@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
+# Test stub for the AWS CLI.
 S="${STUB_STATE:-$HOME/.stub-state}"; mkdir -p "$S"
 case "$1 $2" in
   "sts get-caller-identity") [[ -f "$S/aws_ok" ]] || exit 255; echo '{"UserId":"AIDAEXAMPLE","Account":"123456789012","Arn":"arn:aws:iam::123456789012:user/demo"}' ;;
   "configure import") f="${4#file://}"; grep -q AKIA "$f" && touch "$S/aws_ok" ;;
   "configure set") ;;
-  "configure get") [[ "$3" == sso_start_url && -f "$S/aws_sso" ]] && echo https://example.awsapps.com/start; true ;;
   "sso login")
-    if [[ "$3" == help ]]; then echo "--use-device-code"; exit 0; fi
     echo "Browser will not be automatically opened."
     echo "Please visit the following URL:"
     echo ""

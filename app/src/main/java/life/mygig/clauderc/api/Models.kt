@@ -89,6 +89,7 @@ data class OpenResult(
     val path: String,
     val action: String,
     val pending: Boolean = false,
+    val note: String? = null,
     val session: String? = null,
 )
 

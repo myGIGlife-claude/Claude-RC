@@ -1,23 +1,191 @@
 #!/usr/bin/env bash
-# claude-autostart.sh — restore Claude Remote Control sessions after a reboot.
+# claude-autostart.sh — bring your Claude Code sessions back after a reboot.
 #
-# Every session started by claude-setup.sh (menu or --api) is recorded in
-# ~/.local/state/claude-launcher/sessions.list; stopping one removes it.
-# Run this at boot, e.g. with a user crontab line:
-#   @reboot sleep 20 && $HOME/bin/claude-autostart.sh >/dev/null 2>&1
+# It keeps a list of the Claude tmux sessions you have running (checked every
+# 2 minutes and again at shutdown), and on boot restarts each one detached,
+# with Remote Control on, named after its project.
+#
+#   ./claude-autostart.sh install     set it up (run once, as yourself — not sudo)
+#   claude-autostart status           show saved sessions and what's running
+#   claude-autostart save             save the current list right now
+#   claude-autostart restore          start any saved sessions that aren't running
+#   claude-autostart uninstall        remove the boot/timer setup
 
-set -uo pipefail
+set -euo pipefail
 
-STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/claude-launcher"
-REGISTRY_FILE="$STATE_DIR/sessions.list"
-SETUP="$(dirname "$(readlink -f "$0")")/claude-setup.sh"
-[[ -x "$SETUP" ]] || SETUP="$HOME/bin/claude-setup.sh"
-[[ -x "$SETUP" ]] || SETUP="$HOME/claude-setup.sh"
+STATE_DIR="$HOME/.config/claude-setup"
+LIST="$STATE_DIR/sessions.tsv"          # session<TAB>folder
+BIN="$HOME/.local/bin/claude-autostart"
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
-[[ -s "$REGISTRY_FILE" ]] || exit 0
+log() { echo "[claude-autostart] $*"; }
 
-while IFS= read -r project; do
-  [[ "$project" =~ ^[A-Za-z0-9._-]{1,100}$ ]] || continue
-  result="$("$SETUP" --api start "$project" </dev/null 2>/dev/null)"
-  echo "$project: $result"
-done <"$REGISTRY_FILE"
+# ----------------------------------------------------------------------
+save() {
+  mkdir -p "$STATE_DIR"
+  # No tmux server running (e.g. just booted) → keep the last saved list
+  if ! tmux ls >/dev/null 2>&1; then
+    log "tmux not running — keeping saved list"
+    return 0
+  fi
+  local tmp
+  tmp="$(mktemp)"
+  # (tmux turns tabs into "_", so fields are split on a marker instead)
+  tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}' |
+    awk -F'@@' '($3 ~ /claude/ || $4 == "claude") && !seen[$1]++ { print $1 "\t" $2 }' >"$tmp"
+  mv "$tmp" "$LIST"
+  log "saved $(wc -l <"$LIST") session(s)"
+}
+
+# ----------------------------------------------------------------------
+restore() {
+  if [[ ! -s "$LIST" ]]; then
+    log "no saved sessions"
+    return 0
+  fi
+
+  # Wait (up to ~2 min) for the internet so Remote Control can connect
+  for _ in $(seq 1 24); do
+    curl -s -o /dev/null --max-time 5 https://claude.ai && break
+    sleep 5
+  done
+
+  local sess dir name
+  while IFS=$'\t' read -r sess dir; do
+    [[ -z "$sess" ]] && continue
+    if [[ ! -d "$dir" ]]; then
+      log "$sess: folder $dir is gone — skipping"
+      continue
+    fi
+    if tmux has-session -t "=$sess" 2>/dev/null; then
+      log "$sess: already running"
+      continue
+    fi
+    name="$(basename "$dir")"
+    tmux new-session -d -s "$sess" -c "$dir" \
+      "env -u ANTHROPIC_API_KEY claude --remote-control $(printf %q "$name"); exec bash"
+    log "$sess: started in $dir"
+    sleep 2
+  done <"$LIST"
+}
+
+# ----------------------------------------------------------------------
+install() {
+  if [[ $EUID -eq 0 ]]; then
+    echo "Run this as your normal user (not sudo) — it will ask for sudo when needed."
+    exit 1
+  fi
+  command -v tmux >/dev/null || { echo "tmux isn't installed — run claude-setup.sh first."; exit 1; }
+
+  mkdir -p "$HOME/.local/bin" "$STATE_DIR"
+  cp "$(readlink -f "$0")" "$BIN"
+  chmod +x "$BIN"
+
+  local user="$USER" home="$HOME"
+  local envs="Environment=HOME=$home
+Environment=PATH=$home/.local/bin:/usr/local/bin:/usr/bin:/bin"
+
+  # Restores sessions at boot and saves the list at shutdown.
+  # The tmux server lives in this service, so sessions survive SSH logouts too.
+  sudo tee /etc/systemd/system/claude-sessions.service >/dev/null <<EOF
+[Unit]
+Description=Restore Claude Code tmux sessions (Remote Control)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=$user
+$envs
+ExecStart=$BIN restore
+ExecStop=$BIN save
+TimeoutStartSec=5min
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  # Saves the list every 2 minutes so a crash or power cut still restores
+  sudo tee /etc/systemd/system/claude-sessions-save.service >/dev/null <<EOF
+[Unit]
+Description=Save list of running Claude Code sessions
+
+[Service]
+Type=oneshot
+User=$user
+$envs
+ExecStart=$BIN save
+EOF
+
+  sudo tee /etc/systemd/system/claude-sessions-save.timer >/dev/null <<EOF
+[Unit]
+Description=Save Claude Code session list every 2 minutes
+
+[Timer]
+OnBootSec=4min
+OnUnitActiveSec=2min
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  save
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now claude-sessions.service claude-sessions-save.timer
+  echo
+  echo "Installed. Sessions saved right now:"
+  status_list
+  echo
+  echo "Check anytime with:  claude-autostart status"
+}
+
+# ----------------------------------------------------------------------
+uninstall() {
+  sudo systemctl disable --now claude-sessions-save.timer claude-sessions.service 2>/dev/null || true
+  sudo rm -f /etc/systemd/system/claude-sessions.service \
+    /etc/systemd/system/claude-sessions-save.service \
+    /etc/systemd/system/claude-sessions-save.timer
+  sudo systemctl daemon-reload
+  rm -f "$BIN"
+  echo "Removed. Running sessions were left alone; saved list kept at $LIST"
+}
+
+status_list() {
+  if [[ -s "$LIST" ]]; then
+    while IFS=$'\t' read -r sess dir; do
+      if tmux has-session -t "=$sess" 2>/dev/null; then
+        printf "  %-30s %-10s %s\n" "$sess" "running" "$dir"
+      else
+        printf "  %-30s %-10s %s\n" "$sess" "stopped" "$dir"
+      fi
+    done <"$LIST"
+  else
+    echo "  (none saved)"
+  fi
+}
+
+status() {
+  echo "Saved sessions (restored at boot):"
+  status_list
+  echo
+  local svc tmr
+  svc="$(systemctl is-enabled claude-sessions.service 2>/dev/null || true)"
+  tmr="$(systemctl is-active claude-sessions-save.timer 2>/dev/null || true)"
+  [[ "$svc" == "enabled" ]] || svc="not installed"
+  [[ "$tmr" == "active" ]] || tmr="not running"
+  echo "Boot service: $svc"
+  echo "Save timer:   $tmr"
+}
+
+case "${1:-}" in
+  install) install ;;
+  uninstall) uninstall ;;
+  save) save ;;
+  restore) restore ;;
+  status) status ;;
+  *)
+    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+    exit 1
+    ;;
+esac

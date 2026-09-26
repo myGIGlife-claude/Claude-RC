@@ -196,6 +196,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val what = when (r.action) {
                 "cloned" -> "Cloned"
                 "pulled" -> "Pulled latest for"
+                "not_updated" -> "Couldn't fast-forward (check it manually):"
                 "cloning" -> "Still cloning"
                 else -> "Ready:"
             }

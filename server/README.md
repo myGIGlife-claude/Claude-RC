@@ -9,36 +9,44 @@ the phone can run the allowlisted actions below and nothing else — no shell.
 | `claude-setup.sh` | The interactive menu (no arguments) plus `--api <subcommand>`, which prints exactly one JSON object and never waits for input. |
 | `claude-launcher-api` | Forced command. Splits `SSH_ORIGINAL_COMMAND`, checks it against the allowlist, re-validates every argument, runs `claude-setup.sh --api …`. Anything else → `{"ok":false,"error":{"code":"forbidden"}}`. |
 | `install-launcher-key.sh` | Adds the phone's public key to `~/.ssh/authorized_keys` locked to the runner. |
-| `claude-autostart.sh` | Restores the Claude sessions after a reboot. |
+| `claude-autostart.sh` | Unchanged from the original: a systemd service + 2-minute timer that saves the running Claude tmux sessions and restores them at boot. Sessions started from the phone are picked up the same way. |
 | `config.example` | Per-machine settings. The real file lives at `~/.config/claude-launcher/config` and is never committed. |
 
 ## Install
 
-Needs `bash`, `jq`, `tmux`, `git`, `flock` (util-linux), and the CLIs you use:
-`claude`, `gh`, `aws` (v2).
+Needs `bash`, `jq`, `tmux`, `git`, `flock` (util-linux) and the CLIs the menu
+already installs: `claude`, `gh`, `aws` (v2).
 
 ```bash
 git clone https://github.com/myGIGlife-claude/Claude-RC.git
 cd Claude-RC/server
+
+# Keep your current script, then replace it (same place, same menu)
+cp ~/claude-setup.sh ~/claude-setup.sh.bak
+install -m 755 claude-setup.sh ~/claude-setup.sh
+
+# The phone's runner and key installer
 mkdir -p ~/bin
-install -m 755 claude-setup.sh claude-launcher-api claude-autostart.sh install-launcher-key.sh ~/bin/
+install -m 755 claude-launcher-api install-launcher-key.sh ~/bin/
 
-# Keep a copy of your old script if you had one
-[ -f ~/claude-setup.sh ] && cp ~/claude-setup.sh ~/claude-setup.sh.bak
-
-~/bin/claude-setup.sh --api status | jq .   # first run creates ~/.config/claude-launcher/config
+# First run writes ~/.config/claude-launcher/config — set PROJECTS_DIR there
+~/claude-setup.sh --api status | jq .
 ```
 
-Edit `~/.config/claude-launcher/config` if your projects are not in `~/projects`
-(see `config.example` for every option). If `claude`, `gh` or `aws` live
-somewhere unusual, add that folder to `EXTRA_PATH`: forced-command SSH sessions
-don't read your shell profile.
+The old script hard-coded the projects folder; it now comes from
+`PROJECTS_DIR` in `~/.config/claude-launcher/config` (default `~/projects`).
+See `config.example` for the other options. If `claude`, `gh` or `aws` live
+somewhere other than `~/.local/bin` or `/usr/local/bin`, add that folder to
+`EXTRA_PATH`: SSH calls from the phone don't read your shell profile.
 
-Restore sessions at boot (user crontab):
+`./claude-setup.sh` with no arguments runs the same menu as before: tool
+install, the three logins, then New / Existing project with `b`/`q` at every
+prompt.
 
-```bash
-( crontab -l 2>/dev/null; echo '@reboot sleep 20 && $HOME/bin/claude-autostart.sh >/dev/null 2>&1' ) | crontab -
-```
+If `claude-autostart` isn't installed yet: `./claude-autostart.sh install`
+(once, as yourself). Already installed? Nothing to do — it detects sessions
+by scanning tmux, and `claude-setup.sh` now also tells it to save right after
+a start or stop instead of waiting for the 2-minute timer.
 
 ## Connect the phone
 
@@ -81,11 +89,11 @@ Exit code 0 = success, 1 = handled error, 2 = bad arguments.
 | Subcommand | Args | `data` |
 | --- | --- | --- |
 | `status` | — | `claude.logged_in`, `github.{logged_in,user,missing_scopes}`, `aws.{logged_in,identity,profile,sso_configured}`, `hostname`, `version` |
-| `owners` | — | `user`, `orgs[{login,role}]`, `default_owner` |
+| `owners` | — | `user`, `orgs[{login}]`, `default_owner` |
 | `repos` | `[--refresh]` | `repos[{full_name,name,owner,owner_type,private,pushed_at,local,running}]` (cached for `REPOS_CACHE_TTL`) |
 | `sessions` | — | `sessions[{name,project,dir,started_at,attached,uptime_seconds}]` |
 | `new` | `<name> --owner <owner> --visibility private\|public [--start]` | `repo`, `url`, `path`, `session` |
-| `open` | `<owner/repo> [--start]` | `path`, `action` (`cloned`, `pulled`, `skipped_empty`, `cloning`), `pending`, `session` |
+| `open` | `<owner/repo> [--start]` | `path`, `action` (`cloned`, `pulled`, `not_updated`, `cloning`), `pending`, `session` |
 | `start` | `<project>` | `session`, `already_running` |
 | `stop` | `<project>` | `session`, `stopped` |
 | `tail` | `<project> [--lines N]` | `text` (last N lines, default 40, max 200) |
@@ -100,6 +108,9 @@ Error codes: `not_logged_in_claude`, `not_logged_in_github`, `missing_scopes`,
 `not_logged_in_aws`, `repo_exists`, `folder_dirty`, `invalid_name`, `busy`,
 `internal`, `bad_args`, and `forbidden` from the runner.
 
+`open` returns `action: "not_updated"` with a `note` when `git pull --ff-only`
+can't fast-forward (it still starts the session, like the menu).
+
 Notes:
 
 - `new` and `open` take a `flock` lock; a second call while one runs gets `busy`.
@@ -109,11 +120,15 @@ Notes:
 - Tokens, codes and keys only ever arrive on stdin. The runner's audit log
   (`~/.local/state/claude-launcher/api.log`, rotated at 1 MB) records time,
   subcommand and result code — never arguments.
-- Sessions are named after the project (plus optional `SESSION_PREFIX`; `.` and
-  `:` become `_` as tmux requires) and run
-  `claude --remote-control "<project>"`. Every start — menu, phone or autostart —
-  is recorded in `~/.local/state/claude-launcher/sessions.list`, which is what
-  `claude-autostart.sh` replays after a reboot. Stopping a session removes it.
+- Sessions are started exactly like the menu starts them: named after the
+  project with `.` and `:` turned into `-`, folder pre-trusted in
+  `~/.claude.json`, running
+  `env -u ANTHROPIC_API_KEY claude --remote-control <project>; exec bash`.
+  That is what `claude-autostart` looks for, so it saves and restores them.
+- The very first Remote Control start asks "Enable Remote Control? (y/n)". The
+  menu has you answer it by attaching; from the phone the script answers `y`
+  itself and writes the same `~/.config/claude-setup/remote-control-confirmed`
+  marker.
 - `ANTHROPIC_API_KEY` is always unset: Claude uses the claude.ai subscription login.
 - `login-claude-start` drives `claude auth login` in a tmux session named
   `claude-login`. If a login-method picker appears it chooses the claude.ai
@@ -123,7 +138,7 @@ Notes:
 ## Tests
 
 ```bash
-server/tests/test-api.sh              # runner + every subcommand, with stub gh/claude/aws
+server/tests/test-api.sh              # runner, every subcommand, autostart save/restore, menu (stub gh/claude/aws)
 sudo server/tests/test-sshd.sh        # real sshd: shells are forbidden, status works
 sudo server/tests/test-sshd.sh --app  # also runs the app's SSH code against it
 ```
