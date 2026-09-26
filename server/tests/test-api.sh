@@ -45,7 +45,8 @@ for bad in "" "bash" "status; bash" 'status $(id)' "status && id" "rm -rf /" "st
   "new x --visibility secret" "tail x --lines 9999" "status extra" "new -x" "login-github token" \
   "open a/b/c" "$(printf 'x%.0s' {1..500})" "start --dangerously-skip-permissions" "start -x" \
   "open owner/-x" "open -o/x" "new x --owner --start" "tail -x" "clone-status nope" \
-  "login-gitlab glpat-x" "login-docker docker.io" "login-cloudflare tok"; do
+  "login-gitlab glpat-x" "login-docker docker.io" "login-cloudflare tok" "self-update" "self-update main" \
+  "self-update 0123456789abcdef0123456789abcdef0123456" "self-update ../../etc"; do
   api "$bad"
   check "forbidden: '${bad:0:30}'" "$(jqt '.ok==false and .error.code=="forbidden"')"
 done
@@ -241,6 +242,22 @@ echo "interactive menu still runs"
 OUT="$(printf '2\nq\n' | "$HOME/bin/claude-setup.sh" 2>&1)"
 [[ "$OUT" == *"What are you working on?"* && "$OUT" == *"example-org/org-app"* && "$OUT" == *"Running sessions on the Pi:"* ]]
 check "menu lists repos and exits on q" $?
+
+echo "self-update"
+api "status"
+check "status reports script_api, no commit yet" "$(jqt '.data.script_api >= 3 and .data.commit == null')"
+SHA=0123456789abcdef0123456789abcdef01234567
+mkdir -p "$WORK/raw/myGIGlife-claude/Claude-RC/$SHA"
+ln -s "$SERVER" "$WORK/raw/myGIGlife-claude/Claude-RC/$SHA/server"
+export CLAUDERC_RAW="file://$WORK/raw"
+api "self-update $SHA"
+check "self-update installs that commit" "$(jqt '.ok and .data.commit=="'$SHA'"')"
+[[ "$(cat "$HOME/.config/claude-launcher/installed-commit")" == "$SHA" && -x "$HOME/claude-setup.sh" ]]; check "self-update recorded the commit" $?
+api "status"
+check "status reports the installed commit" "$(jqt '.data.commit=="'$SHA'"')"
+api "self-update ${SHA/0123/9999}"
+check "self-update of a missing commit fails cleanly" "$(jqt '.ok==false and .error.code=="internal"')"
+unset CLAUDERC_RAW
 
 echo "install.sh (no clone)"
 IH="$WORK/installhome"; mkdir -p "$IH"
