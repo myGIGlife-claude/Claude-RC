@@ -57,6 +57,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val settings: StateFlow<AppSettings?> =
         store.settings.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    /** App lock: false until the user unlocks; set back to false after time in the background. */
+    private val _unlocked = MutableStateFlow(false)
+    val unlocked = _unlocked.asStateFlow()
+    fun lockApp() { _unlocked.value = false }
+    fun markUnlocked() { _unlocked.value = true }
+
     private val _busy = MutableStateFlow<String?>(null)
     val busy = _busy.asStateFlow()
 

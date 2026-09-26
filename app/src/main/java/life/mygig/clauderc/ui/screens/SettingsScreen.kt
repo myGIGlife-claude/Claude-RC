@@ -15,10 +15,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -33,18 +38,24 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import life.mygig.clauderc.BuildConfig
 import life.mygig.clauderc.data.AppSettings
 import life.mygig.clauderc.data.ThemeMode
 import life.mygig.clauderc.ssh.HostKeyInfo
+import kotlinx.coroutines.launch
+import life.mygig.clauderc.ui.LocalAppLock
 import life.mygig.clauderc.ui.LocalGuard
 import life.mygig.clauderc.ui.MainViewModel
 
@@ -60,6 +71,12 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
     var port by rememberSaveable(s.port) { mutableStateOf(s.port.toString()) }
     var user by rememberSaveable(s.user) { mutableStateOf(s.user) }
     var confirmRegen by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val appLock = LocalAppLock.current
+    // Hidden by default; revealing asks for fingerprint/PIN when App lock is on.
+    // Not saveable on purpose: leaving the screen hides them again.
+    var showKey by remember { mutableStateOf(false) }
+    var showUser by remember { mutableStateOf(s.user.isBlank()) }
 
     val portNum = port.toIntOrNull()?.takeIf { it in 1..65535 }
     val canSave = host.isNotBlank() && user.isNotBlank() && portNum != null && busy == null
@@ -82,17 +99,37 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
         Section("This phone's key")
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SelectionContainer {
-                    Text(publicKey, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (showKey) {
+                        SelectionContainer(Modifier.weight(1f)) {
+                            Text(publicKey, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                        }
+                    } else {
+                        Text(
+                            "ssh-ed25519 ••••••••••••",
+                            fontFamily = FontFamily.Monospace,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    TextButton(onClick = {
+                        if (showKey) showKey = false else guard.run("Show this phone's key") { showKey = true }
+                    }) { Text(if (showKey) "Hide" else "Show") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { copy(context, "Public key", publicKey) }) { Text("Copy") }
+                    Button(onClick = {
+                        guard.run("Copy this phone's key") { copy(context, "Public key", publicKey) }
+                    }) { Text("Copy") }
                     OutlinedButton(onClick = {
-                        copy(context, "Install command", "~/bin/install-launcher-key.sh '$publicKey'")
+                        guard.run("Copy this phone's key") {
+                            copy(context, "Install command", "~/bin/install-launcher-key.sh '$publicKey'")
+                        }
                     }) { Text("Copy install cmd") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { share(context, publicKey) }) { Text("Share") }
+                    OutlinedButton(onClick = {
+                        guard.run("Share this phone's key") { share(context, publicKey) }
+                    }) { Text("Share") }
                     TextButton(onClick = { confirmRegen = true }) { Text("Regenerate") }
                 }
                 Text(
@@ -116,10 +153,25 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 modifier = Modifier.weight(0.35f),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
+            // Masked once entered; Show (behind App lock) reveals and allows editing.
             OutlinedTextField(
                 value = user, onValueChange = { user = it.trim() },
                 label = { Text("Username") }, singleLine = true,
-                modifier = Modifier.weight(0.65f),
+                readOnly = !showUser,
+                visualTransformation = if (showUser) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = {
+                        if (showUser) showUser = false else guard.run("Show username") { showUser = true }
+                    }) {
+                        Icon(
+                            if (showUser) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                            contentDescription = if (showUser) "Hide username" else "Show username",
+                        )
+                    }
+                },
+                modifier = Modifier.weight(0.65f).onFocusChanged { f ->
+                    if (!f.isFocused && user.isNotBlank()) showUser = false
+                },
                 keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
             )
         }
@@ -147,12 +199,25 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 Column(Modifier.weight(1f)) {
                     Text("App lock")
                     Text(
-                        "Fingerprint or PIN before creating, stopping or logging in",
+                        "Fingerprint or PIN to open the app, and before creating, stopping, " +
+                            "logging in or showing your key and username",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
                 Switch(checked = s.appLock, onCheckedChange = { on ->
-                    guard.run("Change app lock") { vm.setAppLock(on) }
+                    val lock = appLock ?: return@Switch
+                    if (on && !lock.canAuthenticate()) {
+                        vm.say("Set up a screen lock or fingerprint on this phone first.")
+                        return@Switch
+                    }
+                    // Both directions need the fingerprint/PIN, so it can't be
+                    // switched off by someone else, or on without a working unlock.
+                    scope.launch {
+                        if (lock.unlock(if (on) "Turn on app lock" else "Turn off app lock")) {
+                            vm.markUnlocked()
+                            vm.setAppLock(on)
+                        }
+                    }
                 })
             }
             Text("Theme")

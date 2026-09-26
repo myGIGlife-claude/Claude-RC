@@ -1,18 +1,26 @@
 package life.mygig.clauderc.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -26,6 +34,7 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -53,17 +62,25 @@ import life.mygig.clauderc.ui.screens.StatusScreen
 import life.mygig.clauderc.ui.screens.TailDialog
 import life.mygig.clauderc.ui.theme.ClaudeRcTheme
 
+/** Fingerprint / device-PIN check, implemented by the activity. */
+interface AppLock {
+    fun canAuthenticate(): Boolean
+    suspend fun unlock(reason: String): Boolean
+}
+
 /** Runs an action, asking for fingerprint/PIN first when App lock is on. */
 fun interface Guard {
     fun run(reason: String, action: () -> Unit)
 }
 
 val LocalGuard = staticCompositionLocalOf { Guard { _, action -> action() } }
+val LocalAppLock = staticCompositionLocalOf<AppLock?> { null }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppRoot(vm: MainViewModel, unlock: suspend (String) -> Boolean) {
+fun AppRoot(vm: MainViewModel, lock: AppLock) {
     val settings by vm.settings.collectAsState()
+    val unlocked by vm.unlocked.collectAsState()
     val s = settings
     if (s == null) {
         ClaudeRcTheme(ThemeMode.SYSTEM) {
@@ -75,12 +92,19 @@ fun AppRoot(vm: MainViewModel, unlock: suspend (String) -> Boolean) {
     val scope = rememberCoroutineScope()
     val guard = remember(s.appLock) {
         Guard { reason, action ->
-            if (!s.appLock) action() else scope.launch { if (unlock(reason)) action() }
+            if (!s.appLock) action() else scope.launch { if (lock.unlock(reason)) action() }
         }
     }
 
+    if (s.appLock && !unlocked) {
+        ClaudeRcTheme(s.theme) {
+            LockScreen { scope.launch { if (lock.unlock("Open cLaudeRC")) vm.markUnlocked() } }
+        }
+        return
+    }
+
     ClaudeRcTheme(s.theme) {
-        CompositionLocalProvider(LocalGuard provides guard) {
+        CompositionLocalProvider(LocalGuard provides guard, LocalAppLock provides lock) {
             val context = LocalContext.current
             val snackbar = remember { SnackbarHostState() }
             val busy by vm.busy.collectAsState()
@@ -174,7 +198,9 @@ fun AppRoot(vm: MainViewModel, unlock: suspend (String) -> Boolean) {
                 },
                 snackbarHost = { SnackbarHost(snackbar) },
             ) { padding ->
-                Box(Modifier.padding(padding).fillMaxSize()) {
+                // imePadding keeps focused fields above the keyboard (edge-to-edge
+                // windows don't resize for it on their own).
+                Box(Modifier.padding(padding).consumeWindowInsets(padding).imePadding().fillMaxSize()) {
                     when {
                         showSettings || setupNeeded -> SettingsScreen(vm, s, firstRun = setupNeeded)
                         tab == Tab.STATUS -> StatusScreen(vm)
@@ -188,6 +214,25 @@ fun AppRoot(vm: MainViewModel, unlock: suspend (String) -> Boolean) {
             login?.let { LoginDialog(vm, it) }
             tail?.let { TailDialog(vm, it) }
             pendingKey?.let { HostKeyDialog(vm, it, s.hostKeyFingerprint) }
+        }
+    }
+}
+
+/** Shown instead of the app while App lock is on and it hasn't been unlocked. */
+@Composable
+private fun LockScreen(onUnlock: () -> Unit) {
+    LaunchedEffect(Unit) { onUnlock() }
+    Surface(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.fillMaxSize().padding(32.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(56.dp))
+            Spacer(Modifier.height(16.dp))
+            Text("cLaudeRC is locked", style = MaterialTheme.typography.titleLarge)
+            Spacer(Modifier.height(24.dp))
+            Button(onClick = onUnlock) { Text("Unlock") }
         }
     }
 }
