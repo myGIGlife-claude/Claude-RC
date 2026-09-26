@@ -103,28 +103,41 @@ fun StatusScreen(vm: MainViewModel) {
                         onClick = if (aws.loggedIn) null else { { login(LoginKind.AWS) } },
                     )
                 }
-                val services = listOf(
-                    Triple("GitLab", s.services.gitlab, LoginKind.GITLAB),
-                    Triple("Docker / GHCR", s.services.docker, LoginKind.DOCKER),
-                    Triple("Cloudflare", s.services.cloudflare, LoginKind.CLOUDFLARE),
-                )
-                items(services.size) { i ->
-                    val (title, svc, kind) = services[i]
-                    StatusRow(
-                        title = title,
-                        state = when {
-                            svc.loggedIn -> RowState.OK
-                            !svc.installed -> RowState.WARN
-                            else -> RowState.BAD
-                        },
-                        detail = when {
-                            svc.loggedIn -> svc.detail?.let { "Connected: $it" } ?: "Connected"
-                            !svc.installed -> "CLI not installed on the server"
-                            else -> "Not connected — tap to connect"
-                        },
-                        // Re-connecting is allowed too, e.g. to add a second registry.
-                        onClick = if (svc.installed) { { login(kind) } } else null,
+                val svcs = s.services
+                if (svcs == null) {
+                    item {
+                        StatusRow(
+                            title = "More services",
+                            state = RowState.WARN,
+                            detail = "The server's scripts are out of date. Rerun the install command on the server " +
+                                "to connect GitLab, Docker/GHCR and Cloudflare.",
+                            onClick = null,
+                        )
+                    }
+                } else {
+                    val services = listOf(
+                        Triple("GitLab", svcs.gitlab, LoginKind.GITLAB),
+                        Triple("Docker / GHCR", svcs.docker, LoginKind.DOCKER),
+                        Triple("Cloudflare", svcs.cloudflare, LoginKind.CLOUDFLARE),
                     )
+                    items(services.size) { i ->
+                        val (title, svc, kind) = services[i]
+                        StatusRow(
+                            title = title,
+                            state = when {
+                                svc.loggedIn -> RowState.OK
+                                !svc.installed -> RowState.WARN
+                                else -> RowState.BAD
+                            },
+                            detail = when {
+                                svc.loggedIn -> svc.detail?.let { "Connected: $it" } ?: "Connected"
+                                !svc.installed -> "CLI not installed on the server"
+                                else -> "Not connected — tap to connect"
+                            },
+                            // Re-connecting is allowed too, e.g. to add a second registry.
+                            onClick = if (svc.installed) { { login(kind) } } else null,
+                        )
+                    }
                 }
                 s.health?.let { h -> item { HealthCard(h) } }
                 item {
