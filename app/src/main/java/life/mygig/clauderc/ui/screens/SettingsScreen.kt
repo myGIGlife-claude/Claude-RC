@@ -72,7 +72,8 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
             Text("Set up your server", style = MaterialTheme.typography.headlineSmall)
             Text(
                 "1. Copy this phone's public key below.\n" +
-                    "2. On the server run: ./install-launcher-key.sh '<key>'\n" +
+                    "2. Install the server scripts (see server/README.md in the repo), then run:\n" +
+                    "   ~/bin/install-launcher-key.sh '<key>'\n" +
                     "3. Enter the server details and tap Connect.",
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -87,7 +88,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { copy(context, "Public key", publicKey) }) { Text("Copy") }
                     OutlinedButton(onClick = {
-                        copy(context, "Install command", "./install-launcher-key.sh '$publicKey'")
+                        copy(context, "Install command", "~/bin/install-launcher-key.sh '$publicKey'")
                     }) { Text("Copy install cmd") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
