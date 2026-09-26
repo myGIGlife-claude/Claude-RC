@@ -45,7 +45,7 @@ import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.openUrl
 
 private const val GITHUB_TOKEN_URL =
-    "https://github.com/settings/tokens/new?scopes=repo,read:org,workflow&description=cLaudeRC%20server"
+    "https://github.com/settings/tokens/new?scopes=repo,read:org,gist,workflow&description=cLaudeRC%20server"
 
 @Composable
 fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
@@ -125,8 +125,7 @@ private fun GithubLogin(vm: MainViewModel, busy: Boolean) {
     val context = LocalContext.current
     var token by remember { mutableStateOf("") }
     Text(
-        "Create a classic personal access token with these scopes: repo, read:org, workflow. " +
-            "(admin:org or write:org also cover read:org.)",
+        "Create a classic personal access token with these scopes: repo, read:org, gist, workflow.",
     )
     OutlinedButton(onClick = { openUrl(context, GITHUB_TOKEN_URL) }, modifier = Modifier.fillMaxWidth()) {
         Text("Create token on GitHub")
@@ -146,54 +145,70 @@ private fun GithubLogin(vm: MainViewModel, busy: Boolean) {
     Text("The token is sent over SSH on stdin only, never on a command line.", style = MaterialTheme.typography.bodySmall)
 }
 
-/** Exactly which permissions each token needs, shown from the login dialog. */
+/**
+ * Exactly which permissions each token needs, shown from the login dialog.
+ * Names and paths are taken from each provider's docs (checked 2026-09).
+ */
 private fun permissionsText(kind: LoginKind): String = when (kind) {
     LoginKind.GITHUB ->
-        "Classic personal access token (Settings › Developer settings › Tokens (classic)).\n\n" +
-            "Tick these scopes:\n" +
-            "• repo: create, clone and push your repositories (public and private)\n" +
-            "• read:org: list the organizations you can create repos in\n" +
-            "  (admin:org or write:org also cover this)\n" +
-            "• workflow: push changes to GitHub Actions files (.github/workflows)\n\n" +
-            "Nothing else is needed. Pick an expiry you're comfortable with."
-    LoginKind.AWS ->
-        "Access keys for an IAM user (IAM › Users › your user › Security credentials › Create access key, " +
-            "use case \"Command Line Interface\").\n\n" +
-            "• Never use root account keys.\n" +
-            "• The app itself only calls sts:GetCallerIdentity, which every user may call.\n" +
-            "• Give the user only the policies for what Claude should manage, e.g. " +
-            "AmazonS3FullAccess, AWSLambda_FullAccess, CloudWatchLogsReadOnlyAccess. " +
-            "Avoid AdministratorAccess unless you really want Claude to change anything.\n\n" +
-            "SSO instead: run 'aws configure sso --use-device-code' on the server once; the permission set " +
-            "you pick there decides access."
-    LoginKind.GITLAB ->
-        "Personal access token (Preferences › Access tokens › Add new token).\n\n" +
+        "Personal access token (classic). Fine-grained tokens aren't supported here.\n\n" +
+            "Profile picture › Settings › Developer settings › Personal access tokens › Tokens (classic) › " +
+            "Generate new token › Generate new token (classic). The button above opens it pre-filled.\n\n" +
             "Select these scopes:\n" +
-            "• api: create projects, merge requests and issues, and read your user (glab needs it)\n" +
-            "• write_repository: push over HTTPS\n\n" +
-            "read_user and read_repository are included in the above. Set an expiry date " +
-            "(GitLab requires one)."
+            "• repo: full access to your public and private repositories (create, clone, push)\n" +
+            "• read:org: read organization membership, so the app can list your orgs " +
+            "(admin:org or write:org include it)\n" +
+            "• gist (optional): in the GitHub CLI's documented minimum; cLaudeRC doesn't use it\n" +
+            "• workflow: add and update GitHub Actions workflow files\n\n" +
+            "If an organization uses SAML SSO, authorize the token for it afterwards (Configure SSO)."
+    LoginKind.AWS ->
+        "Access keys for an IAM user, never the root user.\n\n" +
+            "IAM console › Users › your user › Security credentials › Access keys › Create access key › " +
+            "use case: Command Line Interface (CLI) › Next › Create access key.\n\n" +
+            "Permissions: the app itself only calls sts:GetCallerIdentity, which needs no permission. " +
+            "Attach only the policies for what Claude should manage, for example:\n" +
+            "• AmazonS3FullAccess or AmazonS3ReadOnlyAccess\n" +
+            "• AWSLambda_FullAccess\n" +
+            "• CloudWatchLogsReadOnlyAccess\n" +
+            "• ReadOnlyAccess (look, don't touch)\n" +
+            "Avoid AdministratorAccess unless Claude should be able to change anything.\n\n" +
+            "SSO instead: run 'aws configure sso --use-device-code' on the server once. The permission set you " +
+            "pick there (AWS suggests PowerUserAccess) decides access."
+    LoginKind.GITLAB ->
+        "Personal access token (legacy).\n\n" +
+            "Avatar › Edit profile › Access › Personal access tokens › Generate token › Legacy token. " +
+            "The button above opens it pre-filled on gitlab.com.\n\n" +
+            "Select these scopes (what the GitLab CLI requires):\n" +
+            "• api: full read/write API access; for a personal token it also covers git push over HTTPS\n" +
+            "• write_repository: pull and push over HTTPS\n\n" +
+            "Expiration date: required, at most 365 days by default. Reconnect here when it expires."
     LoginKind.DOCKER ->
-        "Docker Hub: Account settings › Personal access tokens › Generate new token.\n" +
-            "• Access permissions: Read & Write (to push images), or Read-only if you only pull.\n" +
-            "• Username: your Docker Hub username (not your email).\n\n" +
-            "GHCR (ghcr.io): a GitHub classic personal access token with:\n" +
-            "• write:packages: push images (includes read:packages)\n" +
+        "Docker Hub: Docker Home (app.docker.com) › your avatar › Account settings › Personal access tokens › " +
+            "Generate new token.\n" +
+            "• Access permissions: Read & Write to push images (Read-only if you only pull)\n" +
+            "• Username: your Docker Hub username; the token is the password\n\n" +
+            "GHCR (ghcr.io) needs a GitHub personal access token (classic); fine-grained tokens don't work:\n" +
+            "• write:packages: push and pull images\n" +
             "• delete:packages: only if Claude should delete images\n" +
-            "• Username: your GitHub username."
+            "• Ticking write:packages also ticks repo; untick repo if you don't need it\n" +
+            "• Username: your GitHub username"
     LoginKind.CLOUDFLARE ->
-        "My Profile › API Tokens › Create Token. The \"Edit Cloudflare Workers\" template is the easy choice. " +
-            "To build it yourself, add:\n\n" +
-            "Account permissions:\n" +
-            "• Workers Scripts: Edit (deploy Workers)\n" +
-            "• Account Settings: Read (wrangler reads your account)\n" +
-            "• Optional: Workers KV Storage, Workers R2 Storage, D1, Cloudflare Pages: Edit, if Claude uses them\n\n" +
-            "User permissions:\n" +
+        "A user API token: My Profile › API Tokens › Create Token. (Account-owned tokens from Manage Account " +
+            "aren't supported by this check.)\n\n" +
+            "Easiest: use the \"Edit Cloudflare Workers\" template. It contains:\n" +
+            "Account:\n" +
+            "• Workers Scripts: Edit\n" +
+            "• Workers KV Storage: Edit\n" +
+            "• Workers R2 Storage: Edit\n" +
+            "• Workers Tail: Read\n" +
+            "• Account Settings: Read\n" +
+            "Zone:\n" +
+            "• Workers Routes: Edit\n" +
+            "User:\n" +
             "• User Details: Read\n" +
-            "• Memberships: Read (wrangler lists your accounts)\n\n" +
-            "Zone permissions (only for custom domains/routes):\n" +
-            "• Workers Routes: Edit\n\n" +
-            "Account Resources: include your account. Zone Resources: only the zones Claude should touch."
+            "• Memberships: Read\n\n" +
+            "Add if Claude uses them (Account): D1: Edit, Cloudflare Pages: Edit.\n" +
+            "Then choose the account and zone resources the token may use, and Continue to summary › Create Token."
     LoginKind.CLAUDE -> ""
 }
 
@@ -233,8 +248,8 @@ private fun GitlabLogin(vm: MainViewModel, busy: Boolean) {
     val context = LocalContext.current
     var token by remember { mutableStateOf("") }
     var host by remember { mutableStateOf("gitlab.com") }
-    Text("Create a personal access token with the api and write_repository scopes.")
-    OutlinedButton(onClick = { openUrl(context, "https://$host/-/user_settings/personal_access_tokens") }, modifier = Modifier.fillMaxWidth()) {
+    Text("Create a legacy personal access token with the api and write_repository scopes.")
+    OutlinedButton(onClick = { openUrl(context, "https://$host/-/user_settings/personal_access_tokens/legacy/new?name=cLaudeRC&scopes=api%2Cwrite_repository") }, modifier = Modifier.fillMaxWidth()) {
         Text("Create token on GitLab")
     }
     PermissionsLink(LoginKind.GITLAB)
@@ -274,7 +289,7 @@ private fun CloudflareLogin(vm: MainViewModel, busy: Boolean) {
     val context = LocalContext.current
     var token by remember { mutableStateOf("") }
     Text(
-        "Create an API token (the \"Edit Cloudflare Workers\" template suits wrangler). It's saved in a " +
+        "Create a user API token (the \"Edit Cloudflare Workers\" template suits wrangler). It's saved in a " +
             "private file on the server that Claude's sessions load; restart running sessions to pick it up.",
     )
     OutlinedButton(onClick = { openUrl(context, "https://dash.cloudflare.com/profile/api-tokens") }, modifier = Modifier.fillMaxWidth()) {
