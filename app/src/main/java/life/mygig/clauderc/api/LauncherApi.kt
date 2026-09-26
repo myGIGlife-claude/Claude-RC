@@ -1,6 +1,7 @@
 package life.mygig.clauderc.api
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -22,6 +23,8 @@ class ApiException(
     override val message: String,
     val missing: List<String> = emptyList(),
     val path: String? = null,
+    /** Terminal text the server captured from a login it was driving. */
+    val pane: String? = null,
 ) : Exception(message)
 
 object Codes {
@@ -35,7 +38,6 @@ object Codes {
     const val BUSY = "busy"
     const val INTERNAL = "internal"
     const val FORBIDDEN = "forbidden"
-    const val BAD_ARGS = "bad_args"
 
     // Local, never sent by the server.
     const val HOST_KEY_CHANGED = "host_key_changed"
@@ -44,9 +46,11 @@ object Codes {
     const val TIMEOUT = "timeout"
     const val NOT_CONFIGURED = "not_configured"
     const val BAD_RESPONSE = "bad_response"
+    const val KEY_ERROR = "key_error"
 }
 
-val PROJECT_NAME_RE = Regex("^[A-Za-z0-9._-]{1,100}$")
+/** Same rule as the server: no leading '-', so a name is never read as an option. */
+val PROJECT_NAME_RE = Regex("^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$")
 
 /** Typed calls to `claude-launcher-api` on the server. */
 class LauncherApi(
@@ -63,11 +67,14 @@ class LauncherApi(
     suspend fun newProject(name: String, owner: String, private: Boolean, start: Boolean): NewResult {
         requireName(name)
         val vis = if (private) "private" else "public"
-        return call("new $name --owner $owner --visibility $vis" + if (start) " --start" else "")
+        // Server side: repo check + create + clone + first Remote Control prompt.
+        return call("new $name --owner $owner --visibility $vis" + if (start) " --start" else "", timeoutMs = 180_000)
     }
 
     suspend fun open(fullName: String, start: Boolean): OpenResult =
-        call("open $fullName" + if (start) " --start" else "")
+        call("open $fullName" + if (start) " --start" else "", timeoutMs = 120_000)
+
+    suspend fun cloneStatus(fullName: String): CloneStatus = call("clone-status $fullName")
 
     suspend fun start(project: String): StartResult { requireName(project); return call("start $project") }
     suspend fun stop(project: String): StopResult { requireName(project); return call("stop $project") }
@@ -86,7 +93,10 @@ class LauncherApi(
 
     private fun requireName(name: String) {
         if (!PROJECT_NAME_RE.matches(name)) {
-            throw ApiException(Codes.INVALID_NAME, "Names may use letters, digits, '.', '_' and '-' (max 100).")
+            throw ApiException(
+                Codes.INVALID_NAME,
+                "Names may use letters, digits, '.', '_' and '-' (not first), up to 100.",
+            )
         }
     }
 
@@ -106,9 +116,20 @@ class LauncherApi(
 
     private suspend fun run(command: String, stdin: String?, timeoutMs: Long): String {
         val cfg = config()
-        return withContext(Dispatchers.IO) {
+        val id = withContext(Dispatchers.Default) {
             try {
-                SshRunner.exec(cfg, identity(), command, stdin, timeoutMs)
+                identity()
+            } catch (e: Exception) {
+                throw ApiException(
+                    Codes.KEY_ERROR,
+                    "This phone's SSH key couldn't be unlocked (${e.javaClass.simpleName}). Regenerate it in Settings.",
+                )
+            }
+        }
+        // Interruptible, so leaving a screen or cancelling stops the call.
+        return runInterruptible(Dispatchers.IO) {
+            try {
+                SshRunner.exec(cfg, id, command, stdin, timeoutMs)
             } catch (f: SshFailure) {
                 throw ApiException(
                     when (f.kind) {
@@ -121,6 +142,8 @@ class LauncherApi(
                     f.message ?: "Connection failed",
                 )
             } catch (e: ApiException) {
+                throw e
+            } catch (e: InterruptedException) {
                 throw e
             } catch (e: Exception) {
                 throw ApiException(Codes.NETWORK, e.message ?: e.javaClass.simpleName)
@@ -147,6 +170,7 @@ class LauncherApi(
             err?.get("missing")?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }
         }.getOrNull().orEmpty()
         val path = runCatching { err?.get("path")?.jsonPrimitive?.contentOrNull }.getOrNull()
-        throw ApiException(code, message, missing, path)
+        val pane = runCatching { err?.get("pane")?.jsonPrimitive?.contentOrNull }.getOrNull()
+        throw ApiException(code, message, missing, path, pane)
     }
 }

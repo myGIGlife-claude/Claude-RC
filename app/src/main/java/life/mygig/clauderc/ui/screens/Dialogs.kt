@@ -55,10 +55,18 @@ fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
             )
         },
         text = {
+            val error by vm.loginError.collectAsState()
             Column(
                 Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                error?.let {
+                    Text(
+                        it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 when (kind) {
                     LoginKind.CLAUDE -> ClaudeLogin(vm, busy != null)
                     LoginKind.GITHUB -> GithubLogin(vm, busy != null)

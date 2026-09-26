@@ -14,7 +14,9 @@ set -euo pipefail
 
 RUNNER="$HOME/bin/claude-launcher-api"
 AUTH_KEYS="$HOME/.ssh/authorized_keys"
-OPTS="command=\"$RUNNER\",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-user-rc"
+# `restrict` turns off every forwarding/pty feature, including ones added to
+# OpenSSH later; the command then is the only thing the key can do.
+OPTS="restrict,command=\"$RUNNER\""
 
 remove=0
 if [[ "${1:-}" == "--remove" ]]; then remove=1; shift; fi
@@ -43,8 +45,17 @@ chmod 600 "$AUTH_KEYS"
 
 tmp="$(mktemp "$HOME/.ssh/authorized_keys.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
-grep -vF -- " ssh-ed25519 $blob" "$AUTH_KEYS" | grep -vxF -- "ssh-ed25519 $blob" >"$tmp" || true
-if ((remove == 0)); then
+# Drop every existing line that carries this key, whatever its options or
+# comment. A plain copy of the key (no command=) would give a full shell and
+# sshd uses the first matching line, so it must not survive.
+awk -v b="$blob" '{ for (i = 1; i <= NF; i++) if ($i == b) next } 1' "$AUTH_KEYS" >"$tmp"
+dropped="$(awk -v b="$blob" '{ for (i = 1; i <= NF; i++) if ($i == b) { print; next } }' "$AUTH_KEYS")"
+if [[ -n "$dropped" ]] && grep -qv 'command="' <<<"$dropped"; then
+  echo "Note: removed an unrestricted copy of this key from $AUTH_KEYS." >&2
+fi
+if ((remove)); then
+  [[ -n "$dropped" ]] || { echo "That key isn't in $AUTH_KEYS." >&2; exit 1; }
+else
   printf '%s ssh-ed25519 %s clauderc\n' "$OPTS" "$blob" >>"$tmp"
 fi
 chmod 600 "$tmp"

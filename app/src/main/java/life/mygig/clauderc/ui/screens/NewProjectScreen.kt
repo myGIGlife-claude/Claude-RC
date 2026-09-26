@@ -49,6 +49,7 @@ import life.mygig.clauderc.ui.openUrl
 @Composable
 fun NewProjectScreen(vm: MainViewModel) {
     val owners by vm.owners.collectAsState()
+    val ownersError by vm.ownersError.collectAsState()
     val busy by vm.busy.collectAsState()
     val result by vm.newResult.collectAsState()
     val guard = LocalGuard.current
@@ -67,7 +68,7 @@ fun NewProjectScreen(vm: MainViewModel) {
 
     val nameError = when {
         name.isEmpty() -> null
-        !PROJECT_NAME_RE.matches(name) -> "Use letters, digits, '.', '_' or '-' (max 100)"
+        !PROJECT_NAME_RE.matches(name) -> "Use letters, digits, '.', '_' or '-' (not first), max 100"
         name == "." || name == ".." -> "Not a valid name"
         else -> null
     }
@@ -100,7 +101,14 @@ fun NewProjectScreen(vm: MainViewModel) {
                 readOnly = true,
                 label = { Text("Owner") },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(ownerMenu) },
-                supportingText = { if (owners == null) Text("Loading owners…") },
+                isError = owners == null && ownersError != null,
+                supportingText = {
+                    when {
+                        owners != null -> {}
+                        ownersError != null -> Text(ownersError!!)
+                        else -> Text("Loading owners…")
+                    }
+                },
                 modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
             )
             ExposedDropdownMenu(expanded = ownerMenu, onDismissRequest = { ownerMenu = false }) {
@@ -111,6 +119,10 @@ fun NewProjectScreen(vm: MainViewModel) {
                     )
                 }
             }
+        }
+
+        if (owners == null && ownersError != null) {
+            OutlinedButton(onClick = { vm.loadOwners() }) { Text("Retry loading owners") }
         }
 
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {

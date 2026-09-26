@@ -34,7 +34,7 @@ data class AwsStatus(
 data class AwsIdentity(val account: String? = null, val arn: String? = null)
 
 @Serializable
-data class Org(val login: String, val role: String = "")
+data class Org(val login: String)
 
 @Serializable
 data class OwnersData(
@@ -51,9 +51,10 @@ data class Repo(
     @SerialName("owner_type") val ownerType: String = "User",
     val private: Boolean = false,
     @SerialName("pushed_at") val pushedAt: String? = null,
-    val archived: Boolean = false,
     val local: Boolean = false,
     val running: Boolean = false,
+    /** A clone started from the phone is still running in the background. */
+    val cloning: Boolean = false,
 ) {
     val isOrg: Boolean get() = ownerType == "Organization"
 }
@@ -115,4 +116,12 @@ data class LoginDone(
     val user: String? = null,
     val account: String? = null,
     val arn: String? = null,
+)
+
+@Serializable
+data class CloneStatus(
+    /** running, done, failed, or none (no clone known). */
+    val state: String,
+    val message: String? = null,
+    val session: String? = null,
 )

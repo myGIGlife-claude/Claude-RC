@@ -187,7 +187,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 Text(s.hostKeyFingerprint, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { vm.refreshStatus() }) { Text("Test connection") }
+                OutlinedButton(onClick = { vm.testConnection() }, enabled = busy == null) { Text("Test connection") }
                 TextButton(onClick = { vm.forgetHostKey() }) { Text("Forget host key") }
             }
         }

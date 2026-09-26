@@ -7,10 +7,6 @@
     <!-- Needed on Android 11+ to find and launch the Claude app. -->
     <queries>
         <package android:name="com.anthropic.claude" />
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="https" />
-        </intent>
     </queries>
 
     <application

@@ -15,6 +15,7 @@ case "$1 $2" in
   "api user/orgs") logged_in || exit 1; echo example-org ;;
   "repo list")
     logged_in || exit 1
+    [[ -f "$S/fail_list" ]] && exit 1
     case "$3" in
       demo-user) echo '[{"nameWithOwner":"demo-user/demo-app","name":"demo-app","pushedAt":"2026-09-01T00:00:00Z","visibility":"PRIVATE"}]' ;;
       example-org) echo '[{"nameWithOwner":"example-org/org-app","name":"org-app","pushedAt":"2026-09-20T00:00:00Z","visibility":"PUBLIC"}]' ;;

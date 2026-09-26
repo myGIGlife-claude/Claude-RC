@@ -9,10 +9,8 @@ import life.mygig.clauderc.api.Codes
 
 /** Plain-language message, button label and fix for each error code. */
 fun friendly(e: ApiException): Triple<String, String?, Fix?> = when (e.code) {
-    Codes.NOT_LOGGED_IN_CLAUDE ->
-        Triple("Claude isn't logged in on the server.", "Log in", Fix.Login(LoginKind.CLAUDE))
-    Codes.NOT_LOGGED_IN_GITHUB ->
-        Triple("GitHub isn't logged in on the server.", "Log in", Fix.Login(LoginKind.GITHUB))
+    Codes.NOT_LOGGED_IN_CLAUDE -> Triple(e.message, "Log in", Fix.Login(LoginKind.CLAUDE))
+    Codes.NOT_LOGGED_IN_GITHUB -> Triple(e.message, "Log in", Fix.Login(LoginKind.GITHUB))
     Codes.MISSING_SCOPES ->
         Triple(
             "The GitHub token is missing: ${e.missing.joinToString(", ").ifEmpty { "some scopes" }}.",
@@ -47,6 +45,7 @@ fun friendly(e: ApiException): Triple<String, String?, Fix?> = when (e.code) {
             Fix.OpenSettings,
         )
     Codes.NOT_CONFIGURED -> Triple("Set up the server first.", "Settings", Fix.OpenSettings)
+    Codes.KEY_ERROR -> Triple(e.message, "Settings", Fix.OpenSettings)
     Codes.NETWORK -> Triple("Can't reach the server: ${e.message}", null, null)
     Codes.TIMEOUT -> Triple("The server took too long to answer.", null, null)
     else -> Triple(e.message, null, null)

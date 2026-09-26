@@ -52,8 +52,11 @@ same key.
 
 - The app generates its own Ed25519 key; the private part is encrypted with an
   Android Keystore AES-GCM key and never leaves the phone or its backups.
-- The server pins that key to `claude-launcher-api` with `no-pty`,
-  `no-port-forwarding`, `no-agent-forwarding`, `no-X11-forwarding`.
+- The server pins that key to `claude-launcher-api` with `restrict` (no pty, no
+  forwarding of any kind), so the key can only run that one program.
+- App lock (optional) asks for fingerprint/PIN to open the app, after 30 s in
+  the background, and before creating, stopping, logging in or showing the key
+  and username; it also hides the app from the Recents screen.
 - The runner never uses `eval` or a shell on the request string; it only
   accepts known subcommands with validated arguments.
 - Host key is pinned on first connect after you compare the fingerprint; a
