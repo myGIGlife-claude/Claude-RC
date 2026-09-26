@@ -44,7 +44,8 @@ for bad in "" "bash" "status; bash" 'status $(id)' "status && id" "rm -rf /" "st
   "start a b" "repos --all" "open not-a-repo" "open a/b --evil" "new x --owner" \
   "new x --visibility secret" "tail x --lines 9999" "status extra" "new -x" "login-github token" \
   "open a/b/c" "$(printf 'x%.0s' {1..500})" "start --dangerously-skip-permissions" "start -x" \
-  "open owner/-x" "open -o/x" "new x --owner --start" "tail -x" "clone-status nope"; do
+  "open owner/-x" "open -o/x" "new x --owner --start" "tail -x" "clone-status nope" \
+  "login-gitlab glpat-x" "login-docker docker.io" "login-cloudflare tok"; do
   api "$bad"
   check "forbidden: '${bad:0:30}'" "$(jqt '.ok==false and .error.code=="forbidden"')"
 done
@@ -56,6 +57,33 @@ echo "status"
 api "status"
 check "status not logged in" "$(jqt '.ok and .data.claude.logged_in==false and .data.github.logged_in==false and .data.aws.logged_in==false')"
 [[ -f "$HOME/.config/claude-launcher/config" ]]; check "config created on first run" $?
+check "status has health" "$(jqt '.data.health.mem_total_kb > 0 and .data.health.disk_total_kb > 0 and (.data.health.load|length)==3 and .data.health.uptime_seconds > 0')"
+check "status has services, none logged in" "$(jqt '.data.services.gitlab.installed and (.data.services.gitlab.logged_in|not) and (.data.services.docker.logged_in|not) and (.data.services.cloudflare.logged_in|not)')"
+
+echo "service logins"
+api "login-gitlab" "glpat-bad-token-000000000"
+check "gitlab bad token rejected" "$(jqt '.ok==false and .error.code=="not_logged_in"')"
+api "login-gitlab" "short"
+check "gitlab malformed token" "$(jqt '.error.code=="invalid_name"')"
+api "login-gitlab" "glpat-good-token-00000000"
+check "gitlab login ok" "$(jqt '.ok and .data.user=="demo-gl"')"
+api "login-docker" $'ghcr.io\ndemo\nbad-password'
+check "docker bad password rejected" "$(jqt '.ok==false and .error.code=="not_logged_in"')"
+api "login-docker" $'ghcr.io\n-rf\ngood-password'
+check "docker username can't start with -" "$(jqt '.error.code=="invalid_name"')"
+api "login-docker" $'-registry\ndemo\ngood-password'
+check "docker registry can't start with -" "$(jqt '.error.code=="invalid_name"')"
+api "login-gitlab" $'glpat-good-token-00000000\n--hostname=evil'
+check "gitlab host can't start with -" "$(jqt '.error.code=="invalid_name"')"
+api "login-docker" $'ghcr.io\ndemo\ngood-password'
+check "docker login ok" "$(jqt '.ok and .data.registry=="ghcr.io"')"
+api "login-cloudflare" "not a token"
+check "cloudflare malformed token" "$(jqt '.error.code=="invalid_name"')"
+api "login-cloudflare" "abcdefghijklmnopqrstuvwxyz0123456789ABCD"
+check "cloudflare unverified token rejected, nothing saved" "$(jqt '.error.code=="not_logged_in"')"
+[[ ! -e "$HOME/.config/claude-launcher/env" ]]; check "no env file after rejected token" $?
+api "status"
+check "status shows gitlab + docker" "$(jqt '.data.services.gitlab.detail=="demo-gl" and .data.services.docker.detail=="ghcr.io"')"
 
 echo "github login"
 api "login-github" "not-a-token!"

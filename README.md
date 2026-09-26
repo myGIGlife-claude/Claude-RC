@@ -35,7 +35,7 @@ off the allowlist. There is no web server, open port or cloud service.
 
 | Tab | Shows | Actions |
 | --- | --- | --- |
-| **Status** | Claude / GitHub / AWS login state, server name, last check | Pull to refresh; tap a red row to log in from the phone |
+| **Status** | Claude / GitHub / AWS / GitLab / Docker·GHCR / Cloudflare login state; server health (disk, memory, load, uptime, Claude Code version and updates) | Pull to refresh; tap a row to log in or connect from the phone |
 | **New** | Name (validated live), owner (you or an org), Private/Public, “Start Claude now” | Create → repo link + **Open in Claude** |
 | **Projects** | All your repos, newest push first, with Private/Public, Org, On server, Running badges | Clone/pull + start, stop, tail log (long-press) |
 | **Sessions** | Running Claude sessions, uptime, attached | Stop, tail, **Open in Claude** |
