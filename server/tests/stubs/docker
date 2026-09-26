@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Test stub for docker login: writes auths like the real CLI.
+[[ "$1" == login ]] || { echo "docker stub: $*" >&2; exit 1; }
+read -r pw
+[[ "$pw" == good* ]] || { echo "unauthorized: incorrect username or password"; exit 1; }
+mkdir -p "$HOME/.docker"
+printf '{"auths":{"%s":{}}}\n' "$2" >"$HOME/.docker/config.json"

@@ -58,6 +58,9 @@ fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
                     LoginKind.CLAUDE -> "Log in to Claude"
                     LoginKind.GITHUB -> "Log in to GitHub"
                     LoginKind.AWS -> "Log in to AWS"
+                    LoginKind.GITLAB -> "Log in to GitLab"
+                    LoginKind.DOCKER -> "Log in to a container registry"
+                    LoginKind.CLOUDFLARE -> "Connect Cloudflare"
                 },
             )
         },
@@ -78,6 +81,9 @@ fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
                     LoginKind.CLAUDE -> ClaudeLogin(vm, busy != null)
                     LoginKind.GITHUB -> GithubLogin(vm, busy != null)
                     LoginKind.AWS -> AwsLogin(vm, busy != null)
+                    LoginKind.GITLAB -> GitlabLogin(vm, busy != null)
+                    LoginKind.DOCKER -> DockerLogin(vm, busy != null)
+                    LoginKind.CLOUDFLARE -> CloudflareLogin(vm, busy != null)
                 }
             }
         },
@@ -137,6 +143,77 @@ private fun GithubLogin(vm: MainViewModel, busy: Boolean) {
         modifier = Modifier.fillMaxWidth(),
     ) { Text("Save token") }
     Text("The token is sent over SSH on stdin only, never on a command line.", style = MaterialTheme.typography.bodySmall)
+}
+
+@Composable
+private fun SecretField(value: String, label: String, onChange: (String) -> Unit) = OutlinedTextField(
+    value = value, onValueChange = { onChange(it.trim()) },
+    label = { Text(label) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+    visualTransformation = PasswordVisualTransformation(),
+    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+)
+
+@Composable
+private fun PlainField(value: String, label: String, onChange: (String) -> Unit) = OutlinedTextField(
+    value = value, onValueChange = { onChange(it.trim()) },
+    label = { Text(label) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+)
+
+@Composable
+private fun GitlabLogin(vm: MainViewModel, busy: Boolean) {
+    val context = LocalContext.current
+    var token by remember { mutableStateOf("") }
+    var host by remember { mutableStateOf("gitlab.com") }
+    Text("Create a personal access token with the api and write_repository scopes.")
+    OutlinedButton(onClick = { openUrl(context, "https://$host/-/user_settings/personal_access_tokens") }, modifier = Modifier.fillMaxWidth()) {
+        Text("Create token on GitLab")
+    }
+    PlainField(host, "GitLab host") { host = it }
+    SecretField(token, "Token") { token = it }
+    Button(onClick = { vm.gitlabLogin(token, host) }, enabled = !busy && token.length >= 20, modifier = Modifier.fillMaxWidth()) {
+        Text("Connect")
+    }
+}
+
+@Composable
+private fun DockerLogin(vm: MainViewModel, busy: Boolean) {
+    var registry by remember { mutableStateOf("docker.io") }
+    var user by remember { mutableStateOf("") }
+    var token by remember { mutableStateOf("") }
+    Text("Docker Hub: use an access token. GitHub (ghcr.io): a token with write:packages.")
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        listOf("docker.io", "ghcr.io").forEachIndexed { i, r ->
+            SegmentedButton(selected = registry == r, onClick = { registry = r }, shape = SegmentedButtonDefaults.itemShape(i, 2)) {
+                Text(if (r == "docker.io") "Docker Hub" else "GHCR")
+            }
+        }
+    }
+    PlainField(registry, "Registry") { registry = it }
+    PlainField(user, "Username") { user = it }
+    SecretField(token, "Token or password") { token = it }
+    Button(
+        onClick = { vm.dockerLogin(registry, user, token) },
+        enabled = !busy && user.isNotBlank() && token.length >= 8,
+        modifier = Modifier.fillMaxWidth(),
+    ) { Text("Connect") }
+}
+
+@Composable
+private fun CloudflareLogin(vm: MainViewModel, busy: Boolean) {
+    val context = LocalContext.current
+    var token by remember { mutableStateOf("") }
+    Text(
+        "Create an API token (the \"Edit Cloudflare Workers\" template suits wrangler). It's saved in a " +
+            "private file on the server that Claude's sessions load; restart running sessions to pick it up.",
+    )
+    OutlinedButton(onClick = { openUrl(context, "https://dash.cloudflare.com/profile/api-tokens") }, modifier = Modifier.fillMaxWidth()) {
+        Text("Create token on Cloudflare")
+    }
+    SecretField(token, "API token") { token = it }
+    Button(onClick = { vm.cloudflareLogin(token) }, enabled = !busy && token.length >= 30, modifier = Modifier.fillMaxWidth()) {
+        Text("Connect")
+    }
 }
 
 @Composable
