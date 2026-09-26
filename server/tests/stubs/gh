@@ -3,20 +3,31 @@
 S="${STUB_STATE:-$HOME/.stub-state}"; mkdir -p "$S"
 logged_in() { [[ -f "$S/gh_token" ]]; }
 case "$1 $2" in
-  "api user") logged_in || exit 1; echo demo-user ;;
+  "auth status") logged_in ;;
+  "api user")
+    logged_in || exit 1
+    case "$*" in
+      *".name // .login"*) echo "Demo User" ;;
+      *".id"*) echo 12345 ;;
+      *) echo demo-user ;;
+    esac ;;
   "api -i") logged_in || exit 1; printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: %s\r\n\r\n{"login":"demo-user"}\n' "$(cat "$S/gh_scopes" 2>/dev/null || echo 'repo, admin:org, workflow')" ;;
-  "api --paginate")
+  "api user/orgs") logged_in || exit 1; echo example-org ;;
+  "repo list")
     logged_in || exit 1
     case "$3" in
-      user/memberships*) echo '{"login":"example-org","role":"admin"}' ;;
-      user/repos*)
-        echo '{"full_name":"demo-user/demo-app","name":"demo-app","owner":"demo-user","owner_type":"User","private":true,"pushed_at":"2026-09-01T00:00:00Z","archived":false}'
-        echo '{"full_name":"example-org/org-app","name":"org-app","owner":"example-org","owner_type":"Organization","private":true,"pushed_at":"2026-09-20T00:00:00Z","archived":false}'
-        ;;
+      demo-user) echo '[{"nameWithOwner":"demo-user/demo-app","name":"demo-app","pushedAt":"2026-09-01T00:00:00Z","visibility":"PRIVATE"}]' ;;
+      example-org) echo '[{"nameWithOwner":"example-org/org-app","name":"org-app","pushedAt":"2026-09-20T00:00:00Z","visibility":"PUBLIC"}]' ;;
+      *) echo '[]' ;;
     esac ;;
   "repo view") logged_in || exit 1; [[ -f "$S/repo_$(echo "$3" | tr / _)" ]] ;;
-  "repo create") touch "$S/repo_$(echo "$3" | tr / _)" ;;
-  "repo clone") [[ -n "${STUB_CLONE_SLEEP:-}" ]] && sleep "$STUB_CLONE_SLEEP"; mkdir -p "$4" && git -C "$4" init -q ;;
+  "repo create")
+    touch "$S/repo_$(echo "$3" | tr / _)"
+    [[ " $* " == *" --clone "* ]] && { d="${3#*/}"; mkdir -p "$d" && git -C "$d" init -q && echo "# $d" >"$d/README.md" && git -C "$d" add . && git -C "$d" commit -qm init; }
+    true ;;
+  "repo clone")
+    [[ -n "${STUB_CLONE_SLEEP:-}" ]] && sleep "$STUB_CLONE_SLEEP"
+    mkdir -p "$4" && git -C "$4" init -q && touch "$4/README.md" && git -C "$4" add . && git -C "$4" commit -qm init ;;
   "auth login") read -r tok; [[ "$tok" == ghp_* ]] || { echo "bad token" >&2; exit 1; }; echo "$tok" > "$S/gh_token" ;;
   "auth setup-git") ;;
   *) echo "gh stub: unhandled $*" >&2; exit 1 ;;

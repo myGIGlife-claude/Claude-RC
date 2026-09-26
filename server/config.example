@@ -1,29 +1,25 @@
-# cLaudeRC server config
-# Copy to ~/.config/claude-launcher/config (claude-setup.sh creates it on first run).
+# claude-setup.sh / cLaudeRC server config
+# Lives at ~/.config/claude-launcher/config (created on first run).
 # Everything personal lives here, never in the repo.
 
 # Where project folders are created / cloned.
 PROJECTS_DIR="$HOME/projects"
 
-# Default GitHub owner for new repos (empty = your GitHub user).
+# Default GitHub owner the app pre-selects for new repos (empty = your GitHub user).
 DEFAULT_OWNER=""
 
-# Default visibility for new repos: private or public.
-DEFAULT_VISIBILITY="private"
-
-# Prefix for tmux session names (session = prefix + project name).
-# Leave empty to name sessions exactly after the project, as the menu always has.
-SESSION_PREFIX=""
-
-# AWS profile to check / log in (empty = default profile).
+# AWS profile to check / log in from the phone (empty = default profile).
 AWS_PROFILE_NAME=""
 
-# Default region for access-key logins.
+# Default region for access-key logins from the phone.
 AWS_DEFAULT_REGION_NAME="us-east-1"
 
-# Extra PATH entries for non-interactive SSH calls (colon separated),
-# e.g. where `claude`, `gh` or `aws` are installed if not already on PATH.
+# Extra PATH entries for SSH calls from the phone (colon separated), if
+# `claude`, `gh` or `aws` live somewhere other than ~/.local/bin or /usr/local/bin.
 EXTRA_PATH=""
 
-# How long (seconds) the cached GitHub repo list stays fresh.
+# How long (seconds) the phone's repo list is cached on the server.
 REPOS_CACHE_TTL=600
+
+# Where the runner finds claude-setup.sh (default: next to it, ~/bin, or ~).
+# SETUP_SCRIPT="$HOME/claude-setup.sh"

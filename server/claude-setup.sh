@@ -1,24 +1,26 @@
 #!/usr/bin/env bash
-# claude-setup.sh — check logins, create or open projects, and run Claude
-# with Remote Control in one detached tmux session per project.
+# claude-setup.sh — make sure you're logged in to Claude, GitHub and AWS, then
+# start a new project or resume an existing one. Every project runs Claude Code
+# in a detached tmux session with Remote Control on, named after the project.
 #
-#   claude-setup.sh                      interactive menu
-#   claude-setup.sh --api <cmd> [args]   non-interactive; prints one JSON object
+# Usage: ./claude-setup.sh                     interactive menu
+#        ./claude-setup.sh --api <cmd> [args]  non-interactive, prints one JSON object
 #
-# Nothing personal lives in this file. Per-machine choices are read from
-# ~/.config/claude-launcher/config (created on first run, see config.example).
+# Per-machine settings live in ~/.config/claude-launcher/config (created on
+# first run; see config.example). Nothing personal is written in this file.
 
 set -uo pipefail
 
 SCRIPT_VERSION="2.0.0"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/claude-launcher"
-CONFIG_FILE="$CONFIG_DIR/config"
-STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/claude-launcher"
+STATE_DIR="$HOME/.config/claude-setup"
+RC_MARKER="$STATE_DIR/remote-control-confirmed"
+LAUNCHER_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/claude-launcher"
+CONFIG_FILE="$LAUNCHER_CONFIG_DIR/config"
+API_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/claude-launcher"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/claude-launcher"
-REGISTRY_FILE="$STATE_DIR/sessions.list"
-LOCK_FILE="$STATE_DIR/api.lock"
+LOCK_FILE="$API_STATE_DIR/api.lock"
 
 CLAUDE_LOGIN_SESSION="claude-login"
 AWS_LOGIN_SESSION="aws-sso-login"
@@ -28,345 +30,674 @@ REPO_RE='^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$'
 OWNER_RE='^[A-Za-z0-9-]{1,39}$'
 REQUIRED_SCOPES=(repo read:org workflow)
 
-API_MODE=0
 EMITTED=0
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
+green()  { printf "\033[32m%s\033[0m\n" "$*"; }
+yellow() { printf "\033[33m%s\033[0m\n" "$*"; }
+red()    { printf "\033[31m%s\033[0m\n" "$*"; }
+step()   { printf "\n\033[1;36m==> %s\033[0m\n" "$*"; }
 
+# ======================================================================
+# Config
+# ======================================================================
 load_config() {
   PROJECTS_DIR="$HOME/projects"
   DEFAULT_OWNER=""
-  DEFAULT_VISIBILITY="private"
-  SESSION_PREFIX=""
   AWS_PROFILE_NAME=""
   AWS_DEFAULT_REGION_NAME="us-east-1"
   EXTRA_PATH=""
   REPOS_CACHE_TTL=600
 
   if [[ ! -f "$CONFIG_FILE" ]]; then
-    mkdir -p "$CONFIG_DIR"
+    mkdir -p "$LAUNCHER_CONFIG_DIR"
     cat >"$CONFIG_FILE" <<'EOF'
-# cLaudeRC server config — see config.example in the repo for every option.
+# claude-setup.sh / cLaudeRC config — see config.example in the repo.
 PROJECTS_DIR="$HOME/projects"
-DEFAULT_OWNER=""
-DEFAULT_VISIBILITY="private"
-SESSION_PREFIX=""
-AWS_PROFILE_NAME=""
-AWS_DEFAULT_REGION_NAME="us-east-1"
 EOF
     chmod 600 "$CONFIG_FILE"
   fi
   # shellcheck source=/dev/null
   . "$CONFIG_FILE"
 
-  # Forced-command SSH sessions get a bare PATH, so add the usual install
-  # locations after it, and let EXTRA_PATH win over everything.
-  PATH="$PATH:$HOME/.local/bin:$HOME/bin:$HOME/.npm-global/bin:/usr/local/bin"
+  # Forced-command SSH sessions get a bare PATH; add the usual install places
+  # after it, and let EXTRA_PATH win over everything.
+  PATH="$HOME/.local/bin:$PATH:/usr/local/bin:/usr/bin:/bin"
   [[ -n "$EXTRA_PATH" ]] && PATH="$EXTRA_PATH:$PATH"
   export PATH
 
-  mkdir -p "$STATE_DIR" "$CACHE_DIR"
-  chmod 700 "$STATE_DIR" "$CACHE_DIR" 2>/dev/null || true
-  touch "$REGISTRY_FILE"
-
-  # Never use an API key for Claude — always the claude.ai subscription login.
-  unset ANTHROPIC_API_KEY
-  export GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1 GIT_TERMINAL_PROMPT=0 AWS_PAGER=""
+  mkdir -p "$STATE_DIR" "$API_STATE_DIR" "$CACHE_DIR"
   AWS_ARGS=()
   [[ -n "$AWS_PROFILE_NAME" ]] && AWS_ARGS=(--profile "$AWS_PROFILE_NAME")
 }
 
-# ---------------------------------------------------------------------------
-# Output helpers
-# ---------------------------------------------------------------------------
+# ======================================================================
+# Shared helpers (menu and --api use the same logic)
+# ======================================================================
 
-if [[ -t 2 ]]; then
-  C_RED=$'\e[31m' C_GREEN=$'\e[32m' C_YELLOW=$'\e[33m' C_BOLD=$'\e[1m' C_OFF=$'\e[0m'
-else
-  C_RED="" C_GREEN="" C_YELLOW="" C_BOLD="" C_OFF=""
-fi
+# The first tmux call forks the tmux server, which would inherit and hold open
+# the SSH channel (fd 3) and the api lock (fd 9). Never let it.
+tmux() { command tmux "$@" 3>&- 9>&-; }
 
-# Progress text: stderr only, and silent in --api mode.
-say()  { ((API_MODE)) || printf '%s\n' "$*" >&2; }
-ok()   { say "${C_GREEN}✔${C_OFF} $*"; }
-warn() { say "${C_YELLOW}!${C_OFF} $*"; }
-fail() { say "${C_RED}✘${C_OFF} $*"; }
+t() { local s="$1"; shift; timeout --kill-after=5 "$s" "$@"; }
 
-# Result carriers. In --api mode they print the one JSON object on fd 3 and
-# exit; in menu mode they set RESULT_* for the caller and return.
-RESULT_DATA="{}" RESULT_CODE="" RESULT_MSG="" RESULT_EXTRA="{}"
+session_name() { local n="$1"; echo "${n//[.:]/-}"; }   # tmux can't use . or :
+
+claude_logged_in() { [[ -s "$HOME/.claude/.credentials.json" ]]; }
+
+# Prints missing scopes, space separated. admin:org / write:org cover read:org.
+missing_scopes() {
+  local have
+  have="$(gh api -i user 2>/dev/null </dev/null | tr -d '\r' | grep -i '^x-oauth-scopes:' | cut -d: -f2- | tr -d ' ')"
+  for sc in "${REQUIRED_SCOPES[@]}"; do
+    if [[ "$sc" == "read:org" ]]; then
+      [[ ",$have," == *",read:org,"* || ",$have," == *",write:org,"* || ",$have," == *",admin:org,"* ]] || printf "%s " "$sc"
+    else
+      [[ ",$have," == *",$sc,"* ]] || printf "%s " "$sc"
+    fi
+  done
+}
+
+github_logged_in() { gh auth status --hostname github.com >/dev/null 2>&1 </dev/null; }
+
+load_github() {
+  GH_USER="$(gh api user --jq .login </dev/null)"
+  mapfile -t GH_ORGS < <(gh api user/orgs --paginate --jq '.[].login' 2>/dev/null </dev/null || true)
+}
+
+git_identity() {
+  if [[ -z "$(git config --global user.name || true)" ]]; then
+    git config --global user.name "$(gh api user --jq '.name // .login' </dev/null)"
+  fi
+  if [[ -z "$(git config --global user.email || true)" ]]; then
+    git config --global user.email "$(gh api user --jq '.id' </dev/null)+${GH_USER}@users.noreply.github.com"
+  fi
+  git config --global init.defaultBranch main
+}
+
+aws_sso_configured() { grep -q "sso_" "$HOME/.aws/config" 2>/dev/null; }
+
+# Pre-accept Claude's "trust this folder?" prompt so detached sessions don't hang on it
+trust_folder() {
+  local dir="$1" cfg="$HOME/.claude.json" tmp
+  [[ -s "$cfg" ]] || echo '{}' >"$cfg"
+  tmp="$(mktemp)"
+  if jq --arg d "$dir" '.projects[$d].hasTrustDialogAccepted = true' "$cfg" >"$tmp"; then
+    mv "$tmp" "$cfg"
+  else
+    rm -f "$tmp"
+  fi
+}
+
+# Tell claude-autostart about the change now instead of at its next 2-minute save.
+autostart_save() {
+  local bin
+  bin="$(command -v claude-autostart 2>/dev/null || true)"
+  [[ -n "$bin" ]] && "$bin" save >/dev/null 2>&1 </dev/null || true
+}
+
+# Starts the session exactly as the menu always has, so claude-autostart picks
+# it up. Returns 0 if started, 2 if already running.
+launch_session() {
+  local name="$1" dir="$2" sess
+  sess="$(session_name "$name")"
+  if tmux has-session -t "=$sess" 2>/dev/null; then
+    return 2
+  fi
+  trust_folder "$dir"
+  tmux new-session -d -s "$sess" -c "$dir" \
+    "env -u ANTHROPIC_API_KEY claude --remote-control $(printf %q "$name"); exec bash"
+  autostart_save
+  return 0
+}
+
+# ======================================================================
+# Interactive menu (unchanged behaviour)
+# ======================================================================
+start_session() {
+  local name="$1" dir="$2" sess rc=0
+  sess="$(session_name "$name")"
+  launch_session "$name" "$dir" || rc=$?
+  if ((rc == 2)); then
+    yellow "  $name: already running"
+    return
+  fi
+  green "  $name: started (detached, Remote Control on)"
+
+  # Very first time on this machine, Remote Control asks for a one-time "y"
+  if [[ ! -f "$RC_MARKER" ]]; then
+    echo
+    yellow "One-time step: Claude will ask 'Enable Remote Control? (y/n)'."
+    yellow "Answer y, then detach with Ctrl-b then d."
+    if [[ -n "${TMUX:-}" ]]; then
+      yellow "You're inside tmux already, so run this after the script: tmux attach -t $sess"
+    else
+      read -rp "Press Enter to open it…" _
+      tmux attach -t "=$sess" || true
+    fi
+    touch "$RC_MARKER"
+  fi
+}
+
+quit_script() {
+  trap - INT
+  step "Exiting"
+  echo "Running sessions on the Pi:"
+  tmux ls 2>/dev/null | sed 's/^/  /' || echo "  (none)"
+  echo
+  echo "Open the Claude app → Code. Each project shows up by name with a green dot."
+  echo "Peek at one on the Pi:  tmux attach -t <project>   (detach: Ctrl-b then d)"
+  exit 0
+}
+
+# ask VAR "prompt"  → returns 1 on b (back), exits on q
+ask() {
+  local __var="$1" __prompt="$2" __in=""
+  read -rp "$__prompt" __in || __in="q"
+  __in="${__in#"${__in%%[![:space:]]*}"}"
+  __in="${__in%"${__in##*[![:space:]]}"}"
+  case "$__in" in
+    q | Q) quit_script ;;
+    b | B) return 1 ;;
+  esac
+  printf -v "$__var" '%s' "$__in"
+}
+
+hint() { printf "\033[2m  (b = back, q = exit)\033[0m\n"; }
+
+token_login() {
+  echo
+  yellow "Paste your GitHub personal access token (classic)."
+  yellow "It needs these scopes: ${REQUIRED_SCOPES[*]}"
+  local token=""
+  while [[ -z "$token" ]]; do
+    read -rsp "Token (hidden): " token
+    echo
+  done
+  if printf "%s\n" "$token" | gh auth login --hostname github.com --git-protocol https --with-token; then
+    return 0
+  fi
+  red "GitHub didn't accept that token."
+  return 1
+}
+
+# ---------------- New project ----------------
+new_project() {
+  local stage="owner" owner="$GH_USER" name="" vis="private" raw c i
+  while true; do
+    case "$stage" in
+      owner)
+        if ((${#GH_ORGS[@]} == 0)); then owner="$GH_USER"; stage="name"; continue; fi
+        step "New project — where should the repo live?"
+        echo "  1) $GH_USER (personal)"
+        for ((i = 0; i < ${#GH_ORGS[@]}; i++)); do echo "  $((i + 2))) ${GH_ORGS[$i]}"; done
+        hint
+        ask c "> [1] " || return 1
+        if [[ -z "$c" || "$c" == "1" ]]; then
+          owner="$GH_USER"
+        elif [[ "$c" =~ ^[0-9]+$ ]] && ((c >= 2 && c <= ${#GH_ORGS[@]} + 1)); then
+          owner="${GH_ORGS[$((c - 2))]}"
+        else
+          red "Pick a number from the list."; continue
+        fi
+        stage="name"
+        ;;
+      name)
+        step "New project — name (under $owner)"
+        hint
+        if ! ask raw "Project name: "; then
+          if ((${#GH_ORGS[@]})); then stage="owner"; else return 1; fi
+          continue
+        fi
+        name="$(tr -s ' ' '-' <<<"$raw")"
+        if [[ ! "$name" =~ ^[A-Za-z0-9._-]+$ ]]; then
+          red "Use letters, numbers, dashes, dots or underscores."
+        elif [[ -e "$PROJECTS_DIR/$name" ]]; then
+          red "$PROJECTS_DIR/$name already exists — pick another name, or go back and choose Existing."
+        elif gh repo view "$owner/$name" >/dev/null 2>&1; then
+          red "$owner/$name already exists on GitHub — pick another name, or go back and choose Existing."
+        else
+          stage="vis"
+        fi
+        ;;
+      vis)
+        step "New project — visibility"
+        echo "  1) Private"
+        echo "  2) Public"
+        hint
+        ask c "> [1] " || { stage="name"; continue; }
+        case "$c" in
+          "" | 1) vis="private" ;;
+          2) vis="public" ;;
+          *) red "Pick 1 or 2."; continue ;;
+        esac
+        stage="confirm"
+        ;;
+      confirm)
+        echo
+        echo "About to create a $vis repo: $owner/$name"
+        echo "Folder: $PROJECTS_DIR/$name"
+        hint
+        ask c "Create it? (Y/n) " || { stage="vis"; continue; }
+        if [[ "$c" =~ ^[Nn] ]]; then stage="vis"; continue; fi
+
+        step "Creating $vis repo $owner/$name"
+        if ! (cd "$PROJECTS_DIR" && gh repo create "$owner/$name" "--$vis" --add-readme --clone); then
+          red "GitHub couldn't create the repo. Going back."
+          stage="name"; continue
+        fi
+        [[ -d "$PROJECTS_DIR/$name/.git" ]] || gh repo clone "$owner/$name" "$PROJECTS_DIR/$name" || true
+        if [[ ! -d "$PROJECTS_DIR/$name/.git" ]]; then
+          red "Repo was created but couldn't be cloned. Try it from Existing."
+          return 0
+        fi
+        rm -f "$CACHE_DIR/repos.json"
+        green "Repo ready at $PROJECTS_DIR/$name"
+        step "Starting Claude"
+        start_session "$name" "$PROJECTS_DIR/$name"
+        return 0
+        ;;
+    esac
+  done
+}
+
+# ---------------- Existing project ----------------
+existing_project() {
+  local repos count i name full shown visib pushed flag picks n dir started
+  step "Loading your repos"
+  repos="$(list_repos_raw)"
+  count="$(jq length <<<"$repos")"
+  if ((count == 0)); then
+    yellow "No GitHub repos found. Going back."
+    return 1
+  fi
+
+  while true; do
+    step "Existing project"
+    printf "%-4s %-42s %-9s %-11s %s\n" "#" "PROJECT" "TYPE" "LAST PUSH" ""
+    for ((i = 0; i < count; i++)); do
+      name="$(jq -r ".[$i].name" <<<"$repos")"
+      full="$(jq -r ".[$i].nameWithOwner" <<<"$repos")"
+      shown="$name"; [[ "${full%%/*}" != "$GH_USER" ]] && shown="$full"
+      visib="$(jq -r ".[$i].visibility" <<<"$repos" | tr 'A-Z' 'a-z')"
+      pushed="$(jq -r ".[$i].pushedAt" <<<"$repos")"
+      flag=""
+      [[ -d "$PROJECTS_DIR/$name/.git" ]] && flag="[on Pi]"
+      tmux has-session -t "=$(session_name "$name")" 2>/dev/null && flag="$flag [running]"
+      printf "%-4s %-42s %-9s %-11s %s\n" "$((i + 1))" "$shown" "$visib" "${pushed:0:10}" "$flag"
+    done
+    echo
+    echo "Don't see it? Press b to go back (it may need to be created as New)."
+    hint
+    ask picks "Project number(s), e.g. 2 or 1 3: " || return 1
+    [[ -z "$picks" ]] && continue
+
+    started=0
+    for n in $picks; do
+      if ! [[ "$n" =~ ^[0-9]+$ ]] || ((n < 1 || n > count)); then
+        yellow "Skipping invalid choice: $n"
+        continue
+      fi
+      full="$(jq -r ".[$((n - 1))].nameWithOwner" <<<"$repos")"
+      name="${full#*/}"
+      dir="$PROJECTS_DIR/$name"
+
+      step "$name"
+      if [[ -d "$dir/.git" ]]; then
+        if [[ -n "$(git -C "$dir" status --porcelain)" ]]; then
+          yellow "  Uncommitted changes — not pulling"
+        elif git -C "$dir" pull --ff-only --quiet 2>/dev/null; then
+          green "  Updated from GitHub"
+        else
+          yellow "  Couldn't fast-forward — check it manually"
+        fi
+      elif [[ -e "$dir" ]]; then
+        red "  $dir exists but isn't a git repo — skipping"
+        continue
+      else
+        if ! gh repo clone "$full" "$dir" -- --quiet; then
+          red "  Clone failed — skipping"
+          continue
+        fi
+        green "  Cloned to $dir"
+      fi
+      start_session "$name" "$dir"
+      started=1
+    done
+    ((started)) && return 0
+    yellow "Nothing started — pick again, or b to go back."
+  done
+}
+
+menu_main() {
+  set -e
+
+  # ====================================================================
+  # 1. Tools
+  # ====================================================================
+  step "Checking tools"
+  missing=()
+  for p in git curl jq tmux unzip; do
+    command -v "$p" >/dev/null 2>&1 || missing+=("$p")
+  done
+  if ((${#missing[@]})); then
+    yellow "Installing: ${missing[*]}"
+    sudo apt-get update -y
+    sudo apt-get install -y "${missing[@]}"
+  fi
+
+  if ! command -v gh >/dev/null 2>&1; then
+    yellow "Installing GitHub CLI"
+    sudo mkdir -p -m 755 /etc/apt/keyrings
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg |
+      sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
+    sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" |
+      sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+    sudo apt-get update -y
+    sudo apt-get install -y gh
+  fi
+
+  if ! command -v claude >/dev/null 2>&1; then
+    yellow "Installing Claude Code"
+    curl -fsSL https://claude.ai/install.sh | bash
+    # shellcheck disable=SC2016  # written literally into .bashrc
+    grep -q '.local/bin' "$HOME/.bashrc" 2>/dev/null ||
+      echo 'export PATH="$HOME/.local/bin:$PATH"' >>"$HOME/.bashrc"
+  fi
+
+  if ! command -v aws >/dev/null 2>&1; then
+    yellow "Installing AWS CLI"
+    case "$(uname -m)" in
+      aarch64 | arm64) aws_arch="aarch64" ;;
+      x86_64) aws_arch="x86_64" ;;
+      *) red "Unsupported CPU for AWS CLI: $(uname -m)"; exit 1 ;;
+    esac
+    tmp="$(mktemp -d)"
+    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}.zip" -o "$tmp/aws.zip"
+    unzip -q "$tmp/aws.zip" -d "$tmp"
+    sudo "$tmp/aws/install"
+    rm -rf "$tmp"
+  fi
+  green "Tools OK"
+
+  # ====================================================================
+  # 2. Logins
+  # ====================================================================
+  step "Claude login"
+  # Remote Control needs a claude.ai subscription login, not an API key
+  if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+    yellow "ANTHROPIC_API_KEY is set — ignoring it (Remote Control needs your claude.ai login)."
+    unset ANTHROPIC_API_KEY
+  fi
+  if ! claude_logged_in; then
+    yellow "Choose the claude.ai (subscription) option, open the link on your phone,"
+    yellow "and paste the code back here."
+    claude auth login || true
+  fi
+  if claude_logged_in; then
+    green "Claude: logged in"
+  else
+    red "Claude login failed. Run 'claude auth login' and try again."
+    exit 1
+  fi
+
+  step "GitHub login"
+  # Logs in with a personal access token (classic) — no browser code needed.
+  # Create one at github.com → Settings → Developer settings → Personal access tokens
+  # → Tokens (classic), with scopes: repo, read:org, workflow
+  if [[ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]]; then
+    yellow "GH_TOKEN/GITHUB_TOKEN is set in your environment — ignoring it for this script."
+    unset GH_TOKEN GITHUB_TOKEN
+  fi
+
+  while true; do
+    if ! github_logged_in; then
+      token_login || continue
+    fi
+    need="$(missing_scopes)"
+    if [[ -z "$need" ]]; then
+      break
+    fi
+    red "Your GitHub token is missing scopes: $need"
+    yellow "Edit the token on GitHub to add them (or make a new one), then paste it here."
+    token_login || true
+  done
+  gh auth setup-git >/dev/null 2>&1 || true
+  load_github
+  git_identity
+  green "GitHub: logged in as $GH_USER"
+  if ((${#GH_ORGS[@]})); then
+    green "GitHub orgs: ${GH_ORGS[*]}"
+    yellow "(If an org's private repos are missing, click 'Configure SSO' next to your token"
+    yellow " on GitHub and authorize that org, or have an org owner allow personal access tokens.)"
+  fi
+
+  step "AWS login"
+  if ! aws sts get-caller-identity >/dev/null 2>&1; then
+    if aws_sso_configured; then
+      yellow "Your AWS SSO session has expired — refreshing (enter the code on your phone)."
+      aws sso login --use-device-code || true
+    else
+      echo "How do you sign in to AWS?"
+      echo "  1) SSO / IAM Identity Center"
+      echo "  2) Access keys"
+      echo "  3) Skip for now"
+      read -rp "> " aws_choice
+      case "$aws_choice" in
+        1) aws configure sso --use-device-code || true ;;
+        2) aws configure || true ;;
+        *) yellow "Skipping AWS" ;;
+      esac
+    fi
+  fi
+  if aws_id="$(aws sts get-caller-identity --query Account --output text 2>/dev/null)"; then
+    green "AWS: logged in (account $aws_id)"
+  else
+    yellow "AWS: not logged in — projects will still start, but AWS commands won't work."
+  fi
+
+  # ====================================================================
+  # 3. Projects folder
+  # ====================================================================
+  step "Projects folder"
+  if [[ -d "$PROJECTS_DIR" ]]; then
+    green "$PROJECTS_DIR exists"
+  else
+    mkdir -p "$PROJECTS_DIR"
+    green "Created $PROJECTS_DIR"
+  fi
+
+  # ====================================================================
+  # 4. Menus — every prompt accepts  b = back   q = exit
+  # ====================================================================
+  trap 'echo; yellow "Cancelled."; quit_script' INT
+
+  mode=""
+  while true; do
+    step "What are you working on?"
+    echo "  1) New project"
+    echo "  2) Existing project"
+    printf "\033[2m  (q = exit)\033[0m\n"
+    ask mode "> " || continue
+    case "$mode" in
+      1) new_project && green "All set. Start another, or q to exit." || true ;;
+      2) existing_project && green "All set. Start another, or q to exit." || true ;;
+      *) red "Pick 1, 2 or q." ;;
+    esac
+  done
+}
+
+# Your repos plus every org's, newest push first (gh repo list JSON).
+list_repos_raw() {
+  for owner in "$GH_USER" "${GH_ORGS[@]}"; do
+    gh repo list "$owner" --limit 200 --no-archived \
+      --json nameWithOwner,name,pushedAt,visibility 2>/dev/null </dev/null || echo '[]'
+  done | jq -s 'add | unique_by(.nameWithOwner) | sort_by(.pushedAt) | reverse'
+}
+
+# ======================================================================
+# --api mode: one JSON object on stdout, nothing ever waits for input
+# ======================================================================
 
 api_ok() {
-  RESULT_DATA="${1:-{\}}" RESULT_CODE="" RESULT_MSG=""
-  if ((API_MODE)); then
-    jq -cn --argjson d "$RESULT_DATA" '{ok:true,data:$d}' >&3
-    EMITTED=1
-    exit 0
-  fi
-  return 0
+  jq -cn --argjson d "${1:-"{}"}" '{ok:true,data:$d}' >&3
+  EMITTED=1
+  exit 0
 }
 
 # api_err <code> <message> [extra-json-object] [exit-code]
 api_err() {
-  RESULT_CODE="$1" RESULT_MSG="$2" RESULT_EXTRA="${3:-{\}}"
-  if ((API_MODE)); then
-    jq -cn --arg c "$1" --arg m "$2" --argjson x "$RESULT_EXTRA" \
-      '{ok:false,error:({code:$c,message:$m} + $x)}' >&3
-    EMITTED=1
-    exit "${4:-1}"
-  fi
-  return 1
+  jq -cn --arg c "$1" --arg m "$2" --argjson x "${3:-"{}"}" \
+    '{ok:false,error:({code:$c,message:$m} + $x)}' >&3
+  EMITTED=1
+  exit "${4:-1}"
 }
 
 bad_args() { api_err bad_args "$1" '{}' 2; }
 
 on_exit() {
   local rc=$?
-  if ((API_MODE)) && ((EMITTED == 0)); then
+  if ((EMITTED == 0)); then
     jq -cn --arg m "unexpected exit ($rc)" '{ok:false,error:{code:"internal",message:$m}}' >&3
   fi
 }
 
-need() {
-  command -v "$1" >/dev/null 2>&1 || { api_err internal "'$1' is not installed on the server"; return 1; }
-}
-
-# The first tmux call forks the tmux server, which would inherit and hold open
-# the SSH channel (fd 3) and the lock (fd 9). Never let it.
-tmux() { command tmux "$@" 3>&- 9>&-; }
-
-# Run with a hard time limit so nothing on the phone waits forever.
-t() { local s="$1"; shift; timeout --kill-after=5 "$s" "$@"; }
-
-# ---------------------------------------------------------------------------
-# Validation and naming
-# ---------------------------------------------------------------------------
+need() { command -v "$1" >/dev/null 2>&1 || api_err internal "'$1' is not installed on the server"; }
 
 valid_project() { [[ "$1" =~ $PROJECT_RE && "$1" != "." && "$1" != ".." ]]; }
-valid_repo()    { [[ "$1" =~ $REPO_RE ]]; }
-valid_owner()   { [[ "$1" =~ $OWNER_RE ]]; }
-
-# tmux turns '.' and ':' into '_' in session names; do the same up front.
-session_name() { local s="${SESSION_PREFIX}$1"; s="${s//./_}"; printf '%s' "${s//:/_}"; }
-project_dir()  { printf '%s/%s' "$PROJECTS_DIR" "$1"; }
-
-# ---------------------------------------------------------------------------
-# Locking — two phone taps must not run new/open at the same time
-# ---------------------------------------------------------------------------
 
 take_lock() {
   exec 9>>"$LOCK_FILE"
-  flock -n 9 || { api_err busy "Another create/open is still running. Try again in a moment."; return 1; }
+  flock -n 9 || api_err busy "Another create/open is still running. Try again in a moment."
 }
 
-# ---------------------------------------------------------------------------
-# Login checks
-# ---------------------------------------------------------------------------
-
-claude_logged_in() {
-  command -v claude >/dev/null 2>&1 || return 1
-  local out
-  out="$(t 20 claude auth status 2>&1 </dev/null)"
-  local rc=$?
-  if jq -e 'type=="object"' >/dev/null 2>&1 <<<"$out"; then
-    jq -e '(.loggedIn // .logged_in // false) == true' >/dev/null <<<"$out"
-    return
-  fi
-  if grep -qiE 'not (logged|signed) in|no credentials|please (log|sign) in' <<<"$out"; then
-    return 1
-  fi
-  ((rc == 0)) && grep -qiE 'logged in|signed in|authenticated|subscription' <<<"$out" && return 0
-  # Older versions without `auth status`: look for the OAuth credentials file.
-  grep -qs 'claudeAiOauth' "$HOME/.claude/.credentials.json"
+require_github() {
+  need gh
+  github_logged_in || api_err not_logged_in_github "GitHub is not logged in on the server."
+  load_github
+  [[ -n "$GH_USER" ]] || api_err not_logged_in_github "GitHub is not logged in on the server."
 }
 
-# Prints the GitHub login on success.
-github_user() { t 20 gh api user --jq .login 2>/dev/null </dev/null; }
-
-github_scopes() {
-  t 20 gh api -i user 2>/dev/null </dev/null |
-    tr -d '\r' | awk -F': ' 'tolower($1)=="x-oauth-scopes"{print $2}' | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$'
-}
-
-# Prints missing scopes, one per line. admin:org / write:org cover read:org.
-github_missing_scopes() {
-  local have
-  have="$(github_scopes)"
-  local s
-  for s in "${REQUIRED_SCOPES[@]}"; do
-    if [[ "$s" == "read:org" ]]; then
-      grep -qxE 'read:org|write:org|admin:org' <<<"$have" || echo "$s"
-    else
-      grep -qx "$s" <<<"$have" || echo "$s"
+# The very first Remote Control start asks "Enable Remote Control? (y/n)".
+# The menu has you answer it by hand; from the phone, answer y here.
+api_confirm_remote_control() {
+  local sess="$1" i text
+  [[ -f "$RC_MARKER" ]] && return 0
+  for ((i = 0; i < 30; i++)); do
+    sleep 0.5
+    text="$(tmux capture-pane -p -J -t "=$sess:" 2>/dev/null)"
+    if grep -qiE 'enable remote control.*\(y/n\)|remote control\?.*\(y/n\)' <<<"$text"; then
+      tmux send-keys -t "=$sess:" y Enter
+      touch "$RC_MARKER"
+      return 0
     fi
   done
 }
 
-aws_identity() { t 20 aws sts get-caller-identity "${AWS_ARGS[@]}" --output json 2>/dev/null </dev/null; }
-
-# ---------------------------------------------------------------------------
-# Core actions (shared by the menu and --api)
-# ---------------------------------------------------------------------------
-
-do_status() {
-  local claude_ok=false gh_user="" gh_ok=false missing="[]" aws_ok=false aws_json="null"
-
-  if claude_logged_in; then claude_ok=true; fi
-
-  if command -v gh >/dev/null 2>&1 && gh_user="$(github_user)" && [[ -n "$gh_user" ]]; then
-    gh_ok=true
-    missing="$(github_missing_scopes | jq -R . | jq -sc .)"
+# api_start_session <project> — sets STARTED_SESSION / ALREADY_RUNNING
+api_start_session() {
+  local name="$1" dir rc=0
+  dir="$PROJECTS_DIR/$name"
+  need tmux
+  command -v claude >/dev/null 2>&1 || api_err internal "'claude' is not installed on the server."
+  [[ -d "$dir" ]] || api_err invalid_name "No project folder named '$name' on the server."
+  STARTED_SESSION="$(session_name "$name")"
+  ALREADY_RUNNING=false
+  launch_session "$name" "$dir" || rc=$?
+  if ((rc == 2)); then
+    ALREADY_RUNNING=true
+  elif ((rc != 0)); then
+    api_err internal "tmux could not start the session."
+  else
+    api_confirm_remote_control "$STARTED_SESSION"
   fi
-
-  local ident
-  if command -v aws >/dev/null 2>&1 && ident="$(aws_identity)" && [[ -n "$ident" ]]; then
-    aws_ok=true
-    aws_json="$(jq -c '{account:.Account, arn:.Arn, user_id:.UserId}' <<<"$ident")"
-  fi
-
-  api_ok "$(jq -cn \
-    --argjson c "$claude_ok" --argjson g "$gh_ok" --arg gu "$gh_user" --argjson gm "$missing" \
-    --argjson a "$aws_ok" --argjson ai "$aws_json" --arg ap "$AWS_PROFILE_NAME" \
-    --arg host "$(hostname -s 2>/dev/null || hostname)" --arg v "$SCRIPT_VERSION" \
-    --argjson sso "$(aws_sso_configured && echo true || echo false)" '{
-      claude:{logged_in:$c},
-      github:{logged_in:$g, user:(if $gu=="" then null else $gu end), missing_scopes:$gm},
-      aws:{logged_in:$a, identity:$ai, profile:(if $ap=="" then "default" else $ap end), sso_configured:$sso},
-      hostname:$host, version:$v
-    }')"
 }
 
-require_github() {
-  command -v gh >/dev/null 2>&1 || { api_err not_logged_in_github "GitHub CLI (gh) is not installed on the server."; return 1; }
-  GH_USER="$(github_user)"
-  [[ -n "$GH_USER" ]] || { api_err not_logged_in_github "GitHub is not logged in on the server."; return 1; }
+do_status() {
+  local claude_ok=false gh_ok=false gh_user="" scopes="[]" aws_ok=false aws_json="null" ident
+  claude_logged_in && claude_ok=true
+  if command -v gh >/dev/null 2>&1 && github_logged_in; then
+    gh_user="$(gh api user --jq .login 2>/dev/null </dev/null)"
+    if [[ -n "$gh_user" ]]; then
+      gh_ok=true
+      scopes="$(missing_scopes | tr ' ' '\n' | grep -v '^$' | jq -R . | jq -sc .)"
+    fi
+  fi
+  if command -v aws >/dev/null 2>&1 &&
+    ident="$(t 20 aws sts get-caller-identity "${AWS_ARGS[@]}" --output json 2>/dev/null </dev/null)" && [[ -n "$ident" ]]; then
+    aws_ok=true
+    aws_json="$(jq -c '{account:.Account, arn:.Arn}' <<<"$ident")"
+  fi
+  api_ok "$(jq -cn \
+    --argjson c "$claude_ok" --argjson g "$gh_ok" --arg gu "$gh_user" --argjson gm "$scopes" \
+    --argjson a "$aws_ok" --argjson ai "$aws_json" --arg ap "${AWS_PROFILE_NAME:-default}" \
+    --argjson sso "$(aws_sso_configured && echo true || echo false)" \
+    --arg host "$(hostname -s 2>/dev/null || hostname)" --arg v "$SCRIPT_VERSION" '{
+      claude:{logged_in:$c},
+      github:{logged_in:$g, user:(if $gu=="" then null else $gu end), missing_scopes:$gm},
+      aws:{logged_in:$a, identity:$ai, profile:$ap, sso_configured:$sso},
+      hostname:$host, version:$v}')"
 }
 
 do_owners() {
-  require_github || return 1
-  local orgs
-  orgs="$(t 30 gh api --paginate 'user/memberships/orgs?state=active&per_page=100' \
-    --jq '.[] | {login:.organization.login, role:.role}' 2>/dev/null </dev/null | jq -sc .)" || orgs="[]"
-  [[ -n "$orgs" ]] || orgs="[]"
-  api_ok "$(jq -cn --arg u "$GH_USER" --argjson o "$orgs" --arg d "${DEFAULT_OWNER:-}" \
-    '{user:$u, orgs:$o, default_owner:(if $d=="" then $u else $d end)}')"
-}
-
-running_sessions_json() {
-  { tmux list-sessions -F '#{session_name}' 2>/dev/null || true; } | jq -R . | jq -sc .
-}
-
-local_dirs_json() {
-  [[ -d "$PROJECTS_DIR" ]] || { echo '[]'; return; }
-  { find "$PROJECTS_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null || true; } | jq -R . | jq -sc .
-}
-
-fetch_repos() {
-  local cache="$CACHE_DIR/repos.json" refresh="$1"
-  if [[ "$refresh" != 1 && -s "$cache" ]]; then
-    local age=$(($(date +%s) - $(stat -c %Y "$cache")))
-    if ((age < REPOS_CACHE_TTL)); then cat "$cache"; return 0; fi
-  fi
-  local out
-  out="$(t 50 gh api --paginate \
-    'user/repos?per_page=100&affiliation=owner,collaborator,organization_member&sort=pushed' \
-    --jq '.[] | {full_name, name, owner:.owner.login, owner_type:.owner.type, private, pushed_at, archived}' \
-    2>/dev/null </dev/null | jq -sc 'unique_by(.full_name)')" || return 1
-  [[ -n "$out" ]] || return 1
-  printf '%s' "$out" >"$cache.tmp" && mv "$cache.tmp" "$cache"
-  printf '%s' "$out"
+  require_github
+  api_ok "$(printf '%s\n' "${GH_ORGS[@]}" | grep -v '^$' | jq -R '{login:., role:""}' | jq -sc \
+    --arg u "$GH_USER" --arg d "$DEFAULT_OWNER" '{user:$u, orgs:., default_owner:(if $d=="" then $u else $d end)}')"
 }
 
 do_repos() {
-  local refresh=0
+  local refresh=0 cache="$CACHE_DIR/repos.json" raw
   [[ "${1:-}" == "--refresh" ]] && refresh=1
-  require_github || return 1
-  local repos
-  repos="$(fetch_repos "$refresh")" || { api_err internal "Could not list GitHub repos."; return 1; }
-  api_ok "$(jq -c --argjson l "$(local_dirs_json)" --argjson r "$(running_sessions_json)" \
-    --arg p "$SESSION_PREFIX" --arg gu "$GH_USER" '
-    {user:$gu, repos: (map(. + {
-      local: (.name as $n | $l | index($n) != null),
-      running: (($p + .name | gsub("[.:]"; "_")) as $s | $r | index($s) != null)
-    }) | sort_by(.pushed_at) | reverse)}' <<<"$repos")"
-}
-
-sessions_json() {
-  # tmux turns tabs into '_' in formats, so use a separator no path contains.
-  local fmt='#{session_name}|#|#{session_created}|#|#{session_attached}|#|#{@claude_project}|#|#{@claude_dir}|#|#{pane_start_command}|#|#{pane_current_path}'
-  { tmux list-panes -a -F "$fmt" 2>/dev/null || true; } |
-    awk -F'[|]#[|]' '!seen[$1]++' |
-    jq -Rc --arg login1 "$CLAUDE_LOGIN_SESSION" --arg login2 "$AWS_LOGIN_SESSION" '
-      split("|#|") as $f
-      | select($f[0] != $login1 and $f[0] != $login2)
-      | select(($f[3] // "") != "" or (($f[5] // "") | test("claude.*remote-control")))
-      | {name:$f[0],
-         project:(if ($f[3] // "") != "" then $f[3] else $f[0] end),
-         dir:(if ($f[4] // "") != "" then $f[4] else $f[6] end),
-         started_at:($f[1] | tonumber),
-         attached:(($f[2] | tonumber) > 0)}' |
-    jq -sc 'sort_by(.started_at)'
+  require_github
+  if ((refresh == 0)) && [[ -s "$cache" ]] && (($(date +%s) - $(stat -c %Y "$cache") < REPOS_CACHE_TTL)); then
+    raw="$(cat "$cache")"
+  else
+    raw="$(list_repos_raw)" || api_err internal "Could not list GitHub repos."
+    printf '%s' "$raw" >"$cache"
+  fi
+  local locals running
+  locals="$({ find "$PROJECTS_DIR" -mindepth 2 -maxdepth 2 -name .git -printf '%h\n' 2>/dev/null || true; } |
+    xargs -r -n1 basename | jq -R . | jq -sc .)"
+  running="$({ tmux list-sessions -F '#{session_name}' 2>/dev/null || true; } | jq -R . | jq -sc .)"
+  api_ok "$(jq -c --argjson l "$locals" --argjson r "$running" --arg gu "$GH_USER" '
+    {user:$gu, repos: map({
+      full_name:.nameWithOwner, name, owner:(.nameWithOwner | split("/")[0]),
+      owner_type:(if (.nameWithOwner | split("/")[0]) == $gu then "User" else "Organization" end),
+      private:((.visibility // "" | ascii_downcase) != "public"), pushed_at:.pushedAt,
+      local:(.name as $n | $l | index($n) != null),
+      running:((.name | gsub("[.:]"; "-")) as $s | $r | index($s) != null)
+    })}' <<<"$raw")"
 }
 
 do_sessions() {
   local s
-  s="$(sessions_json)"
-  [[ -n "$s" ]] || s="[]"
-  api_ok "$(jq -cn --argjson s "$s" --argjson now "$(date +%s)" \
-    '{now:$now, sessions:($s | map(. + {uptime_seconds:($now - .started_at)}))}')"
-}
-
-registry_add() {
-  grep -qxF -- "$1" "$REGISTRY_FILE" 2>/dev/null || printf '%s\n' "$1" >>"$REGISTRY_FILE"
-}
-registry_remove() {
-  local tmp="$REGISTRY_FILE.tmp"
-  grep -vxF -- "$1" "$REGISTRY_FILE" >"$tmp" 2>/dev/null
-  mv "$tmp" "$REGISTRY_FILE"
-}
-
-# start_session <project> — sets STARTED_SESSION and ALREADY_RUNNING.
-start_session() {
-  local project="$1" dir sess
-  dir="$(project_dir "$project")"
-  sess="$(session_name "$project")"
-  STARTED_SESSION="$sess" ALREADY_RUNNING=false
-  need tmux || return 1
-  [[ -d "$dir" ]] || { api_err invalid_name "No project folder named '$project' on the server."; return 1; }
-  if tmux has-session -t "=$sess" 2>/dev/null; then
-    ALREADY_RUNNING=true
-    registry_add "$project"
-    return 0
-  fi
-  local claude_bin
-  claude_bin="$(command -v claude)" || { api_err internal "'claude' is not installed on the server."; return 1; }
-  tmux new-session -d -s "$sess" -c "$dir" -x 200 -y 50 \
-    env -u ANTHROPIC_API_KEY "$claude_bin" --remote-control "$project" \; \
-    set-option @claude_project "$project" \; \
-    set-option @claude_dir "$dir" >/dev/null 2>&1 ||
-    { api_err internal "tmux could not start the session."; return 1; }
-  registry_add "$project"
+  # Same detection as claude-autostart: any session whose pane started claude.
+  s="$({ tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}@@#{session_created}@@#{session_attached}' 2>/dev/null || true; } |
+    awk -F'@@' -v l1="$CLAUDE_LOGIN_SESSION" -v l2="$AWS_LOGIN_SESSION" \
+      '($3 ~ /claude/ || $4 == "claude") && $1 != l1 && $1 != l2 && !seen[$1]++' |
+    jq -Rc 'split("@@") | {name:.[0], dir:.[1], project:(.[1] | split("/") | last),
+      started_at:(.[4] | tonumber), attached:((.[5] | tonumber) > 0)}' |
+    jq -sc --argjson now "$(date +%s)" 'map(. + {uptime_seconds:($now - .started_at)}) | sort_by(.started_at)')"
+  api_ok "$(jq -cn --argjson s "${s:-[]}" --argjson now "$(date +%s)" '{now:$now, sessions:$s}')"
 }
 
 do_start() {
-  [[ $# -eq 1 ]] || { bad_args "usage: start <project>"; return 1; }
-  valid_project "$1" || { api_err invalid_name "Invalid project name."; return 1; }
-  start_session "$1" || return 1
-  api_ok "$(jq -cn --arg s "$STARTED_SESSION" --arg p "$(project_dir "$1")" --argjson a "$ALREADY_RUNNING" \
+  [[ $# -eq 1 ]] || bad_args "usage: start <project>"
+  valid_project "$1" || api_err invalid_name "Invalid project name."
+  api_start_session "$1"
+  api_ok "$(jq -cn --arg s "$STARTED_SESSION" --arg p "$PROJECTS_DIR/$1" --argjson a "$ALREADY_RUNNING" \
     '{session:$s, path:$p, already_running:$a}')"
 }
 
 do_stop() {
-  [[ $# -eq 1 ]] || { bad_args "usage: stop <project>"; return 1; }
-  valid_project "$1" || { api_err invalid_name "Invalid project name."; return 1; }
+  [[ $# -eq 1 ]] || bad_args "usage: stop <project>"
+  valid_project "$1" || api_err invalid_name "Invalid project name."
   local sess stopped=false
   sess="$(session_name "$1")"
-  if tmux has-session -t "=$sess" 2>/dev/null; then
-    tmux kill-session -t "=$sess" 2>/dev/null && stopped=true
+  if tmux has-session -t "=$sess" 2>/dev/null && tmux kill-session -t "=$sess" 2>/dev/null; then
+    stopped=true
+    autostart_save
   fi
-  registry_remove "$1"
   api_ok "$(jq -cn --arg s "$sess" --argjson st "$stopped" '{session:$s, stopped:$st}')"
 }
 
@@ -374,71 +705,58 @@ do_tail() {
   local project="" lines=40
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --lines) [[ "${2:-}" =~ ^[0-9]{1,4}$ ]] || { bad_args "--lines needs a number"; return 1; }; lines="$2"; shift 2 ;;
-      -*) bad_args "unknown option $1"; return 1 ;;
-      *) [[ -z "$project" ]] || { bad_args "usage: tail <project> [--lines N]"; return 1; }; project="$1"; shift ;;
+      --lines) [[ "${2:-}" =~ ^[0-9]{1,4}$ ]] || bad_args "--lines needs a number"; lines="$2"; shift 2 ;;
+      -*) bad_args "unknown option $1" ;;
+      *) [[ -z "$project" ]] || bad_args "usage: tail <project> [--lines N]"; project="$1"; shift ;;
     esac
   done
-  [[ -n "$project" ]] || { bad_args "usage: tail <project> [--lines N]"; return 1; }
-  valid_project "$project" || { api_err invalid_name "Invalid project name."; return 1; }
+  [[ -n "$project" ]] || bad_args "usage: tail <project> [--lines N]"
+  valid_project "$project" || api_err invalid_name "Invalid project name."
   ((lines < 1)) && lines=1
   ((lines > 200)) && lines=200
   local sess text
   sess="$(session_name "$project")"
-  tmux has-session -t "=$sess" 2>/dev/null || { api_err invalid_name "No running session for '$project'."; return 1; }
+  tmux has-session -t "=$sess" 2>/dev/null || api_err invalid_name "No running session for '$project'."
   text="$(tmux capture-pane -p -J -t "=$sess:" -S -500 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n "$lines")"
   api_ok "$(jq -cn --arg s "$sess" --arg t "$text" --argjson n "$lines" '{session:$s, lines:$n, text:$t}')"
 }
 
 do_new() {
-  local name="" owner="" vis="" start=0
+  local name="" owner="" vis="private" start=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --owner) owner="${2:-}"; shift 2 || { bad_args "--owner needs a value"; return 1; } ;;
-      --visibility) vis="${2:-}"; shift 2 || { bad_args "--visibility needs a value"; return 1; } ;;
+      --owner) owner="${2:-}"; shift 2 || bad_args "--owner needs a value" ;;
+      --visibility) vis="${2:-}"; shift 2 || bad_args "--visibility needs a value" ;;
       --start) start=1; shift ;;
-      -*) bad_args "unknown option $1"; return 1 ;;
-      *) [[ -z "$name" ]] || { bad_args "usage: new <name> --owner <owner> --visibility private|public [--start]"; return 1; }; name="$1"; shift ;;
+      -*) bad_args "unknown option $1" ;;
+      *) [[ -z "$name" ]] || bad_args "usage: new <name> --owner <owner> --visibility private|public [--start]"; name="$1"; shift ;;
     esac
   done
-  [[ -n "$name" ]] || { bad_args "usage: new <name> --owner <owner> --visibility private|public [--start]"; return 1; }
-  valid_project "$name" || { api_err invalid_name "Names may use letters, digits, '.', '_' and '-' (max 100)."; return 1; }
-  [[ -z "$vis" ]] && vis="$DEFAULT_VISIBILITY"
-  [[ "$vis" == private || "$vis" == public ]] || { bad_args "--visibility must be private or public"; return 1; }
+  [[ -n "$name" ]] || bad_args "usage: new <name> --owner <owner> --visibility private|public [--start]"
+  valid_project "$name" || api_err invalid_name "Use letters, numbers, dashes, dots or underscores (max 100)."
+  [[ "$vis" == private || "$vis" == public ]] || bad_args "--visibility must be private or public"
 
-  take_lock || return 1
-  require_github || return 1
+  take_lock
+  require_github
   [[ -z "$owner" ]] && owner="${DEFAULT_OWNER:-$GH_USER}"
-  valid_owner "$owner" || { api_err invalid_name "Invalid owner."; return 1; }
+  [[ "$owner" =~ $OWNER_RE ]] || api_err invalid_name "Invalid owner."
+  local dir="$PROJECTS_DIR/$name" repo="$owner/$name" err
+  [[ -e "$dir" ]] && api_err repo_exists "$dir already exists — pick another name, or open it from Projects."
+  t 20 gh repo view "$repo" >/dev/null 2>&1 </dev/null &&
+    api_err repo_exists "$repo already exists on GitHub — pick another name, or open it from Projects."
 
-  local dir repo="$owner/$name"
-  dir="$(project_dir "$name")"
-  if [[ -e "$dir" ]] && [[ -n "$(ls -A "$dir" 2>/dev/null)" ]]; then
-    api_err repo_exists "A folder named '$name' already exists on the server."; return 1
-  fi
-  if t 20 gh repo view "$repo" --json name >/dev/null 2>&1 </dev/null; then
-    api_err repo_exists "The repo $repo already exists on GitHub. Open it from Projects instead."; return 1
-  fi
-
-  say "Creating $vis repo $repo…"
-  local err
-  if ! err="$(t 50 gh repo create "$repo" "--$vis" 2>&1 </dev/null)"; then
-    api_err internal "gh repo create failed: $(tail -n 3 <<<"$err")"; return 1
-  fi
+  git_identity >/dev/null 2>&1 || true
   mkdir -p "$PROJECTS_DIR"
-  rmdir "$dir" 2>/dev/null
-  if ! err="$(t 50 gh repo clone "$repo" "$dir" 2>&1 </dev/null)"; then
-    # Empty repo clone can fail on older git; fall back to a local init.
-    mkdir -p "$dir" && git -C "$dir" init -q -b main >/dev/null 2>&1 &&
-      git -C "$dir" remote add origin "https://github.com/$repo.git" ||
-      { api_err internal "Repo created, but the folder could not be set up: $(tail -n 2 <<<"$err")"; return 1; }
+  if ! err="$(cd "$PROJECTS_DIR" && t 50 gh repo create "$repo" "--$vis" --add-readme --clone 2>&1 </dev/null)"; then
+    api_err internal "GitHub couldn't create the repo: $(tail -n 2 <<<"$err")"
   fi
+  [[ -d "$dir/.git" ]] || t 40 gh repo clone "$repo" "$dir" >/dev/null 2>&1 </dev/null || true
+  [[ -d "$dir/.git" ]] || api_err internal "Repo was created but couldn't be cloned. Try it from Projects."
   rm -f "$CACHE_DIR/repos.json"
-  ok "Created $repo in $dir"
 
   local sess=""
   if ((start)); then
-    start_session "$name" || return 1
+    api_start_session "$name"
     sess="$STARTED_SESSION"
   fi
   api_ok "$(jq -cn --arg r "$repo" --arg u "https://github.com/$repo" --arg p "$dir" --arg s "$sess" --arg v "$vis" \
@@ -447,12 +765,12 @@ do_new() {
 
 # Background clone worker (internal; not reachable through the runner).
 clone_worker() {
-  local repo="$1" dir="$2" start="$3" status="$4" err
-  if err="$(gh repo clone "$repo" "$dir" 2>&1 </dev/null)"; then
-    local sess=""
+  local repo="$1" dir="$2" start="$3" status="$4" err sess=""
+  if err="$(gh repo clone "$repo" "$dir" -- --quiet 2>&1 </dev/null)"; then
     if [[ "$start" == 1 ]]; then
-      API_MODE=0
-      start_session "$(basename "$dir")" && sess="$STARTED_SESSION"
+      launch_session "${repo#*/}" "$dir" || true
+      sess="$(session_name "${repo#*/}")"
+      api_confirm_remote_control "$sess"
     fi
     jq -cn --arg s "$sess" '{state:"done", session:(if $s=="" then null else $s end)}' >"$status"
   else
@@ -467,43 +785,35 @@ do_open() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --start) start=1; shift ;;
-      -*) bad_args "unknown option $1"; return 1 ;;
-      *) [[ -z "$repo" ]] || { bad_args "usage: open <owner/repo> [--start]"; return 1; }; repo="$1"; shift ;;
+      -*) bad_args "unknown option $1" ;;
+      *) [[ -z "$repo" ]] || bad_args "usage: open <owner/repo> [--start]"; repo="$1"; shift ;;
     esac
   done
-  [[ -n "$repo" ]] || { bad_args "usage: open <owner/repo> [--start]"; return 1; }
-  valid_repo "$repo" || { api_err invalid_name "Invalid repo name."; return 1; }
+  [[ -n "$repo" ]] || bad_args "usage: open <owner/repo> [--start]"
+  [[ "$repo" =~ $REPO_RE ]] || api_err invalid_name "Invalid repo name."
   local name="${repo#*/}"
-  valid_project "$name" || { api_err invalid_name "Invalid repo name."; return 1; }
+  valid_project "$name" || api_err invalid_name "Invalid repo name."
 
-  take_lock || return 1
-  require_github || return 1
-  local dir action sess="" pending=false
-  dir="$(project_dir "$name")"
-
-  if [[ -d "$dir" ]]; then
-    if ! git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-      api_err folder_dirty "The folder $dir exists but is not a git repo, so it wasn't updated. Start anyway?" \
-        "$(jq -cn --arg p "$dir" '{path:$p}')"; return 1
-    fi
+  take_lock
+  require_github
+  local dir="$PROJECTS_DIR/$name" action sess="" pending=false note=""
+  if [[ -d "$dir/.git" ]]; then
     if [[ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ]]; then
       api_err folder_dirty "The folder has uncommitted changes, so it wasn't updated. Start anyway?" \
-        "$(jq -cn --arg p "$dir" '{path:$p}')"; return 1
+        "$(jq -cn --arg p "$dir" '{path:$p}')"
     fi
-    say "Pulling $repo…"
-    local err
-    if ! git -C "$dir" rev-parse --verify -q HEAD >/dev/null; then
-      action="skipped_empty"
-    elif err="$(t 50 git -C "$dir" pull --ff-only 2>&1 </dev/null)"; then
+    if t 50 git -C "$dir" pull --ff-only --quiet >/dev/null 2>&1 </dev/null; then
       action="pulled"
     else
-      api_err internal "git pull failed: $(tail -n 3 <<<"$err")" "$(jq -cn --arg p "$dir" '{path:$p}')"; return 1
+      action="not_updated"
+      note="Couldn't fast-forward — check it manually."
     fi
-    if ((start)); then start_session "$name" || return 1; sess="$STARTED_SESSION"; fi
+    if ((start)); then api_start_session "$name"; sess="$STARTED_SESSION"; fi
+  elif [[ -e "$dir" ]]; then
+    api_err internal "$dir exists but isn't a git repo — skipping."
   else
-    say "Cloning $repo…"
     mkdir -p "$PROJECTS_DIR"
-    local status="$STATE_DIR/clone-${repo//\//__}.json"
+    local status="$API_STATE_DIR/clone-${repo//\//__}.json"
     rm -f "$status"
     # Detach fully (fd 3 is the SSH channel) but keep the lock (fd 9) held
     # until the clone finishes.
@@ -512,9 +822,7 @@ do_open() {
     local waited=0
     while [[ ! -s "$status" ]] && ((waited < 45)); do sleep 1; ((waited++)); done
     if [[ -s "$status" ]]; then
-      if [[ "$(jq -r .state "$status")" == failed ]]; then
-        api_err internal "Clone failed: $(jq -r .message "$status")"; return 1
-      fi
+      [[ "$(jq -r .state "$status")" == failed ]] && api_err internal "Clone failed: $(jq -r .message "$status")"
       action="cloned"
       sess="$(jq -r '.session // ""' "$status")"
     else
@@ -522,17 +830,14 @@ do_open() {
       pending=true
     fi
   fi
-  api_ok "$(jq -cn --arg p "$dir" --arg a "$action" --arg s "$sess" --argjson pe "$pending" --arg r "$repo" \
-    '{repo:$r, path:$p, action:$a, pending:$pe, session:(if $s=="" then null else $s end)}')"
+  api_ok "$(jq -cn --arg p "$dir" --arg a "$action" --arg s "$sess" --argjson pe "$pending" --arg r "$repo" --arg n "$note" \
+    '{repo:$r, path:$p, action:$a, pending:$pe, note:(if $n=="" then null else $n end), session:(if $s=="" then null else $s end)}')"
 }
 
-# ---------------------------------------------------------------------------
-# Login flows (secrets arrive on stdin only)
-# ---------------------------------------------------------------------------
+# ---------------- Login flows (secrets arrive on stdin only) ----------------
 
 pane_text() { tmux capture-pane -p -J -t "=$1:" -S -200 2>/dev/null; }
 
-# Start a throwaway tmux session that keeps its output after the command exits.
 start_login_session() {
   local name="$1"; shift
   tmux kill-session -t "=$name" 2>/dev/null
@@ -540,22 +845,22 @@ start_login_session() {
     bash -c '"$@"; echo "[exit $?]"; sleep 900' login "$@" >/dev/null 2>&1
 }
 
-do_login_claude_start() {
-  need tmux || return 1
-  command -v claude >/dev/null 2>&1 || { api_err internal "'claude' is not installed on the server."; return 1; }
-  start_login_session "$CLAUDE_LOGIN_SESSION" env -u ANTHROPIC_API_KEY claude auth login ||
-    { api_err internal "Could not start the login session."; return 1; }
+read_secret_line() { local v=""; IFS= read -r v || true; v="${v//$'\r'/}"; printf '%s' "$v"; }
 
-  local i text url="" enters=0
+do_login_claude_start() {
+  need tmux
+  command -v claude >/dev/null 2>&1 || api_err internal "'claude' is not installed on the server."
+  start_login_session "$CLAUDE_LOGIN_SESSION" env -u ANTHROPIC_API_KEY claude auth login ||
+    api_err internal "Could not start the login session."
+  local i text="" url="" enters=0 line
   for ((i = 0; i < 60; i++)); do
     sleep 0.5
     text="$(pane_text "$CLAUDE_LOGIN_SESSION")"
     url="$(grep -oE 'https://[^[:space:]]*(oauth|authorize|login)[^[:space:]]*' <<<"$text" | tail -n 1)"
     [[ -n "$url" ]] && break
-    if grep -q '\[exit ' <<<"$text"; then break; fi
-    # A method picker: pick the claude.ai subscription entry, never an API key.
+    grep -q '\[exit ' <<<"$text" && break
+    # A method picker: choose the claude.ai subscription entry by its label.
     if ((enters < 3)) && grep -qiE 'subscription|claude\.ai|select login method|choose' <<<"$text"; then
-      local line
       line="$(grep -iE '^\s*(❯|>)?\s*[0-9]+\..*(subscription|claude\.ai|Claude account)' <<<"$text" | head -n 1)"
       if [[ "$line" =~ ([0-9]+)\. ]]; then
         tmux send-keys -t "=$CLAUDE_LOGIN_SESSION:" "${BASH_REMATCH[1]}"
@@ -570,46 +875,33 @@ do_login_claude_start() {
     fi
   done
   if [[ -z "$url" ]]; then
-    local tailtext
-    tailtext="$(tail -n 15 <<<"$text")"
     tmux kill-session -t "=$CLAUDE_LOGIN_SESSION" 2>/dev/null
-    api_err internal "No login URL appeared within 30 s." "$(jq -cn --arg t "$tailtext" '{pane:$t}')"; return 1
+    api_err internal "No login URL appeared within 30 s." "$(jq -cn --arg t "$(tail -n 15 <<<"$text")" '{pane:$t}')"
   fi
-  api_ok "$(jq -cn --arg u "$url" '{url:$u, session:"'"$CLAUDE_LOGIN_SESSION"'"}')"
+  api_ok "$(jq -cn --arg u "$url" --arg s "$CLAUDE_LOGIN_SESSION" '{url:$u, session:$s}')"
 }
 
-read_secret_line() { local v=""; IFS= read -r v || true; v="${v//$'\r'/}"; printf '%s' "$v"; }
-
 do_login_claude_code() {
-  local code
+  local code i text=""
   code="$(read_secret_line)"
   exec 0</dev/null
   code="${code//[[:space:]]/}"
-  [[ "$code" =~ ^[A-Za-z0-9#_.~=+/-]{4,1024}$ ]] || { api_err invalid_name "That doesn't look like a login code."; return 1; }
+  [[ "$code" =~ ^[A-Za-z0-9#_.~=+/-]{4,1024}$ ]] || api_err invalid_name "That doesn't look like a login code."
   tmux has-session -t "=$CLAUDE_LOGIN_SESSION" 2>/dev/null ||
-    { api_err not_logged_in_claude "The login session expired. Start the Claude login again."; return 1; }
-
+    api_err not_logged_in_claude "The login session expired. Start the Claude login again."
   tmux send-keys -t "=$CLAUDE_LOGIN_SESSION:" -l -- "$code"
   tmux send-keys -t "=$CLAUDE_LOGIN_SESSION:" Enter
-  local i text
   for ((i = 0; i < 45; i++)); do
     sleep 1
-    text="$(pane_text "$CLAUDE_LOGIN_SESSION")"
-    if grep -qiE 'login successful|logged in|successfully|\[exit 0\]' <<<"$text"; then
-      sleep 1
-      if claude_logged_in; then
-        tmux kill-session -t "=$CLAUDE_LOGIN_SESSION" 2>/dev/null
-        api_ok '{"logged_in":true}'; return 0
-      fi
+    if claude_logged_in; then
+      tmux kill-session -t "=$CLAUDE_LOGIN_SESSION" 2>/dev/null
+      api_ok '{"logged_in":true}'
     fi
-    if grep -qiE 'invalid|error|failed|expired|\[exit [1-9]' <<<"$text"; then break; fi
+    text="$(pane_text "$CLAUDE_LOGIN_SESSION")"
+    grep -qiE 'invalid|error|failed|expired|\[exit [1-9]' <<<"$text" && break
   done
-  if claude_logged_in; then
-    tmux kill-session -t "=$CLAUDE_LOGIN_SESSION" 2>/dev/null
-    api_ok '{"logged_in":true}'; return 0
-  fi
-  api_err not_logged_in_claude "Login did not complete." \
-    "$(jq -cn --arg t "$(tail -n 15 <<<"$text")" '{pane:$t}')"
+  claude_logged_in && api_ok '{"logged_in":true}'
+  api_err not_logged_in_claude "Login did not complete." "$(jq -cn --arg t "$(tail -n 15 <<<"$text")" '{pane:$t}')"
 }
 
 do_login_claude_cancel() {
@@ -618,81 +910,66 @@ do_login_claude_cancel() {
 }
 
 do_login_github() {
-  local token
+  local token err user need_scopes
   token="$(read_secret_line)"
   exec 0</dev/null
   token="${token//[[:space:]]/}"
-  [[ "$token" =~ ^[A-Za-z0-9_]{20,255}$ ]] || { api_err invalid_name "That doesn't look like a GitHub token."; return 1; }
-  need gh || return 1
-  local err
-  if ! err="$(printf '%s\n' "$token" | t 30 gh auth login --hostname github.com --with-token 2>&1)"; then
-    api_err not_logged_in_github "GitHub rejected the token: $(tail -n 2 <<<"$err")"; return 1
+  [[ "$token" =~ ^[A-Za-z0-9_]{20,255}$ ]] || api_err invalid_name "That doesn't look like a GitHub token."
+  need gh
+  if ! err="$(printf '%s\n' "$token" | t 30 gh auth login --hostname github.com --git-protocol https --with-token 2>&1)"; then
+    api_err not_logged_in_github "GitHub didn't accept that token: $(tail -n 2 <<<"$err")"
   fi
   unset token
-  t 20 gh auth setup-git >/dev/null 2>&1 </dev/null
-  local user missing
-  user="$(github_user)"
-  [[ -n "$user" ]] || { api_err not_logged_in_github "Token saved, but GitHub login still fails."; return 1; }
-  missing="$(github_missing_scopes | jq -R . | jq -sc .)"
+  gh auth setup-git >/dev/null 2>&1 </dev/null || true
+  user="$(gh api user --jq .login 2>/dev/null </dev/null)"
+  [[ -n "$user" ]] || api_err not_logged_in_github "Token saved, but GitHub login still fails."
+  GH_USER="$user"
+  git_identity >/dev/null 2>&1 || true
   rm -f "$CACHE_DIR/repos.json"
-  if [[ "$missing" != "[]" ]]; then
-    api_err missing_scopes "Logged in as $user, but the token is missing: $(jq -r 'join(", ")' <<<"$missing")." \
-      "$(jq -cn --argjson m "$missing" --arg u "$user" '{missing:$m, user:$u}')"; return 1
+  need_scopes="$(missing_scopes)"
+  if [[ -n "$need_scopes" ]]; then
+    api_err missing_scopes "Your GitHub token is missing scopes: $need_scopes" \
+      "$(tr ' ' '\n' <<<"$need_scopes" | grep -v '^$' | jq -R . | jq -sc --arg u "$user" '{missing:., user:$u}')"
   fi
   api_ok "$(jq -cn --arg u "$user" '{logged_in:true, user:$u}')"
 }
 
 do_login_aws_keys() {
-  local key_id secret region
+  local key_id secret region profile csv err ident
   key_id="$(read_secret_line)"; secret="$(read_secret_line)"; region="$(read_secret_line)"
   exec 0</dev/null
   key_id="${key_id//[[:space:]]/}" secret="${secret//[[:space:]]/}" region="${region//[[:space:]]/}"
   [[ -z "$region" ]] && region="$AWS_DEFAULT_REGION_NAME"
-  [[ "$key_id" =~ ^[A-Z0-9]{16,128}$ ]] || { api_err invalid_name "That access key ID doesn't look right."; return 1; }
-  [[ "$secret" =~ ^[A-Za-z0-9/+=]{16,128}$ ]] || { api_err invalid_name "That secret key doesn't look right."; return 1; }
-  [[ "$region" =~ ^[a-z0-9-]{2,32}$ ]] || { api_err invalid_name "That region doesn't look right."; return 1; }
-  need aws || return 1
-
+  [[ "$key_id" =~ ^[A-Z0-9]{16,128}$ ]] || api_err invalid_name "That access key ID doesn't look right."
+  [[ "$secret" =~ ^[A-Za-z0-9/+=]{16,128}$ ]] || api_err invalid_name "That secret key doesn't look right."
+  [[ "$region" =~ ^[a-z0-9-]{2,32}$ ]] || api_err invalid_name "That region doesn't look right."
+  need aws
   # `aws configure import` reads the secret from a file, so it never shows up
   # in the process list the way `aws configure set <secret>` would.
-  local profile="${AWS_PROFILE_NAME:-default}" csv err
-  csv="$(mktemp "$STATE_DIR/awskeys.XXXXXX")"
+  profile="${AWS_PROFILE_NAME:-default}"
+  csv="$(mktemp "$API_STATE_DIR/awskeys.XXXXXX")"
   chmod 600 "$csv"
   printf 'User Name,Access key ID,Secret access key\n%s,%s,%s\n' "$profile" "$key_id" "$secret" >"$csv"
   unset secret
   err="$(t 30 aws configure import --csv "file://$csv" --skip-invalid 2>&1 </dev/null)"
   local rc=$?
   rm -f "$csv"
-  ((rc == 0)) || { api_err internal "Saving keys failed (AWS CLI v2 is required): $(tail -n 2 <<<"$err")"; return 1; }
+  ((rc == 0)) || api_err internal "Saving keys failed (AWS CLI v2 is required): $(tail -n 2 <<<"$err")"
   aws configure set region "$region" --profile "$profile" </dev/null >/dev/null 2>&1
   aws configure set output json --profile "$profile" </dev/null >/dev/null 2>&1
-
-  local ident
-  ident="$(aws_identity)" || ident=""
-  [[ -n "$ident" ]] || { api_err not_logged_in_aws "Keys saved, but AWS rejected them."; return 1; }
+  ident="$(t 20 aws sts get-caller-identity "${AWS_ARGS[@]}" --output json 2>/dev/null </dev/null)"
+  [[ -n "$ident" ]] || api_err not_logged_in_aws "Keys saved, but AWS rejected them."
   api_ok "$(jq -c --arg r "$region" '{logged_in:true, account:.Account, arn:.Arn, region:$r}' <<<"$ident")"
 }
 
-aws_sso_configured() {
-  command -v aws >/dev/null 2>&1 || return 1
-  [[ -n "$(aws configure get sso_start_url "${AWS_ARGS[@]}" 2>/dev/null </dev/null)" ||
-     -n "$(aws configure get sso_session "${AWS_ARGS[@]}" 2>/dev/null </dev/null)" ]]
-}
-
 do_login_aws_sso_start() {
-  need aws || return 1
-  need tmux || return 1
+  need aws
+  need tmux
   aws_sso_configured ||
-    { api_err not_logged_in_aws "AWS SSO isn't configured on the server for this profile. Use access keys instead." '{"sso_configured":false}'; return 1; }
-
-  local args=(aws sso login --no-browser "${AWS_ARGS[@]}")
-  # Newer CLIs default to a localhost callback; ask for the device-code flow.
-  if aws sso login help 2>/dev/null </dev/null | grep -q -- '--use-device-code'; then
-    args+=(--use-device-code)
-  fi
-  start_login_session "$AWS_LOGIN_SESSION" "${args[@]}" || { api_err internal "Could not start the SSO login."; return 1; }
-
-  local i text url="" code=""
+    api_err not_logged_in_aws "AWS SSO isn't configured on the server yet. Use access keys, or run 'aws configure sso --use-device-code' there once." '{"sso_configured":false}'
+  start_login_session "$AWS_LOGIN_SESSION" aws sso login --use-device-code --no-browser "${AWS_ARGS[@]}" ||
+    api_err internal "Could not start the SSO login."
+  local i text="" url="" code=""
   for ((i = 0; i < 60; i++)); do
     sleep 0.5
     text="$(pane_text "$AWS_LOGIN_SESSION")"
@@ -702,24 +979,20 @@ do_login_aws_sso_start() {
     grep -q '\[exit ' <<<"$text" && break
   done
   if [[ -z "$url" ]]; then
-    local tailtext
-    tailtext="$(tail -n 15 <<<"$text")"
     tmux kill-session -t "=$AWS_LOGIN_SESSION" 2>/dev/null
-    api_err internal "No SSO URL appeared within 30 s." "$(jq -cn --arg t "$tailtext" '{pane:$t}')"; return 1
+    api_err internal "No SSO URL appeared within 30 s." "$(jq -cn --arg t "$(tail -n 15 <<<"$text")" '{pane:$t}')"
   fi
   api_ok "$(jq -cn --arg u "$url" --arg c "$code" '{url:$u, code:(if $c=="" then null else $c end)}')"
 }
 
-# ---------------------------------------------------------------------------
-# --api dispatcher
-# ---------------------------------------------------------------------------
-
 api_main() {
-  API_MODE=1
   # fd 3 = the one JSON object; everything else goes to stderr.
   exec 3>&1 1>&2
   trap on_exit EXIT
-  need jq || { printf '{"ok":false,"error":{"code":"internal","message":"jq is not installed on the server"}}\n' >&3; EMITTED=1; exit 1; }
+  command -v jq >/dev/null 2>&1 ||
+    { printf '{"ok":false,"error":{"code":"internal","message":"jq is not installed on the server"}}\n' >&3; EMITTED=1; exit 1; }
+  unset ANTHROPIC_API_KEY GH_TOKEN GITHUB_TOKEN
+  export GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1 GIT_TERMINAL_PROMPT=0 AWS_PAGER=""
 
   local cmd="${1:-}"
   shift || true
@@ -747,178 +1020,18 @@ api_main() {
     "")                  bad_args "missing subcommand" ;;
     *)                   bad_args "unknown subcommand '$cmd'" ;;
   esac
-  # Every handler emits and exits; reaching here is a bug.
   api_err internal "no result"
 }
 
-# ---------------------------------------------------------------------------
-# Interactive menu
-# ---------------------------------------------------------------------------
-
-pause() { read -r -p "Press Enter to continue…" _ || true; }
-
-attach_offer() {
-  local sess="$1"
-  [[ -t 0 ]] || return 0
-  local a
-  read -r -p "Attach to session '$sess' now? [y/N] " a || return 0
-  [[ "$a" =~ ^[Yy] ]] && tmux attach-session -t "=$sess"
-}
-
-menu_logins() {
-  say "${C_BOLD}Checking logins…${C_OFF}"
-  if claude_logged_in; then ok "Claude: logged in (claude.ai subscription)"
-  else
-    fail "Claude: not logged in"
-    local a; read -r -p "Log in to Claude now? [Y/n] " a
-    [[ "$a" =~ ^[Nn] ]] || env -u ANTHROPIC_API_KEY claude auth login
-  fi
-
-  local user
-  if command -v gh >/dev/null && user="$(github_user)" && [[ -n "$user" ]]; then
-    local missing; missing="$(github_missing_scopes | paste -sd, -)"
-    if [[ -z "$missing" ]]; then ok "GitHub: $user (all scopes present)"
-    else
-      warn "GitHub: $user, missing scopes: $missing"
-      say "  Create a classic token with repo, read:org, workflow at https://github.com/settings/tokens/new"
-      local a; read -r -p "Paste a new token now? [y/N] " a
-      if [[ "$a" =~ ^[Yy] ]]; then
-        local tok; read -r -s -p "Token: " tok; echo >&2
-        printf '%s\n' "$tok" | gh auth login --hostname github.com --with-token && gh auth setup-git
-      fi
-    fi
-  else
-    fail "GitHub: not logged in"
-    say "  Create a classic token with repo, read:org, workflow at https://github.com/settings/tokens/new"
-    local a; read -r -p "Paste a token now? [Y/n] " a
-    if ! [[ "$a" =~ ^[Nn] ]]; then
-      local tok; read -r -s -p "Token: " tok; echo >&2
-      printf '%s\n' "$tok" | gh auth login --hostname github.com --with-token && gh auth setup-git
-    fi
-  fi
-
-  local ident
-  if command -v aws >/dev/null && ident="$(aws_identity)" && [[ -n "$ident" ]]; then
-    ok "AWS: $(jq -r .Arn <<<"$ident")"
-  else
-    fail "AWS: not logged in"
-    local a; read -r -p "Log in via (s)SO, access (k)eys, or skip? [s/k/N] " a
-    case "$a" in
-      [Ss]*) aws sso login "${AWS_ARGS[@]}" ;;
-      [Kk]*) aws configure "${AWS_ARGS[@]}" ;;
-    esac
-  fi
-}
-
-pick_owner() {
-  require_github || return 1
-  local orgs
-  mapfile -t orgs < <(t 30 gh api --paginate 'user/memberships/orgs?state=active&per_page=100' --jq '.[].organization.login' 2>/dev/null)
-  local choices=("$GH_USER" "${orgs[@]}") i
-  say "Owner:"
-  for i in "${!choices[@]}"; do say "  $((i + 1))) ${choices[$i]}"; done
-  local n; read -r -p "Choose [1]: " n
-  n="${n:-1}"
-  [[ "$n" =~ ^[0-9]+$ ]] && ((n >= 1 && n <= ${#choices[@]})) || { fail "Invalid choice"; return 1; }
-  PICKED_OWNER="${choices[$((n - 1))]}"
-}
-
-menu_new() {
-  local name
-  read -r -p "Project name: " name
-  valid_project "$name" || { fail "Names may use letters, digits, '.', '_' and '-'."; return 1; }
-  pick_owner || return 1
-  local v; read -r -p "Visibility (p)rivate or p(u)blic? [p]: " v
-  local vis=private; [[ "$v" =~ ^[Uu] ]] && vis=public
-  if do_new "$name" --owner "$PICKED_OWNER" --visibility "$vis" --start; then
-    ok "Started session '$(session_name "$name")' running claude --remote-control \"$name\""
-    attach_offer "$(session_name "$name")"
-  else
-    fail "$RESULT_MSG"
-  fi
-}
-
-menu_existing() {
-  require_github || { fail "$RESULT_MSG"; return 1; }
-  say "Loading repos…"
-  local repos
-  repos="$(fetch_repos 1)" || { fail "Could not list repos."; return 1; }
-  local list
-  mapfile -t list < <(jq -r 'sort_by(.pushed_at) | reverse | .[] | "\(.full_name)\t\(if .private then "private" else "public" end)"' <<<"$repos")
-  local i
-  for i in "${!list[@]}"; do
-    local fn="${list[$i]%%$'\t'*}" vis="${list[$i]#*$'\t'}" mark=""
-    [[ -d "$(project_dir "${fn#*/}")" ]] && mark=" [on server]"
-    printf '%4d) %s (%s)%s\n' "$((i + 1))" "$fn" "$vis" "$mark" >&2
-  done
-  local n; read -r -p "Choose a repo (number or owner/name): " n
-  local repo
-  if [[ "$n" =~ ^[0-9]+$ ]] && ((n >= 1 && n <= ${#list[@]})); then repo="${list[$((n - 1))]%%$'\t'*}"
-  else repo="$n"; fi
-  if do_open "$repo" --start; then
-    ok "Ready: $(project_dir "${repo#*/}")"
-    attach_offer "$(session_name "${repo#*/}")"
-  elif [[ "$RESULT_CODE" == folder_dirty ]]; then
-    warn "$RESULT_MSG"
-    local a; read -r -p "[y/N] " a
-    if [[ "$a" =~ ^[Yy] ]] && start_session "${repo#*/}"; then attach_offer "$STARTED_SESSION"; fi
-  else
-    fail "$RESULT_MSG"
-  fi
-}
-
-menu_sessions() {
-  local s
-  s="$(sessions_json)"
-  if [[ -z "$s" || "$s" == "[]" ]]; then say "No Claude sessions running."; return 0; fi
-  local names
-  mapfile -t names < <(jq -r '.[].name' <<<"$s")
-  jq -r --argjson now "$(date +%s)" 'to_entries[] | "\(.key + 1)) \(.value.name)  up \((($now - .value.started_at) / 60 | floor))m\(if .value.attached then "  (attached)" else "" end)"' <<<"$s" >&2
-  local n; read -r -p "Number to (a)ttach or (s)top, e.g. 'a1' / 's2' (Enter to go back): " n
-  [[ "$n" =~ ^([as])([0-9]+)$ ]] || return 0
-  local idx=$((BASH_REMATCH[2] - 1))
-  ((idx >= 0 && idx < ${#names[@]})) || return 0
-  if [[ "${BASH_REMATCH[1]}" == a ]]; then tmux attach-session -t "=${names[$idx]}"
-  else
-    tmux kill-session -t "=${names[$idx]}" && ok "Stopped ${names[$idx]}"
-    local proj
-    proj="$(jq -r ".[$idx].project" <<<"$s")"
-    registry_remove "$proj"
-  fi
-}
-
-menu_main() {
-  need jq || { echo "Please install jq." >&2; exit 1; }
-  while true; do
-    say ""
-    say "${C_BOLD}Claude setup${C_OFF} — projects in $PROJECTS_DIR"
-    say "  1) Check / fix logins"
-    say "  2) New project"
-    say "  3) Existing project"
-    say "  4) Running sessions"
-    say "  q) Quit"
-    local c
-    read -r -p "Choose: " c || exit 0
-    case "$c" in
-      1) menu_logins; pause ;;
-      2) menu_new; pause ;;
-      3) menu_existing; pause ;;
-      4) menu_sessions ;;
-      q | Q | "") exit 0 ;;
-      *) warn "Unknown choice" ;;
-    esac
-  done
-}
-
-# ---------------------------------------------------------------------------
+# ======================================================================
 
 main() {
   load_config
   case "${1:-}" in
     --api) shift; api_main "$@" ;;
-    --clone-worker) shift; API_MODE=1; clone_worker "$@" ;;
+    --clone-worker) shift; clone_worker "$@" ;;
     --version) echo "$SCRIPT_VERSION" ;;
-    -h | --help) sed -n '2,9p' "$SCRIPT_PATH" | sed 's/^# \{0,1\}//' ;;
+    -h | --help) sed -n '2,10p' "$SCRIPT_PATH" | sed 's/^# \{0,1\}//' ;;
     "") menu_main ;;
     *) echo "Unknown option: $1 (try --help)" >&2; exit 2 ;;
   esac
