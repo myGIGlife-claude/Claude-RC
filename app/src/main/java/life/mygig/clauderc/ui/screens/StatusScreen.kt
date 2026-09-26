@@ -30,9 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import java.text.DateFormat
 import java.util.Date
-import life.mygig.clauderc.api.Health
 import life.mygig.clauderc.ui.LocalGuard
-import life.mygig.clauderc.ui.formatUptime
 import life.mygig.clauderc.ui.LoginKind
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.theme.BadRed
@@ -139,7 +137,6 @@ fun StatusScreen(vm: MainViewModel) {
                         )
                     }
                 }
-                s.health?.let { h -> item { HealthCard(h) } }
                 item {
                     Column(Modifier.padding(vertical = 8.dp)) {
                         Text("Server: ${s.hostname}", style = MaterialTheme.typography.bodyMedium)
@@ -158,31 +155,6 @@ fun StatusScreen(vm: MainViewModel) {
 }
 
 private enum class RowState { OK, WARN, BAD }
-
-@Composable
-private fun HealthCard(h: Health) {
-    fun gb(kb: Long) = "%.1f GB".format(kb / 1_048_576.0)
-    fun pct(used: Long, total: Long) = if (total > 0) (used * 100 / total).toInt() else 0
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Server health", style = MaterialTheme.typography.titleMedium)
-            Text("Disk: ${gb(h.diskUsedKb)} of ${gb(h.diskTotalKb)} (${pct(h.diskUsedKb, h.diskTotalKb)}%)")
-            Text("Memory: ${gb(h.memUsedKb)} of ${gb(h.memTotalKb)} (${pct(h.memUsedKb, h.memTotalKb)}%)")
-            Text("Load: ${h.load.joinToString(" ") { "%.2f".format(it) }} on ${h.cpus} CPU" + if (h.cpus == 1) "" else "s")
-            Text("Up: ${formatUptime(h.uptimeSeconds)}")
-            val cur = h.claudeVersion
-            val latest = h.claudeLatest
-            Text(
-                when {
-                    cur == null -> "Claude Code: not found"
-                    latest != null && latest != cur -> "Claude Code $cur (update available: $latest)"
-                    else -> "Claude Code $cur"
-                },
-                color = if (cur != null && latest != null && latest != cur) Amber else MaterialTheme.colorScheme.onSurface,
-            )
-        }
-    }
-}
 
 @Composable
 private fun StatusRow(title: String, state: RowState, detail: String, onClick: (() -> Unit)?) {

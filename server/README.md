@@ -83,7 +83,7 @@ Exit code 0 = success, 1 = handled error, 2 = bad arguments.
 
 | Subcommand | Args | `data` |
 | --- | --- | --- |
-| `status` | — | `claude.logged_in`, `github.{logged_in,user,missing_scopes}`, `aws.{logged_in,identity,profile,sso_configured}`, `services.{gitlab,docker,cloudflare}.{installed,logged_in,detail}`, `health.{disk_*_kb,mem_*_kb,load,cpus,uptime_seconds,claude_version,claude_latest}`, `hostname`, `version` |
+| `status` | — | `claude.logged_in`, `github.{logged_in,user,missing_scopes}`, `aws.{logged_in,identity,profile,sso_configured}`, `services.{gitlab,docker,cloudflare}.{installed,logged_in,detail}`, `hostname`, `version` |
 | `owners` | — | `user`, `orgs[{login}]`, `default_owner` |
 | `repos` | `[--refresh]` | `repos[{full_name,name,owner,owner_type,private,pushed_at,local,running,cloning}]` (cached for `REPOS_CACHE_TTL`). `local` means the folder's `origin` is this repo. |
 | `sessions` | — | `sessions[{name,project,dir,started_at,attached,uptime_seconds}]` |

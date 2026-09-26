@@ -10,22 +10,8 @@ data class StatusData(
     val aws: AwsStatus = AwsStatus(),
     val hostname: String = "",
     val version: String = "",
-    val health: Health? = null,
     /** Missing when the server's scripts predate these services. */
     val services: Services? = null,
-)
-
-@Serializable
-data class Health(
-    @SerialName("disk_used_kb") val diskUsedKb: Long = 0,
-    @SerialName("disk_total_kb") val diskTotalKb: Long = 0,
-    @SerialName("mem_used_kb") val memUsedKb: Long = 0,
-    @SerialName("mem_total_kb") val memTotalKb: Long = 0,
-    val load: List<Double> = emptyList(),
-    val cpus: Int = 1,
-    @SerialName("uptime_seconds") val uptimeSeconds: Long = 0,
-    @SerialName("claude_version") val claudeVersion: String? = null,
-    @SerialName("claude_latest") val claudeLatest: String? = null,
 )
 
 @Serializable
