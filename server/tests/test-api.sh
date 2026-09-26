@@ -46,7 +46,8 @@ for bad in "" "bash" "status; bash" 'status $(id)' "status && id" "rm -rf /" "st
   "open a/b/c" "$(printf 'x%.0s' {1..500})" "start --dangerously-skip-permissions" "start -x" \
   "open owner/-x" "open -o/x" "new x --owner --start" "tail -x" "clone-status nope" \
   "login-gitlab glpat-x" "login-docker docker.io" "login-cloudflare tok" "self-update" "self-update main" \
-  "self-update 0123456789abcdef0123456789abcdef0123456" "self-update ../../etc"; do
+  "self-update 0123456789abcdef0123456789abcdef0123456" "self-update ../../etc" "install-cli" "install-cli docker" \
+  "install-cli glab extra"; do
   api "$bad"
   check "forbidden: '${bad:0:30}'" "$(jqt '.ok==false and .error.code=="forbidden"')"
 done
@@ -243,9 +244,14 @@ OUT="$(printf '2\nq\n' | "$HOME/bin/claude-setup.sh" 2>&1)"
 [[ "$OUT" == *"What are you working on?"* && "$OUT" == *"example-org/org-app"* && "$OUT" == *"Running sessions on the Pi:"* ]]
 check "menu lists repos and exits on q" $?
 
+echo "install-cli"
+api "install-cli glab"
+check "install-cli without the internet fails cleanly" "$(jqt '.ok==false and .error.code=="internal"')"
+[[ ! -e "$HOME/.local/bin/glab.new" ]]; check "install-cli leaves nothing half-installed" $?
+
 echo "self-update"
 api "status"
-check "status reports script_api, no commit yet" "$(jqt '.data.script_api >= 3 and .data.commit == null')"
+check "status reports script_api, no commit yet" "$(jqt '.data.script_api >= 4 and .data.commit == null')"
 SHA=0123456789abcdef0123456789abcdef01234567
 mkdir -p "$WORK/raw/myGIGlife-claude/Claude-RC/$SHA"
 ln -s "$SERVER" "$WORK/raw/myGIGlife-claude/Claude-RC/$SHA/server"
