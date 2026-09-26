@@ -30,6 +30,9 @@ phone. The release keystore is **never** in this repo; never generate a new one.
 
 ## Checks
 
+Build and test the app on GitHub Actions only (push, then `gh run download`),
+not on the server: it saves server resources. The server shell tests are fine locally.
+
 ```bash
 server/tests/test-api.sh                 # server, stub CLIs
 sudo server/tests/test-sshd.sh --app     # real sshd + app SSH code
