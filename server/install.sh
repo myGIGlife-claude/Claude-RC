@@ -13,9 +13,9 @@ set -euo pipefail
 # Everything runs from main() so a half-downloaded script never runs.
 main() {
   local base="${CLAUDERC_BASE:-https://raw.githubusercontent.com/myGIGlife-claude/Claude-RC/main/server}"
-  local tmp f missing=()
+  local f missing=()
   tmp="$(mktemp -d)"
-  trap "rm -rf '$tmp'" EXIT
+  trap 'rm -rf "$tmp"' EXIT  # tmp is global so the trap still sees it after main returns
 
   for f in jq tmux git flock curl; do command -v "$f" >/dev/null || missing+=("$f"); done
   ((${#missing[@]} == 0)) || echo "Note: install these first: ${missing[*]} (e.g. sudo apt install ${missing[*]})" >&2
