@@ -52,6 +52,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import life.mygig.clauderc.BuildConfig
 import life.mygig.clauderc.data.AppSettings
+import life.mygig.clauderc.data.Server
 import life.mygig.clauderc.data.ThemeMode
 import life.mygig.clauderc.ssh.HostKeyInfo
 import kotlinx.coroutines.launch
@@ -71,6 +72,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
     var port by rememberSaveable(s.port) { mutableStateOf(s.port.toString()) }
     var user by rememberSaveable(s.user) { mutableStateOf(s.user) }
     var confirmRegen by remember { mutableStateOf(false) }
+    var confirmRemove by remember { mutableStateOf<Server?>(null) }
     val scope = rememberCoroutineScope()
     val appLock = LocalAppLock.current
     // Hidden by default; revealing asks for fingerprint/PIN when App lock is on.
@@ -97,7 +99,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SelectionContainer {
                         Text(
-                            if (publicKey.isBlank()) "No key yet. Tap Regenerate below." else installCmd("'$publicKey'"),
+                            if (publicKey.isBlank()) "No key yet. Tap Regenerate." else installCmd("'$publicKey'"),
                             fontFamily = FontFamily.Monospace,
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -109,6 +111,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                         OutlinedButton(enabled = publicKey.isNotBlank(), onClick = {
                             share(context, installCmd("'$publicKey'"))
                         }) { Text("Share") }
+                        if (publicKey.isBlank()) TextButton(onClick = { vm.regenerateKey() }) { Text("Regenerate") }
                     }
                 }
             }
@@ -121,54 +124,58 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
             )
         }
 
-        Section("This phone's key")
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (publicKey.isBlank()) {
-                        Text(
-                            "No key yet. Tap Regenerate to create one.",
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f),
-                        )
-                    } else if (showKey) {
-                        SelectionContainer(Modifier.weight(1f)) {
-                            Text(publicKey, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+        // On first run the setup card above already carries the key.
+        if (!firstRun) {
+            Section("This phone's key")
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (publicKey.isBlank()) {
+                            Text(
+                                "No key yet. Tap Regenerate to create one.",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                        } else if (showKey) {
+                            SelectionContainer(Modifier.weight(1f)) {
+                                Text(publicKey, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                            }
+                        } else {
+                            Text(
+                                "ssh-ed25519 ••••••••••••",
+                                fontFamily = FontFamily.Monospace,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
                         }
-                    } else {
-                        Text(
-                            "ssh-ed25519 ••••••••••••",
-                            fontFamily = FontFamily.Monospace,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f),
-                        )
+                        TextButton(enabled = publicKey.isNotBlank(), onClick = {
+                            if (showKey) showKey = false else guard.run("Show this phone's key") { showKey = true }
+                        }) { Text(if (showKey) "Hide" else "Show") }
                     }
-                    TextButton(enabled = publicKey.isNotBlank(), onClick = {
-                        if (showKey) showKey = false else guard.run("Show this phone's key") { showKey = true }
-                    }) { Text(if (showKey) "Hide" else "Show") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(enabled = publicKey.isNotBlank(), onClick = {
+                            guard.run("Copy this phone's key") { copy(context, "Public key", publicKey) }
+                        }) { Text("Copy") }
+                        OutlinedButton(enabled = publicKey.isNotBlank(), onClick = {
+                            guard.run("Copy this phone's key") {
+                                copy(context, "Install command", installCmd("'$publicKey'"))
+                            }
+                        }) { Text("Copy install command") }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(enabled = publicKey.isNotBlank(), onClick = {
+                            guard.run("Share this phone's key") { share(context, publicKey) }
+                        }) { Text("Share") }
+                        TextButton(onClick = { confirmRegen = true }) { Text("Regenerate") }
+                    }
+                    Text(
+                        "The private key never leaves this phone. It is encrypted with the Android Keystore.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(enabled = publicKey.isNotBlank(), onClick = {
-                        guard.run("Copy this phone's key") { copy(context, "Public key", publicKey) }
-                    }) { Text("Copy") }
-                    OutlinedButton(enabled = publicKey.isNotBlank(), onClick = {
-                        guard.run("Copy this phone's key") {
-                            copy(context, "Install command", installCmd("'$publicKey'"))
-                        }
-                    }) { Text("Copy install command") }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(enabled = publicKey.isNotBlank(), onClick = {
-                        guard.run("Share this phone's key") { share(context, publicKey) }
-                    }) { Text("Share") }
-                    TextButton(onClick = { confirmRegen = true }) { Text("Regenerate") }
-                }
-                Text(
-                    "The private key never leaves this phone. It is encrypted with the Android Keystore.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
             }
+
         }
 
         Section("Server")
@@ -226,6 +233,20 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
 
         if (!firstRun) {
             HorizontalDivider()
+            Section("Servers")
+            s.servers.filter { it.isConfigured }.forEach { srv ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("${srv.user}@${srv.host}:${srv.port}", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                        if (srv.id == s.activeId) Text("Current", style = MaterialTheme.typography.labelSmall)
+                    }
+                    if (srv.id != s.activeId) TextButton(onClick = { vm.switchServer(srv.id) }) { Text("Use") }
+                    TextButton(onClick = { confirmRemove = srv }) { Text("Remove") }
+                }
+            }
+            OutlinedButton(onClick = { vm.addServer() }) { Text("Add server") }
+
+            HorizontalDivider()
             Section("App")
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -274,7 +295,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
         AlertDialog(
             onDismissRequest = { confirmRegen = false },
             title = { Text("Regenerate key?") },
-            text = { Text("The old key stops working. You'll need to run install-launcher-key.sh again with the new key.") },
+            text = { Text("The old key stops working on every server. Run Copy install command on each server again.") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmRegen = false
@@ -282,6 +303,23 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 }) { Text("Regenerate") }
             },
             dismissButton = { TextButton(onClick = { confirmRegen = false }) { Text("Cancel") } },
+        )
+    }
+
+    confirmRemove?.let { srv ->
+        AlertDialog(
+            onDismissRequest = { confirmRemove = null },
+            title = { Text("Remove ${srv.host}?") },
+            text = {
+                Text(
+                    "The app forgets this server. This phone's key stays allowed on it until you run " +
+                        "~/bin/install-launcher-key.sh --remove there.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmRemove = null; vm.removeServer(srv.id) }) { Text("Remove") }
+            },
+            dismissButton = { TextButton(onClick = { confirmRemove = null }) { Text("Cancel") } },
         )
     }
 }
