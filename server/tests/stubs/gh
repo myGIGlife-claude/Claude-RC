@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test stub for the GitHub CLI. State lives in $STUB_STATE.
-S="$STUB_STATE"
+S="${STUB_STATE:-$HOME/.stub-state}"; mkdir -p "$S"
 logged_in() { [[ -f "$S/gh_token" ]]; }
 case "$1 $2" in
   "api user") logged_in || exit 1; echo demo-user ;;
