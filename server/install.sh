@@ -14,7 +14,15 @@ set -euo pipefail
 
 # Everything runs from main() so a half-downloaded script never runs.
 main() {
-  local base="${CLAUDERC_BASE:-https://raw.githubusercontent.com/myGIGlife-claude/Claude-RC/main/server}"
+  local repo="myGIGlife-claude/Claude-RC" base sha=""
+  # raw.githubusercontent.com caches a branch for ~5 minutes; a commit URL is
+  # never stale, so resolve main to its commit first (falls back to main).
+  if [[ -z "${CLAUDERC_BASE:-}" ]]; then
+    sha="$(curl -fsSL --max-time 10 -H 'Accept: application/vnd.github.sha' \
+      "https://api.github.com/repos/$repo/commits/main" 2>/dev/null)" || sha=""
+    [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || sha="main"
+  fi
+  base="${CLAUDERC_BASE:-https://raw.githubusercontent.com/$repo/$sha/server}"
   local f missing=()
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT  # tmp is global so the trap still sees it after main returns
@@ -33,7 +41,7 @@ main() {
   install -m 755 "$tmp/claude-setup.sh" "$HOME/claude-setup.sh"
   mkdir -p "$HOME/bin"
   install -m 755 "$tmp/claude-launcher-api" "$tmp/install-launcher-key.sh" "$HOME/bin/"
-  echo "Installed ~/claude-setup.sh, ~/bin/claude-launcher-api, ~/bin/install-launcher-key.sh"
+  echo "Installed ~/claude-setup.sh, ~/bin/claude-launcher-api, ~/bin/install-launcher-key.sh (${sha:0:7})"
 
   # First run writes ~/.config/claude-launcher/config.
   "$HOME/claude-setup.sh" --api status </dev/null >/dev/null 2>&1 || true
@@ -49,7 +57,7 @@ main() {
   if [[ $# -ge 1 ]]; then
     "$HOME/bin/install-launcher-key.sh" "$@" </dev/null
   else
-    echo "Next: in the app tap 'Copy install command' and run it here to authorize the phone."
+    echo "No phone key given. To authorize a phone, run the command from the app's setup screen."
   fi
 
   local port
