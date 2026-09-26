@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Test stub for Claude Code.
+S="${STUB_STATE:-$HOME/.stub-state}"; mkdir -p "$S"
+case "$1 ${2:-}" in
+  "auth login")
+    echo "Select login method:"
+    echo " ❯ 1. Claude account with subscription"
+    echo "   2. Anthropic Console account"
+    read -r _
+    echo "Browser didn't open? Use the url below to sign in:"
+    echo "https://claude.ai/oauth/authorize?code=true&client_id=demo&state=xyz"
+    printf 'Paste code here if prompted > '
+    read -r code
+    if [[ "$code" == good* ]]; then
+      mkdir -p "$HOME/.claude" && echo '{"claudeAiOauth":{}}' >"$HOME/.claude/.credentials.json"
+      echo "Login successful."
+    else
+      echo "OAuth error: invalid code"; exit 1
+    fi ;;
+  "--remote-control "*)
+    if [[ ! -f "$S/rc_enabled" ]]; then
+      printf 'Enable Remote Control? (y/n) '
+      read -r a
+      [[ "$a" == y ]] && touch "$S/rc_enabled"
+    fi
+    exec sleep 1000 ;;
+  *) echo "claude stub: $*" >&2; exit 1 ;;
+esac

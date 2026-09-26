@@ -1,0 +1,26 @@
+# Secrets — never commit
+*.jks
+*.keystore
+!app/debug.keystore
+*.p12
+keystore.properties
+local.properties
+.env
+config
+!server/config.example
+*.log
+
+# Gradle / Android
+.gradle/
+build/
+/app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+
+# IDE
+.idea/
+*.iml
+.DS_Store

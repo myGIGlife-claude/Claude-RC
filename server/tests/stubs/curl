@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Test stub: claude-autostart waits for the internet with curl; say it's up.
+exit 0

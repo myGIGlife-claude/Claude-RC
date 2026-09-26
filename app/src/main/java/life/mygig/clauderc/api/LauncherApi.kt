@@ -1,0 +1,176 @@
+package life.mygig.clauderc.api
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import life.mygig.clauderc.ssh.Ed25519Identity
+import life.mygig.clauderc.ssh.ServerConfig
+import life.mygig.clauderc.ssh.SshFailure
+import life.mygig.clauderc.ssh.SshRunner
+
+/** An error the app can act on: server error codes plus local connection failures. */
+class ApiException(
+    val code: String,
+    override val message: String,
+    val missing: List<String> = emptyList(),
+    val path: String? = null,
+    /** Terminal text the server captured from a login it was driving. */
+    val pane: String? = null,
+) : Exception(message)
+
+object Codes {
+    const val NOT_LOGGED_IN_CLAUDE = "not_logged_in_claude"
+    const val NOT_LOGGED_IN_GITHUB = "not_logged_in_github"
+    const val MISSING_SCOPES = "missing_scopes"
+    const val NOT_LOGGED_IN_AWS = "not_logged_in_aws"
+    const val REPO_EXISTS = "repo_exists"
+    const val FOLDER_DIRTY = "folder_dirty"
+    const val INVALID_NAME = "invalid_name"
+    const val BUSY = "busy"
+    const val INTERNAL = "internal"
+    const val FORBIDDEN = "forbidden"
+
+    // Local, never sent by the server.
+    const val HOST_KEY_CHANGED = "host_key_changed"
+    const val AUTH_FAILED = "auth_failed"
+    const val NETWORK = "network"
+    const val TIMEOUT = "timeout"
+    const val NOT_CONFIGURED = "not_configured"
+    const val BAD_RESPONSE = "bad_response"
+    const val KEY_ERROR = "key_error"
+}
+
+/** Same rule as the server: no leading '-', so a name is never read as an option. */
+val PROJECT_NAME_RE = Regex("^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$")
+
+/** Typed calls to `claude-launcher-api` on the server. */
+class LauncherApi(
+    private val config: suspend () -> ServerConfig,
+    private val identity: () -> Ed25519Identity,
+) {
+    private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
+
+    suspend fun status(): StatusData = call("status")
+    suspend fun owners(): OwnersData = call("owners")
+    suspend fun repos(refresh: Boolean): ReposData = call(if (refresh) "repos --refresh" else "repos")
+    suspend fun sessions(): SessionsData = call("sessions")
+
+    suspend fun newProject(name: String, owner: String, private: Boolean, start: Boolean): NewResult {
+        requireName(name)
+        val vis = if (private) "private" else "public"
+        // Server side: repo check + create + clone + first Remote Control prompt.
+        return call("new $name --owner $owner --visibility $vis" + if (start) " --start" else "", timeoutMs = 180_000)
+    }
+
+    suspend fun open(fullName: String, start: Boolean): OpenResult =
+        call("open $fullName" + if (start) " --start" else "", timeoutMs = 120_000)
+
+    suspend fun cloneStatus(fullName: String): CloneStatus = call("clone-status $fullName")
+
+    suspend fun start(project: String): StartResult { requireName(project); return call("start $project") }
+    suspend fun stop(project: String): StopResult { requireName(project); return call("stop $project") }
+    suspend fun tail(project: String, lines: Int = 40): TailResult {
+        requireName(project)
+        return call("tail $project --lines ${lines.coerceIn(1, 200)}")
+    }
+
+    suspend fun loginClaudeStart(): LoginUrl = call("login-claude-start")
+    suspend fun loginClaudeCode(code: String): LoginDone = call("login-claude-code", stdin = code.trim(), timeoutMs = 120_000)
+    suspend fun loginClaudeCancel(): JsonObject = call("login-claude-cancel")
+    suspend fun loginGithub(token: String): LoginDone = call("login-github", stdin = token.trim())
+    suspend fun loginAwsKeys(keyId: String, secret: String, region: String): LoginDone =
+        call("login-aws-keys", stdin = listOf(keyId.trim(), secret.trim(), region.trim()).joinToString("\n"))
+    suspend fun loginAwsSsoStart(): LoginUrl = call("login-aws-sso-start")
+
+    private fun requireName(name: String) {
+        if (!PROJECT_NAME_RE.matches(name)) {
+            throw ApiException(
+                Codes.INVALID_NAME,
+                "Names may use letters, digits, '.', '_' and '-' (not first), up to 100.",
+            )
+        }
+    }
+
+    private suspend inline fun <reified T> call(
+        command: String,
+        stdin: String? = null,
+        timeoutMs: Long = 90_000,
+    ): T {
+        val raw = run(command, stdin, timeoutMs)
+        val data = parseEnvelope(raw)
+        return try {
+            json.decodeFromJsonElement(data)
+        } catch (e: Exception) {
+            throw ApiException(Codes.BAD_RESPONSE, "Unexpected answer from the server: ${e.message}")
+        }
+    }
+
+    private suspend fun run(command: String, stdin: String?, timeoutMs: Long): String {
+        val cfg = config()
+        val id = withContext(Dispatchers.Default) {
+            try {
+                identity()
+            } catch (e: Exception) {
+                throw ApiException(
+                    Codes.KEY_ERROR,
+                    "This phone's SSH key couldn't be unlocked (${e.javaClass.simpleName}). Regenerate it in Settings.",
+                )
+            }
+        }
+        // Interruptible, so leaving a screen or cancelling stops the call.
+        return runInterruptible(Dispatchers.IO) {
+            try {
+                SshRunner.exec(cfg, id, command, stdin, timeoutMs)
+            } catch (f: SshFailure) {
+                throw ApiException(
+                    when (f.kind) {
+                        SshFailure.Kind.HOST_KEY_CHANGED -> Codes.HOST_KEY_CHANGED
+                        SshFailure.Kind.AUTH_FAILED -> Codes.AUTH_FAILED
+                        SshFailure.Kind.TIMEOUT -> Codes.TIMEOUT
+                        SshFailure.Kind.NOT_CONFIGURED -> Codes.NOT_CONFIGURED
+                        SshFailure.Kind.NETWORK -> Codes.NETWORK
+                    },
+                    f.message ?: "Connection failed",
+                )
+            } catch (e: ApiException) {
+                throw e
+            } catch (e: InterruptedException) {
+                throw e
+            } catch (e: Exception) {
+                throw ApiException(Codes.NETWORK, e.message ?: e.javaClass.simpleName)
+            }
+        }
+    }
+
+    /** Returns `data` from `{"ok":true,...}` or throws the server's error. */
+    internal fun parseEnvelope(raw: String): JsonElement {
+        val line = raw.lineSequence().map { it.trim() }.lastOrNull { it.startsWith("{") }
+            ?: throw ApiException(Codes.BAD_RESPONSE, "The server sent no JSON. Is claude-launcher-api installed?")
+        val obj = try {
+            json.parseToJsonElement(line).jsonObject
+        } catch (e: Exception) {
+            throw ApiException(Codes.BAD_RESPONSE, "The server sent invalid JSON.")
+        }
+        if (obj["ok"]?.jsonPrimitive?.booleanOrNull == true) {
+            return obj["data"] ?: JsonObject(emptyMap())
+        }
+        val err = obj["error"]?.jsonObject
+        val code = err?.get("code")?.jsonPrimitive?.contentOrNull ?: Codes.INTERNAL
+        val message = err?.get("message")?.jsonPrimitive?.contentOrNull ?: "The server reported an error."
+        val missing = runCatching {
+            err?.get("missing")?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }
+        }.getOrNull().orEmpty()
+        val path = runCatching { err?.get("path")?.jsonPrimitive?.contentOrNull }.getOrNull()
+        val pane = runCatching { err?.get("pane")?.jsonPrimitive?.contentOrNull }.getOrNull()
+        throw ApiException(code, message, missing, path, pane)
+    }
+}

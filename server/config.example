@@ -1,0 +1,25 @@
+# claude-setup.sh / cLaudeRC server config
+# Lives at ~/.config/claude-launcher/config (created on first run).
+# Everything personal lives here, never in the repo.
+
+# Where project folders are created / cloned.
+PROJECTS_DIR="$HOME/projects"
+
+# Default GitHub owner the app pre-selects for new repos (empty = your GitHub user).
+DEFAULT_OWNER=""
+
+# AWS profile to check / log in from the phone (empty = default profile).
+AWS_PROFILE_NAME=""
+
+# Default region for access-key logins from the phone.
+AWS_DEFAULT_REGION_NAME="us-east-1"
+
+# Extra PATH entries for SSH calls from the phone (colon separated), if
+# `claude`, `gh` or `aws` live somewhere other than ~/.local/bin or /usr/local/bin.
+EXTRA_PATH=""
+
+# How long (seconds) the phone's repo list is cached on the server.
+REPOS_CACHE_TTL=600
+
+# Where the runner finds claude-setup.sh (default: next to it, ~/bin, or ~).
+# SETUP_SCRIPT="$HOME/claude-setup.sh"
