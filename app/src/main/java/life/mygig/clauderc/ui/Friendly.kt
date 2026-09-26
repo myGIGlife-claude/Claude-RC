@@ -1,9 +1,11 @@
 package life.mygig.clauderc.ui
 
+import android.app.DownloadManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Environment
 import life.mygig.clauderc.api.ApiException
 import life.mygig.clauderc.api.Codes
 
@@ -68,6 +70,26 @@ fun openUrl(context: Context, url: String) {
     try {
         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     } catch (_: ActivityNotFoundException) {
+    }
+}
+
+/**
+ * Downloads an APK with Android's download manager: a normal download
+ * notification that opens the installer when tapped. (Opening the link in a
+ * browser tab can leave its download sheet stuck at 100%.)
+ */
+fun downloadApk(context: Context, url: String) {
+    val name = url.substringAfterLast('/')
+    val request = DownloadManager.Request(Uri.parse(url))
+        .setTitle(name)
+        .setMimeType("application/vnd.android.package-archive")
+        .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+        // App-specific folder: no storage permission needed on any Android version.
+        .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, name)
+    try {
+        (context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+    } catch (_: Exception) {
+        openUrl(context, url)
     }
 }
 

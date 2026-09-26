@@ -26,7 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import life.mygig.clauderc.BuildConfig
 import life.mygig.clauderc.api.Updates
-import life.mygig.clauderc.ui.openUrl
+import life.mygig.clauderc.ui.downloadApk
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -75,7 +75,10 @@ fun StatusScreen(vm: MainViewModel) {
                         title = "App update available",
                         state = RowState.WARN,
                         detail = "Build ${newApp - 100} is ready (you have ${BuildConfig.VERSION_CODE - 100}). Tap to download.",
-                        onClick = { openUrl(context, apkUrl) },
+                        onClick = {
+                            downloadApk(context, apkUrl)
+                            vm.say("Downloading… tap the notification when it's done to install.")
+                        },
                     )
                 }
             }
