@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Light by default; values-night/ has the dark one, so startup matches the phone. -->
+    <style name="Theme.ClaudeRC" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#FFFAF9F5</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

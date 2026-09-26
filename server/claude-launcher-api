@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# claude-launcher-api — forced command for the cLaudeRC phone key.
+#
+# authorized_keys pins the phone's key to this program. It reads the requested
+# action from SSH_ORIGINAL_COMMAND, checks it against an allowlist, re-validates
+# every argument and runs `claude-setup.sh --api ...`. It never runs a shell,
+# never uses eval and never passes the raw string anywhere.
+
+set -uo pipefail
+umask 077
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/claude-launcher"
+LOG_FILE="$STATE_DIR/api.log"
+LOG_MAX_BYTES=1048576
+CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/claude-launcher/config"
+
+# Names never start with '-', so they can't be read as an option by git, gh,
+# tmux or claude.
+PROJECT_RE='^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$'
+REPO_RE='^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._][A-Za-z0-9._-]*$'
+OWNER_RE='^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'
+KNOWN="status owners repos sessions new open clone-status start stop tail login-claude-start login-claude-code login-claude-cancel login-github login-aws-keys login-aws-sso-start"
+TOKEN_RE='^[A-Za-z0-9._/=-]{1,200}$'
+
+mkdir -p "$STATE_DIR" 2>/dev/null
+
+log_line() {
+  # time, subcommand, result code — never arguments that could carry secrets.
+  local sub="$1" code="$2"
+  if [[ -f "$LOG_FILE" ]] && (($(stat -c %s "$LOG_FILE" 2>/dev/null || echo 0) >= LOG_MAX_BYTES)); then
+    mv -f "$LOG_FILE" "$LOG_FILE.1"
+  fi
+  printf '%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sub" "$code" >>"$LOG_FILE" 2>/dev/null
+}
+
+deny() {
+  local sub="${1:-?}" code="${2:-forbidden}" msg="${3:-This action is not allowed.}"
+  # Only log names we know; an unknown first word could be anything (even a token).
+  [[ " $KNOWN " == *" $sub "* || "$sub" == "("*")" ]] || sub="(unknown)"
+  # Hand-built on purpose: this path must work even if jq is missing, and the
+  # message is always one of the fixed strings in this file.
+  printf '{"ok":false,"error":{"code":"%s","message":"%s"}}\n' "$code" "$msg"
+  log_line "${sub:0:40}" "$code"
+  exit "${4:-1}"
+}
+
+# Where claude-setup.sh lives: config SETUP_SCRIPT, next to this runner, ~/bin, ~.
+SETUP_SCRIPT=""
+if [[ -r "$CONFIG_FILE" ]]; then
+  SETUP_SCRIPT="$(sed -n 's/^SETUP_SCRIPT="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$CONFIG_FILE" | tail -n 1)"
+  SETUP_SCRIPT="${SETUP_SCRIPT//\$HOME/$HOME}"
+fi
+if [[ -z "$SETUP_SCRIPT" || ! -x "$SETUP_SCRIPT" ]]; then
+  for c in "$(dirname "$(readlink -f "$0")")/claude-setup.sh" "$HOME/bin/claude-setup.sh" "$HOME/claude-setup.sh"; do
+    [[ -x "$c" ]] && { SETUP_SCRIPT="$c"; break; }
+  done
+fi
+
+raw="${SSH_ORIGINAL_COMMAND-}"
+# No command = someone asked for a shell.
+[[ -n "$raw" ]] || deny "(shell)"
+# Hard limits before splitting: length and character set.
+((${#raw} <= 400)) || deny "(too-long)"
+[[ "$raw" =~ ^[A-Za-z0-9\ ._/:=-]+$ ]] || deny "(bad-chars)"
+
+# Split on spaces into an array. `read -a` does no globbing or expansion.
+read -r -a argv <<<"$raw"
+sub="${argv[0]:-}"
+args=("${argv[@]:1}")
+
+for a in "${args[@]}"; do
+  [[ "$a" =~ $TOKEN_RE ]] || deny "$sub"
+done
+
+nargs=${#args[@]}
+case "$sub" in
+  status | owners | sessions | login-claude-start | login-claude-code | login-claude-cancel | \
+    login-github | login-aws-keys | login-aws-sso-start)
+    ((nargs == 0)) || deny "$sub"
+    ;;
+  repos)
+    ((nargs == 0)) || { ((nargs == 1)) && [[ "${args[0]}" == --refresh ]]; } || deny "$sub"
+    ;;
+  start | stop)
+    ((nargs == 1)) && [[ "${args[0]}" =~ $PROJECT_RE ]] || deny "$sub"
+    ;;
+  tail)
+    [[ "${args[0]:-}" =~ $PROJECT_RE ]] || deny "$sub"
+    if ((nargs == 3)); then
+      [[ "${args[1]}" == --lines && "${args[2]}" =~ ^[0-9]{1,3}$ ]] || deny "$sub"
+    else
+      ((nargs == 1)) || deny "$sub"
+    fi
+    ;;
+  open)
+    ((nargs >= 1 && nargs <= 2)) && [[ "${args[0]}" =~ $REPO_RE ]] || deny "$sub"
+    ((nargs == 1)) || [[ "${args[1]}" == --start ]] || deny "$sub"
+    ;;
+  clone-status)
+    ((nargs == 1)) && [[ "${args[0]}" =~ $REPO_RE ]] || deny "$sub"
+    ;;
+  new)
+    [[ "${args[0]:-}" =~ $PROJECT_RE ]] || deny "$sub"
+    i=1 seen_owner=0 seen_vis=0 seen_start=0
+    while ((i < nargs)); do
+      case "${args[$i]}" in
+        --owner)
+          ((seen_owner == 0)) && [[ "${args[$((i + 1))]:-}" =~ $OWNER_RE ]] || deny "$sub"
+          seen_owner=1; ((i += 2)) ;;
+        --visibility)
+          ((seen_vis == 0)) && [[ "${args[$((i + 1))]:-}" == private || "${args[$((i + 1))]:-}" == public ]] || deny "$sub"
+          seen_vis=1; ((i += 2)) ;;
+        --start)
+          ((seen_start == 0)) || deny "$sub"
+          seen_start=1; ((i += 1)) ;;
+        *) deny "$sub" ;;
+      esac
+    done
+    ;;
+  *)
+    deny "$sub"
+    ;;
+esac
+
+[[ -n "$SETUP_SCRIPT" ]] || deny "$sub" internal "claude-setup.sh was not found on the server."
+
+out="$("$SETUP_SCRIPT" --api "$sub" "${args[@]}" 2>/dev/null)"
+rc=$?
+
+# The phone always gets exactly one JSON object, even if the script died early
+# (e.g. a broken config file).
+if command -v jq >/dev/null 2>&1 && ! jq -e 'type == "object" and has("ok")' >/dev/null 2>&1 <<<"$out"; then
+  deny "$sub" internal "claude-setup.sh gave no valid answer (exit $rc). Check ~/.config/claude-launcher/config." 1
+fi
+printf '%s\n' "$out"
+
+code="ok"
+if command -v jq >/dev/null 2>&1; then
+  code="$(jq -r 'if .ok then "ok" else (.error.code // "error") end' <<<"$out" 2>/dev/null || echo "bad-json")"
+fi
+log_line "$sub" "$code"
+exit "$rc"
