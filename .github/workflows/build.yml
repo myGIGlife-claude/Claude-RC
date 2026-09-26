@@ -1,0 +1,122 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  secrets-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: gitleaks (full history)
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar xz gitleaks
+          ./gitleaks git --redact --no-banner --exit-code 1 .
+
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install tools
+        run: sudo apt-get update -q && sudo apt-get install -y -q jq tmux shellcheck openssh-server
+      - name: shellcheck
+        run: shellcheck -S warning server/*.sh server/claude-launcher-api server/tests/*.sh server/tests/stubs/*
+      - name: API tests (stub gh/claude/aws)
+        run: server/tests/test-api.sh
+      - name: Real sshd + forced command
+        run: sudo server/tests/test-sshd.sh
+
+  android:
+    runs-on: ubuntu-latest
+    needs: [secrets-scan]
+    permissions:
+      contents: write
+    env:
+      HAS_SIGNING: ${{ secrets.SIGNING_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v5
+
+      - name: Version
+        id: ver
+        run: |
+          # versionCode only ever goes up, so each build installs over the last.
+          echo "code=$((100 + GITHUB_RUN_NUMBER))" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "name=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            base="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null | sed 's/^v//')"
+            echo "name=${base:-0.1.0}-build.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Unit tests
+        run: ./gradlew --no-daemon testDebugUnitTest
+
+      - name: Decode signing key
+        if: env.HAS_SIGNING == 'true'
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+        run: |
+          echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "SIGNING_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Build release APK
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          ./gradlew --no-daemon assembleRelease \
+            -PversionCode=${{ steps.ver.outputs.code }} -PversionName=${{ steps.ver.outputs.name }}
+          mkdir -p dist
+          if [[ "$HAS_SIGNING" == true ]]; then
+            apk=app/build/outputs/apk/release/app-release.apk
+            "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "$apk" | head -n 3
+            cp "$apk" "dist/cLaudeRC-${{ steps.ver.outputs.name }}.apk"
+          else
+            echo "::warning::Signing secrets are not set, so the APK is unsigned and no release is published."
+            cp app/build/outputs/apk/release/app-release-unsigned.apk "dist/cLaudeRC-${{ steps.ver.outputs.name }}-unsigned.apk"
+          fi
+          rm -f "$RUNNER_TEMP/release.jks"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cLaudeRC-${{ steps.ver.outputs.name }}
+          path: dist/*.apk
+
+      - name: Publish tag release
+        if: env.HAS_SIGNING == 'true' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.apk --title "cLaudeRC $GITHUB_REF_NAME" --generate-notes \
+            || gh release upload "$GITHUB_REF_NAME" dist/*.apk --clobber
+
+      - name: Publish latest main build
+        if: env.HAS_SIGNING == 'true' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest-main --cleanup-tag --yes || true
+          gh release create latest-main dist/*.apk --prerelease --target "$GITHUB_SHA" \
+            --title "Latest main build (${{ steps.ver.outputs.name }})" \
+            --notes "Built from $GITHUB_SHA. Tagged releases (v*) are the stable ones."
