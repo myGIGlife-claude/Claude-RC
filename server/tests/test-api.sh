@@ -219,11 +219,14 @@ echo "install.sh (no clone)"
 IH="$WORK/installhome"; mkdir -p "$IH"
 ssh-keygen -q -t ed25519 -N '' -C clauderc -f "$WORK/phone" </dev/null
 echo old >"$IH/claude-setup.sh"
+# Already set up, so the test never runs its sudo install.
+mkdir -p "$IH/.local/bin" && touch "$IH/.local/bin/claude-autostart" && chmod +x "$IH/.local/bin/claude-autostart"
 # Real curl, not the stub.
 OUT="$(HOME="$IH" PATH=/usr/local/bin:/usr/bin:/bin CLAUDERC_BASE="file://$SERVER" bash -s -- "$(cat "$WORK/phone.pub")" <"$SERVER/install.sh" 2>&1)"
 [[ -x "$IH/claude-setup.sh" && -x "$IH/bin/claude-launcher-api" && -x "$IH/bin/install-launcher-key.sh" ]]; check "install.sh installs the scripts" $?
 [[ "$(cat "$IH/claude-setup.sh.bak")" == old ]]; check "install.sh backs up a changed claude-setup.sh" $?
 grep -q "^restrict,command=\"$IH/bin/claude-launcher-api\" ssh-ed25519 " "$IH/.ssh/authorized_keys"; check "install.sh authorizes the key" $?
+[[ "$OUT" == *"already set up"* && "$OUT" == *"Username: $(id -un)"* ]]; check "install.sh skips autostart and prints app details" $?
 
 echo
 echo "$pass passed, $failn failed"
