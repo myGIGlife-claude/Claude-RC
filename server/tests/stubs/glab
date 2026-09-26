@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Test stub for the GitLab CLI. State lives in $STUB_STATE.
+S="${STUB_STATE:-$HOME/.stub-state}"; mkdir -p "$S"
+case "$1 $2" in
+  "auth login") read -r tok; [[ "$tok" == glpat-good* ]] || { echo "401 Unauthorized"; exit 1; }; touch "$S/glab_token" ;;
+  "api user") [[ -f "$S/glab_token" ]] && echo '{"username":"demo-gl"}' || exit 1 ;;
+  *) echo "glab stub: $*" >&2; exit 1 ;;
+esac

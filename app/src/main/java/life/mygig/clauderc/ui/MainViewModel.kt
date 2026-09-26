@@ -36,7 +36,7 @@ import life.mygig.clauderc.ssh.SshKeyManager
 import life.mygig.clauderc.ssh.SshRunner
 
 enum class Tab { STATUS, NEW, PROJECTS, SESSIONS }
-enum class LoginKind { CLAUDE, GITHUB, AWS }
+enum class LoginKind { CLAUDE, GITHUB, AWS, GITLAB, DOCKER, CLOUDFLARE }
 
 /** What a snackbar's button does. */
 sealed interface Fix {
@@ -443,6 +443,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _loginError.value = "The SSO code expired before it was approved. Start the SSO login again."
             }
         }
+    }
+
+    fun gitlabLogin(token: String, host: String) = loginAction(LoginKind.GITLAB, "Saving GitLab token…") {
+        val r = api.loginGitlab(token, host)
+        loginDone(LoginKind.GITLAB, "GitLab logged in as ${r.user}")
+    }
+
+    fun dockerLogin(registry: String, user: String, token: String) = loginAction(LoginKind.DOCKER, "Logging in to the registry…") {
+        api.loginDocker(registry, user, token)
+        loginDone(LoginKind.DOCKER, "Logged in to ${registry.ifBlank { "docker.io" }}")
+    }
+
+    fun cloudflareLogin(token: String) = loginAction(LoginKind.CLOUDFLARE, "Checking Cloudflare token…") {
+        api.loginCloudflare(token)
+        loginDone(LoginKind.CLOUDFLARE, "Cloudflare token saved. Restart running sessions to use it.")
     }
 
     private fun loginDone(kind: LoginKind, text: String) {

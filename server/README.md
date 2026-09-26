@@ -83,7 +83,7 @@ Exit code 0 = success, 1 = handled error, 2 = bad arguments.
 
 | Subcommand | Args | `data` |
 | --- | --- | --- |
-| `status` | — | `claude.logged_in`, `github.{logged_in,user,missing_scopes}`, `aws.{logged_in,identity,profile,sso_configured}`, `hostname`, `version` |
+| `status` | — | `claude.logged_in`, `github.{logged_in,user,missing_scopes}`, `aws.{logged_in,identity,profile,sso_configured}`, `services.{gitlab,docker,cloudflare}.{installed,logged_in,detail}`, `health.{disk_*_kb,mem_*_kb,load,cpus,uptime_seconds,claude_version,claude_latest}`, `hostname`, `version` |
 | `owners` | — | `user`, `orgs[{login}]`, `default_owner` |
 | `repos` | `[--refresh]` | `repos[{full_name,name,owner,owner_type,private,pushed_at,local,running,cloning}]` (cached for `REPOS_CACHE_TTL`). `local` means the folder's `origin` is this repo. |
 | `sessions` | — | `sessions[{name,project,dir,started_at,attached,uptime_seconds}]` |
@@ -99,9 +99,12 @@ Exit code 0 = success, 1 = handled error, 2 = bad arguments.
 | `login-github` | token on stdin | `user` (or error `missing_scopes` with `missing`) |
 | `login-aws-keys` | key id, secret, region on stdin (one per line) | `account`, `arn`, `region` |
 | `login-aws-sso-start` | — | `url`, `code` (then poll `status`) |
+| `login-gitlab` | token, host (default gitlab.com) on stdin | `user` (uses `glab auth login --stdin`) |
+| `login-docker` | registry (default docker.io), username, token on stdin | `registry`, `user` (uses `docker login --password-stdin`) |
+| `login-cloudflare` | API token on stdin | `logged_in`. Verified with Cloudflare, then saved as `CLOUDFLARE_API_TOKEN` in `~/.config/claude-launcher/env` (mode 600); one line in `~/.bashrc` loads it so Claude's sessions (and `wrangler`) see it. |
 
 Error codes: `not_logged_in_claude`, `not_logged_in_github`, `missing_scopes`,
-`not_logged_in_aws`, `repo_exists`, `folder_dirty`, `invalid_name`, `busy`,
+`not_logged_in_aws`, `not_logged_in` (GitLab / registry / Cloudflare), `repo_exists`, `folder_dirty`, `invalid_name`, `busy`,
 `internal`, `bad_args`, and `forbidden` from the runner.
 
 `open` returns `action: "not_updated"` with a `note` when `git pull --ff-only`
