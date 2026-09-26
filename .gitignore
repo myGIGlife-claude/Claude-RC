@@ -1,6 +1,7 @@
 # Secrets — never commit
 *.jks
 *.keystore
+!app/debug.keystore
 *.p12
 keystore.properties
 local.properties

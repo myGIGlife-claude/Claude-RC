@@ -2,23 +2,23 @@
 
 ## APK signing (read before building or sending any APK)
 
-The app is sideloaded. Android only installs an update over the existing app
-if it is signed with the **same certificate**, otherwise the user has to
-uninstall and lose the app's key and settings. So:
+**Pre-release (now):** every build is signed with the committed
+`app/debug.keystore` (password `android`, alias `androiddebugkey`, certificate
+SHA-256 `ff714e476e95c2d2af85c31a6cc7455011ea74825f182dad9a6a74c4dc1df5c3`).
+The user chose this so CI builds and publishes installable APKs with no setup.
+Don't replace or regenerate this keystore: a different key means the user has
+to uninstall the app and lose its SSH key and settings.
 
-- There is exactly one release key. Its certificate SHA-256 is
-  `cc833ec5438cbf8089cb511ab5612ff28149f0b8a0afcb18b09b020771cf3cd1`
-  (CN=cLaudeRC). It is public, so it's safe to keep here.
-- The keystore itself is **never** in this repo. CI reads it from the Actions
-  secrets `SIGNING_KEYSTORE_BASE64`, `SIGNING_STORE_PASSWORD`,
-  `SIGNING_KEY_ALIAS`, `SIGNING_KEY_PASSWORD`.
-- **Never generate a new keystore**, and never give the user a debug APK or an
-  APK signed with any other key. If you don't have the keystore, don't build an
-  APK for the user. Point them at the latest GitHub Release, or push and let
-  CI build it.
+**At release:** set the Actions secrets `SIGNING_KEYSTORE_BASE64`,
+`SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS`, `SIGNING_KEY_PASSWORD` from
+`clauderc-release.jks` (certificate SHA-256
+`cc833ec5438cbf8089cb511ab5612ff28149f0b8a0afcb18b09b020771cf3cd1`, CN=cLaudeRC).
+CI then signs with that key instead. Switching keys needs one uninstall on the
+phone. The release keystore is **never** in this repo; never generate a new one.
+
+- CI fails any APK whose certificate doesn't match the key it expects.
 - `versionCode` must only go up. CI uses `100 + GITHUB_RUN_NUMBER`. Builds made
-  by hand used 1 and 2.
-- CI fails any release APK whose certificate doesn't match the SHA-256 above.
+  by hand used 1 to 4.
 
 ## Layout
 

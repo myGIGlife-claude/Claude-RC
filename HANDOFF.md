@@ -23,27 +23,10 @@ the cLaudeRC app). Read `CLAUDE.md` too: its signing rules are strict.
 
 ## Do first
 
-1. **Put the signing key into GitHub Actions secrets.** CI only signs APKs
-   once these exist. Until then it builds unsigned APKs and publishes no
-   release. `gh` on this server is logged in with `repo` scope, so you can do
-   it here. The user has the files from the cloud session:
-   `clauderc-release.jks` and `SIGNING-SECRETS.txt` (the password). Ask them to
-   copy the `.jks` to the server (e.g. `/tmp/clauderc-release.jks`) and give you
-   the password. Then:
-
-   ```bash
-   R=myGIGlife-claude/Claude-RC
-   base64 -w0 /tmp/clauderc-release.jks | gh secret set SIGNING_KEYSTORE_BASE64 -R $R
-   gh secret set SIGNING_KEY_ALIAS -R $R -b clauderc
-   printf '%s' "$PW" | gh secret set SIGNING_STORE_PASSWORD -R $R
-   printf '%s' "$PW" | gh secret set SIGNING_KEY_PASSWORD -R $R
-   shred -u /tmp/clauderc-release.jks   # after the user confirms it's backed up
-   ```
-
-   Never commit the keystore or put the password in any file in the repo.
-   Check it worked: push, and the `android` job must pass its step "APK is
-   signed with the cLaudeRC release key" (certificate SHA-256 `cc833ec5…3cd1`,
-   in CLAUDE.md).
+1. **Signing: done differently.** The user chose to sign every build with
+   the committed `app/debug.keystore` until release (see CLAUDE.md). Installing
+   the first debug-signed build needs one uninstall of 0.1.3 (release-signed).
+   The release-key secrets step is deferred to release time.
 
 2. **Get it onto `main`.** Ask the user before opening a PR or merging. After
    merging, pushes to `main` update the `latest-main` pre-release, and a
@@ -52,9 +35,8 @@ the cLaudeRC app). Read `CLAUDE.md` too: its signing rules are strict.
 
 ## Rules that bit before
 
-- **Signing:** never generate a new keystore and never hand the user a debug
-  APK or one signed with another key. Without the keystore, push and let CI
-  build.
+- **Signing:** see CLAUDE.md. Never regenerate either keystore. Push and let
+  CI build.
 - **Public repo:** no usernames, home paths, hostnames, IPs, emails, org names
   or keys in code, docs or commits. The server's real values live in
   `~/.config/claude-launcher/config`, never in the repo.
