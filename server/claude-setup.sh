@@ -20,6 +20,9 @@ LAUNCHER_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/claude-launcher"
 CONFIG_FILE="$LAUNCHER_CONFIG_DIR/config"
 API_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/claude-launcher"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/claude-launcher"
+# Tokens for services whose CLIs only read an environment variable.
+SERVICES_ENV="$LAUNCHER_CONFIG_DIR/env"
+SERVICES_ENV_HOOK="[ -f \"$SERVICES_ENV\" ] && . \"$SERVICES_ENV\"  # cLaudeRC"
 LOCK_FILE="$API_STATE_DIR/api.lock"
 
 CLAUDE_LOGIN_SESSION="claude-login"
@@ -658,7 +661,7 @@ do_status() {
     aws_ok=true
     aws_json="$(jq -c '{account:.Account, arn:.Arn}' <<<"$ident")"
   fi
-  api_ok "$(jq -cn \
+  api_ok "$(jq -cn --argjson health "$(health_json)" --argjson services "$(services_json)" \
     --argjson c "$claude_ok" --argjson g "$gh_ok" --arg gu "$gh_user" --argjson gm "$scopes" \
     --argjson a "$aws_ok" --argjson ai "$aws_json" --arg ap "${AWS_PROFILE_NAME:-default}" \
     --argjson sso "$(aws_sso_configured && echo true || echo false)" \
@@ -666,7 +669,56 @@ do_status() {
       claude:{logged_in:$c},
       github:{logged_in:$g, user:(if $gu=="" then null else $gu end), missing_scopes:$gm},
       aws:{logged_in:$a, identity:$ai, profile:$ap, sso_configured:$sso},
-      hostname:$host, version:$v}')"
+      hostname:$host, version:$v, health:$health, services:$services}')"
+}
+
+# Disk, memory, load, uptime and the Claude Code version (plus the newest one,
+# looked up at most every 6 hours).
+health_json() {
+  local disk mem load cur latest="" cache="$CACHE_DIR/claude-latest" du dt mu mt l1 l5 l15
+  disk="$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2 {print $3, $2}')"
+  mem="$(awk '/^MemTotal:/ {t=$2} /^MemAvailable:/ {a=$2} END {print t-a, t}' /proc/meminfo 2>/dev/null)"
+  load="$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null)"
+  cur="$(t 10 claude --version 2>/dev/null </dev/null | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)"
+  if [[ -n "$(find "$cache" -mmin -360 2>/dev/null)" ]]; then
+    latest="$(cat "$cache")"
+  elif command -v curl >/dev/null 2>&1; then
+    latest="$(curl -fsS --max-time 5 https://registry.npmjs.org/@anthropic-ai/claude-code/latest 2>/dev/null </dev/null |
+      jq -r '.version // empty' 2>/dev/null)"
+    [[ "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && printf '%s' "$latest" >"$cache" || latest=""
+  fi
+  read -r du dt <<<"${disk:-0 0}"
+  read -r mu mt <<<"${mem:-0 0}"
+  read -r l1 l5 l15 <<<"${load:-0 0 0}"
+  jq -cn --argjson du "${du:-0}" --argjson dt "${dt:-0}" --argjson mu "${mu:-0}" --argjson mt "${mt:-0}" \
+    --argjson l1 "${l1:-0}" --argjson l5 "${l5:-0}" --argjson l15 "${l15:-0}" \
+    --argjson cpus "$(nproc 2>/dev/null || echo 1)" \
+    --argjson up "$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)" \
+    --arg cur "$cur" --arg latest "$latest" '{
+      disk_used_kb:$du, disk_total_kb:$dt, mem_used_kb:$mu, mem_total_kb:$mt,
+      load:[$l1,$l5,$l15], cpus:$cpus, uptime_seconds:$up,
+      claude_version:(if $cur=="" then null else $cur end),
+      claude_latest:(if $latest=="" then null else $latest end)}'
+}
+
+# Extra services the phone can log in to. Each: installed, logged_in, detail.
+services_json() {
+  local gl_i=false gl_ok=false gl_user="" dk_i=false dk_regs="" cf_ok=false
+  if command -v glab >/dev/null 2>&1; then
+    gl_i=true
+    gl_user="$(t 15 glab api user 2>/dev/null </dev/null | jq -r '.username // empty' 2>/dev/null)"
+    [[ -n "$gl_user" ]] && gl_ok=true
+  fi
+  if command -v docker >/dev/null 2>&1; then
+    dk_i=true
+    dk_regs="$(jq -r '(.auths // {}) | keys | join(", ")' "$HOME/.docker/config.json" 2>/dev/null)"
+  fi
+  grep -q '^export CLOUDFLARE_API_TOKEN=' "$SERVICES_ENV" 2>/dev/null && cf_ok=true
+  jq -cn --argjson gi "$gl_i" --argjson go "$gl_ok" --arg gu "$gl_user" \
+    --argjson di "$dk_i" --arg dr "$dk_regs" --argjson co "$cf_ok" '{
+      gitlab:{installed:$gi, logged_in:$go, detail:(if $gu=="" then null else $gu end)},
+      docker:{installed:$di, logged_in:($dr!=""), detail:(if $dr=="" then null else $dr end)},
+      cloudflare:{installed:true, logged_in:$co, detail:null}}'
 }
 
 do_owners() {
@@ -1121,6 +1173,65 @@ do_login_aws_sso_start() {
   api_ok "$(jq -cn --arg u "$url" --arg c "$code" '{url:$u, code:(if $c=="" then null else $c end)}')"
 }
 
+do_login_gitlab() {
+  local token host err user
+  token="$(read_secret_line)"; host="$(read_secret_line)"
+  exec 0</dev/null
+  token="${token//[[:space:]]/}" host="${host//[[:space:]]/}"
+  [[ -z "$host" ]] && host="gitlab.com"
+  [[ "$token" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{19,254}$ ]] || api_err invalid_name "That doesn't look like a GitLab token."
+  [[ "$host" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}(:[0-9]{1,5})?$ ]] || api_err invalid_name "That GitLab host doesn't look right."
+  need glab
+  if ! err="$(printf '%s\n' "$token" | t 30 glab auth login --hostname "$host" --stdin 2>&1)"; then
+    api_err not_logged_in "GitLab didn't accept that token: $(tail -n 2 <<<"$err")"
+  fi
+  unset token
+  user="$(t 15 glab api user --hostname "$host" 2>/dev/null </dev/null | jq -r '.username // empty' 2>/dev/null)"
+  [[ -n "$user" ]] || api_err not_logged_in "Token saved, but GitLab login still fails."
+  api_ok "$(jq -cn --arg u "$user" '{logged_in:true, user:$u}')"
+}
+
+do_login_docker() {
+  local reg user token err
+  reg="$(read_secret_line)"; user="$(read_secret_line)"; token="$(read_secret_line)"
+  exec 0</dev/null
+  reg="${reg//[[:space:]]/}" user="${user//[[:space:]]/}" token="${token//[[:space:]]/}"
+  [[ -z "$reg" ]] && reg="docker.io"
+  [[ "$reg" =~ ^[a-z0-9][a-z0-9.-]{0,252}(:[0-9]{1,5})?$ ]] || api_err invalid_name "That registry doesn't look right."
+  [[ "$user" =~ ^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$ ]] || api_err invalid_name "That username doesn't look right."
+  [[ "$token" =~ ^[^[:space:]]{8,512}$ ]] || api_err invalid_name "That token or password doesn't look right."
+  need docker
+  if ! err="$(printf '%s\n' "$token" | t 30 docker login "$reg" -u "$user" --password-stdin 2>&1)"; then
+    api_err not_logged_in "The registry didn't accept that login: $(tail -n 2 <<<"$err")"
+  fi
+  unset token
+  api_ok "$(jq -cn --arg r "$reg" --arg u "$user" '{logged_in:true, user:$u, registry:$r}')"
+}
+
+# wrangler has no lasting token login, so the token goes in a private env file
+# that ~/.bashrc loads (Claude Code picks up the shell's environment from it).
+do_login_cloudflare() {
+  local token ok tmp
+  token="$(read_secret_line)"
+  exec 0</dev/null
+  token="${token//[[:space:]]/}"
+  [[ "$token" =~ ^[A-Za-z0-9_-]{30,100}$ ]] || api_err invalid_name "That doesn't look like a Cloudflare API token."
+  need curl
+  # curl reads the header from its config on stdin, so the token isn't in the process list.
+  ok="$(printf 'header = "Authorization: Bearer %s"\n' "$token" |
+    curl -fsS --max-time 15 -K - https://api.cloudflare.com/client/v4/user/tokens/verify 2>/dev/null |
+    jq -r '.success // false' 2>/dev/null)"
+  [[ "$ok" == true ]] || api_err not_logged_in "Cloudflare didn't accept that token."
+  mkdir -p "$LAUNCHER_CONFIG_DIR"
+  tmp="$(mktemp "$SERVICES_ENV.XXXXXX")"
+  chmod 600 "$tmp"
+  { grep -v '^export CLOUDFLARE_API_TOKEN=' "$SERVICES_ENV" 2>/dev/null; printf "export CLOUDFLARE_API_TOKEN='%s'\n" "$token"; } >"$tmp"
+  mv "$tmp" "$SERVICES_ENV"
+  unset token
+  grep -qF "$SERVICES_ENV_HOOK" "$HOME/.bashrc" 2>/dev/null || printf '\n%s\n' "$SERVICES_ENV_HOOK" >>"$HOME/.bashrc"
+  api_ok '{"logged_in":true}'
+}
+
 api_main() {
   # fd 3 = the one JSON object; everything else goes to stderr.
   exec 3>&1 1>&2
@@ -1133,7 +1244,7 @@ api_main() {
   local cmd="${1:-}"
   shift || true
   case "$cmd" in
-    login-claude-code | login-github | login-aws-keys) ;;  # these read stdin
+    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | login-cloudflare) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -1154,6 +1265,9 @@ api_main() {
     login-github)        do_login_github ;;
     login-aws-keys)      do_login_aws_keys ;;
     login-aws-sso-start) do_login_aws_sso_start ;;
+    login-gitlab)        do_login_gitlab ;;
+    login-docker)        do_login_docker ;;
+    login-cloudflare)    do_login_cloudflare ;;
     "")                  bad_args "missing subcommand" ;;
     *)                   bad_args "unknown subcommand '$cmd'" ;;
   esac

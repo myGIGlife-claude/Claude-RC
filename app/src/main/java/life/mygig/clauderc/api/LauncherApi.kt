@@ -90,6 +90,11 @@ class LauncherApi(
     suspend fun loginAwsKeys(keyId: String, secret: String, region: String): LoginDone =
         call("login-aws-keys", stdin = listOf(keyId.trim(), secret.trim(), region.trim()).joinToString("\n"))
     suspend fun loginAwsSsoStart(): LoginUrl = call("login-aws-sso-start")
+    suspend fun loginGitlab(token: String, host: String): LoginDone =
+        call("login-gitlab", stdin = listOf(token.trim(), host.trim()).joinToString("\n"))
+    suspend fun loginDocker(registry: String, user: String, token: String): LoginDone =
+        call("login-docker", stdin = listOf(registry.trim(), user.trim(), token.trim()).joinToString("\n"))
+    suspend fun loginCloudflare(token: String): LoginDone = call("login-cloudflare", stdin = token.trim())
 
     private fun requireName(name: String) {
         if (!PROJECT_NAME_RE.matches(name)) {
