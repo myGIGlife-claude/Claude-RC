@@ -69,6 +69,15 @@ Updates install over the old version because every build is signed with the
 same key. Until the first real release that is the committed
 `app/debug.keystore`; switching to the release key later needs one uninstall.
 
+## Updates
+
+The app checks GitHub when it opens and every hour while it's open. Status
+shows **App update available** (tap to download the new APK) and **Server
+scripts update available** with **Update now** (the server runs that
+commit's `install.sh`, after you confirm) or **Copy command** to paste on the
+server yourself. `install.sh` records the commit it installed so the app can
+compare.
+
 ## Security
 
 - The app generates its own Ed25519 key; the private part is encrypted with an

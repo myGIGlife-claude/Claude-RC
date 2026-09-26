@@ -39,6 +39,12 @@ sudo server/tests/test-sshd.sh --app     # real sshd + app SSH code
 ./gradlew testDebugUnitTest assembleDebug
 ```
 
+## Server script API
+
+`claude-setup.sh` has `SCRIPT_API`; the app has `Updates.MIN_SCRIPT_API`.
+When the app starts needing a new server action or field, bump `SCRIPT_API`
+and raise `MIN_SCRIPT_API` so old servers see "Server scripts need an update".
+
 ## Public repo
 
 No personal values in code, docs or commits: usernames, home paths,

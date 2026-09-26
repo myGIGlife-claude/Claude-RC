@@ -51,6 +51,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import life.mygig.clauderc.BuildConfig
+import life.mygig.clauderc.api.Updates
 import life.mygig.clauderc.data.AppSettings
 import life.mygig.clauderc.data.Server
 import life.mygig.clauderc.data.ThemeMode
@@ -99,17 +100,17 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SelectionContainer {
                         Text(
-                            if (publicKey.isBlank()) "No key yet. Tap Regenerate." else installCmd("'$publicKey'"),
+                            if (publicKey.isBlank()) "No key yet. Tap Regenerate." else Updates.installCommand(publicKey),
                             fontFamily = FontFamily.Monospace,
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(enabled = publicKey.isNotBlank(), onClick = {
-                            copy(context, "Install command", installCmd("'$publicKey'"))
+                            copy(context, "Install command", Updates.installCommand(publicKey))
                         }) { Text("Copy command") }
                         OutlinedButton(enabled = publicKey.isNotBlank(), onClick = {
-                            share(context, installCmd("'$publicKey'"))
+                            share(context, Updates.installCommand(publicKey))
                         }) { Text("Share") }
                         if (publicKey.isBlank()) TextButton(onClick = { vm.regenerateKey() }) { Text("Regenerate") }
                     }
@@ -159,7 +160,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                         }) { Text("Copy") }
                         OutlinedButton(enabled = publicKey.isNotBlank(), onClick = {
                             guard.run("Copy this phone's key") {
-                                copy(context, "Install command", installCmd("'$publicKey'"))
+                                copy(context, "Install command", Updates.installCommand(publicKey))
                             }
                         }) { Text("Copy install command") }
                     }
@@ -359,7 +360,7 @@ fun HostKeyDialog(vm: MainViewModel, info: HostKeyInfo, previous: String) {
     )
 }
 
-private fun copy(context: Context, label: String, text: String) {
+internal fun copy(context: Context, label: String, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     cm.setPrimaryClip(ClipData.newPlainText(label, text))
 }
@@ -368,7 +369,3 @@ private fun share(context: Context, text: String) {
     val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
     context.startActivity(Intent.createChooser(send, "Share public key").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
-
-/** Downloads and installs the server scripts (no clone) and authorizes [key]. Rerun it to update. */
-private fun installCmd(key: String) =
-    "curl -fsSL https://raw.githubusercontent.com/myGIGlife-claude/Claude-RC/main/server/install.sh | bash -s -- $key"
