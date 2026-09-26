@@ -8,6 +8,7 @@ the phone can run the allowlisted actions below and nothing else — no shell.
 | --- | --- |
 | `claude-setup.sh` | The interactive menu (no arguments) plus `--api <subcommand>`, which prints exactly one JSON object and never waits for input. |
 | `claude-launcher-api` | Forced command. Splits `SSH_ORIGINAL_COMMAND`, checks it against the allowlist, re-validates every argument, runs `claude-setup.sh --api …`. Anything else → `{"ok":false,"error":{"code":"forbidden"}}`. |
+| `install.sh` | Downloads and installs the three scripts below without cloning, then authorizes the phone key if given. |
 | `install-launcher-key.sh` | Adds the phone's public key to `~/.ssh/authorized_keys` locked to the runner. |
 | `claude-autostart.sh` | Unchanged from the original: a systemd service + 2-minute timer that saves the running Claude tmux sessions and restores them at boot. Sessions started from the phone are picked up the same way. |
 | `config.example` | Per-machine settings. The real file lives at `~/.config/claude-launcher/config` and is never committed. |
@@ -17,21 +18,17 @@ the phone can run the allowlisted actions below and nothing else — no shell.
 Needs `bash`, `jq`, `tmux`, `git`, `flock` (util-linux) and the CLIs the menu
 already installs: `claude`, `gh`, `aws` (v2).
 
+One command, no clone. It downloads `claude-setup.sh`, `claude-launcher-api`
+and `install-launcher-key.sh`, backs up a changed `~/claude-setup.sh`, and
+installs them (rerun it to update):
+
 ```bash
-git clone https://github.com/myGIGlife-claude/Claude-RC.git
-cd Claude-RC/server
-
-# Keep your current script, then replace it (same place, same menu)
-cp ~/claude-setup.sh ~/claude-setup.sh.bak
-install -m 755 claude-setup.sh ~/claude-setup.sh
-
-# The phone's runner and key installer
-mkdir -p ~/bin
-install -m 755 claude-launcher-api install-launcher-key.sh ~/bin/
-
-# First run writes ~/.config/claude-launcher/config — set PROJECTS_DIR there
-~/claude-setup.sh --api status | jq .
+curl -fsSL https://raw.githubusercontent.com/myGIGlife-claude/Claude-RC/main/server/install.sh | bash
+# or, with the key from the app's "Copy install cmd", also authorize the phone:
+curl -fsSL https://raw.githubusercontent.com/myGIGlife-claude/Claude-RC/main/server/install.sh | bash -s -- 'ssh-ed25519 AAAA… clauderc'
 ```
+
+The first run writes `~/.config/claude-launcher/config`; set `PROJECTS_DIR` there.
 
 The old script hard-coded the projects folder; it now comes from
 `PROJECTS_DIR` in `~/.config/claude-launcher/config` (default `~/projects`).
@@ -43,8 +40,14 @@ somewhere other than `~/.local/bin` or `/usr/local/bin`, add that folder to
 install, the three logins, then New / Existing project with `b`/`q` at every
 prompt.
 
-If `claude-autostart` isn't installed yet: `./claude-autostart.sh install`
-(once, as yourself). Already installed? Nothing to do — it detects sessions
+If `claude-autostart` isn't installed yet (once, as yourself):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/myGIGlife-claude/Claude-RC/main/server/claude-autostart.sh -o /tmp/claude-autostart.sh
+bash /tmp/claude-autostart.sh install
+```
+
+Already installed? Nothing to do — it detects sessions
 by scanning tmux, and `claude-setup.sh` now also tells it to save right after
 a start or stop instead of waiting for the 2-minute timer.
 
@@ -52,14 +55,10 @@ a start or stop instead of waiting for the 2-minute timer.
 
 1. Install the app from the GitHub Releases page and open it. It generates its
    own Ed25519 key on first launch.
-2. In the app, tap **Copy install cmd** (or **Copy** for just the key).
-3. On the server:
-
-   ```bash
-   ~/bin/install-launcher-key.sh 'ssh-ed25519 AAAA… clauderc'
-   ```
-
-   That writes:
+2. In the app, tap **Copy install cmd** and run it on the server (the
+   `install.sh` line above). If the scripts are already installed, just the key
+   works too: `~/bin/install-launcher-key.sh 'ssh-ed25519 AAAA… clauderc'`.
+3. That writes:
 
    ```
    restrict,command="/home/<you>/bin/claude-launcher-api" ssh-ed25519 AAAA… clauderc
