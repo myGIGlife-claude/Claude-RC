@@ -61,8 +61,10 @@ EOF
   # shellcheck source=/dev/null
   . "$CONFIG_FILE"
 
+  # Forced-command SSH sessions get a bare PATH, so add the usual install
+  # locations after it, and let EXTRA_PATH win over everything.
+  PATH="$PATH:$HOME/.local/bin:$HOME/bin:$HOME/.npm-global/bin:/usr/local/bin"
   [[ -n "$EXTRA_PATH" ]] && PATH="$EXTRA_PATH:$PATH"
-  PATH="$HOME/.local/bin:$HOME/bin:$HOME/.npm-global/bin:/usr/local/bin:$PATH"
   export PATH
 
   mkdir -p "$STATE_DIR" "$CACHE_DIR"
