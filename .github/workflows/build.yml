@@ -46,6 +46,7 @@ jobs:
       contents: write
     env:
       HAS_SIGNING: ${{ secrets.SIGNING_KEYSTORE_BASE64 != '' }}
+      EXPECTED_CERT_SHA256: cc833ec5438cbf8089cb511ab5612ff28149f0b8a0afcb18b09b020771cf3cd1
     steps:
       - uses: actions/checkout@v5
         with:
@@ -90,10 +91,14 @@ jobs:
           mkdir -p dist
           if [[ "$HAS_SIGNING" == true ]]; then
             apk=app/build/outputs/apk/release/app-release.apk
-            "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "$apk" | head -n 3
+            certs="$("$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "$apk")"
+            echo "$certs" | head -n 3
+            # The one release key (see CLAUDE.md). A different key breaks in-place upgrades.
+            grep -q "SHA-256 digest: $EXPECTED_CERT_SHA256" <<<"$certs" ||
+              { echo "::error::APK is not signed with the cLaudeRC release key"; exit 1; }
             cp "$apk" "dist/cLaudeRC-${{ steps.ver.outputs.name }}.apk"
           else
-            echo "::warning::Signing secrets are not set, so the APK is unsigned and no release is published."
+            echo "::warning::Signing secrets are not set, so the APK is unsigned and no release is published. See CLAUDE.md."
             cp app/build/outputs/apk/release/app-release-unsigned.apk "dist/cLaudeRC-${{ steps.ver.outputs.name }}-unsigned.apk"
           fi
           rm -f "$RUNNER_TEMP/release.jks"
