@@ -304,15 +304,46 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private var tailTarget: String? = null
+    private val _tailUpdatedAt = MutableStateFlow<Long?>(null)
+    val tailUpdatedAt = _tailUpdatedAt.asStateFlow()
+    private val _tailRefreshing = MutableStateFlow(false)
+    val tailRefreshing = _tailRefreshing.asStateFlow()
+    private var tailJob: Job? = null
 
     fun loadTail(target: String) = action("Reading log…") {
         tailTarget = target
-        _tail.value = api.tail(target, 80)
+        _tail.value = api.tail(target, 120)
+        _tailUpdatedAt.value = System.currentTimeMillis()
     }
 
-    fun refreshTail() { tailTarget?.let { loadTail(it) } }
+    /**
+     * Re-reads the open log in place: progress shows in the log window itself,
+     * not the app-wide bar behind it. Errors only show if [manual].
+     */
+    fun refreshTail(manual: Boolean = true) {
+        val target = tailTarget ?: return
+        if (_tailRefreshing.value) return
+        tailJob = viewModelScope.launch {
+            _tailRefreshing.value = true
+            try {
+                val r = api.tail(target, 120)
+                if (tailTarget == target && _tail.value != null) {
+                    _tail.value = r
+                    _tailUpdatedAt.value = System.currentTimeMillis()
+                }
+            } catch (e: ApiException) {
+                if (manual) report(e)
+            } finally {
+                _tailRefreshing.value = false
+            }
+        }
+    }
 
-    fun closeTail() { _tail.value = null }
+    fun closeTail() {
+        tailJob?.cancel()
+        _tail.value = null
+        _tailUpdatedAt.value = null
+    }
 
     // ---- New project ------------------------------------------------------------
 
