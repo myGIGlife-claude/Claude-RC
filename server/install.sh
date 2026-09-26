@@ -14,15 +14,17 @@ set -euo pipefail
 
 # Everything runs from main() so a half-downloaded script never runs.
 main() {
-  local repo="myGIGlife-claude/Claude-RC" base sha=""
-  # raw.githubusercontent.com caches a branch for ~5 minutes; a commit URL is
-  # never stale, so resolve main to its commit first (falls back to main).
-  if [[ -z "${CLAUDERC_BASE:-}" ]]; then
-    sha="$(curl -fsSL --max-time 10 -H 'Accept: application/vnd.github.sha' \
-      "https://api.github.com/repos/$repo/commits/main" 2>/dev/null)" || sha=""
-    [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || sha="main"
+  local repo="myGIGlife-claude/Claude-RC" base sha="${CLAUDERC_COMMIT:-}"
+  local raw="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
+  # Download from the last commit that changed server/, not the main branch:
+  # raw.githubusercontent.com caches a branch for ~5 minutes, a commit URL is
+  # never stale, and the app compares this commit to spot updates.
+  if [[ -z "$sha" && -z "${CLAUDERC_BASE:-}" ]]; then
+    sha="$(curl -fsSL --max-time 10 "https://api.github.com/repos/$repo/commits?path=server&per_page=1" 2>/dev/null |
+      grep -oE '"sha": ?"[0-9a-f]{40}"' | head -n 1 | grep -oE '[0-9a-f]{40}')" || sha=""
+    [[ -n "$sha" ]] || sha="main"
   fi
-  base="${CLAUDERC_BASE:-https://raw.githubusercontent.com/$repo/$sha/server}"
+  base="${CLAUDERC_BASE:-$raw/$repo/$sha/server}"
   local f missing=()
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT  # tmp is global so the trap still sees it after main returns
@@ -38,9 +40,17 @@ main() {
     cp "$HOME/claude-setup.sh" "$HOME/claude-setup.sh.bak"
     echo "Backed up your old ~/claude-setup.sh to ~/claude-setup.sh.bak"
   fi
-  install -m 755 "$tmp/claude-setup.sh" "$HOME/claude-setup.sh"
-  mkdir -p "$HOME/bin"
-  install -m 755 "$tmp/claude-launcher-api" "$tmp/install-launcher-key.sh" "$HOME/bin/"
+  mkdir -p "$HOME/bin" "$HOME/.config/claude-launcher"
+  # Write a new file and rename it over the old one: these scripts may be
+  # running right now (an update started from the phone), and bash reads a
+  # script while it runs, so the old file must never be changed in place.
+  put() { install -m 755 "$1" "$2.new" && mv -f "$2.new" "$2"; }
+  put "$tmp/claude-setup.sh" "$HOME/claude-setup.sh"
+  put "$tmp/claude-launcher-api" "$HOME/bin/claude-launcher-api"
+  put "$tmp/install-launcher-key.sh" "$HOME/bin/install-launcher-key.sh"
+  if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+    printf '%s\n' "$sha" >"$HOME/.config/claude-launcher/installed-commit"
+  fi
   echo "Installed ~/claude-setup.sh, ~/bin/claude-launcher-api, ~/bin/install-launcher-key.sh (${sha:0:7})"
 
   # First run writes ~/.config/claude-launcher/config.

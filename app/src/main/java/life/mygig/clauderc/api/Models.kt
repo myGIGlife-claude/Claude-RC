@@ -12,6 +12,9 @@ data class StatusData(
     val version: String = "",
     /** Missing when the server's scripts predate these services. */
     val services: Services? = null,
+    /** Last commit that changed server/, as recorded by install.sh; null if unknown. */
+    val commit: String? = null,
+    @SerialName("script_api") val scriptApi: Int = 0,
 )
 
 @Serializable

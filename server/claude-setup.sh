@@ -12,6 +12,11 @@
 set -uo pipefail
 
 SCRIPT_VERSION="2.0.0"
+# What the phone can rely on: 2 = extra services, 3 = self-update. Bump when
+# the app starts needing a new server feature.
+SCRIPT_API=3
+CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
+CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 
 STATE_DIR="$HOME/.config/claude-setup"
@@ -24,6 +29,7 @@ CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/claude-launcher"
 SERVICES_ENV="$LAUNCHER_CONFIG_DIR/env"
 SERVICES_ENV_HOOK="[ -f \"$SERVICES_ENV\" ] && . \"$SERVICES_ENV\"  # cLaudeRC"
 LOCK_FILE="$API_STATE_DIR/api.lock"
+INSTALLED_COMMIT_FILE="$LAUNCHER_CONFIG_DIR/installed-commit"   # written by install.sh
 
 CLAUDE_LOGIN_SESSION="claude-login"
 AWS_LOGIN_SESSION="aws-sso-login"
@@ -661,7 +667,9 @@ do_status() {
     aws_ok=true
     aws_json="$(jq -c '{account:.Account, arn:.Arn}' <<<"$ident")"
   fi
-  api_ok "$(jq -cn --argjson services "$(services_json)" \
+  local commit
+  commit="$(grep -oE '^[0-9a-f]{40}$' "$INSTALLED_COMMIT_FILE" 2>/dev/null | head -n 1)"
+  api_ok "$(jq -cn --argjson services "$(services_json)" --arg commit "$commit" --argjson api "$SCRIPT_API" \
     --argjson c "$claude_ok" --argjson g "$gh_ok" --arg gu "$gh_user" --argjson gm "$scopes" \
     --argjson a "$aws_ok" --argjson ai "$aws_json" --arg ap "${AWS_PROFILE_NAME:-default}" \
     --argjson sso "$(aws_sso_configured && echo true || echo false)" \
@@ -669,7 +677,8 @@ do_status() {
       claude:{logged_in:$c},
       github:{logged_in:$g, user:(if $gu=="" then null else $gu end), missing_scopes:$gm},
       aws:{logged_in:$a, identity:$ai, profile:$ap, sso_configured:$sso},
-      hostname:$host, version:$v, services:$services}')"
+      hostname:$host, version:$v, services:$services,
+      commit:(if $commit=="" then null else $commit end), script_api:$api}')"
 }
 
 # Extra services the phone can log in to. Each: installed, logged_in, detail.
@@ -1203,6 +1212,22 @@ do_login_cloudflare() {
   api_ok '{"logged_in":true}'
 }
 
+# Update these scripts to <commit> by running that commit's install.sh.
+do_self_update() {
+  local sha="${1:-}" dir out
+  [[ $# -eq 1 && "$sha" =~ ^[0-9a-f]{40}$ ]] || bad_args "usage: self-update <commit>"
+  need curl
+  dir="$(mktemp -d)"
+  trap 'rm -rf "$dir"; on_exit' EXIT
+  curl -fsSL --max-time 30 "$CLAUDERC_RAW/$CLAUDERC_REPO/$sha/server/install.sh" -o "$dir/install.sh" 2>/dev/null ||
+    api_err internal "Couldn't download install.sh for commit ${sha:0:7}."
+  out="$(CLAUDERC_COMMIT="$sha" t 180 bash "$dir/install.sh" </dev/null 2>&1)" ||
+    api_err internal "The update failed: $(tail -n 3 <<<"$out")"
+  [[ "$(cat "$INSTALLED_COMMIT_FILE" 2>/dev/null)" == "$sha" ]] ||
+    api_err internal "The update ran but didn't record commit ${sha:0:7}."
+  api_ok "$(jq -cn --arg c "$sha" '{commit:$c}')"
+}
+
 api_main() {
   # fd 3 = the one JSON object; everything else goes to stderr.
   exec 3>&1 1>&2
@@ -1239,6 +1264,7 @@ api_main() {
     login-gitlab)        do_login_gitlab ;;
     login-docker)        do_login_docker ;;
     login-cloudflare)    do_login_cloudflare ;;
+    self-update)         do_self_update "$@" ;;
     "")                  bad_args "missing subcommand" ;;
     *)                   bad_args "unknown subcommand '$cmd'" ;;
   esac

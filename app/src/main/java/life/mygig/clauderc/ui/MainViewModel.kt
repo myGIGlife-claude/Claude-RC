@@ -21,6 +21,8 @@ import kotlinx.serialization.json.Json
 import life.mygig.clauderc.api.ApiException
 import life.mygig.clauderc.api.Codes
 import life.mygig.clauderc.api.LauncherApi
+import life.mygig.clauderc.api.Latest
+import life.mygig.clauderc.api.Updates
 import life.mygig.clauderc.api.LoginUrl
 import life.mygig.clauderc.api.NewResult
 import life.mygig.clauderc.api.OwnersData
@@ -122,6 +124,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val clonePollers = mutableMapOf<String, Job>()
 
+    /** Newest server scripts and app build on GitHub; checked at start and hourly. */
+    private val _latest = MutableStateFlow<Latest?>(null)
+    val latest = _latest.asStateFlow()
+
     init {
         viewModelScope.launch {
             _publicKey.value = try {
@@ -138,6 +144,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (store.current().isConfigured) refreshStatus()
         }
+        viewModelScope.launch {
+            while (true) {
+                // Offline or rate-limited: keep the last answer and try again next hour.
+                runCatching { Updates.fetch() }.getOrNull()?.let { _latest.value = it }
+                delay(60 * 60 * 1000L)
+            }
+        }
+    }
+
+    fun updateServerScripts(commit: String) = action("Updating the server scripts…") {
+        api.selfUpdate(commit)
+        say("Server scripts updated")
+        refreshStatus()
     }
 
     fun selectTab(t: Tab) { _tab.value = t }
