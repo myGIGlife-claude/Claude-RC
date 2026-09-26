@@ -40,7 +40,10 @@ off the allowlist. There is no web server, open port or cloud service.
 | **Projects** | All your repos, newest push first, with Private/Public, Org, On server, Running badges | Clone/pull + start, stop, tail log (long-press) |
 | **Sessions** | Running Claude sessions, uptime, attached | Stop, tail, **Open in Claude** |
 
-**Settings**: host, port, username, pinned host key fingerprint, this phone's
+**Servers**: add as many as you like; tap the server name under the title to
+switch. All of them use this phone's one key.
+
+**Settings**: servers (add, switch, remove), host, port, username, pinned host key fingerprint, this phone's
 public key (copy / share / regenerate), app lock (fingerprint/PIN before
 create, stop, logins), theme.
 

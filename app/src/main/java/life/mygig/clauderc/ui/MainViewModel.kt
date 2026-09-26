@@ -511,6 +511,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun forgetHostKey() = viewModelScope.launch { store.forgetHostKey() }
 
+    // ---- Servers ------------------------------------------------------------------
+
+    /** Opens the setup screen for a new server. Back (removing the blank one) cancels. */
+    fun addServer() = viewModelScope.launch {
+        store.addServer()
+        clearServerState()
+        _showSettings.value = false
+    }
+
+    fun switchServer(id: String) = viewModelScope.launch {
+        if (id == store.current().activeId) return@launch
+        store.switchServer(id)
+        clearServerState()
+        if (store.current().isConfigured) refreshStatus()
+    }
+
+    fun removeServer(id: String) = viewModelScope.launch {
+        val wasActive = id == store.current().activeId
+        store.removeServer(id)
+        if (wasActive) {
+            clearServerState()
+            if (store.current().isConfigured) refreshStatus()
+        }
+    }
+
     fun regenerateKey() = viewModelScope.launch {
         try {
             _publicKey.value = withContext(Dispatchers.Default) { keys.regenerate() }
