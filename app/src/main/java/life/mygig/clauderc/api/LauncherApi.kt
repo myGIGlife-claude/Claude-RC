@@ -98,6 +98,7 @@ class LauncherApi(
         require(Regex("^[0-9a-f]{40}$").matches(commit))
         return call("self-update $commit", timeoutMs = 240_000)
     }
+    suspend fun installGlab(): JsonObject = call("install-cli glab", timeoutMs = 240_000)
     suspend fun loginCloudflare(token: String): LoginDone = call("login-cloudflare", stdin = token.trim())
 
     private fun requireName(name: String) {

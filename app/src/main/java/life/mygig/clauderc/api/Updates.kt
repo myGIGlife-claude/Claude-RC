@@ -23,6 +23,9 @@ object Updates {
     /** Server script API that has self-update. */
     const val SELF_UPDATE_API = 3
 
+    /** Server script API that can install glab. */
+    const val INSTALL_CLI_API = 4
+
     /** Downloads and installs the server scripts (no clone), authorizing [key] if given. Rerun it to update. */
     fun installCommand(key: String? = null) =
         "curl -fsSL https://raw.githubusercontent.com/$REPO/main/server/install.sh | bash" +

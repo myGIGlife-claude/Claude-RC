@@ -12,9 +12,9 @@
 set -uo pipefail
 
 SCRIPT_VERSION="2.0.0"
-# What the phone can rely on: 2 = extra services, 3 = self-update. Bump when
-# the app starts needing a new server feature.
-SCRIPT_API=3
+# What the phone can rely on: 2 = extra services, 3 = self-update,
+# 4 = install-cli. Bump when the app starts needing a new server feature.
+SCRIPT_API=4
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -1228,6 +1228,38 @@ do_self_update() {
   api_ok "$(jq -cn --arg c "$sha" '{commit:$c}')"
 }
 
+# Install a CLI the phone can't otherwise get onto the server. Only glab so far:
+# the latest official release from gitlab.com, checksum-verified, into
+# ~/.local/bin (no sudo).
+do_install_cli() {
+  [[ $# -eq 1 && "$1" == glab ]] || bad_args "usage: install-cli glab"
+  local arch rel ver tgz sums_url tgz_url dir want have
+  need curl; need tar; need sha256sum
+  case "$(uname -m)" in
+    x86_64) arch=amd64 ;; aarch64 | arm64) arch=arm64 ;; armv6l | armv7l) arch=armv6 ;; i?86) arch=386 ;;
+    *) api_err internal "No glab build for this CPU ($(uname -m))." ;;
+  esac
+  rel="$(curl -fsSL --max-time 20 "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/releases/permalink/latest" 2>/dev/null)"
+  ver="$(jq -r '.tag_name // empty' <<<"$rel" 2>/dev/null)"; ver="${ver#v}"
+  [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || api_err internal "Couldn't find the latest glab release on gitlab.com."
+  tgz="glab_${ver}_linux_${arch}.tar.gz"
+  tgz_url="$(jq -r --arg n "$tgz" '.assets.links[] | select(.name==$n) | .direct_asset_url' <<<"$rel")"
+  sums_url="$(jq -r '.assets.links[] | select(.name=="checksums.txt") | .direct_asset_url' <<<"$rel")"
+  [[ "$tgz_url" == https://gitlab.com/* && "$sums_url" == https://gitlab.com/* ]] ||
+    api_err internal "The glab $ver release has no $tgz."
+  dir="$(mktemp -d)"
+  trap 'rm -rf "$dir"; on_exit' EXIT
+  curl -fsSL --max-time 120 "$tgz_url" -o "$dir/$tgz" && curl -fsSL --max-time 20 "$sums_url" -o "$dir/sums" ||
+    api_err internal "Downloading glab $ver failed."
+  want="$(awk -v f="$tgz" '$2==f {print $1}' "$dir/sums")"
+  have="$(sha256sum "$dir/$tgz" | cut -d' ' -f1)"
+  [[ -n "$want" && "$want" == "$have" ]] || api_err internal "glab $ver failed its checksum check; nothing was installed."
+  tar -xzf "$dir/$tgz" -C "$dir" bin/glab || api_err internal "The glab download was not a valid archive."
+  mkdir -p "$HOME/.local/bin"
+  install -m 755 "$dir/bin/glab" "$HOME/.local/bin/glab.new" && mv -f "$HOME/.local/bin/glab.new" "$HOME/.local/bin/glab"
+  api_ok "$(jq -cn --arg v "$ver" '{installed:true, name:"glab", version:$v}')"
+}
+
 api_main() {
   # fd 3 = the one JSON object; everything else goes to stderr.
   exec 3>&1 1>&2
@@ -1265,6 +1297,7 @@ api_main() {
     login-docker)        do_login_docker ;;
     login-cloudflare)    do_login_cloudflare ;;
     self-update)         do_self_update "$@" ;;
+    install-cli)         do_install_cli "$@" ;;
     "")                  bad_args "missing subcommand" ;;
     *)                   bad_args "unknown subcommand '$cmd'" ;;
   esac

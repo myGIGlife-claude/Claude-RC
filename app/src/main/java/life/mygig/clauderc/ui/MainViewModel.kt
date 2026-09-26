@@ -153,6 +153,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** A service whose CLI isn't on the server yet: the setup guide for it. */
+    private val _setup = MutableStateFlow<LoginKind?>(null)
+    val setup = _setup.asStateFlow()
+    fun showSetup(kind: LoginKind?) { _setup.value = kind }
+
+    fun installGlab() = action("Installing the GitLab CLI…") {
+        api.installGlab()
+        _setup.value = null
+        say("GitLab CLI installed")
+        refreshStatus()
+        _login.value = LoginKind.GITLAB
+    }
+
     fun updateServerScripts(commit: String) = action("Updating the server scripts…") {
         api.selfUpdate(commit)
         say("Server scripts updated")
