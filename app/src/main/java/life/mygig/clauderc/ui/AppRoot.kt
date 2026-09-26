@@ -72,6 +72,7 @@ import life.mygig.clauderc.ui.screens.NewProjectScreen
 import life.mygig.clauderc.ui.screens.ProjectsScreen
 import life.mygig.clauderc.ui.screens.SessionsScreen
 import life.mygig.clauderc.ui.screens.SettingsScreen
+import life.mygig.clauderc.ui.screens.SetupDialog
 import life.mygig.clauderc.ui.screens.StatusScreen
 import life.mygig.clauderc.ui.screens.TailDialog
 import life.mygig.clauderc.ui.theme.ClaudeRcTheme
@@ -136,6 +137,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             val showSettings by vm.showSettings.collectAsState()
             val status by vm.status.collectAsState()
             val login by vm.login.collectAsState()
+            val setup by vm.setup.collectAsState()
             val tail by vm.tail.collectAsState()
             val pendingKey by vm.pendingHostKey.collectAsState()
 
@@ -271,6 +273,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             }
 
             login?.let { LoginDialog(vm, it) }
+            setup?.let { SetupDialog(vm, it) }
             tail?.let { TailDialog(vm, it) }
             pendingKey?.let { HostKeyDialog(vm, it, s.hostKeyFingerprint.ifEmpty { s.previousFingerprint }) }
         }

@@ -40,6 +40,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import life.mygig.clauderc.api.TailResult
+import life.mygig.clauderc.api.Updates
 import life.mygig.clauderc.ui.LoginKind
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.openUrl
@@ -91,6 +92,61 @@ fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
         dismissButton = { TextButton(onClick = { vm.showLogin(null) }) { Text("Close") } },
     )
 }
+
+/** Getting a service's CLI onto the server. */
+@Composable
+fun SetupDialog(vm: MainViewModel, kind: LoginKind) {
+    val context = LocalContext.current
+    val busy by vm.busy.collectAsState()
+    val status by vm.status.collectAsState()
+    val canInstall = (status?.scriptApi ?: 0) >= Updates.INSTALL_CLI_API
+    AlertDialog(
+        onDismissRequest = { if (busy == null) vm.showSetup(null) },
+        title = { Text(if (kind == LoginKind.GITLAB) "Set up the GitLab CLI" else "Set up Docker") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (kind == LoginKind.GITLAB) {
+                    Text(
+                        "GitLab needs its command-line tool, glab, on the server. Install downloads the latest " +
+                            "official release from gitlab.com into ~/.local/bin, checks it against the release's " +
+                            "checksums, and needs no sudo. Then you can log in.",
+                    )
+                    if (canInstall) {
+                        Button(onClick = { vm.installGlab() }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) {
+                            Text("Install glab")
+                        }
+                    } else {
+                        Text(
+                            "Update the server scripts first (the card at the top of Status), then come back here.",
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                } else {
+                    Text("Docker needs root to install, so run this on the server yourself (it asks for your sudo password):")
+                    SelectionContainer {
+                        Text(DOCKER_INSTALL, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                    }
+                    OutlinedButton(onClick = {
+                        copy(context, "Docker install", DOCKER_INSTALL)
+                        vm.say("Copied. Paste it into a terminal on the server.")
+                    }, modifier = Modifier.fillMaxWidth()) { Text("Copy command") }
+                    Text(
+                        "It uses Docker's official install script (get.docker.com) and adds you to the docker " +
+                            "group so docker works without sudo. Then tap Check again.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Button(onClick = { vm.showSetup(null); vm.refreshStatus() }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Check again")
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = { vm.showSetup(null) }) { Text("Close") } },
+    )
+}
+
+private const val DOCKER_INSTALL = "curl -fsSL https://get.docker.com | sudo sh && sudo usermod -aG docker \"\$USER\""
 
 @Composable
 private fun ClaudeLogin(vm: MainViewModel, busy: Boolean) {

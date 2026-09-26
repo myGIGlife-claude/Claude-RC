@@ -153,11 +153,11 @@ fun StatusScreen(vm: MainViewModel) {
                             },
                             detail = when {
                                 svc.loggedIn -> svc.detail?.let { "Connected: $it" } ?: "Connected"
-                                !svc.installed -> "CLI not installed on the server"
+                                !svc.installed -> "CLI not installed on the server — tap to set it up"
                                 else -> "Not connected — tap to connect"
                             },
                             // Re-connecting is allowed too, e.g. to add a second registry.
-                            onClick = if (svc.installed) { { login(kind) } } else null,
+                            onClick = if (svc.installed) { { login(kind) } } else { { vm.showSetup(kind) } },
                         )
                     }
                 }
