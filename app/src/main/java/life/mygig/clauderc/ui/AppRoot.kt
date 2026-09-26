@@ -1,0 +1,209 @@
+package life.mygig.clauderc.ui
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
+import life.mygig.clauderc.data.ThemeMode
+import life.mygig.clauderc.ui.screens.HostKeyDialog
+import life.mygig.clauderc.ui.screens.LoginDialog
+import life.mygig.clauderc.ui.screens.NewProjectScreen
+import life.mygig.clauderc.ui.screens.ProjectsScreen
+import life.mygig.clauderc.ui.screens.SessionsScreen
+import life.mygig.clauderc.ui.screens.SettingsScreen
+import life.mygig.clauderc.ui.screens.StatusScreen
+import life.mygig.clauderc.ui.screens.TailDialog
+import life.mygig.clauderc.ui.theme.ClaudeRcTheme
+
+/** Runs an action, asking for fingerprint/PIN first when App lock is on. */
+fun interface Guard {
+    fun run(reason: String, action: () -> Unit)
+}
+
+val LocalGuard = staticCompositionLocalOf { Guard { _, action -> action() } }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AppRoot(vm: MainViewModel, unlock: suspend (String) -> Boolean) {
+    val settings by vm.settings.collectAsState()
+    val s = settings
+    if (s == null) {
+        ClaudeRcTheme(ThemeMode.SYSTEM) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        }
+        return
+    }
+
+    val scope = rememberCoroutineScope()
+    val guard = remember(s.appLock) {
+        Guard { reason, action ->
+            if (!s.appLock) action() else scope.launch { if (unlock(reason)) action() }
+        }
+    }
+
+    ClaudeRcTheme(s.theme) {
+        CompositionLocalProvider(LocalGuard provides guard) {
+            val context = LocalContext.current
+            val snackbar = remember { SnackbarHostState() }
+            val busy by vm.busy.collectAsState()
+            val tab by vm.tab.collectAsState()
+            val showSettings by vm.showSettings.collectAsState()
+            val status by vm.status.collectAsState()
+            val login by vm.login.collectAsState()
+            val tail by vm.tail.collectAsState()
+            val pendingKey by vm.pendingHostKey.collectAsState()
+
+            LaunchedEffect(Unit) {
+                vm.messages.collect { m ->
+                    val r = snackbar.showSnackbar(
+                        m.text,
+                        actionLabel = m.actionLabel,
+                        withDismissAction = m.actionLabel == null,
+                        duration = if (m.actionLabel != null) SnackbarDuration.Long else SnackbarDuration.Short,
+                    )
+                    if (r == SnackbarResult.ActionPerformed) {
+                        when (val f = m.fix) {
+                            is Fix.Login -> guard.run("Log in on the server") { vm.showLogin(f.kind) }
+                            is Fix.GoTo -> vm.selectTab(f.tab)
+                            is Fix.StartAnyway -> vm.startProject(f.project)
+                            is Fix.Retry -> f.block()
+                            Fix.OpenSettings -> vm.openSettings(true)
+                            Fix.OpenClaude -> openInClaude(context)
+                            null -> {}
+                        }
+                    }
+                }
+            }
+
+            val setupNeeded = !s.isConfigured
+            BackHandler(enabled = showSettings && !setupNeeded) { vm.openSettings(false) }
+
+            Scaffold(
+                topBar = {
+                    Column {
+                        TopAppBar(
+                            title = {
+                                Column {
+                                    Text("cLaudeRC")
+                                    val sub = status?.hostname?.takeIf { it.isNotBlank() } ?: s.host
+                                    if (sub.isNotBlank()) {
+                                        Text(
+                                            sub,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            },
+                            navigationIcon = {
+                                if (showSettings && !setupNeeded) {
+                                    IconButton(onClick = { vm.openSettings(false) }) {
+                                        Icon(
+                                            Icons.AutoMirrored.Filled.ArrowBack,
+                                            contentDescription = "Back",
+                                        )
+                                    }
+                                }
+                            },
+                            actions = {
+                                if (!showSettings && !setupNeeded) {
+                                    IconButton(onClick = { vm.openSettings(true) }) {
+                                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                                    }
+                                }
+                            },
+                        )
+                        busy?.let { label ->
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                            Text(
+                                label,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                    }
+                },
+                bottomBar = {
+                    if (!showSettings && !setupNeeded) {
+                        NavigationBar {
+                            TabItem(tab, Tab.STATUS, "Status", Icons.Filled.CheckCircle, vm)
+                            TabItem(tab, Tab.NEW, "New", Icons.Filled.AddCircle, vm)
+                            TabItem(tab, Tab.PROJECTS, "Projects", Icons.AutoMirrored.Filled.List, vm)
+                            TabItem(tab, Tab.SESSIONS, "Sessions", Icons.Filled.Terminal, vm)
+                        }
+                    }
+                },
+                snackbarHost = { SnackbarHost(snackbar) },
+            ) { padding ->
+                Box(Modifier.padding(padding).fillMaxSize()) {
+                    when {
+                        showSettings || setupNeeded -> SettingsScreen(vm, s, firstRun = setupNeeded)
+                        tab == Tab.STATUS -> StatusScreen(vm)
+                        tab == Tab.NEW -> NewProjectScreen(vm)
+                        tab == Tab.PROJECTS -> ProjectsScreen(vm)
+                        tab == Tab.SESSIONS -> SessionsScreen(vm)
+                    }
+                }
+            }
+
+            login?.let { LoginDialog(vm, it) }
+            tail?.let { TailDialog(vm, it) }
+            pendingKey?.let { HostKeyDialog(vm, it, s.hostKeyFingerprint) }
+        }
+    }
+}
+
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.TabItem(
+    current: Tab,
+    tab: Tab,
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    vm: MainViewModel,
+) {
+    NavigationBarItem(
+        selected = current == tab,
+        onClick = { vm.selectTab(tab) },
+        icon = { Icon(icon, contentDescription = null) },
+        label = { Text(label) },
+    )
+}

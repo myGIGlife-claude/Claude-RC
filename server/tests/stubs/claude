@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-S="$STUB_STATE"
+S="${STUB_STATE:-$HOME/.stub-state}"; mkdir -p "$S"
 case "$1 ${2:-}" in
   "auth status") if [[ -f "$S/claude_ok" ]]; then echo '{"loggedIn":true}'; else echo '{"loggedIn":false}'; exit 1; fi ;;
   "auth login")
