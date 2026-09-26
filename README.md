@@ -4,6 +4,7 @@
 [![latest build](https://img.shields.io/github/v/release/myGIGlife-claude/Claude-RC?include_prereleases&label=latest%20build)](https://github.com/myGIGlife-claude/Claude-RC/releases/tag/latest-main)
 ![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B%20(API%2026)-3DDC84?logo=android&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7F52FF?logo=kotlin&logoColor=white)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 ![Server](https://img.shields.io/badge/server-bash%20%2B%20OpenSSH-4EAA25?logo=gnubash&logoColor=white)
 
 **[⬇ Download the latest APK](https://github.com/myGIGlife-claude/Claude-RC/releases/tag/latest-main)**
@@ -48,9 +49,13 @@ create, stop, logins), theme.
 1. Download the APK from [latest-main](https://github.com/myGIGlife-claude/Claude-RC/releases/tag/latest-main)
    (every push to `main`) or a tagged [Release](https://github.com/myGIGlife-claude/Claude-RC/releases)
    on the phone and install it (allow installs from your browser when asked).
-2. Open **cLaudeRC**, tap **Copy install cmd**.
-3. On the server, set up `server/` (see [server/README.md](server/README.md)) and paste:
-   `~/bin/install-launcher-key.sh 'ssh-ed25519 AAAA… clauderc'`
+2. Open **cLaudeRC** and tap **Copy install cmd**.
+3. Paste it into a terminal on the server. It downloads just the three server
+   scripts (no clone), installs them and authorizes the phone's key:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/myGIGlife-claude/Claude-RC/main/server/install.sh | bash -s -- 'ssh-ed25519 AAAA… clauderc'
+   ```
+   Needs `curl`, `jq`, `tmux`, `git`, `flock`. Run it again any time to update.
 4. Back in the app enter host, port, username → **Connect** → compare the
    fingerprint → **Trust**.
 
@@ -95,3 +100,8 @@ Locally:
 ./gradlew assembleDebug
 ./gradlew assembleRelease   # debug-key signed; an untracked keystore.properties switches to the release key
 ```
+
+## License
+
+[MIT](LICENSE): free to use, modify and share. Keep the copyright notice to
+credit the original project.

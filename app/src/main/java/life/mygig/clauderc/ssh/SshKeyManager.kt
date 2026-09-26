@@ -5,6 +5,7 @@ import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import java.security.GeneralSecurityException
 import java.security.KeyStore
 import java.security.SecureRandom
 import javax.crypto.Cipher
@@ -51,22 +52,38 @@ class SshKeyManager(context: Context) {
 
     private fun generate(): String {
         val seed = ByteArray(32).also { SecureRandom().nextBytes(it) }
-        val identity = Ed25519Identity(seed)
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, wrappingKey())
-        val enc = cipher.iv + cipher.doFinal(seed)
-        seed.fill(0)
-        val pub = identity.authorizedKey(COMMENT)
-        prefs.edit()
-            .putString(PREF_SEED, Base64.encodeToString(enc, Base64.NO_WRAP))
-            .putString(PREF_PUB, pub)
-            .commit()
-        return pub
+        try {
+            val identity = Ed25519Identity(seed)
+            // Some phones can't use an "unlocked device only" key (e.g. unlocked by
+            // face or Smart Lock), so fall back to a plain Keystore key there.
+            val enc = try {
+                encrypt(seed, newWrappingKey(unlockedOnly = true))
+            } catch (e: GeneralSecurityException) {
+                encrypt(seed, newWrappingKey(unlockedOnly = false))
+            }
+            val pub = identity.authorizedKey(COMMENT)
+            prefs.edit()
+                .putString(PREF_SEED, Base64.encodeToString(enc, Base64.NO_WRAP))
+                .putString(PREF_PUB, pub)
+                .commit()
+            return pub
+        } finally {
+            seed.fill(0)
+        }
     }
 
-    private fun wrappingKey(): SecretKey {
-        val ks = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        (ks.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
+    private fun encrypt(seed: ByteArray, key: SecretKey): ByteArray {
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, key)
+        return cipher.iv + cipher.doFinal(seed)
+    }
+
+    private fun wrappingKey(): SecretKey =
+        KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }.getKey(KEY_ALIAS, null) as? SecretKey
+            ?: throw GeneralSecurityException("Keystore key missing")
+
+    /** A fresh wrapping key, replacing any old one, so a broken key is never reused. */
+    private fun newWrappingKey(unlockedOnly: Boolean): SecretKey {
         val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         gen.init(
             KeyGenParameterSpec.Builder(
@@ -78,7 +95,7 @@ class SshKeyManager(context: Context) {
                 .setKeySize(256)
                 .apply {
                     // The key can't be used while the phone is locked.
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) setUnlockedDeviceRequired(true)
+                    if (unlockedOnly && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) setUnlockedDeviceRequired(true)
                 }
                 .build(),
         )

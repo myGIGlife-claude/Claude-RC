@@ -127,7 +127,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _publicKey.value = try {
                 withContext(Dispatchers.Default) { keys.publicKey() }
             } catch (e: Exception) {
-                say("This phone's SSH key couldn't be read. Regenerate it in Settings.", "Settings", Fix.OpenSettings)
+                say("This phone's SSH key couldn't be created (${e.javaClass.simpleName}: ${e.message}). Tap Regenerate in Settings.", "Settings", Fix.OpenSettings)
                 ""
             }
             store.reposCache()?.let { cached ->
