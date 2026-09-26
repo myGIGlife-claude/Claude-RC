@@ -215,6 +215,16 @@ OUT="$(printf '2\nq\n' | "$HOME/bin/claude-setup.sh" 2>&1)"
 [[ "$OUT" == *"What are you working on?"* && "$OUT" == *"example-org/org-app"* && "$OUT" == *"Running sessions on the Pi:"* ]]
 check "menu lists repos and exits on q" $?
 
+echo "install.sh (no clone)"
+IH="$WORK/installhome"; mkdir -p "$IH"
+ssh-keygen -q -t ed25519 -N '' -C clauderc -f "$WORK/phone" </dev/null
+echo old >"$IH/claude-setup.sh"
+# Real curl, not the stub.
+OUT="$(HOME="$IH" PATH=/usr/local/bin:/usr/bin:/bin CLAUDERC_BASE="file://$SERVER" bash -s -- "$(cat "$WORK/phone.pub")" <"$SERVER/install.sh" 2>&1)"
+[[ -x "$IH/claude-setup.sh" && -x "$IH/bin/claude-launcher-api" && -x "$IH/bin/install-launcher-key.sh" ]]; check "install.sh installs the scripts" $?
+[[ "$(cat "$IH/claude-setup.sh.bak")" == old ]]; check "install.sh backs up a changed claude-setup.sh" $?
+grep -q "^restrict,command=\"$IH/bin/claude-launcher-api\" ssh-ed25519 " "$IH/.ssh/authorized_keys"; check "install.sh authorizes the key" $?
+
 echo
 echo "$pass passed, $failn failed"
 ((failn == 0))
