@@ -661,7 +661,7 @@ do_status() {
     aws_ok=true
     aws_json="$(jq -c '{account:.Account, arn:.Arn}' <<<"$ident")"
   fi
-  api_ok "$(jq -cn --argjson health "$(health_json)" --argjson services "$(services_json)" \
+  api_ok "$(jq -cn --argjson services "$(services_json)" \
     --argjson c "$claude_ok" --argjson g "$gh_ok" --arg gu "$gh_user" --argjson gm "$scopes" \
     --argjson a "$aws_ok" --argjson ai "$aws_json" --arg ap "${AWS_PROFILE_NAME:-default}" \
     --argjson sso "$(aws_sso_configured && echo true || echo false)" \
@@ -669,36 +669,7 @@ do_status() {
       claude:{logged_in:$c},
       github:{logged_in:$g, user:(if $gu=="" then null else $gu end), missing_scopes:$gm},
       aws:{logged_in:$a, identity:$ai, profile:$ap, sso_configured:$sso},
-      hostname:$host, version:$v, health:$health, services:$services}')"
-}
-
-# Disk, memory, load, uptime and the Claude Code version (plus the newest one,
-# looked up at most every 6 hours).
-health_json() {
-  local disk mem load cur latest="" cache="$CACHE_DIR/claude-latest" du dt mu mt l1 l5 l15
-  disk="$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2 {print $3, $2}')"
-  mem="$(awk '/^MemTotal:/ {t=$2} /^MemAvailable:/ {a=$2} END {print t-a, t}' /proc/meminfo 2>/dev/null)"
-  load="$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null)"
-  cur="$(t 10 claude --version 2>/dev/null </dev/null | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)"
-  if [[ -n "$(find "$cache" -mmin -360 2>/dev/null)" ]]; then
-    latest="$(cat "$cache")"
-  elif command -v curl >/dev/null 2>&1; then
-    latest="$(curl -fsS --max-time 5 https://registry.npmjs.org/@anthropic-ai/claude-code/latest 2>/dev/null </dev/null |
-      jq -r '.version // empty' 2>/dev/null)"
-    [[ "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && printf '%s' "$latest" >"$cache" || latest=""
-  fi
-  read -r du dt <<<"${disk:-0 0}"
-  read -r mu mt <<<"${mem:-0 0}"
-  read -r l1 l5 l15 <<<"${load:-0 0 0}"
-  jq -cn --argjson du "${du:-0}" --argjson dt "${dt:-0}" --argjson mu "${mu:-0}" --argjson mt "${mt:-0}" \
-    --argjson l1 "${l1:-0}" --argjson l5 "${l5:-0}" --argjson l15 "${l15:-0}" \
-    --argjson cpus "$(nproc 2>/dev/null || echo 1)" \
-    --argjson up "$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)" \
-    --arg cur "$cur" --arg latest "$latest" '{
-      disk_used_kb:$du, disk_total_kb:$dt, mem_used_kb:$mu, mem_total_kb:$mt,
-      load:[$l1,$l5,$l15], cpus:$cpus, uptime_seconds:$up,
-      claude_version:(if $cur=="" then null else $cur end),
-      claude_latest:(if $latest=="" then null else $latest end)}'
+      hostname:$host, version:$v, services:$services}')"
 }
 
 # Extra services the phone can log in to. Each: installed, logged_in, detail.

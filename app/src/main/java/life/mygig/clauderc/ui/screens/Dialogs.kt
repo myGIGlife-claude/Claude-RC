@@ -131,6 +131,7 @@ private fun GithubLogin(vm: MainViewModel, busy: Boolean) {
     OutlinedButton(onClick = { openUrl(context, GITHUB_TOKEN_URL) }, modifier = Modifier.fillMaxWidth()) {
         Text("Create token on GitHub")
     }
+    PermissionsLink(LoginKind.GITHUB)
     OutlinedTextField(
         value = token, onValueChange = { token = it.trim() },
         label = { Text("Token") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
@@ -143,6 +144,73 @@ private fun GithubLogin(vm: MainViewModel, busy: Boolean) {
         modifier = Modifier.fillMaxWidth(),
     ) { Text("Save token") }
     Text("The token is sent over SSH on stdin only, never on a command line.", style = MaterialTheme.typography.bodySmall)
+}
+
+/** Exactly which permissions each token needs, shown from the login dialog. */
+private fun permissionsText(kind: LoginKind): String = when (kind) {
+    LoginKind.GITHUB ->
+        "Classic personal access token (Settings › Developer settings › Tokens (classic)).\n\n" +
+            "Tick these scopes:\n" +
+            "• repo: create, clone and push your repositories (public and private)\n" +
+            "• read:org: list the organizations you can create repos in\n" +
+            "  (admin:org or write:org also cover this)\n" +
+            "• workflow: push changes to GitHub Actions files (.github/workflows)\n\n" +
+            "Nothing else is needed. Pick an expiry you're comfortable with."
+    LoginKind.AWS ->
+        "Access keys for an IAM user (IAM › Users › your user › Security credentials › Create access key, " +
+            "use case \"Command Line Interface\").\n\n" +
+            "• Never use root account keys.\n" +
+            "• The app itself only calls sts:GetCallerIdentity, which every user may call.\n" +
+            "• Give the user only the policies for what Claude should manage, e.g. " +
+            "AmazonS3FullAccess, AWSLambda_FullAccess, CloudWatchLogsReadOnlyAccess. " +
+            "Avoid AdministratorAccess unless you really want Claude to change anything.\n\n" +
+            "SSO instead: run 'aws configure sso --use-device-code' on the server once; the permission set " +
+            "you pick there decides access."
+    LoginKind.GITLAB ->
+        "Personal access token (Preferences › Access tokens › Add new token).\n\n" +
+            "Select these scopes:\n" +
+            "• api: create projects, merge requests and issues, and read your user (glab needs it)\n" +
+            "• write_repository: push over HTTPS\n\n" +
+            "read_user and read_repository are included in the above. Set an expiry date " +
+            "(GitLab requires one)."
+    LoginKind.DOCKER ->
+        "Docker Hub: Account settings › Personal access tokens › Generate new token.\n" +
+            "• Access permissions: Read & Write (to push images), or Read-only if you only pull.\n" +
+            "• Username: your Docker Hub username (not your email).\n\n" +
+            "GHCR (ghcr.io): a GitHub classic personal access token with:\n" +
+            "• write:packages: push images (includes read:packages)\n" +
+            "• delete:packages: only if Claude should delete images\n" +
+            "• Username: your GitHub username."
+    LoginKind.CLOUDFLARE ->
+        "My Profile › API Tokens › Create Token. The \"Edit Cloudflare Workers\" template is the easy choice. " +
+            "To build it yourself, add:\n\n" +
+            "Account permissions:\n" +
+            "• Workers Scripts: Edit (deploy Workers)\n" +
+            "• Account Settings: Read (wrangler reads your account)\n" +
+            "• Optional: Workers KV Storage, Workers R2 Storage, D1, Cloudflare Pages: Edit, if Claude uses them\n\n" +
+            "User permissions:\n" +
+            "• User Details: Read\n" +
+            "• Memberships: Read (wrangler lists your accounts)\n\n" +
+            "Zone permissions (only for custom domains/routes):\n" +
+            "• Workers Routes: Edit\n\n" +
+            "Account Resources: include your account. Zone Resources: only the zones Claude should touch."
+    LoginKind.CLAUDE -> ""
+}
+
+@Composable
+private fun PermissionsLink(kind: LoginKind) {
+    var open by remember { mutableStateOf(false) }
+    TextButton(onClick = { open = true }) { Text("What permissions does it need?") }
+    if (open) {
+        AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text("Permissions needed") },
+            text = {
+                SelectionContainer(Modifier.verticalScroll(rememberScrollState())) { Text(permissionsText(kind)) }
+            },
+            confirmButton = { TextButton(onClick = { open = false }) { Text("Got it") } },
+        )
+    }
 }
 
 @Composable
@@ -169,6 +237,7 @@ private fun GitlabLogin(vm: MainViewModel, busy: Boolean) {
     OutlinedButton(onClick = { openUrl(context, "https://$host/-/user_settings/personal_access_tokens") }, modifier = Modifier.fillMaxWidth()) {
         Text("Create token on GitLab")
     }
+    PermissionsLink(LoginKind.GITLAB)
     PlainField(host, "GitLab host") { host = it }
     SecretField(token, "Token") { token = it }
     Button(onClick = { vm.gitlabLogin(token, host) }, enabled = !busy && token.length >= 20, modifier = Modifier.fillMaxWidth()) {
@@ -182,6 +251,7 @@ private fun DockerLogin(vm: MainViewModel, busy: Boolean) {
     var user by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
     Text("Docker Hub: use an access token. GitHub (ghcr.io): a token with write:packages.")
+    PermissionsLink(LoginKind.DOCKER)
     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
         listOf("docker.io", "ghcr.io").forEachIndexed { i, r ->
             SegmentedButton(selected = registry == r, onClick = { registry = r }, shape = SegmentedButtonDefaults.itemShape(i, 2)) {
@@ -210,6 +280,7 @@ private fun CloudflareLogin(vm: MainViewModel, busy: Boolean) {
     OutlinedButton(onClick = { openUrl(context, "https://dash.cloudflare.com/profile/api-tokens") }, modifier = Modifier.fillMaxWidth()) {
         Text("Create token on Cloudflare")
     }
+    PermissionsLink(LoginKind.CLOUDFLARE)
     SecretField(token, "API token") { token = it }
     Button(onClick = { vm.cloudflareLogin(token) }, enabled = !busy && token.length >= 30, modifier = Modifier.fillMaxWidth()) {
         Text("Connect")
@@ -234,6 +305,7 @@ private fun AwsLogin(vm: MainViewModel, busy: Boolean) {
             Text("SSO")
         }
     }
+    PermissionsLink(LoginKind.AWS)
     if (!sso) {
         OutlinedTextField(
             value = keyId, onValueChange = { keyId = it.trim() },

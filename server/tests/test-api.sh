@@ -57,7 +57,6 @@ echo "status"
 api "status"
 check "status not logged in" "$(jqt '.ok and .data.claude.logged_in==false and .data.github.logged_in==false and .data.aws.logged_in==false')"
 [[ -f "$HOME/.config/claude-launcher/config" ]]; check "config created on first run" $?
-check "status has health" "$(jqt '.data.health.mem_total_kb > 0 and .data.health.disk_total_kb > 0 and (.data.health.load|length)==3 and .data.health.uptime_seconds > 0')"
 check "status has services, none logged in" "$(jqt '.data.services.gitlab.installed and (.data.services.gitlab.logged_in|not) and (.data.services.docker.logged_in|not) and (.data.services.cloudflare.logged_in|not)')"
 
 echo "service logins"
