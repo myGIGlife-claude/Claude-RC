@@ -23,7 +23,7 @@ phone. The release keystore is **never** in this repo; never generate a new one.
 ## Layout
 
 - `app/`: Android app (Kotlin, Compose), package `life.mygig.clauderc`.
-- `server/`: `claude-setup.sh` (the user's interactive menu, unchanged, plus
+- `server/`: `install.sh` (curl-able installer, no clone), `claude-setup.sh` (the user's interactive menu, unchanged, plus
   `--api` JSON mode), `claude-launcher-api` (forced-command runner),
   `install-launcher-key.sh`, and `claude-autostart.sh` (the user's original, keep it
   unchanged).

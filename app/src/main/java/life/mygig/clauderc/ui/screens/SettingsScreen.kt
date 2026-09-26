@@ -88,10 +88,17 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
         if (firstRun) {
             Text("Set up your server", style = MaterialTheme.typography.headlineSmall)
             Text(
-                "1. Copy this phone's public key below.\n" +
-                    "2. Install the server scripts (see server/README.md in the repo), then run:\n" +
-                    "   ~/bin/install-launcher-key.sh '<key>'\n" +
-                    "3. Enter the server details and tap Connect.",
+                "1. Tap Copy install cmd below.\n" +
+                    "2. Paste it into a terminal on your server (SSH in as the user Claude runs as). " +
+                    "It downloads the three server scripts, installs them and authorizes this phone:",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            SelectionContainer {
+                Text(installCmd("'<key>'"), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+            }
+            Text(
+                "Needs curl, jq, tmux, git and flock on the server.\n" +
+                    "3. Enter the server details below and tap Connect.",
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
@@ -100,7 +107,14 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (showKey) {
+                    if (publicKey.isBlank()) {
+                        Text(
+                            "No key yet. Tap Regenerate to create one.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                    } else if (showKey) {
                         SelectionContainer(Modifier.weight(1f)) {
                             Text(publicKey, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
                         }
@@ -112,22 +126,22 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                             modifier = Modifier.weight(1f),
                         )
                     }
-                    TextButton(onClick = {
+                    TextButton(enabled = publicKey.isNotBlank(), onClick = {
                         if (showKey) showKey = false else guard.run("Show this phone's key") { showKey = true }
                     }) { Text(if (showKey) "Hide" else "Show") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = {
+                    Button(enabled = publicKey.isNotBlank(), onClick = {
                         guard.run("Copy this phone's key") { copy(context, "Public key", publicKey) }
                     }) { Text("Copy") }
-                    OutlinedButton(onClick = {
+                    OutlinedButton(enabled = publicKey.isNotBlank(), onClick = {
                         guard.run("Copy this phone's key") {
-                            copy(context, "Install command", "~/bin/install-launcher-key.sh '$publicKey'")
+                            copy(context, "Install command", installCmd("'$publicKey'"))
                         }
                     }) { Text("Copy install cmd") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = {
+                    OutlinedButton(enabled = publicKey.isNotBlank(), onClick = {
                         guard.run("Share this phone's key") { share(context, publicKey) }
                     }) { Text("Share") }
                     TextButton(onClick = { confirmRegen = true }) { Text("Regenerate") }
@@ -298,3 +312,7 @@ private fun share(context: Context, text: String) {
     val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
     context.startActivity(Intent.createChooser(send, "Share public key").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
+
+/** Downloads and installs the server scripts (no clone) and authorizes [key]. Rerun it to update. */
+private fun installCmd(key: String) =
+    "curl -fsSL https://raw.githubusercontent.com/myGIGlife-claude/Claude-RC/main/server/install.sh | bash -s -- $key"
