@@ -16,6 +16,17 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import life.mygig.clauderc.BuildConfig
+import life.mygig.clauderc.api.Updates
+import life.mygig.clauderc.ui.openUrl
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -45,6 +56,8 @@ fun StatusScreen(vm: MainViewModel) {
     val checkedAt by vm.statusCheckedAt.collectAsState()
     val refreshing by vm.statusRefreshing.collectAsState()
     val guard = LocalGuard.current
+    val latest by vm.latest.collectAsState()
+    val context = LocalContext.current
     val login = { kind: LoginKind -> guard.run("Log in on the server") { vm.showLogin(kind) } }
 
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = { vm.refreshStatus() }, modifier = Modifier.fillMaxSize()) {
@@ -53,6 +66,19 @@ fun StatusScreen(vm: MainViewModel) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { Spacer(Modifier.padding(top = 4.dp)) }
+            val l = latest
+            val newApp = l?.appVersionCode?.takeIf { it > BuildConfig.VERSION_CODE }
+            val apkUrl = l?.apkUrl
+            if (newApp != null && apkUrl != null) {
+                item {
+                    StatusRow(
+                        title = "App update available",
+                        state = RowState.WARN,
+                        detail = "Build ${newApp - 100} is ready (you have ${BuildConfig.VERSION_CODE - 100}). Tap to download.",
+                        onClick = { openUrl(context, apkUrl) },
+                    )
+                }
+            }
             val s = status
             if (s == null) {
                 item {
@@ -62,6 +88,11 @@ fun StatusScreen(vm: MainViewModel) {
                     )
                 }
             } else {
+                val required = s.scriptApi < Updates.MIN_SCRIPT_API
+                val newCommit = l?.serverCommit?.takeIf { it != s.commit }
+                if (required || newCommit != null) {
+                    item { ServerUpdateCard(vm, required, newCommit.takeIf { s.scriptApi >= Updates.SELF_UPDATE_API }) }
+                }
                 item {
                     StatusRow(
                         title = "Claude",
@@ -102,17 +133,7 @@ fun StatusScreen(vm: MainViewModel) {
                     )
                 }
                 val svcs = s.services
-                if (svcs == null) {
-                    item {
-                        StatusRow(
-                            title = "More services",
-                            state = RowState.WARN,
-                            detail = "The server's scripts are out of date. Rerun the install command on the server " +
-                                "to connect GitLab, Docker/GHCR and Cloudflare.",
-                            onClick = null,
-                        )
-                    }
-                } else {
+                if (svcs != null) {
                     val services = listOf(
                         Triple("GitLab", svcs.gitlab, LoginKind.GITLAB),
                         Triple("Docker / GHCR", svcs.docker, LoginKind.DOCKER),
@@ -155,6 +176,66 @@ fun StatusScreen(vm: MainViewModel) {
 }
 
 private enum class RowState { OK, WARN, BAD }
+
+/** Newer server scripts on GitHub: update from here ([commit] non-null) or copy the command. */
+@Composable
+private fun ServerUpdateCard(vm: MainViewModel, required: Boolean, commit: String?) {
+    val context = LocalContext.current
+    val guard = LocalGuard.current
+    val busy by vm.busy.collectAsState()
+    var confirm by remember { mutableStateOf(false) }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    if (required) Icons.Filled.Error else Icons.Filled.Warning,
+                    contentDescription = null,
+                    tint = if (required) BadRed else Amber,
+                    modifier = Modifier.size(32.dp),
+                )
+                Spacer(Modifier.width(16.dp))
+                Column {
+                    Text(
+                        if (required) "Server scripts need an update" else "Server scripts update available",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        if (required) "Parts of the app won't work until the server is updated." else "A newer version is on GitHub.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (commit != null) {
+                    Button(onClick = { confirm = true }, enabled = busy == null) { Text("Update now") }
+                }
+                OutlinedButton(onClick = {
+                    copy(context, "Update command", Updates.installCommand())
+                    vm.say("Copied. Paste it into a terminal on the server.")
+                }) { Text("Copy command") }
+            }
+        }
+    }
+    if (confirm && commit != null) {
+        AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text("Update the server scripts?") },
+            text = {
+                Text(
+                    "The server downloads install.sh from GitHub at commit ${commit.take(7)} and runs it. " +
+                        "Running sessions keep going.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirm = false
+                    guard.run("Update the server scripts") { vm.updateServerScripts(commit) }
+                }) { Text("Update") }
+            },
+            dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
+        )
+    }
+}
 
 @Composable
 private fun StatusRow(title: String, state: RowState, detail: String, onClick: (() -> Unit)?) {

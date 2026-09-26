@@ -94,6 +94,10 @@ class LauncherApi(
         call("login-gitlab", stdin = listOf(token.trim(), host.trim()).joinToString("\n"))
     suspend fun loginDocker(registry: String, user: String, token: String): LoginDone =
         call("login-docker", stdin = listOf(registry.trim(), user.trim(), token.trim()).joinToString("\n"))
+    suspend fun selfUpdate(commit: String): JsonObject {
+        require(Regex("^[0-9a-f]{40}$").matches(commit))
+        return call("self-update $commit", timeoutMs = 240_000)
+    }
     suspend fun loginCloudflare(token: String): LoginDone = call("login-cloudflare", stdin = token.trim())
 
     private fun requireName(name: String) {
