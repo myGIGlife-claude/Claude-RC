@@ -48,7 +48,8 @@ jobs:
     env:
       # Signed on pushes to this repo only (never for pull requests).
       HAS_SIGNING: ${{ github.event_name != 'pull_request' && secrets.SIGNING_KEYSTORE_BASE64 != '' }}
-      EXPECTED_CERT_SHA256: cc833ec5438cbf8089cb511ab5612ff28149f0b8a0afcb18b09b020771cf3cd1
+      # Release key if the secrets are set, otherwise the committed app/debug.keystore.
+      EXPECTED_CERT_SHA256: ${{ github.event_name != 'pull_request' && secrets.SIGNING_KEYSTORE_BASE64 != '' && 'cc833ec5438cbf8089cb511ab5612ff28149f0b8a0afcb18b09b020771cf3cd1' || 'ff714e476e95c2d2af85c31a6cc7455011ea74825f182dad9a6a74c4dc1df5c3' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -95,20 +96,15 @@ jobs:
         run: |
           ./gradlew --no-daemon assembleRelease -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME"
           mkdir -p dist
-          if [[ "$HAS_SIGNING" == true ]]; then
-            apk=app/build/outputs/apk/release/app-release.apk
-            # Several build-tools versions are installed; use the newest apksigner.
-            apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)"
-            certs="$("$apksigner" verify --print-certs "$apk")"
-            echo "$certs" | head -n 3
-            # The one release key (see CLAUDE.md). A different key breaks in-place upgrades.
-            grep -q "SHA-256 digest: $EXPECTED_CERT_SHA256" <<<"$certs" ||
-              { echo "::error::APK is not signed with the cLaudeRC release key"; exit 1; }
-            cp "$apk" "dist/cLaudeRC-$VERSION_NAME.apk"
-          else
-            echo "::warning::Signing secrets are not set, so the APK is unsigned and no release is published. See CLAUDE.md."
-            cp app/build/outputs/apk/release/app-release-unsigned.apk "dist/cLaudeRC-$VERSION_NAME-unsigned.apk"
-          fi
+          apk=app/build/outputs/apk/release/app-release.apk
+          # Several build-tools versions are installed; use the newest apksigner.
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)"
+          certs="$("$apksigner" verify --print-certs "$apk")"
+          echo "$certs" | head -n 3
+          # A different key breaks in-place upgrades (see CLAUDE.md).
+          grep -q "SHA-256 digest: $EXPECTED_CERT_SHA256" <<<"$certs" ||
+            { echo "::error::APK is not signed with the expected cLaudeRC key"; exit 1; }
+          cp "$apk" "dist/cLaudeRC-$VERSION_NAME.apk"
           rm -f "$RUNNER_TEMP/release.jks"
 
       - uses: actions/upload-artifact@v4
@@ -117,7 +113,7 @@ jobs:
           path: dist/*.apk
 
       - name: Publish tag release
-        if: env.HAS_SIGNING == 'true' && startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -125,7 +121,7 @@ jobs:
             || gh release upload "$GITHUB_REF_NAME" dist/*.apk --clobber
 
       - name: Publish latest main build
-        if: env.HAS_SIGNING == 'true' && github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION_NAME: ${{ steps.ver.outputs.name }}

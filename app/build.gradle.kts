@@ -9,7 +9,8 @@ plugins {
 
 // Release signing: CI writes the keystore from GitHub Actions secrets and passes
 // its path in SIGNING_KEYSTORE_FILE. Locally, an untracked keystore.properties
-// (storeFile, storePassword, keyAlias, keyPassword) works too.
+// (storeFile, storePassword, keyAlias, keyPassword) works too. Without either,
+// release builds are signed with the committed app/debug.keystore (pre-release only).
 val localSigning = Properties().apply {
     val f = rootProject.file("keystore.properties")
     if (f.exists()) f.inputStream().use { load(it) }
@@ -33,6 +34,12 @@ android {
     }
 
     signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         if (keystorePath != null) {
             create("release") {
                 storeFile = file(keystorePath)
@@ -47,7 +54,7 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.findByName("release")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 
