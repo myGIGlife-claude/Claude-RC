@@ -1,9 +1,16 @@
 package life.mygig.clauderc.ui.screens
 
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Switch
+import androidx.compose.ui.Alignment
+import java.text.DateFormat
+import java.util.Date
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -196,26 +203,58 @@ private fun AwsLogin(vm: MainViewModel, busy: Boolean) {
 
 @Composable
 fun TailDialog(vm: MainViewModel, tail: TailResult) {
+    val updatedAt by vm.tailUpdatedAt.collectAsState()
+    val refreshing by vm.tailRefreshing.collectAsState()
+    var live by remember { mutableStateOf(true) }
     val vScroll = rememberScrollState()
+    // Stay at the bottom as new output arrives.
     LaunchedEffect(tail.text) { vScroll.scrollTo(vScroll.maxValue) }
+    // Live: re-read every 5 s while the window is open.
+    LaunchedEffect(live) {
+        while (live) {
+            delay(5_000)
+            vm.refreshTail(manual = false)
+        }
+    }
     AlertDialog(
         onDismissRequest = { vm.closeTail() },
-        title = { Text(tail.session) },
-        text = {
-            SelectionContainer {
+        title = {
+            Column {
+                Text(tail.session)
                 Text(
-                    tail.text.ifBlank { "(no output yet)" },
-                    fontFamily = FontFamily.Monospace,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier
-                        .heightIn(max = 480.dp)
-                        .verticalScroll(vScroll)
-                        .horizontalScroll(rememberScrollState()),
+                    when {
+                        refreshing -> "Refreshing…"
+                        updatedAt != null ->
+                            "Updated " + DateFormat.getTimeInstance(DateFormat.MEDIUM).format(Date(updatedAt!!)) +
+                                if (live) " · live" else ""
+                        else -> ""
+                    },
+                    style = MaterialTheme.typography.labelMedium,
                 )
             }
         },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (refreshing) LinearProgressIndicator(Modifier.fillMaxWidth())
+                SelectionContainer {
+                    Text(
+                        tail.text.ifBlank { "(no output yet)" },
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier
+                            .heightIn(max = 480.dp)
+                            .verticalScroll(vScroll)
+                            .horizontalScroll(rememberScrollState()),
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(checked = live, onCheckedChange = { live = it })
+                    Text("  Auto-refresh", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
         confirmButton = {
-            TextButton(onClick = { vm.refreshTail() }) { Text("Refresh") }
+            TextButton(onClick = { vm.refreshTail() }, enabled = !refreshing) { Text("Refresh") }
         },
         dismissButton = { TextButton(onClick = { vm.closeTail() }) { Text("Close") } },
     )
