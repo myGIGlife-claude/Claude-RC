@@ -1,5 +1,13 @@
 # cLaudeRC
 
+[![build](https://github.com/myGIGlife-claude/Claude-RC/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/myGIGlife-claude/Claude-RC/actions/workflows/build.yml)
+[![latest build](https://img.shields.io/github/v/release/myGIGlife-claude/Claude-RC?include_prereleases&label=latest%20build)](https://github.com/myGIGlife-claude/Claude-RC/releases/tag/latest-main)
+![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B%20(API%2026)-3DDC84?logo=android&logoColor=white)
+![Kotlin](https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7F52FF?logo=kotlin&logoColor=white)
+![Server](https://img.shields.io/badge/server-bash%20%2B%20OpenSSH-4EAA25?logo=gnubash&logoColor=white)
+
+**[⬇ Download the latest APK](https://github.com/myGIGlife-claude/Claude-RC/releases/tag/latest-main)**
+
 Start and manage Claude Code **Remote Control** sessions on your own server
 from your Android phone — check logins, create a new GitHub project or open an
 existing one, and start Claude in it, without opening an SSH terminal.
@@ -37,7 +45,8 @@ create, stop, logins), theme.
 
 ## Install on the phone
 
-1. Download the APK from the [Releases page](https://github.com/myGIGlife-claude/Claude-RC/releases)
+1. Download the APK from [latest-main](https://github.com/myGIGlife-claude/Claude-RC/releases/tag/latest-main)
+   (every push to `main`) or a tagged [Release](https://github.com/myGIGlife-claude/Claude-RC/releases)
    on the phone and install it (allow installs from your browser when asked).
 2. Open **cLaudeRC**, tap **Copy install cmd**.
 3. On the server, set up `server/` (see [server/README.md](server/README.md)) and paste:
@@ -45,8 +54,9 @@ create, stop, logins), theme.
 4. Back in the app enter host, port, username → **Connect** → compare the
    fingerprint → **Trust**.
 
-Updates install over the old version because every release is signed with the
-same key.
+Updates install over the old version because every build is signed with the
+same key. Until the first real release that is the committed
+`app/debug.keystore`; switching to the release key later needs one uninstall.
 
 ## Security
 
@@ -73,14 +83,15 @@ server tests (including a real sshd), unit tests, and builds a signed release
 APK. Tags `v*` publish a GitHub Release; pushes to `main` update the
 `latest-main` pre-release.
 
-Release signing needs four repository secrets: `SIGNING_KEYSTORE_BASE64`,
-`SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS`, `SIGNING_KEY_PASSWORD`. Without
-them CI still builds, but only an unsigned APK and no release.
+Signing: with no secrets set, CI signs with the committed
+`app/debug.keystore` (pre-release). Setting the four repository secrets
+`SIGNING_KEYSTORE_BASE64`, `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS`,
+`SIGNING_KEY_PASSWORD` switches CI to the release key. CI fails any APK whose
+certificate isn't the one it expects.
 
 Locally:
 
 ```bash
 ./gradlew assembleDebug
-# signed release: put storeFile/storePassword/keyAlias/keyPassword in an untracked keystore.properties
-./gradlew assembleRelease
+./gradlew assembleRelease   # debug-key signed; an untracked keystore.properties switches to the release key
 ```
