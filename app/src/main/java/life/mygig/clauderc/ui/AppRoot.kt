@@ -3,6 +3,7 @@ package life.mygig.clauderc.ui
 import android.app.Activity
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,18 +13,24 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,6 +52,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -155,7 +164,11 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             }
 
             val setupNeeded = !s.isConfigured
+            // Adding another server: back drops the blank one and returns to the others.
+            val canCancelSetup = setupNeeded && s.servers.any { it.isConfigured && it.id != s.activeId }
             BackHandler(enabled = showSettings && !setupNeeded) { vm.openSettings(false) }
+            BackHandler(enabled = canCancelSetup) { vm.removeServer(s.activeId) }
+            var serverMenu by remember { mutableStateOf(false) }
 
             Scaffold(
                 topBar = {
@@ -165,18 +178,47 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                                 Column {
                                     Text("cLaudeRC")
                                     val sub = status?.hostname?.takeIf { it.isNotBlank() } ?: s.host
-                                    if (sub.isNotBlank()) {
-                                        Text(
-                                            sub,
-                                            style = MaterialTheme.typography.labelMedium,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
+                                    if (sub.isNotBlank() && !setupNeeded) {
+                                        Box {
+                                            // Tap the server name to switch or add servers.
+                                            Row(
+                                                Modifier.clickable { serverMenu = true },
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                Text(
+                                                    sub,
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                                Icon(Icons.Filled.ArrowDropDown, contentDescription = "Switch server")
+                                            }
+                                            DropdownMenu(expanded = serverMenu, onDismissRequest = { serverMenu = false }) {
+                                                s.servers.filter { it.isConfigured }.forEach { srv ->
+                                                    DropdownMenuItem(
+                                                        text = { Text("${srv.user}@${srv.host}") },
+                                                        leadingIcon = {
+                                                            if (srv.id == s.activeId) Icon(Icons.Filled.Check, contentDescription = "Current")
+                                                        },
+                                                        onClick = { serverMenu = false; vm.switchServer(srv.id) },
+                                                    )
+                                                }
+                                                DropdownMenuItem(
+                                                    text = { Text("Add server") },
+                                                    leadingIcon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                                                    onClick = { serverMenu = false; vm.addServer() },
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             },
                             navigationIcon = {
-                                if (showSettings && !setupNeeded) {
+                                if (canCancelSetup) {
+                                    IconButton(onClick = { vm.removeServer(s.activeId) }) {
+                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Cancel adding server")
+                                    }
+                                } else if (showSettings && !setupNeeded) {
                                     IconButton(onClick = { vm.openSettings(false) }) {
                                         Icon(
                                             Icons.AutoMirrored.Filled.ArrowBack,

@@ -13,11 +13,17 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import java.util.UUID
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import life.mygig.clauderc.ssh.ServerConfig
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
-data class AppSettings(
+/** One server. They all use this phone's single SSH key. */
+@Serializable
+data class Server(
+    val id: String,
     val host: String = "",
     val port: Int = 22,
     val user: String = "",
@@ -26,8 +32,24 @@ data class AppSettings(
     val hostKeyFingerprint: String = "",
     /** Fingerprint pinned before "Forget host key", so a changed key still gets flagged. */
     val previousFingerprint: String = "",
+) {
+    val isConfigured: Boolean
+        get() = host.isNotBlank() && user.isNotBlank() && hostKeyBlob.isNotBlank()
+}
+
+/** The active server's fields, plus the full list and the app-wide settings. */
+data class AppSettings(
+    val host: String = "",
+    val port: Int = 22,
+    val user: String = "",
+    val hostKeyType: String = "",
+    val hostKeyBlob: String = "",
+    val hostKeyFingerprint: String = "",
+    val previousFingerprint: String = "",
     val appLock: Boolean = false,
     val theme: ThemeMode = ThemeMode.SYSTEM,
+    val servers: List<Server> = emptyList(),
+    val activeId: String = "",
 ) {
     val isConfigured: Boolean
         get() = host.isNotBlank() && user.isNotBlank() && hostKeyBlob.isNotBlank()
@@ -44,6 +66,9 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
 class SettingsStore(private val context: Context) {
 
     private object K {
+        val SERVERS = stringPreferencesKey("servers")
+        val ACTIVE = stringPreferencesKey("active_server")
+        // Before multi-server: one server in these keys. Read once, then removed.
         val HOST = stringPreferencesKey("host")
         val PORT = intPreferencesKey("port")
         val USER = stringPreferencesKey("user")
@@ -57,21 +82,64 @@ class SettingsStore(private val context: Context) {
         val OWNERS_CACHE = stringPreferencesKey("owners_cache")
     }
 
+    private val json = Json { ignoreUnknownKeys = true }
+
+    private fun servers(p: Preferences): List<Server> =
+        p[K.SERVERS]?.let { runCatching { json.decodeFromString<List<Server>>(it) }.getOrNull() }
+            ?: p[K.HOST]?.let { host ->
+                listOf(
+                    Server(
+                        id = "default", host = host, port = p[K.PORT] ?: 22, user = p[K.USER].orEmpty(),
+                        hostKeyType = p[K.HK_TYPE].orEmpty(), hostKeyBlob = p[K.HK_BLOB].orEmpty(),
+                        hostKeyFingerprint = p[K.HK_FP].orEmpty(), previousFingerprint = p[K.HK_PREV_FP].orEmpty(),
+                    ),
+                )
+            }
+            ?: emptyList()
+
+    private fun activeId(p: Preferences, list: List<Server>): String =
+        p[K.ACTIVE]?.takeIf { id -> list.any { it.id == id } } ?: list.firstOrNull()?.id.orEmpty()
+
     val settings: Flow<AppSettings> = context.dataStore.data.map { p ->
+        val list = servers(p)
+        val id = activeId(p, list)
+        val a = list.firstOrNull { it.id == id } ?: Server("")
         AppSettings(
-            host = p[K.HOST].orEmpty(),
-            port = p[K.PORT] ?: 22,
-            user = p[K.USER].orEmpty(),
-            hostKeyType = p[K.HK_TYPE].orEmpty(),
-            hostKeyBlob = p[K.HK_BLOB].orEmpty(),
-            hostKeyFingerprint = p[K.HK_FP].orEmpty(),
-            previousFingerprint = p[K.HK_PREV_FP].orEmpty(),
+            host = a.host,
+            port = a.port,
+            user = a.user,
+            hostKeyType = a.hostKeyType,
+            hostKeyBlob = a.hostKeyBlob,
+            hostKeyFingerprint = a.hostKeyFingerprint,
+            previousFingerprint = a.previousFingerprint,
             appLock = p[K.APP_LOCK] ?: false,
             theme = runCatching { ThemeMode.valueOf(p[K.THEME] ?: "SYSTEM") }.getOrDefault(ThemeMode.SYSTEM),
+            servers = list,
+            activeId = id,
         )
     }
 
     suspend fun current(): AppSettings = settings.first()
+
+    /** Rewrites the server list; [change] gets the list and active id and returns the new active id. */
+    private suspend fun editServers(change: (MutableList<Server>, String) -> String) {
+        context.dataStore.edit { p ->
+            val list = servers(p).toMutableList()
+            val before = activeId(p, list)
+            val after = change(list, before)
+            p[K.SERVERS] = json.encodeToString(list.toList())
+            p[K.ACTIVE] = after
+            listOf(K.HOST, K.PORT, K.USER, K.HK_TYPE, K.HK_BLOB, K.HK_FP, K.HK_PREV_FP).forEach { p.remove(it) }
+            // The cached lists belong to one server.
+            if (after != before) { p.remove(K.REPOS_CACHE); p.remove(K.OWNERS_CACHE) }
+        }
+    }
+
+    /** Changes the active server, creating one if there is none. */
+    private suspend fun editActive(change: (Server) -> Server) = editServers { list, id ->
+        val i = list.indexOfFirst { it.id == id }
+        if (i >= 0) { list[i] = change(list[i]); id } else change(Server(newId())).also { list += it }.id
+    }
 
     /**
      * A different host or port is a different server: drop its pinned key.
@@ -79,36 +147,41 @@ class SettingsStore(private val context: Context) {
      * is still reported as a change. Either way the cached lists are dropped.
      */
     suspend fun saveServer(host: String, port: Int, user: String) {
-        context.dataStore.edit { p ->
-            val newServer = p[K.HOST] != host || (p[K.PORT] ?: 22) != port
-            val newUser = p[K.USER] != user
-            p[K.HOST] = host
-            p[K.PORT] = port
-            p[K.USER] = user
-            if (newServer) {
-                p.remove(K.HK_TYPE); p.remove(K.HK_BLOB); p.remove(K.HK_FP); p.remove(K.HK_PREV_FP)
+        val before = current()
+        editActive { s ->
+            val newServer = s.host != host || s.port != port
+            s.copy(host = host, port = port, user = user).let {
+                if (newServer) it.copy(hostKeyType = "", hostKeyBlob = "", hostKeyFingerprint = "", previousFingerprint = "") else it
             }
-            if (newServer || newUser) {
-                p.remove(K.REPOS_CACHE); p.remove(K.OWNERS_CACHE)
-            }
+        }
+        if (before.host != host || before.port != port || before.user != user) {
+            context.dataStore.edit { p -> p.remove(K.REPOS_CACHE); p.remove(K.OWNERS_CACHE) }
         }
     }
 
-    suspend fun pinHostKey(type: String, blob: String, fingerprint: String) {
-        context.dataStore.edit { p ->
-            p[K.HK_TYPE] = type
-            p[K.HK_BLOB] = blob
-            p[K.HK_FP] = fingerprint
-            p.remove(K.HK_PREV_FP)
-        }
+    suspend fun pinHostKey(type: String, blob: String, fingerprint: String) = editActive {
+        it.copy(hostKeyType = type, hostKeyBlob = blob, hostKeyFingerprint = fingerprint, previousFingerprint = "")
     }
 
-    suspend fun forgetHostKey() {
-        context.dataStore.edit { p ->
-            p[K.HK_FP]?.let { p[K.HK_PREV_FP] = it }
-            p.remove(K.HK_TYPE); p.remove(K.HK_BLOB); p.remove(K.HK_FP)
-        }
+    suspend fun forgetHostKey() = editActive {
+        it.copy(
+            hostKeyType = "", hostKeyBlob = "", hostKeyFingerprint = "",
+            previousFingerprint = it.hostKeyFingerprint.ifEmpty { it.previousFingerprint },
+        )
     }
+
+    /** Adds a blank server and makes it active, so the setup screen shows. */
+    suspend fun addServer() = editServers { list, _ -> Server(newId()).also { list += it }.id }
+
+    suspend fun switchServer(id: String) = editServers { list, cur -> if (list.any { it.id == id }) id else cur }
+
+    /** Removes a server. If it was active, the first configured one becomes active. */
+    suspend fun removeServer(id: String) = editServers { list, cur ->
+        list.removeAll { it.id == id }
+        if (cur != id) cur else (list.firstOrNull { it.isConfigured } ?: list.firstOrNull())?.id.orEmpty()
+    }
+
+    private fun newId() = UUID.randomUUID().toString()
 
     suspend fun setAppLock(on: Boolean) = context.dataStore.edit { it[K.APP_LOCK] = on }
     suspend fun setTheme(mode: ThemeMode) = context.dataStore.edit { it[K.THEME] = mode.name }

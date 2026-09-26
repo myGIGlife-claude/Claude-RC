@@ -65,7 +65,7 @@ the cLaudeRC app). Read `CLAUDE.md` too: its signing rules are strict.
 - **Dependencies:** lint lists newer AndroidX versions. Some need compileSdk 37
   / AGP 9, so upgrade carefully.
 - **Optional from the brief:** the home-screen widget (3 recent projects plus a
-  running count), and a server switcher if a second server is added.
+  running count), (the server switcher is done).
 
 ## Handy commands on the server
 
