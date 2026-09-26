@@ -86,19 +86,37 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (firstRun) {
-            Text("Set up your server", style = MaterialTheme.typography.headlineSmall)
+            Text("Add your server", style = MaterialTheme.typography.headlineSmall)
             Text(
-                "1. Tap Copy install cmd below.\n" +
-                    "2. Paste it into a terminal on your server (SSH in as the user Claude runs as). " +
-                    "It downloads the three server scripts, installs them and authorizes this phone:",
+                "1. On your Linux server, open a terminal as the user Claude should run as.\n" +
+                    "2. Run this one command. It installs the cLaudeRC scripts and session " +
+                    "auto-restore (asks for sudo once) and lets this phone in:",
                 style = MaterialTheme.typography.bodyMedium,
             )
-            SelectionContainer {
-                Text(installCmd("'<key>'"), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SelectionContainer {
+                        Text(
+                            if (publicKey.isBlank()) "No key yet. Tap Regenerate below." else installCmd("'$publicKey'"),
+                            fontFamily = FontFamily.Monospace,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(enabled = publicKey.isNotBlank(), onClick = {
+                            copy(context, "Install command", installCmd("'$publicKey'"))
+                        }) { Text("Copy command") }
+                        OutlinedButton(enabled = publicKey.isNotBlank(), onClick = {
+                            share(context, installCmd("'$publicKey'"))
+                        }) { Text("Share") }
+                    }
+                }
             }
             Text(
-                "Needs curl, jq, tmux, git and flock on the server.\n" +
-                    "3. Enter the server details below and tap Connect.",
+                "3. When it finishes it prints the Host, Port and Username. Enter them below " +
+                    "and tap Connect.\n" +
+                    "4. Check the fingerprint the app shows is one of those it printed, then tap Trust.\n" +
+                    "The server needs curl, jq, tmux, git and flock.",
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
@@ -138,7 +156,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                         guard.run("Copy this phone's key") {
                             copy(context, "Install command", installCmd("'$publicKey'"))
                         }
-                    }) { Text("Copy install cmd") }
+                    }) { Text("Copy install command") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(enabled = publicKey.isNotBlank(), onClick = {

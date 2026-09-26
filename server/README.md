@@ -18,13 +18,15 @@ the phone can run the allowlisted actions below and nothing else — no shell.
 Needs `bash`, `jq`, `tmux`, `git`, `flock` (util-linux) and the CLIs the menu
 already installs: `claude`, `gh`, `aws` (v2).
 
-One command, no clone. It downloads `claude-setup.sh`, `claude-launcher-api`
-and `install-launcher-key.sh`, backs up a changed `~/claude-setup.sh`, and
-installs them (rerun it to update):
+One command, no clone. It downloads `claude-setup.sh`, `claude-launcher-api`,
+`install-launcher-key.sh` and `claude-autostart.sh`, backs up a changed
+`~/claude-setup.sh`, installs them, sets up `claude-autostart` if it isn't
+already (asks for sudo once), and prints what to enter in the app (rerun it to
+update):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/myGIGlife-claude/Claude-RC/main/server/install.sh | bash
-# or, with the key from the app's "Copy install cmd", also authorize the phone:
+# or, with the key (the app's "Copy command" does this), also authorize the phone:
 curl -fsSL https://raw.githubusercontent.com/myGIGlife-claude/Claude-RC/main/server/install.sh | bash -s -- 'ssh-ed25519 AAAA… clauderc'
 ```
 
@@ -40,14 +42,7 @@ somewhere other than `~/.local/bin` or `/usr/local/bin`, add that folder to
 install, the three logins, then New / Existing project with `b`/`q` at every
 prompt.
 
-If `claude-autostart` isn't installed yet (once, as yourself):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/myGIGlife-claude/Claude-RC/main/server/claude-autostart.sh -o /tmp/claude-autostart.sh
-bash /tmp/claude-autostart.sh install
-```
-
-Already installed? Nothing to do — it detects sessions
+`install.sh` sets up `claude-autostart` only if it isn't installed yet. Already installed? Nothing to do — it detects sessions
 by scanning tmux, and `claude-setup.sh` now also tells it to save right after
 a start or stop instead of waiting for the 2-minute timer.
 
@@ -55,8 +50,8 @@ a start or stop instead of waiting for the 2-minute timer.
 
 1. Install the app from the GitHub Releases page and open it. It generates its
    own Ed25519 key on first launch.
-2. In the app, tap **Copy install cmd** and run it on the server (the
-   `install.sh` line above). If the scripts are already installed, just the key
+2. In the app, tap **Copy command** on the setup screen (or **Copy install
+   command** in Settings) and run it on the server (the `install.sh` line above). If the scripts are already installed, just the key
    works too: `~/bin/install-launcher-key.sh 'ssh-ed25519 AAAA… clauderc'`.
 3. That writes:
 
@@ -64,8 +59,9 @@ a start or stop instead of waiting for the 2-minute timer.
    restrict,command="/home/<you>/bin/claude-launcher-api" ssh-ed25519 AAAA… clauderc
    ```
 
-4. In the app enter host, port and username and tap **Connect**. Compare the
-   fingerprint it shows with the server's:
+4. In the app enter the host, port and username the command printed and tap
+   **Connect**. Compare the fingerprint it shows with the ones the command
+   printed, or:
 
    ```bash
    ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub

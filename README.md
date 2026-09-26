@@ -49,15 +49,18 @@ create, stop, logins), theme.
 1. Download the APK from [latest-main](https://github.com/myGIGlife-claude/Claude-RC/releases/tag/latest-main)
    (every push to `main`) or a tagged [Release](https://github.com/myGIGlife-claude/Claude-RC/releases)
    on the phone and install it (allow installs from your browser when asked).
-2. Open **cLaudeRC** and tap **Copy install cmd**.
-3. Paste it into a terminal on the server. It downloads just the three server
-   scripts (no clone), installs them and authorizes the phone's key:
+2. Open **cLaudeRC**. The setup screen shows one command with this phone's key
+   already in it. Tap **Copy command** (or **Share** to send it to your computer).
+3. Run it in a terminal on the server, as the user Claude should run as:
    ```bash
    curl -fsSL https://raw.githubusercontent.com/myGIGlife-claude/Claude-RC/main/server/install.sh | bash -s -- 'ssh-ed25519 AAAA… clauderc'
    ```
+   It downloads the server scripts (no clone), sets up `claude-autostart`
+   (session restore after reboot; asks for sudo once), authorizes the phone,
+   and prints the Host, Port, Username and host-key fingerprints.
    Needs `curl`, `jq`, `tmux`, `git`, `flock`. Run it again any time to update.
-4. Back in the app enter host, port, username → **Connect** → compare the
-   fingerprint → **Trust**.
+4. In the app enter Host, Port, Username → **Connect** → check the fingerprint
+   is one the command printed → **Trust**.
 
 Updates install over the old version because every build is signed with the
 same key. Until the first real release that is the committed
