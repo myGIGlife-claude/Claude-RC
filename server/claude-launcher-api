@@ -19,7 +19,7 @@ CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/claude-launcher/config"
 PROJECT_RE='^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$'
 REPO_RE='^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._][A-Za-z0-9._-]*$'
 OWNER_RE='^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'
-KNOWN="status owners repos sessions new open clone-status start stop tail login-claude-start login-claude-code login-claude-cancel login-github login-aws-keys login-aws-sso-start login-gitlab login-docker login-cloudflare self-update"
+KNOWN="status owners repos sessions new open clone-status start stop tail login-claude-start login-claude-code login-claude-cancel login-github login-aws-keys login-aws-sso-start login-gitlab login-docker login-cloudflare self-update install-cli"
 TOKEN_RE='^[A-Za-z0-9._/=-]{1,200}$'
 
 mkdir -p "$STATE_DIR" 2>/dev/null
@@ -95,6 +95,9 @@ case "$sub" in
   open)
     ((nargs >= 1 && nargs <= 2)) && [[ "${args[0]}" =~ $REPO_RE ]] || deny "$sub"
     ((nargs == 1)) || [[ "${args[1]}" == --start ]] || deny "$sub"
+    ;;
+  install-cli)
+    ((nargs == 1)) && [[ "${args[0]}" == glab ]] || deny "$sub"
     ;;
   self-update)
     ((nargs == 1)) && [[ "${args[0]}" =~ ^[0-9a-f]{40}$ ]] || deny "$sub"
