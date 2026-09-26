@@ -11,7 +11,8 @@ data class StatusData(
     val hostname: String = "",
     val version: String = "",
     val health: Health? = null,
-    val services: Services = Services(),
+    /** Missing when the server's scripts predate these services. */
+    val services: Services? = null,
 )
 
 @Serializable
