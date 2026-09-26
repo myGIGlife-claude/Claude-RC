@@ -56,12 +56,18 @@ object SshRunner {
      * Connect once without authenticating, only to learn the server's host key
      * so the user can compare the fingerprint before trusting it.
      */
-    fun probeHostKey(host: String, port: Int, user: String): HostKeyInfo {
+    fun probeHostKey(host: String, port: Int, user: String, preferType: String? = null): HostKeyInfo {
         val jsch = JSch()
         val recorder = RecordingRepository()
         jsch.hostKeyRepository = recorder
         val session = jsch.getSession(user.ifBlank { "probe" }, host, port)
         session.setConfig("StrictHostKeyChecking", "yes")
+        // Ask for the pinned key type first, so a server that has *added* a
+        // key type isn't mistaken for one whose key changed.
+        if (preferType != null) {
+            val algs = if (preferType == "ssh-rsa") "rsa-sha2-512,rsa-sha2-256" else preferType
+            session.setConfig("server_host_key", algs + "," + JSch.getConfig("server_host_key"))
+        }
         session.setConfig("PreferredAuthentications", "none")
         try {
             session.connect(CONNECT_TIMEOUT_MS)

@@ -64,7 +64,7 @@ fun SessionsScreen(vm: MainViewModel) {
                         if (s.dir.isNotBlank()) Text(s.dir, style = MaterialTheme.typography.bodySmall)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
                             Button(onClick = { openInClaude(context) }) { Text("Open in Claude") }
-                            OutlinedButton(onClick = { vm.loadTail(s.project) }) { Text("Tail") }
+                            OutlinedButton(onClick = { vm.loadTail(s.name) }) { Text("Tail") }
                             TextButton(onClick = { confirmStop = s }) { Text("Stop") }
                         }
                     }
@@ -81,7 +81,7 @@ fun SessionsScreen(vm: MainViewModel) {
             confirmButton = {
                 TextButton(onClick = {
                     confirmStop = null
-                    guard.run("Stop ${s.project}") { vm.stopProject(s.project) }
+                    guard.run("Stop ${s.project}") { vm.stopProject(s.name) }
                 }) { Text("Stop") }
             },
             dismissButton = { TextButton(onClick = { confirmStop = null }) { Text("Cancel") } },

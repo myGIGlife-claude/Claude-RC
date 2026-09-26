@@ -1,5 +1,7 @@
 package life.mygig.clauderc.ui
 
+import android.app.Activity
+import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,14 +42,17 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -103,9 +108,19 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
         return
     }
 
+    // With App lock on, keep app content out of the Recents screen and screenshots.
+    val view = LocalView.current
+    SideEffect {
+        val window = (view.context as? Activity)?.window ?: return@SideEffect
+        if (s.appLock) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    }
+
     ClaudeRcTheme(s.theme) {
         CompositionLocalProvider(LocalGuard provides guard, LocalAppLock provides lock) {
             val context = LocalContext.current
+            // The snackbar collector below lives for the whole screen; always use the current guard.
+            val currentGuard by rememberUpdatedState(guard)
             val snackbar = remember { SnackbarHostState() }
             val busy by vm.busy.collectAsState()
             val tab by vm.tab.collectAsState()
@@ -117,6 +132,8 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
 
             LaunchedEffect(Unit) {
                 vm.messages.collect { m ->
+                    // Newest message wins; don't queue stale ones.
+                    snackbar.currentSnackbarData?.dismiss()
                     val r = snackbar.showSnackbar(
                         m.text,
                         actionLabel = m.actionLabel,
@@ -125,7 +142,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                     )
                     if (r == SnackbarResult.ActionPerformed) {
                         when (val f = m.fix) {
-                            is Fix.Login -> guard.run("Log in on the server") { vm.showLogin(f.kind) }
+                            is Fix.Login -> currentGuard.run("Log in on the server") { vm.showLogin(f.kind) }
                             is Fix.GoTo -> vm.selectTab(f.tab)
                             is Fix.StartAnyway -> vm.startProject(f.project)
                             is Fix.Retry -> f.block()
@@ -213,7 +230,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
 
             login?.let { LoginDialog(vm, it) }
             tail?.let { TailDialog(vm, it) }
-            pendingKey?.let { HostKeyDialog(vm, it, s.hostKeyFingerprint) }
+            pendingKey?.let { HostKeyDialog(vm, it, s.hostKeyFingerprint.ifEmpty { s.previousFingerprint }) }
         }
     }
 }

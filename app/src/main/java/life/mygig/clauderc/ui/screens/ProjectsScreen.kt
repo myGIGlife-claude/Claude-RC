@@ -14,7 +14,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -24,6 +23,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -123,14 +123,25 @@ private fun Badges(repo: Repo) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Badge(if (repo.private) "Private" else "Public")
         if (repo.isOrg) Badge("Org")
-        if (repo.local) Badge("On server")
+        if (repo.cloning) Badge("Cloning…") else if (repo.local) Badge("On server")
         if (repo.running) Badge("Running")
     }
 }
 
+/** A plain label (not a button) so screen readers don't announce it as tappable. */
 @Composable
 private fun Badge(text: String) {
-    AssistChip(onClick = {}, label = { Text(text, style = MaterialTheme.typography.labelSmall) })
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        modifier = Modifier.padding(top = 4.dp),
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+        )
+    }
 }
 
 @Composable
@@ -144,12 +155,15 @@ private fun RepoActions(vm: MainViewModel, repo: Repo, onDismiss: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     when {
+                        repo.cloning -> "Still cloning on the server. You'll get a message when it's done."
                         repo.running -> "Claude is running for this project."
                         repo.local -> "The folder is on the server."
                         else -> "Not on the server yet — Open will clone it."
                     },
                 )
-                if (!repo.running) {
+                if (repo.cloning) {
+                    // Nothing to do until the clone finishes.
+                } else if (!repo.running) {
                     Button(onClick = { vm.openRepo(repo, start = true); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
                         Text(if (repo.local) "Pull & start Claude" else "Clone & start Claude")
                     }

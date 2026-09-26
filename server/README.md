@@ -62,7 +62,7 @@ a start or stop instead of waiting for the 2-minute timer.
    That writes:
 
    ```
-   command="/home/<you>/bin/claude-launcher-api",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-user-rc ssh-ed25519 AAAA… clauderc
+   restrict,command="/home/<you>/bin/claude-launcher-api" ssh-ed25519 AAAA… clauderc
    ```
 
 4. In the app enter host, port and username and tap **Connect**. Compare the
@@ -90,14 +90,15 @@ Exit code 0 = success, 1 = handled error, 2 = bad arguments.
 | --- | --- | --- |
 | `status` | — | `claude.logged_in`, `github.{logged_in,user,missing_scopes}`, `aws.{logged_in,identity,profile,sso_configured}`, `hostname`, `version` |
 | `owners` | — | `user`, `orgs[{login}]`, `default_owner` |
-| `repos` | `[--refresh]` | `repos[{full_name,name,owner,owner_type,private,pushed_at,local,running}]` (cached for `REPOS_CACHE_TTL`) |
+| `repos` | `[--refresh]` | `repos[{full_name,name,owner,owner_type,private,pushed_at,local,running,cloning}]` (cached for `REPOS_CACHE_TTL`). `local` means the folder's `origin` is this repo. |
 | `sessions` | — | `sessions[{name,project,dir,started_at,attached,uptime_seconds}]` |
-| `new` | `<name> --owner <owner> --visibility private\|public [--start]` | `repo`, `url`, `path`, `session` |
-| `open` | `<owner/repo> [--start]` | `path`, `action` (`cloned`, `pulled`, `not_updated`, `cloning`), `pending`, `session` |
-| `start` | `<project>` | `session`, `already_running` |
-| `stop` | `<project>` | `session`, `stopped` |
-| `tail` | `<project> [--lines N]` | `text` (last N lines, default 40, max 200) |
-| `login-claude-start` | — | `url` |
+| `new` | `<name> --owner <owner> --visibility private\|public [--start]` | `repo`, `url`, `path`, `visibility`, `session` |
+| `open` | `<owner/repo> [--start]` | `repo`, `path`, `action` (`cloned`, `pulled`, `not_updated`, `cloning`), `pending`, `note`, `session` |
+| `clone-status` | `<owner/repo>` | `state` (`running`, `done`, `failed`, `none`), `message`, `session`. A finished result is reported once. |
+| `start` | `<project>` | `session`, `path`, `already_running` |
+| `stop` | `<project or session>` | `session`, `stopped` |
+| `tail` | `<project or session> [--lines N]` | `session`, `lines`, `text` (last N lines, default 40, max 200) |
+| `login-claude-start` | — | `url`, `session` |
 | `login-claude-code` | code on stdin | `logged_in` |
 | `login-claude-cancel` | — | `cancelled` |
 | `login-github` | token on stdin | `user` (or error `missing_scopes` with `missing`) |
@@ -112,6 +113,9 @@ Error codes: `not_logged_in_claude`, `not_logged_in_github`, `missing_scopes`,
 can't fast-forward (it still starts the session, like the menu).
 
 Notes:
+
+- Project, repo and owner names never start with `-` (so they can't be read
+  as command-line options); the runner and the script both reject them.
 
 - `new` and `open` take a `flock` lock; a second call while one runs gets `busy`.
 - A clone that takes longer than ~45 s keeps running in the background

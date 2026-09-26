@@ -74,7 +74,7 @@ check "ssh ... 'status; id' is forbidden" '[[ "$OUT" == *"\"code\":\"forbidden\"
 OUT="$("${SSH[@]}" status </dev/null 2>&1 || true)"
 check "ssh ... status works" '[[ "$OUT" == "{\"ok\":true"* ]]'
 OUT="$(cat "$THOME/.ssh/authorized_keys")"
-check "authorized_keys pins runner + no-pty/forwarding" '[[ "$OUT" == "command=\"$THOME/bin/claude-launcher-api\",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-user-rc ssh-ed25519 "* ]]'
+check "authorized_keys: restrict + forced runner" '[[ "$OUT" == "restrict,command=\"$THOME/bin/claude-launcher-api\" ssh-ed25519 "* ]]'
 
 if [[ "${1:-}" == "--app" ]]; then
   echo "App SSH code (SshIntegrationTest)"

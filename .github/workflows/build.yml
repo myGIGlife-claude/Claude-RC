@@ -41,11 +41,13 @@ jobs:
 
   android:
     runs-on: ubuntu-latest
-    needs: [secrets-scan]
+    # Nothing is built or released unless the server tests pass too.
+    needs: [secrets-scan, server]
     permissions:
       contents: write
     env:
-      HAS_SIGNING: ${{ secrets.SIGNING_KEYSTORE_BASE64 != '' }}
+      # Signed on pushes to this repo only (never for pull requests).
+      HAS_SIGNING: ${{ github.event_name != 'pull_request' && secrets.SIGNING_KEYSTORE_BASE64 != '' }}
       EXPECTED_CERT_SHA256: cc833ec5438cbf8089cb511ab5612ff28149f0b8a0afcb18b09b020771cf3cd1
     steps:
       - uses: actions/checkout@v5
@@ -61,13 +63,16 @@ jobs:
         id: ver
         run: |
           # versionCode only ever goes up, so each build installs over the last.
+          # (It's 100 + this workflow's run number: don't rename build.yml.)
           echo "code=$((100 + GITHUB_RUN_NUMBER))" >> "$GITHUB_OUTPUT"
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo "name=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            name="${GITHUB_REF_NAME#v}"
           else
             base="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null | sed 's/^v//')"
-            echo "name=${base:-0.1.0}-build.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+            name="${base:-0.1.0}-build.${GITHUB_RUN_NUMBER}"
           fi
+          # Tag names can hold shell characters; keep only safe ones.
+          echo "name=$(tr -cd 'A-Za-z0-9._-' <<<"$name")" >> "$GITHUB_OUTPUT"
 
       - name: Unit tests
         run: ./gradlew --no-daemon testDebugUnitTest
@@ -85,21 +90,24 @@ jobs:
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+          VERSION_CODE: ${{ steps.ver.outputs.code }}
+          VERSION_NAME: ${{ steps.ver.outputs.name }}
         run: |
-          ./gradlew --no-daemon assembleRelease \
-            -PversionCode=${{ steps.ver.outputs.code }} -PversionName=${{ steps.ver.outputs.name }}
+          ./gradlew --no-daemon assembleRelease -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME"
           mkdir -p dist
           if [[ "$HAS_SIGNING" == true ]]; then
             apk=app/build/outputs/apk/release/app-release.apk
-            certs="$("$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "$apk")"
+            # Several build-tools versions are installed; use the newest apksigner.
+            apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)"
+            certs="$("$apksigner" verify --print-certs "$apk")"
             echo "$certs" | head -n 3
             # The one release key (see CLAUDE.md). A different key breaks in-place upgrades.
             grep -q "SHA-256 digest: $EXPECTED_CERT_SHA256" <<<"$certs" ||
               { echo "::error::APK is not signed with the cLaudeRC release key"; exit 1; }
-            cp "$apk" "dist/cLaudeRC-${{ steps.ver.outputs.name }}.apk"
+            cp "$apk" "dist/cLaudeRC-$VERSION_NAME.apk"
           else
             echo "::warning::Signing secrets are not set, so the APK is unsigned and no release is published. See CLAUDE.md."
-            cp app/build/outputs/apk/release/app-release-unsigned.apk "dist/cLaudeRC-${{ steps.ver.outputs.name }}-unsigned.apk"
+            cp app/build/outputs/apk/release/app-release-unsigned.apk "dist/cLaudeRC-$VERSION_NAME-unsigned.apk"
           fi
           rm -f "$RUNNER_TEMP/release.jks"
 
@@ -120,8 +128,9 @@ jobs:
         if: env.HAS_SIGNING == 'true' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION_NAME: ${{ steps.ver.outputs.name }}
         run: |
           gh release delete latest-main --cleanup-tag --yes || true
           gh release create latest-main dist/*.apk --prerelease --target "$GITHUB_SHA" \
-            --title "Latest main build (${{ steps.ver.outputs.name }})" \
+            --title "Latest main build ($VERSION_NAME)" \
             --notes "Built from $GITHUB_SHA. Tagged releases (v*) are the stable ones."

@@ -14,9 +14,12 @@ LOG_FILE="$STATE_DIR/api.log"
 LOG_MAX_BYTES=1048576
 CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/claude-launcher/config"
 
-PROJECT_RE='^[A-Za-z0-9._-]{1,100}$'
-REPO_RE='^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$'
-OWNER_RE='^[A-Za-z0-9-]{1,39}$'
+# Names never start with '-', so they can't be read as an option by git, gh,
+# tmux or claude.
+PROJECT_RE='^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$'
+REPO_RE='^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._][A-Za-z0-9._-]*$'
+OWNER_RE='^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'
+KNOWN="status owners repos sessions new open clone-status start stop tail login-claude-start login-claude-code login-claude-cancel login-github login-aws-keys login-aws-sso-start"
 TOKEN_RE='^[A-Za-z0-9._/=-]{1,200}$'
 
 mkdir -p "$STATE_DIR" 2>/dev/null
@@ -32,6 +35,8 @@ log_line() {
 
 deny() {
   local sub="${1:-?}" code="${2:-forbidden}" msg="${3:-This action is not allowed.}"
+  # Only log names we know; an unknown first word could be anything (even a token).
+  [[ " $KNOWN " == *" $sub "* || "$sub" == "("*")" ]] || sub="(unknown)"
   # Hand-built on purpose: this path must work even if jq is missing, and the
   # message is always one of the fixed strings in this file.
   printf '{"ok":false,"error":{"code":"%s","message":"%s"}}\n' "$code" "$msg"
@@ -91,8 +96,11 @@ case "$sub" in
     ((nargs >= 1 && nargs <= 2)) && [[ "${args[0]}" =~ $REPO_RE ]] || deny "$sub"
     ((nargs == 1)) || [[ "${args[1]}" == --start ]] || deny "$sub"
     ;;
+  clone-status)
+    ((nargs == 1)) && [[ "${args[0]}" =~ $REPO_RE ]] || deny "$sub"
+    ;;
   new)
-    [[ "${args[0]:-}" =~ $PROJECT_RE && "${args[0]}" != -* ]] || deny "$sub"
+    [[ "${args[0]:-}" =~ $PROJECT_RE ]] || deny "$sub"
     i=1 seen_owner=0 seen_vis=0 seen_start=0
     while ((i < nargs)); do
       case "${args[$i]}" in
@@ -118,6 +126,12 @@ esac
 
 out="$("$SETUP_SCRIPT" --api "$sub" "${args[@]}" 2>/dev/null)"
 rc=$?
+
+# The phone always gets exactly one JSON object, even if the script died early
+# (e.g. a broken config file).
+if command -v jq >/dev/null 2>&1 && ! jq -e 'type == "object" and has("ok")' >/dev/null 2>&1 <<<"$out"; then
+  deny "$sub" internal "claude-setup.sh gave no valid answer (exit $rc). Check ~/.config/claude-launcher/config." 1
+fi
 printf '%s\n' "$out"
 
 code="ok"

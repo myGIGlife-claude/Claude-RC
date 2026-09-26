@@ -3,13 +3,16 @@ package life.mygig.clauderc.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -63,8 +66,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun lockApp() { _unlocked.value = false }
     fun markUnlocked() { _unlocked.value = true }
 
-    private val _busy = MutableStateFlow<String?>(null)
-    val busy = _busy.asStateFlow()
+    // Every running action has an entry, so one finishing doesn't clear another's spinner.
+    private val actionIds = AtomicLong()
+    private val running = MutableStateFlow<Map<Long, String>>(emptyMap())
+    val busy: StateFlow<String?> =
+        running.map { it.values.lastOrNull() }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     private val _messages = Channel<UiMessage>(Channel.BUFFERED)
     val messages = _messages.receiveAsFlow()
@@ -83,6 +89,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _owners = MutableStateFlow<OwnersData?>(null)
     val owners = _owners.asStateFlow()
+    private val _ownersError = MutableStateFlow<String?>(null)
+    val ownersError = _ownersError.asStateFlow()
 
     private val _sessions = MutableStateFlow<List<Session>>(emptyList())
     val sessions = _sessions.asStateFlow()
@@ -99,6 +107,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val login = _login.asStateFlow()
     private val _loginUrl = MutableStateFlow<LoginUrl?>(null)
     val loginUrl = _loginUrl.asStateFlow()
+    /** An error from a login call, shown inside the open login dialog. */
+    private val _loginError = MutableStateFlow<String?>(null)
+    val loginError = _loginError.asStateFlow()
+    private var ssoPoller: Job? = null
 
     private val _publicKey = MutableStateFlow("")
     val publicKey = _publicKey.asStateFlow()
@@ -108,9 +120,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _showSettings = MutableStateFlow(false)
     val showSettings = _showSettings.asStateFlow()
 
+    private val clonePollers = mutableMapOf<String, Job>()
+
     init {
         viewModelScope.launch {
-            _publicKey.value = withContext(Dispatchers.Default) { keys.publicKey() }
+            _publicKey.value = try {
+                withContext(Dispatchers.Default) { keys.publicKey() }
+            } catch (e: Exception) {
+                say("This phone's SSH key couldn't be read. Regenerate it in Settings.", "Settings", Fix.OpenSettings)
+                ""
+            }
             store.reposCache()?.let { cached ->
                 runCatching { json.decodeFromString<List<Repo>>(cached) }.getOrNull()?.let { _repos.value = it }
             }
@@ -129,15 +148,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Runs a server call with the spinner on and maps any failure to a friendly message. */
-    private fun action(label: String, block: suspend () -> Unit) {
+    private fun action(label: String, onError: ((ApiException) -> Unit)? = null, block: suspend () -> Unit) {
         viewModelScope.launch {
-            _busy.value = label
+            val id = actionIds.incrementAndGet()
+            running.value = running.value + (id to label)
             try {
                 block()
             } catch (e: ApiException) {
-                report(e)
+                if (onError != null) onError(e) else report(e)
             } finally {
-                _busy.value = null
+                running.value = running.value - id
             }
         }
     }
@@ -154,6 +174,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---- Status ---------------------------------------------------------------
 
     fun refreshStatus() {
+        if (_statusRefreshing.value) return
         viewModelScope.launch {
             _statusRefreshing.value = true
             try {
@@ -167,9 +188,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun testConnection() = action("Testing connection…") {
+        val s = api.status()
+        _status.value = s
+        _statusCheckedAt.value = System.currentTimeMillis()
+        say("Connected to ${s.hostname.ifBlank { "the server" }}")
+    }
+
     // ---- Projects -------------------------------------------------------------
 
     fun refreshRepos(force: Boolean) {
+        if (_reposRefreshing.value) return
         viewModelScope.launch {
             _reposRefreshing.value = true
             try {
@@ -186,38 +215,74 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadOwners() {
         viewModelScope.launch {
+            _ownersError.value = null
             try {
                 val o = api.owners()
                 _owners.value = o
                 store.setOwnersCache(json.encodeToString(o))
             } catch (e: ApiException) {
-                report(e) { loadOwners() }
+                _ownersError.value = friendly(e).first
             }
         }
     }
 
-    fun openRepo(repo: Repo, start: Boolean) = action(if (repo.local) "Updating ${repo.name}…" else "Cloning ${repo.name}…") {
-        try {
-            val r = api.open(repo.fullName, start)
-            val what = when (r.action) {
-                "cloned" -> "Cloned"
-                "pulled" -> "Pulled latest for"
-                "not_updated" -> "Couldn't fast-forward (check it manually):"
-                "cloning" -> "Still cloning"
-                else -> "Ready:"
-            }
-            val started = r.session?.let { " — Claude started" } ?: ""
-            if (r.pending) {
-                say("$what ${repo.name} in the background. Check Projects in a minute.")
+    fun openRepo(repo: Repo, start: Boolean) = action(
+        if (repo.local) "Updating ${repo.name}…" else "Cloning ${repo.name}…",
+        onError = { e ->
+            // "Start anyway" only makes sense if they asked to start.
+            if (e.code == Codes.FOLDER_DIRTY && !start) {
+                say("The folder has uncommitted changes, so it wasn't updated.")
             } else {
-                say(
-                    "$what ${repo.name}$started",
-                    if (r.session != null) "Open in Claude" else null,
-                    if (r.session != null) Fix.OpenClaude else null,
-                )
+                report(e)
             }
-        } finally {
             refreshRepos(false)
+        },
+    ) {
+        val r = api.open(repo.fullName, start)
+        val what = when (r.action) {
+            "cloned" -> "Cloned"
+            "pulled" -> "Pulled latest for"
+            "not_updated" -> "Couldn't fast-forward (check it manually):"
+            "cloning" -> "Still cloning"
+            else -> "Ready:"
+        }
+        if (r.pending) {
+            say("$what ${repo.name} in the background. You'll get a message when it's done.")
+            watchClone(repo.fullName, repo.name)
+        } else {
+            say(
+                "$what ${repo.name}" + (r.session?.let { " — Claude started" } ?: ""),
+                if (r.session != null) "Open in Claude" else null,
+                if (r.session != null) Fix.OpenClaude else null,
+            )
+        }
+        refreshRepos(false)
+    }
+
+    /** Follow a clone that outlived the SSH call until it finishes or fails. */
+    private fun watchClone(fullName: String, name: String) {
+        clonePollers[fullName]?.cancel()
+        clonePollers[fullName] = viewModelScope.launch {
+            repeat(180) {
+                delay(5_000)
+                val c = runCatching { api.cloneStatus(fullName) }.getOrNull() ?: return@repeat
+                when (c.state) {
+                    "done" -> {
+                        say(
+                            "Cloned $name" + (c.session?.let { " — Claude started" } ?: ""),
+                            if (c.session != null) "Open in Claude" else null,
+                            if (c.session != null) Fix.OpenClaude else null,
+                        )
+                        refreshRepos(false); refreshSessions()
+                        return@launch
+                    }
+                    "failed", "none" -> {
+                        say("Clone of $name failed" + (c.message?.let { ": $it" } ?: "."))
+                        refreshRepos(false)
+                        return@launch
+                    }
+                }
+            }
         }
     }
 
@@ -231,20 +296,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         refreshSessions(); refreshRepos(false)
     }
 
-    fun stopProject(project: String) = action("Stopping $project…") {
-        val r = api.stop(project)
-        say(if (r.stopped) "Stopped $project" else "$project wasn't running")
+    /** [target] is a project or tmux session name; the server accepts either. */
+    fun stopProject(target: String) = action("Stopping $target…") {
+        val r = api.stop(target)
+        say(if (r.stopped) "Stopped $target" else "$target wasn't running")
         refreshSessions(); refreshRepos(false)
     }
 
-    private var tailProject: String? = null
+    private var tailTarget: String? = null
 
-    fun loadTail(project: String) = action("Reading log…") {
-        tailProject = project
-        _tail.value = api.tail(project, 80)
+    fun loadTail(target: String) = action("Reading log…") {
+        tailTarget = target
+        _tail.value = api.tail(target, 80)
     }
 
-    fun refreshTail() { tailProject?.let { loadTail(it) } }
+    fun refreshTail() { tailTarget?.let { loadTail(it) } }
 
     fun closeTail() { _tail.value = null }
 
@@ -264,6 +330,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---- Sessions ---------------------------------------------------------------
 
     fun refreshSessions() {
+        if (_sessionsRefreshing.value) return
         viewModelScope.launch {
             _sessionsRefreshing.value = true
             try {
@@ -279,54 +346,80 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---- Logins -----------------------------------------------------------------
 
     fun showLogin(kind: LoginKind?) {
-        if (kind == null && _login.value == LoginKind.CLAUDE && _loginUrl.value != null) {
+        if (_login.value == LoginKind.CLAUDE && _loginUrl.value != null && kind != LoginKind.CLAUDE) {
             viewModelScope.launch { runCatching { api.loginClaudeCancel() } }
         }
+        ssoPoller?.cancel()
         _loginUrl.value = null
+        _loginError.value = null
         _login.value = kind
     }
 
-    fun claudeLoginStart() = action("Starting Claude login…") {
-        _loginUrl.value = api.loginClaudeStart()
+    /** Like [action], but errors show inside the login dialog while it's open. */
+    private fun loginAction(kind: LoginKind, label: String, block: suspend () -> Unit) {
+        _loginError.value = null
+        action(label, onError = { e ->
+            if (_login.value == kind) {
+                _loginError.value = friendly(e).first + (e.pane?.takeIf { it.isNotBlank() }?.let { "\n\n$it" } ?: "")
+            } else {
+                report(e)
+            }
+        }, block = block)
     }
 
-    fun claudeLoginCode(code: String) = action("Checking code…") {
+    fun claudeLoginStart() = loginAction(LoginKind.CLAUDE, "Starting Claude login…") {
+        val u = api.loginClaudeStart()
+        if (_login.value == LoginKind.CLAUDE) _loginUrl.value = u
+    }
+
+    fun claudeLoginCode(code: String) = loginAction(LoginKind.CLAUDE, "Checking code…") {
         api.loginClaudeCode(code)
-        loginDone("Claude is logged in")
+        loginDone(LoginKind.CLAUDE, "Claude is logged in")
     }
 
-    fun githubLogin(token: String) = action("Saving GitHub token…") {
+    fun githubLogin(token: String) = loginAction(LoginKind.GITHUB, "Saving GitHub token…") {
         val r = api.loginGithub(token)
-        loginDone("GitHub logged in as ${r.user}")
+        loginDone(LoginKind.GITHUB, "GitHub logged in as ${r.user}")
         loadOwners(); refreshRepos(true)
     }
 
-    fun awsKeysLogin(id: String, secret: String, region: String) = action("Saving AWS keys…") {
+    fun awsKeysLogin(id: String, secret: String, region: String) = loginAction(LoginKind.AWS, "Saving AWS keys…") {
         val r = api.loginAwsKeys(id, secret, region)
-        loginDone("AWS logged in" + (r.account?.let { " (account $it)" } ?: ""))
+        loginDone(LoginKind.AWS, "AWS logged in" + (r.account?.let { " (account $it)" } ?: ""))
     }
 
-    fun awsSsoStart() = action("Starting AWS SSO…") {
-        _loginUrl.value = api.loginAwsSsoStart()
+    fun awsSsoStart() = loginAction(LoginKind.AWS, "Starting AWS SSO…") {
+        val u = api.loginAwsSsoStart()
+        if (_login.value != LoginKind.AWS) return@loginAction
+        _loginUrl.value = u
         // The user approves in the browser; poll status until AWS shows up.
-        viewModelScope.launch {
-            repeat(40) {
+        // Device codes last about 10 minutes.
+        ssoPoller?.cancel()
+        ssoPoller = viewModelScope.launch {
+            repeat(150) {
                 delay(4_000)
                 if (_login.value != LoginKind.AWS) return@launch
                 val s = runCatching { api.status() }.getOrNull() ?: return@repeat
                 _status.value = s
                 _statusCheckedAt.value = System.currentTimeMillis()
                 if (s.aws.loggedIn) {
-                    loginDone("AWS SSO login complete")
+                    loginDone(LoginKind.AWS, "AWS SSO login complete")
                     return@launch
                 }
+            }
+            if (_login.value == LoginKind.AWS) {
+                _loginUrl.value = null
+                _loginError.value = "The SSO code expired before it was approved. Start the SSO login again."
             }
         }
     }
 
-    private fun loginDone(text: String) {
-        _login.value = null
-        _loginUrl.value = null
+    private fun loginDone(kind: LoginKind, text: String) {
+        if (_login.value == kind) {
+            _login.value = null
+            _loginUrl.value = null
+            _loginError.value = null
+        }
         say(text)
         refreshStatus()
     }
@@ -337,10 +430,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val pendingHostKey = _pendingHostKey.asStateFlow()
 
     fun saveServerAndProbe(host: String, port: Int, user: String) = action("Contacting $host…") {
-        store.saveServer(host.trim(), port, user.trim())
+        val before = store.current()
+        val h = host.trim()
+        val u = user.trim()
+        store.saveServer(h, port, u)
+        if (before.host != h || before.port != port || before.user != u) clearServerState()
+        val pinnedType = store.current().hostKeyType.ifBlank { null }
         val info = withContext(Dispatchers.IO) {
             try {
-                SshRunner.probeHostKey(host.trim(), port, user.trim())
+                SshRunner.probeHostKey(h, port, u, preferType = pinnedType)
             } catch (e: Exception) {
                 throw ApiException(Codes.NETWORK, e.message ?: "Could not reach the server")
             }
@@ -352,6 +450,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         } else {
             _pendingHostKey.value = info
         }
+    }
+
+    /** Forget everything shown from the previous server. */
+    private fun clearServerState() {
+        _status.value = null
+        _statusCheckedAt.value = null
+        _repos.value = emptyList()
+        _owners.value = null
+        _ownersError.value = null
+        _sessions.value = emptyList()
+        _newResult.value = null
+        _tail.value = null
+        tailTarget = null
+        clonePollers.values.forEach { it.cancel() }
+        clonePollers.clear()
     }
 
     fun acceptHostKey(accept: Boolean) {
@@ -368,8 +481,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun forgetHostKey() = viewModelScope.launch { store.forgetHostKey() }
 
     fun regenerateKey() = viewModelScope.launch {
-        _publicKey.value = withContext(Dispatchers.Default) { keys.regenerate() }
-        say("New key created. Install it on the server again.")
+        try {
+            _publicKey.value = withContext(Dispatchers.Default) { keys.regenerate() }
+            say("New key created. Install it on the server again.")
+        } catch (e: Exception) {
+            say("Couldn't create a new key: ${e.message}")
+        }
     }
 
     fun setAppLock(on: Boolean) = viewModelScope.launch { store.setAppLock(on) }

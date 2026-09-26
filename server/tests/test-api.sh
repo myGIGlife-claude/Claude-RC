@@ -43,11 +43,14 @@ echo "runner allowlist"
 for bad in "" "bash" "status; bash" 'status $(id)' "status && id" "rm -rf /" "start ../etc" \
   "start a b" "repos --all" "open not-a-repo" "open a/b --evil" "new x --owner" \
   "new x --visibility secret" "tail x --lines 9999" "status extra" "new -x" "login-github token" \
-  "open a/b/c" "$(printf 'x%.0s' {1..500})"; do
+  "open a/b/c" "$(printf 'x%.0s' {1..500})" "start --dangerously-skip-permissions" "start -x" \
+  "open owner/-x" "open -o/x" "new x --owner --start" "tail -x" "clone-status nope"; do
   api "$bad"
   check "forbidden: '${bad:0:30}'" "$(jqt '.ok==false and .error.code=="forbidden"')"
 done
 [[ -s "$HOME/.local/state/claude-launcher/api.log" ]]; check "audit log written" $?
+api "ghp_SECRETTOKENVALUE123456"
+grep -q SECRETTOKEN "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "unknown first word not logged" $?
 
 echo "status"
 api "status"
@@ -66,6 +69,10 @@ rm "$STUB_STATE/gh_scopes"
 grep -q ghp_ "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "token not in audit log" $?
 
 echo "owners / repos"
+touch "$STUB_STATE/fail_list"
+api "repos --refresh"
+check "gh failure is an error, not an empty list" "$(jqt '.ok==false and .error.code=="internal"')"
+rm "$STUB_STATE/fail_list"
 api "owners"
 check "owners" "$(jqt '.ok and .data.user=="demo-user" and .data.orgs[0].login=="example-org"')"
 api "repos --refresh"
@@ -87,6 +94,13 @@ api "new my.dotted --owner example-org --visibility public --start"
 check "dotted name -> dashed session" "$(jqt '.ok and .data.session=="my-dotted"')"
 
 echo "sessions / tail / start / stop"
+# A session whose name differs from its folder: Stop/Tail by session name.
+tmux new-session -d -s work -c "$HOME/projects/demo-app2" "claude --remote-control demo-app2x; exec bash"
+api "tail work"
+check "tail by session name" "$(jqt '.ok and .data.session=="work"')"
+api "stop work"
+check "stop by session name" "$(jqt '.ok and .data.session=="work" and .data.stopped')"
+tmux has-session -t "=demo-app2" 2>/dev/null; check "the other session was left alone" $?
 api "sessions"
 check "sessions lists them" "$(jqt '.ok and ([.data.sessions[].name] | index("demo-app2") != null and index("my-dotted") != null) and (.data.sessions[] | select(.name=="my-dotted") | .project=="my.dotted")')"
 api "tail demo-app2 --lines 5"
@@ -100,6 +114,13 @@ api "start nope"
 check "start missing folder" "$(jqt '.error.code=="invalid_name"')"
 
 echo "open"
+mkdir -p "$HOME/projects/demo-app" && git -C "$HOME/projects/demo-app" init -q &&
+  git -C "$HOME/projects/demo-app" remote add origin https://github.com/someone-else/demo-app.git
+api "repos --refresh"
+check "folder of another repo isn't 'On server'" "$(jqt '(.data.repos[] | select(.full_name=="demo-user/demo-app") | .local)==false')"
+api "open demo-user/demo-app --start"
+check "open refuses a folder holding another repo" "$(jqt '.error.code=="repo_exists"')"
+rm -rf "$HOME/projects/demo-app"
 api "open example-org/org-app --start"
 check "open clones + starts" "$(jqt '.ok and .data.action=="cloned" and .data.session=="org-app"')"
 api "open example-org/org-app"
@@ -127,7 +148,16 @@ sleep 1
 api "open demo-user/demo-app"
 check "second open while cloning -> busy" "$(jqt '.error.code=="busy"')"
 kill %1 2>/dev/null; wait 2>/dev/null
-pkill -f -- '--clone-worker' 2>/dev/null; rm -rf "$HOME/projects/demo-app"
+api "clone-status demo-user/demo-app"
+check "clone-status running" "$(jqt '.ok and .data.state=="running"')"
+api "repos"
+check "repos marks it cloning, not local" "$(jqt '(.data.repos[] | select(.full_name=="demo-user/demo-app") | .cloning==true and .local==false)')"
+pkill -f -- '--clone-worker' 2>/dev/null; sleep 1
+api "clone-status demo-user/demo-app"
+check "killed clone reported failed" "$(jqt '.ok and .data.state=="failed"')"
+api "clone-status demo-user/demo-app"
+check "then forgotten" "$(jqt '.ok and .data.state=="none"')"
+rm -rf "$HOME/projects/demo-app"
 
 echo "claude-autostart (reboot)"
 "$HOME/.local/bin/claude-autostart" save >/dev/null
@@ -135,16 +165,30 @@ tmux kill-server 2>/dev/null; sleep 0.5
 "$HOME/.local/bin/claude-autostart" restore >/dev/null
 tmux has-session -t "=org-app" 2>/dev/null && tmux has-session -t "=demo-app2" 2>/dev/null; check "autostart restores phone-started sessions" $?
 
+echo "stop the last session drops it from autostart"
+tmux kill-server 2>/dev/null; sleep 0.3
+api "start org-app"
+"$HOME/.local/bin/claude-autostart" save >/dev/null
+api "stop org-app"
+grep -q "^org-app	" "$LIST"; [[ $? -ne 0 ]]; check "last session removed from autostart list" $?
+api "start demo-app2"
+
 echo "claude login"
 api "login-claude-start"
 check "login url returned" "$(jqt '.ok and (.data.url | startswith("https://claude.ai/oauth/authorize"))')"
 api "login-claude-code" "bad-code-123"
 check "bad code -> not_logged_in_claude" "$(jqt '.error.code=="not_logged_in_claude"')"
 api "login-claude-start"
+"$HOME/.local/bin/claude-autostart" save >/dev/null
+grep -q "^claude-login	" "$LIST"; [[ $? -ne 0 ]]; check "login session not saved by autostart" $?
 api "login-claude-code" "good-code-123"
 check "good code -> logged in" "$(jqt '.ok and .data.logged_in')"
 api "status"
 check "status shows claude + github" "$(jqt '.data.claude.logged_in and .data.github.logged_in and .data.github.missing_scopes==[]')"
+api "login-claude-start"
+api "login-claude-code" "bad-code-456"
+check "old credentials don't fake a success" "$(jqt '.error.code=="not_logged_in_claude"')"
+grep -q "^claude-login	" "$LIST"; [[ $? -ne 0 ]]; check "failed login not in autostart list" $?
 
 echo "aws"
 api "login-aws-sso-start"
@@ -160,6 +204,11 @@ OUT="$("$HOME/bin/claude-setup.sh" --api bogus </dev/null 2>/dev/null)"; RC=$?
 [[ $RC == 2 ]]; check "bad args exit 2" $?
 OUT="$("$HOME/bin/claude-setup.sh" --api status </dev/null 2>/dev/null)"
 [[ "$(wc -l <<<"$OUT")" == 1 ]]; check "exactly one JSON line" $?
+cp "$HOME/.config/claude-launcher/config" "$WORK/config.bak"
+echo 'FOO=$UNSET_VAR_FOR_TEST' >>"$HOME/.config/claude-launcher/config"
+api "status"
+check "broken config still gives one JSON error" "$(jqt '.ok==false and .error.code=="internal"')"
+cp "$WORK/config.bak" "$HOME/.config/claude-launcher/config"
 
 echo "interactive menu still runs"
 OUT="$(printf '2\nq\n' | "$HOME/bin/claude-setup.sh" 2>&1)"

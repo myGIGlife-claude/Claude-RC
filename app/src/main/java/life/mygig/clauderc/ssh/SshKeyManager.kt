@@ -1,6 +1,7 @@
 package life.mygig.clauderc.ssh
 
 import android.content.Context
+import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -41,7 +42,11 @@ class SshKeyManager(context: Context) {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, wrappingKey(), GCMParameterSpec(128, iv))
         val seed = cipher.doFinal(blob, IV_LEN, blob.size - IV_LEN)
-        return Ed25519Identity(seed)
+        try {
+            return Ed25519Identity(seed)
+        } finally {
+            seed.fill(0)
+        }
     }
 
     private fun generate(): String {
@@ -55,7 +60,7 @@ class SshKeyManager(context: Context) {
         prefs.edit()
             .putString(PREF_SEED, Base64.encodeToString(enc, Base64.NO_WRAP))
             .putString(PREF_PUB, pub)
-            .apply()
+            .commit()
         return pub
     }
 
@@ -71,6 +76,10 @@ class SshKeyManager(context: Context) {
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setKeySize(256)
+                .apply {
+                    // The key can't be used while the phone is locked.
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) setUnlockedDeviceRequired(true)
+                }
                 .build(),
         )
         return gen.generateKey()
