@@ -101,12 +101,13 @@ Exit code 0 = success, 1 = handled error, 2 = bad arguments.
 | `login-aws-sso-start` | — | `url`, `code` (then poll `status`) |
 | `self-update` | `<40-hex commit>` | `commit`. Downloads that commit's `install.sh` and runs it (the phone's **Update now** button). |
 | `install-cli` | `glab` | `installed`, `name`, `version`. Latest glab release from gitlab.com, checked against its `checksums.txt`, into `~/.local/bin` (no sudo). |
+| `run` | stdin: sudo password line (may be empty), timeout seconds line, then the command | `exit_code`, `output` (stdout+stderr, last 64 KB). Off unless `ALLOW_RUN=1` in the config (error `run_disabled`). |
 | `login-gitlab` | token, host (default gitlab.com) on stdin | `user` (uses `glab auth login --stdin`) |
 | `login-docker` | registry (default docker.io), username, token on stdin | `registry`, `user` (uses `docker login --password-stdin`) |
 | `login-cloudflare` | API token on stdin | `logged_in`. Verified with Cloudflare, then saved as `CLOUDFLARE_API_TOKEN` in `~/.config/claude-launcher/env` (mode 600); one line in `~/.bashrc` loads it so Claude's sessions (and `wrangler`) see it. |
 
 Error codes: `not_logged_in_claude`, `not_logged_in_github`, `missing_scopes`,
-`not_logged_in_aws`, `not_logged_in` (GitLab / registry / Cloudflare), `repo_exists`, `folder_dirty`, `invalid_name`, `busy`,
+`not_logged_in_aws`, `not_logged_in` (GitLab / registry / Cloudflare), `repo_exists`, `folder_dirty`, `invalid_name`, `run_disabled`, `busy`,
 `internal`, `bad_args`, and `forbidden` from the runner.
 
 `open` returns `action: "not_updated"` with a `note` when `git pull --ff-only`
