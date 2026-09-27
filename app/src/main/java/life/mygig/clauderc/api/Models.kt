@@ -15,6 +15,7 @@ data class StatusData(
     /** Last commit that changed server/, as recorded by install.sh; null if unknown. */
     val commit: String? = null,
     @SerialName("script_api") val scriptApi: Int = 0,
+    @SerialName("run_enabled") val runEnabled: Boolean = false,
 )
 
 @Serializable
@@ -143,4 +144,10 @@ data class CloneStatus(
     val state: String,
     val message: String? = null,
     val session: String? = null,
+)
+
+@Serializable
+data class RunResult(
+    @SerialName("exit_code") val exitCode: Int = 0,
+    val output: String = "",
 )

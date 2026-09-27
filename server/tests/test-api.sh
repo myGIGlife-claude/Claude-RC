@@ -244,6 +244,25 @@ OUT="$(printf '2\nq\n' | "$HOME/bin/claude-setup.sh" 2>&1)"
 [[ "$OUT" == *"What are you working on?"* && "$OUT" == *"example-org/org-app"* && "$OUT" == *"Running sessions on the Pi:"* ]]
 check "menu lists repos and exits on q" $?
 
+echo "run"
+api "run" $'\n\necho hi'
+check "run is off by default" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+api "run echo"
+check "run takes no arguments" "$(jqt '.error.code=="forbidden"')"
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
+api "run" $'\n\necho hi; pwd'
+check "run returns output" "$(jqt '.ok and .data.exit_code==0 and .data.output=="hi\n'"$HOME"'"')"
+api "run" $'\n\nexit 3'
+check "run reports the exit code" "$(jqt '.ok and .data.exit_code==3')"
+api "run" $'\n1\nsleep 5'
+check "run timeout stops it" "$(jqt '.data.exit_code==124 and (.data.output|test("stopped after 1 s"))')"
+api "run" $'pw-ok\n\nsudo echo root-ok'
+check "run feeds the sudo password" "$(jqt '.data.exit_code==0 and .data.output=="root-ok"')"
+api "run" $'pw-bad\n\nsudo echo root-ok'
+check "wrong sudo password fails" "$(jqt '.data.exit_code!=0')"
+grep -q "pw-ok" "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "sudo password not logged" $?
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
+
 echo "install-cli"
 api "install-cli glab"
 check "install-cli without the internet fails cleanly" "$(jqt '.ok==false and .error.code=="internal"')"
@@ -251,7 +270,7 @@ check "install-cli without the internet fails cleanly" "$(jqt '.ok==false and .e
 
 echo "self-update"
 api "status"
-check "status reports script_api, no commit yet" "$(jqt '.data.script_api >= 4 and .data.commit == null')"
+check "status reports script_api, no commit yet, run off" "$(jqt '.data.script_api >= 5 and .data.commit == null and .data.run_enabled == false')"
 SHA=0123456789abcdef0123456789abcdef01234567
 mkdir -p "$WORK/raw/myGIGlife-claude/Claude-RC/$SHA"
 ln -s "$SERVER" "$WORK/raw/myGIGlife-claude/Claude-RC/$SHA/server"

@@ -29,7 +29,8 @@ phone app ──SSH (its own Ed25519 key)──▶ sshd ──forced command─�
 
 Every call is short: connect, run one allowlisted action, read the JSON,
 disconnect. The phone key can't open a shell, forward ports or run anything
-off the allowlist. There is no web server, open port or cloud service.
+off the allowlist (except **Run a command**, which is off unless you turn it on;
+see Security). There is no web server, open port or cloud service.
 
 ## Screens
 
@@ -38,7 +39,7 @@ off the allowlist. There is no web server, open port or cloud service.
 | **Status** | Claude / GitHub / AWS / GitLab / Docker·GHCR / Cloudflare login state | Pull to refresh; tap a row to log in or connect from the phone |
 | **New** | Name (validated live), owner (you or an org), Private/Public, “Start Claude now” | Create → repo link + **Open in Claude** |
 | **Projects** | All your repos, newest push first, with Private/Public, Org, On server, Running badges | Clone/pull + start, stop, tail log (long-press) |
-| **Sessions** | Running Claude sessions, uptime, attached | Stop, tail, **Open in Claude** |
+| **Sessions** | Running Claude sessions, uptime, attached | Stop, tail, **Open in Claude**; with App lock on, **Run a command** (type or paste, optional sudo password) |
 
 **Servers**: add as many as you like; tap the server name under the title to
 switch. All of them use this phone's one key.
@@ -84,6 +85,11 @@ compare.
   Android Keystore AES-GCM key and never leaves the phone or its backups.
 - The server pins that key to `claude-launcher-api` with `restrict` (no pty, no
   forwarding of any kind), so the key can only run that one program.
+- **Run a command** is the one exception: it runs what you type as your user
+  (and sudo with the password you enter). It only exists when App lock is on
+  in the app **and** the server's config has `ALLOW_RUN=1`, so a lost phone
+  can't enable it. Each run asks for your fingerprint/PIN. The sudo password
+  reaches sudo through a private askpass file, never a command line or log.
 - App lock (optional) asks for fingerprint/PIN to open the app, after 30 s in
   the background, and before creating, stopping, logging in or showing the key
   and username; it also hides the app from the Recents screen.
