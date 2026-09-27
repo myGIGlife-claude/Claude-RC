@@ -29,6 +29,9 @@ object Updates {
     /** Server script API that can run a command typed on the phone. */
     const val RUN_API = 5
 
+    /** Server script API with restart and Command Center (claude-cmd). */
+    const val COMMAND_CENTER_API = 6
+
     /** Downloads and installs the server scripts (no clone), authorizing [key] if given. Rerun it to update. */
     fun installCommand(key: String? = null) =
         "curl -fsSL https://raw.githubusercontent.com/$REPO/main/server/install.sh | bash" +

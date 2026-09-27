@@ -42,7 +42,7 @@ import life.mygig.clauderc.ssh.HostKeyInfo
 import life.mygig.clauderc.ssh.SshKeyManager
 import life.mygig.clauderc.ssh.SshRunner
 
-enum class Tab { STATUS, NEW, PROJECTS, SESSIONS }
+enum class Tab { STATUS, NEW, PROJECTS, SESSIONS, COMMAND }
 enum class LoginKind { CLAUDE, GITHUB, AWS, GITLAB, DOCKER, CLOUDFLARE }
 
 /** What a snackbar's button does. */
@@ -167,6 +167,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun runCommand(command: String, sudoPassword: String) = action("Running on the server…") {
         _runResult.value = null
         _runResult.value = api.run(command, sudoPassword)
+    }
+
+    fun restartSession(name: String) = action("Restarting $name…") {
+        api.restart(name)
+        say("$name restarted")
+        refreshSessions()
+    }
+
+    /** Command Center: what ran and what it printed. */
+    private val _ccResult = MutableStateFlow<Pair<String, RunResult>?>(null)
+    val ccResult = _ccResult.asStateFlow()
+
+    fun claudeCommand(args: String) = action("Running claude ${args.trim()}…") {
+        _ccResult.value = args.trim() to api.claudeCmd(args)
     }
 
     /** A service whose CLI isn't on the server yet: the setup guide for it. */
