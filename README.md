@@ -126,17 +126,18 @@ server tests (including a real sshd), unit tests, and builds a signed release
 APK. Tags `v*` publish a GitHub Release; pushes to `main` update the
 `latest-main` pre-release.
 
-Signing: with no secrets set, CI signs with the committed
-`app/debug.keystore` (pre-release). Setting the four repository secrets
-`SIGNING_KEYSTORE_BASE64`, `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS`,
-`SIGNING_KEY_PASSWORD` switches CI to the release key. CI fails any APK whose
-certificate isn't the one it expects.
+Signing: releases are signed with the project's private key (from the
+repository secrets) and CI fails any APK with a different certificate. Only
+install APKs from this repo's Releases. Builds from pull requests or your own
+machine use the public `app/debug.keystore`, are for testing only, and can't
+update a release install. Forks: set the four `SIGNING_*` secrets to your own
+key and change `EXPECTED_CERT_SHA256` in the workflow.
 
 Locally:
 
 ```bash
 ./gradlew assembleDebug
-./gradlew assembleRelease   # debug-key signed; an untracked keystore.properties switches to the release key
+./gradlew assembleRelease   # signed with the public debug key unless keystore.properties points at yours
 ```
 
 ## Contributing

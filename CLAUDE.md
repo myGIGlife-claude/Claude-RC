@@ -2,23 +2,19 @@
 
 ## APK signing (read before building or sending any APK)
 
-**Pre-release (now):** every build is signed with the committed
-`app/debug.keystore` (password `android`, alias `androiddebugkey`, certificate
-SHA-256 `ff714e476e95c2d2af85c31a6cc7455011ea74825f182dad9a6a74c4dc1df5c3`).
-The user chose this so CI builds and publishes installable APKs with no setup.
-Don't replace or regenerate this keystore: a different key means the user has
-to uninstall the app and lose its SSH key and settings.
+Releases are signed with the private release key: certificate SHA-256
+`b62dd1599ca2dd7f9a637f215da28321e6ec1c45981a940e594f4595efd570f7`
+(CN=cLaudeRC, O=myGIGlife). CI reads it from the Actions secrets
+`SIGNING_KEYSTORE_BASE64`, `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS`,
+`SIGNING_KEY_PASSWORD`, and fails any APK signed with anything else. The
+keystore is never in this repo; the owner keeps the backup.
 
-**At release:** set the Actions secrets `SIGNING_KEYSTORE_BASE64`,
-`SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS`, `SIGNING_KEY_PASSWORD` from
-`clauderc-release.jks` (certificate SHA-256
-`cc833ec5438cbf8089cb511ab5612ff28149f0b8a0afcb18b09b020771cf3cd1`, CN=cLaudeRC).
-CI then signs with that key instead. Switching keys needs one uninstall on the
-phone. The release keystore is **never** in this repo; never generate a new one.
-
-- CI fails any APK whose certificate doesn't match the key it expects.
-- `versionCode` must only go up. CI uses `100 + GITHUB_RUN_NUMBER`. Builds made
-  by hand used 1 to 4.
+- Never generate a new keystore: a different key means every user has to
+  uninstall and lose the app's SSH key and settings.
+- Never give anyone an APK that isn't a CI release build. Pull-request builds
+  (no secrets) and local builds are signed with the committed
+  `app/debug.keystore`, which is public: those are for testing only.
+- `versionCode` must only go up. CI uses `100 + GITHUB_RUN_NUMBER`.
 
 ## Layout
 

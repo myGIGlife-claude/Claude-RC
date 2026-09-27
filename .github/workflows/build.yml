@@ -49,7 +49,7 @@ jobs:
       # Signed on pushes to this repo only (never for pull requests).
       HAS_SIGNING: ${{ github.event_name != 'pull_request' && secrets.SIGNING_KEYSTORE_BASE64 != '' }}
       # Release key if the secrets are set, otherwise the committed app/debug.keystore.
-      EXPECTED_CERT_SHA256: ${{ github.event_name != 'pull_request' && secrets.SIGNING_KEYSTORE_BASE64 != '' && 'cc833ec5438cbf8089cb511ab5612ff28149f0b8a0afcb18b09b020771cf3cd1' || 'ff714e476e95c2d2af85c31a6cc7455011ea74825f182dad9a6a74c4dc1df5c3' }}
+      EXPECTED_CERT_SHA256: ${{ github.event_name != 'pull_request' && secrets.SIGNING_KEYSTORE_BASE64 != '' && 'b62dd1599ca2dd7f9a637f215da28321e6ec1c45981a940e594f4595efd570f7' || 'ff714e476e95c2d2af85c31a6cc7455011ea74825f182dad9a6a74c4dc1df5c3' }}
     steps:
       - uses: actions/checkout@v5
         with:
