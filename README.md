@@ -39,7 +39,8 @@ see Security). There is no web server, open port or cloud service.
 | **Status** | Claude / GitHub / AWS / GitLab / Docker·GHCR / Cloudflare login state | Pull to refresh; tap a row to log in or connect from the phone |
 | **New** | Name (validated live), owner (you or an org), Private/Public, “Start Claude now” | Create → repo link + **Open in Claude** |
 | **Projects** | All your repos, newest push first, with Private/Public, Org, On server, Running badges | Clone/pull + start, stop, tail log (long-press) |
-| **Sessions** | Running Claude sessions, uptime, attached | Stop, tail, **Open in Claude**; with App lock on, **Run a command** (type or paste, optional sudo password) |
+| **Sessions** | Running Claude sessions, uptime, attached | Stop, **Restart** (picks up new plugins), tail, **Open in Claude**; with App lock on, **Run a command** (type or paste, optional sudo password) |
+| **Command** | Claude Code housekeeping | Doctor, version, update; list / install / update / uninstall plugins; add and update marketplaces; list MCP servers; other allowed `claude` commands |
 
 **Servers**: add as many as you like; tap the server name under the title to
 switch. All of them use this phone's one key.

@@ -139,6 +139,15 @@ check "start already running is ok" "$(jqt '.ok and .data.already_running==true'
 api "stop my.dotted"
 check "stop" "$(jqt '.ok and .data.stopped==true and .data.session=="my-dotted"')"
 grep -q "^my-dotted	" "$LIST"; [[ $? -ne 0 ]]; check "stopped session dropped from autostart list" $?
+old_pid="$(tmux display-message -p -t "=demo-app2:" '#{pane_pid}')"
+api "restart demo-app2"
+check "restart" "$(jqt '.ok and .data.restarted and .data.session=="demo-app2"')"
+[[ "$(tmux display-message -p -t "=demo-app2:" '#{pane_pid}' 2>/dev/null)" != "$old_pid" ]]; check "restart made a new process" $?
+grep -q "^demo-app2	" "$LIST"; check "restarted session still in autostart list" $?
+api "restart nope"
+check "restart missing session" "$(jqt '.error.code=="invalid_name"')"
+api "restart -x"
+check "restart refuses -x" "$(jqt '.error.code=="forbidden"')"
 api "start nope"
 check "start missing folder" "$(jqt '.error.code=="invalid_name"')"
 
@@ -262,6 +271,18 @@ api "run" $'pw-bad\n\nsudo echo root-ok'
 check "wrong sudo password fails" "$(jqt '.data.exit_code!=0')"
 grep -q "pw-ok" "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "sudo password not logged" $?
 sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
+
+echo "claude-cmd"
+api "claude-cmd" "doctor"
+check "claude-cmd doctor, colours stripped" "$(jqt '.ok and .data.exit_code==0 and .data.output=="No installation issues found."')"
+api "claude-cmd" "plugin install demo@market --scope user"
+check "claude-cmd plugin install" "$(jqt '.ok and .data.output=="Installed demo@market"')"
+for bad in "mcp add x -- bash -c id" "auth logout" "doctor; id" 'plugin install $(id)' "--dangerously-skip-permissions" "" "doctor extra"; do
+  api "claude-cmd" "$bad"
+  check "claude-cmd refuses '${bad:0:25}'" "$(jqt '.ok==false')"
+done
+api "claude-cmd doctor"
+check "claude-cmd takes nothing on the command line" "$(jqt '.error.code=="forbidden"')"
 
 echo "install-cli"
 api "install-cli glab"

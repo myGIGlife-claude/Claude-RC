@@ -102,6 +102,8 @@ Exit code 0 = success, 1 = handled error, 2 = bad arguments.
 | `self-update` | `<40-hex commit>` | `commit`. Downloads that commit's `install.sh` and runs it (the phone's **Update now** button). |
 | `install-cli` | `glab` | `installed`, `name`, `version`. Latest glab release from gitlab.com, checked against its `checksums.txt`, into `~/.local/bin` (no sudo). |
 | `run` | stdin: sudo password line (may be empty), timeout seconds line, then the command | `exit_code`, `output` (stdout+stderr, last 64 KB). Off unless `ALLOW_RUN=1` in the config (error `run_disabled`). |
+| `restart` | `<project or session>` | `session`, `path`, `restarted`. Stops the session and starts it again in the same folder (picks up new plugins). |
+| `claude-cmd` | stdin: the arguments after `claude` | `exit_code`, `output`. Only `doctor`, `update`, `--version`, `plugin …`, `plugin marketplace …`, `mcp list/get/remove`; no shell. |
 | `login-gitlab` | token, host (default gitlab.com) on stdin | `user` (uses `glab auth login --stdin`) |
 | `login-docker` | registry (default docker.io), username, token on stdin | `registry`, `user` (uses `docker login --password-stdin`) |
 | `login-cloudflare` | API token on stdin | `logged_in`. Verified with Cloudflare, then saved as `CLOUDFLARE_API_TOKEN` in `~/.config/claude-launcher/env` (mode 600); one line in `~/.bashrc` loads it so Claude's sessions (and `wrangler`) see it. |

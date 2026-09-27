@@ -52,6 +52,7 @@ fun SessionsScreen(vm: MainViewModel) {
     val guard = LocalGuard.current
     val context = LocalContext.current
     var confirmStop by remember { mutableStateOf<Session?>(null) }
+    var confirmRestart by remember { mutableStateOf<Session?>(null) }
     val settings by vm.settings.collectAsState()
     var showRun by remember { mutableStateOf(false) }
 
@@ -86,6 +87,7 @@ fun SessionsScreen(vm: MainViewModel) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
                             Button(onClick = { openInClaude(context) }) { Text("Open in Claude") }
                             OutlinedButton(onClick = { vm.loadTail(s.name) }) { Text("Tail") }
+                            TextButton(onClick = { confirmRestart = s }) { Text("Restart") }
                             TextButton(onClick = { confirmStop = s }) { Text("Stop") }
                         }
                     }
@@ -95,6 +97,26 @@ fun SessionsScreen(vm: MainViewModel) {
     }
 
     if (showRun && settings?.appLock == true) RunCommandDialog(vm) { showRun = false }
+
+    confirmRestart?.let { s ->
+        AlertDialog(
+            onDismissRequest = { confirmRestart = null },
+            title = { Text("Restart ${s.project}?") },
+            text = {
+                Text(
+                    "Stops this Claude session and starts it again in the same folder, so it picks up new " +
+                        "plugins, skills and MCP servers. The conversation in it starts fresh.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmRestart = null
+                    guard.run("Restart ${s.project}") { vm.restartSession(s.name) }
+                }) { Text("Restart") }
+            },
+            dismissButton = { TextButton(onClick = { confirmRestart = null }) { Text("Cancel") } },
+        )
+    }
 
     confirmStop?.let { s ->
         AlertDialog(
