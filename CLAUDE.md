@@ -41,6 +41,17 @@ sudo server/tests/test-sshd.sh --app     # real sshd + app SSH code
 When the app starts needing a new server action or field, bump `SCRIPT_API`
 and raise `MIN_SCRIPT_API` so old servers see "Server scripts need an update".
 
+## Credentials for Claude's sessions
+
+Anything a Claude session needs from its environment (service tokens, key
+file paths) goes in `~/.config/claude-launcher/env` through `set_env` in
+`claude-setup.sh`. Never append to `~/.bashrc` yourself: Ubuntu's `.bashrc`
+returns early for non-interactive shells, which is how Claude runs commands,
+so only its first line is reliable (`ensure_env_hook` keeps the loader there).
+Tools install into `~/.local/bin`, which is on the sessions' PATH. Group
+changes (e.g. `docker`) only reach sessions after the server restarts, so
+tell the user.
+
 ## Public repo
 
 No personal values in code, docs or commits: usernames, home paths,

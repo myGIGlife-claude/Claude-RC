@@ -1445,7 +1445,10 @@ do_install_cli() {
       fetch https://get.docker.com "$dir/get-docker.sh"
       out="$(t 600 sudo sh "$dir/get-docker.sh" </dev/null 2>&1 && sudo usermod -aG docker "$(id -un)" </dev/null 2>&1)" ||
         api_err internal "Installing Docker failed: $(tail -n 3 <<<"$out")"
-      ver="$(docker --version 2>/dev/null)" ;;
+      ver="$(docker --version 2>/dev/null)"
+      # Running tmux (and so every Claude session) keeps the groups it started
+      # with, so the new docker group only applies after a restart.
+      id -nG | tr ' ' '\n' | grep -qx docker || NOTE="Docker is installed. Reboot the server so Claude's sessions can use docker without sudo." ;;
     supabase)
       gh_ver supabase/cli; f="supabase_${ver}_linux_$($a64 && echo arm64 || echo amd64).tar.gz"
       fetch "https://github.com/supabase/cli/releases/download/$tag/$f" "$dir/$f" "https://github.com/supabase/cli/releases/download/$tag/checksums.txt"
@@ -1492,7 +1495,8 @@ do_install_cli() {
       for bin in gcloud gsutil bq; do ln -sf "$HOME/google-cloud-sdk/bin/$bin" "$HOME/.local/bin/$bin"; done
       ver="latest" ;;
   esac
-  api_ok "$(jq -cn --arg n "$name" --arg v "${ver:-}" '{installed:true, name:$n, version:$v}')"
+  api_ok "$(jq -cn --arg n "$name" --arg v "${ver:-}" --arg note "${NOTE:-}" \
+    '{installed:true, name:$n, version:$v} + (if $note == "" then {} else {note:$note} end)')"
 }
 
 # The latest official glab release from gitlab.com, checksum-verified.

@@ -22,6 +22,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import life.mygig.clauderc.api.ApiException
 import life.mygig.clauderc.api.Codes
 import life.mygig.clauderc.api.LauncherApi
@@ -215,8 +217,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Installs [name] on the server, then runs [then] (usually: open the login form). */
     fun installCli(name: String, sudoPassword: String = "", then: () -> Unit = {}) = action("Installing $name on the server…") {
-        api.installCli(name, sudoPassword)
-        say("$name installed")
+        val r = api.installCli(name, sudoPassword)
+        say(r["note"]?.jsonPrimitive?.contentOrNull ?: "$name installed")
         refreshStatus()
         then()
     }
