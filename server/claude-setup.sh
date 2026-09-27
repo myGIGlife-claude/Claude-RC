@@ -1464,7 +1464,7 @@ do_install_cli() {
       out="$(t 480 bash "$dir/hf-install.sh" --exclude-skill --no-modify-path </dev/null 2>&1)" || api_err internal "The hf installer failed: $(tail -n 3 <<<"$out")"
       ver="latest" ;;
     gcloud)
-      [[ ! -e "$HOME/google-cloud-sdk" ]] || api_err internal "~/google-cloud-sdk already exists; update it with 'gcloud components update'."
+      [[ ! -e "$HOME/google-cloud-sdk" ]] || api_err internal "google-cloud-sdk already exists in your home folder; update it with 'gcloud components update'."
       f="google-cloud-cli-linux-$($a64 && echo arm || echo x86_64).tar.gz"
       fetch "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/$f" "$dir/$f"
       tar -xzf "$dir/$f" -C "$HOME" 2>/dev/null || api_err internal "$f isn't a valid archive."
