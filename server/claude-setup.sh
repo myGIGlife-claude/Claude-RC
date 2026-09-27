@@ -13,8 +13,9 @@ set -uo pipefail
 
 SCRIPT_VERSION="2.0.0"
 # What the phone can rely on: 2 = extra services, 3 = self-update,
-# 4 = install-cli, 5 = run. Bump when the app starts needing a new server feature.
-SCRIPT_API=5
+# 4 = install-cli, 5 = run, 6 = restart + claude-cmd. Bump when the app starts
+# needing a new server feature.
+SCRIPT_API=6
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -809,6 +810,27 @@ do_stop() {
   api_ok "$(jq -cn --arg s "$sess" --argjson st "$stopped" '{session:$s, stopped:$st}')"
 }
 
+# Stop a session and start it again in the same folder, the same way the menu
+# starts sessions, so Claude picks up new plugins, skills and MCP servers.
+do_restart() {
+  [[ $# -eq 1 ]] || bad_args "usage: restart <project or session>"
+  valid_project "$1" || api_err invalid_name "Invalid project name."
+  local sess dir name
+  sess="$(resolve_session "$1")"
+  tmux has-session -t "=$sess" 2>/dev/null || api_err invalid_name "No running session named '$1'."
+  # The folder: claude-autostart's list first, else where the pane is.
+  dir="$(awk -F'\t' -v s="$sess" '$1 == s {print $2; exit}' "$AUTOSTART_LIST" 2>/dev/null)"
+  [[ -n "$dir" ]] || dir="$(tmux display-message -p -t "=$sess:" '#{pane_current_path}' 2>/dev/null)"
+  [[ -d "$dir" ]] || api_err internal "Couldn't find the folder of session '$sess'."
+  name="$(basename "$dir")"
+  valid_project "$name" || api_err invalid_name "The folder name '$name' can't be used as a session name."
+  tmux kill-session -t "=$sess" 2>/dev/null
+  launch_session "$name" "$dir" || api_err internal "tmux could not start the session again."
+  STARTED_SESSION="$(session_name "$name")"
+  api_confirm_remote_control "$STARTED_SESSION"
+  api_ok "$(jq -cn --arg s "$STARTED_SESSION" --arg p "$dir" '{session:$s, path:$p, restarted:true}')"
+}
+
 do_tail() {
   local project="" lines=40
   while [[ $# -gt 0 ]]; do
@@ -1298,6 +1320,37 @@ do_run() {
   api_ok "$(jq -cn --arg o "$(tail -c 65536 <<<"$out")" --argjson rc "$rc" '{exit_code:$rc, output:$o}')"
 }
 
+# Command Center: a fixed set of `claude` management commands (no shell).
+# stdin: the arguments after `claude`, space separated, on one line.
+do_claude_cmd() {
+  [[ $# -eq 0 ]] || bad_args "claude-cmd takes its arguments on stdin"
+  local line out rc x
+  IFS= read -r -t 15 line || true
+  exec 0</dev/null
+  local -a a=()
+  read -r -a a <<<"${line//$'\r'/}"   # plain word split: no globbing, no quotes, no expansion
+  ((${#a[@]} > 0 && ${#a[@]} <= 20)) || bad_args "usage: claude-cmd (arguments on stdin)"
+  for x in "${a[@]}"; do
+    [[ "$x" =~ ^[A-Za-z0-9@._:/=+~-]{1,200}$ ]] || api_err invalid_name "'$x' has characters Command Center doesn't allow."
+  done
+  local allowed=false
+  case "${a[0]}" in
+    doctor | --version | update | upgrade) ((${#a[@]} == 1)) && allowed=true ;;
+    plugin | plugins)
+      case "${a[1]:-}" in
+        list | install | i | uninstall | remove | enable | disable | update | details) allowed=true ;;
+        marketplace) [[ "${a[2]:-}" =~ ^(list|add|remove|rm|update)$ ]] && allowed=true ;;
+      esac ;;
+    mcp) [[ "${a[1]:-}" =~ ^(list|get|remove)$ ]] && allowed=true ;;
+  esac
+  $allowed || api_err forbidden "Command Center runs: doctor, update, --version, plugin …, plugin marketplace …, mcp list/get/remove."
+  need claude
+  out="$(cd "$HOME" && t 300 env -u ANTHROPIC_API_KEY claude "${a[@]}" </dev/null 2>&1)"
+  rc=$?
+  out="$(sed 's/\x1b\[[0-9;?]*[A-Za-z]//g' <<<"$out" | tail -c 65536)"
+  api_ok "$(jq -cn --arg o "$out" --argjson rc "$rc" '{exit_code:$rc, output:$o}')"
+}
+
 api_main() {
   # fd 3 = the one JSON object; everything else goes to stderr.
   exec 3>&1 1>&2
@@ -1310,7 +1363,7 @@ api_main() {
   local cmd="${1:-}"
   shift || true
   case "$cmd" in
-    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | login-cloudflare | run) ;;  # these read stdin
+    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | login-cloudflare | run | claude-cmd) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -1337,6 +1390,8 @@ api_main() {
     self-update)         do_self_update "$@" ;;
     install-cli)         do_install_cli "$@" ;;
     run)                 do_run "$@" ;;
+    claude-cmd)          do_claude_cmd "$@" ;;
+    restart)             do_restart "$@" ;;
     "")                  bad_args "missing subcommand" ;;
     *)                   bad_args "unknown subcommand '$cmd'" ;;
   esac

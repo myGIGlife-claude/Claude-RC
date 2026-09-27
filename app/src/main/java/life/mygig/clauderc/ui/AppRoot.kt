@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Lock
@@ -66,6 +67,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import life.mygig.clauderc.data.ThemeMode
+import life.mygig.clauderc.ui.screens.CommandCenterScreen
 import life.mygig.clauderc.ui.screens.HostKeyDialog
 import life.mygig.clauderc.ui.screens.LoginDialog
 import life.mygig.clauderc.ui.screens.NewProjectScreen
@@ -254,6 +256,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                             TabItem(tab, Tab.NEW, "New", Icons.Filled.AddCircle, vm)
                             TabItem(tab, Tab.PROJECTS, "Projects", Icons.AutoMirrored.Filled.List, vm)
                             TabItem(tab, Tab.SESSIONS, "Sessions", Icons.Filled.Terminal, vm)
+                            TabItem(tab, Tab.COMMAND, "Command", Icons.Filled.Build, vm)
                         }
                     }
                 },
@@ -268,6 +271,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                         tab == Tab.NEW -> NewProjectScreen(vm)
                         tab == Tab.PROJECTS -> ProjectsScreen(vm)
                         tab == Tab.SESSIONS -> SessionsScreen(vm)
+                        tab == Tab.COMMAND -> CommandCenterScreen(vm)
                     }
                 }
             }
