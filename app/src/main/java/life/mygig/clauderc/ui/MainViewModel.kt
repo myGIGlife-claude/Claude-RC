@@ -709,10 +709,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** True after a new key was made this session: Settings then shows the install command. */
+    private val _keyRegenerated = MutableStateFlow(false)
+    val keyRegenerated = _keyRegenerated.asStateFlow()
+
     fun regenerateKey() = viewModelScope.launch {
         try {
             _publicKey.value = withContext(Dispatchers.Default) { keys.regenerate() }
-            say("New key created. Install it on the server again.")
+            _keyRegenerated.value = true
+            say("New key created. Run the install command on each server.")
         } catch (e: Exception) {
             say("Couldn't create a new key: ${e.message}")
         }

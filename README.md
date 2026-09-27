@@ -56,7 +56,7 @@ see Security). There is no web server, open port or cloud service.
 switch. All of them use this phone's one key.
 
 **Settings**: servers (add, switch, remove), host, port, username, pinned host key fingerprint, this phone's
-public key (copy / share / regenerate), app lock (fingerprint/PIN before
+key (regenerate, with two warnings, then the new install command), app lock (fingerprint/PIN before
 create, stop, logins), theme.
 
 ## Install on the phone
