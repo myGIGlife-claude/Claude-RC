@@ -13,8 +13,8 @@ set -uo pipefail
 
 SCRIPT_VERSION="2.0.0"
 # What the phone can rely on: 2 = extra services, 3 = self-update,
-# 4 = install-cli. Bump when the app starts needing a new server feature.
-SCRIPT_API=4
+# 4 = install-cli, 5 = run. Bump when the app starts needing a new server feature.
+SCRIPT_API=5
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -59,6 +59,7 @@ load_config() {
   AWS_DEFAULT_REGION_NAME="us-east-1"
   EXTRA_PATH=""
   REPOS_CACHE_TTL=600
+  ALLOW_RUN=0
 
   if [[ ! -f "$CONFIG_FILE" ]]; then
     mkdir -p "$LAUNCHER_CONFIG_DIR"
@@ -670,6 +671,7 @@ do_status() {
   local commit
   commit="$(grep -oE '^[0-9a-f]{40}$' "$INSTALLED_COMMIT_FILE" 2>/dev/null | head -n 1)"
   api_ok "$(jq -cn --argjson services "$(services_json)" --arg commit "$commit" --argjson api "$SCRIPT_API" \
+    --argjson run "$([[ "$ALLOW_RUN" == 1 ]] && echo true || echo false)" \
     --argjson c "$claude_ok" --argjson g "$gh_ok" --arg gu "$gh_user" --argjson gm "$scopes" \
     --argjson a "$aws_ok" --argjson ai "$aws_json" --arg ap "${AWS_PROFILE_NAME:-default}" \
     --argjson sso "$(aws_sso_configured && echo true || echo false)" \
@@ -678,7 +680,7 @@ do_status() {
       github:{logged_in:$g, user:(if $gu=="" then null else $gu end), missing_scopes:$gm},
       aws:{logged_in:$a, identity:$ai, profile:$ap, sso_configured:$sso},
       hostname:$host, version:$v, services:$services,
-      commit:(if $commit=="" then null else $commit end), script_api:$api}')"
+      commit:(if $commit=="" then null else $commit end), script_api:$api, run_enabled:$run}')"
 }
 
 # Extra services the phone can log in to. Each: installed, logged_in, detail.
@@ -1260,6 +1262,42 @@ do_install_cli() {
   api_ok "$(jq -cn --arg v "$ver" '{installed:true, name:"glab", version:$v}')"
 }
 
+# Run a command typed on the phone (behind App lock there). Off unless the
+# server's config says ALLOW_RUN=1, so a lost phone can't turn it on.
+# stdin: line 1 = sudo password (may be empty), line 2 = timeout seconds,
+# the rest = the command. Output is stdout+stderr, last 64 KB.
+do_run() {
+  [[ $# -eq 0 ]] || bad_args "run takes no arguments"
+  [[ "$ALLOW_RUN" == 1 ]] ||
+    api_err run_disabled "Running commands from the phone is off on this server. To allow it, run this on the server: echo 'ALLOW_RUN=1' >> ~/.config/claude-launcher/config"
+  local pw secs cmd dir out rc real_sudo
+  IFS= read -r -t 15 pw || true; pw="${pw//$'\r'/}"
+  IFS= read -r -t 15 secs || true
+  cmd="$(head -c 65536)"
+  exec 0</dev/null
+  [[ "$secs" =~ ^[0-9]{1,3}$ ]] && ((secs >= 1 && secs <= 600)) || secs=120
+  [[ -n "${cmd//[[:space:]]/}" ]] || bad_args "empty command"
+  dir="$(mktemp -d)"
+  trap 'rm -rf "$dir"; on_exit' EXIT
+  if [[ -n "$pw" ]] && real_sudo="$(command -v sudo)"; then
+    # sudo reads the password through an askpass helper, from a private file:
+    # never on a command line, never in the environment.
+    printf '%s\n' "$pw" >"$dir/pw"
+    printf '#!/bin/sh\ncat %q\n' "$dir/pw" >"$dir/askpass"
+    mkdir "$dir/bin"
+    printf '#!/bin/sh\nexec %q -A "$@"\n' "$real_sudo" >"$dir/bin/sudo"
+    chmod 700 "$dir/askpass" "$dir/bin/sudo"
+    chmod 600 "$dir/pw"
+    export SUDO_ASKPASS="$dir/askpass" PATH="$dir/bin:$PATH"
+  fi
+  unset pw
+  out="$(cd "$HOME" && timeout --kill-after=5 "$secs" bash -c "$cmd" </dev/null 2>&1)"
+  rc=$?
+  rm -rf "$dir"
+  ((rc == 124)) && out+=$'\n'"[stopped after $secs s]"
+  api_ok "$(jq -cn --arg o "$(tail -c 65536 <<<"$out")" --argjson rc "$rc" '{exit_code:$rc, output:$o}')"
+}
+
 api_main() {
   # fd 3 = the one JSON object; everything else goes to stderr.
   exec 3>&1 1>&2
@@ -1272,7 +1310,7 @@ api_main() {
   local cmd="${1:-}"
   shift || true
   case "$cmd" in
-    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | login-cloudflare) ;;  # these read stdin
+    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | login-cloudflare | run) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -1298,6 +1336,7 @@ api_main() {
     login-cloudflare)    do_login_cloudflare ;;
     self-update)         do_self_update "$@" ;;
     install-cli)         do_install_cli "$@" ;;
+    run)                 do_run "$@" ;;
     "")                  bad_args "missing subcommand" ;;
     *)                   bad_args "unknown subcommand '$cmd'" ;;
   esac

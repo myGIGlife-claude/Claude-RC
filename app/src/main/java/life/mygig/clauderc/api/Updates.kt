@@ -26,6 +26,9 @@ object Updates {
     /** Server script API that can install glab. */
     const val INSTALL_CLI_API = 4
 
+    /** Server script API that can run a command typed on the phone. */
+    const val RUN_API = 5
+
     /** Downloads and installs the server scripts (no clone), authorizing [key] if given. Rerun it to update. */
     fun installCommand(key: String? = null) =
         "curl -fsSL https://raw.githubusercontent.com/$REPO/main/server/install.sh | bash" +
