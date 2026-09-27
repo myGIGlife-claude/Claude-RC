@@ -101,6 +101,9 @@ class LauncherApi(
     /** Runs [command] on the server; the sudo password and command go on stdin only. */
     suspend fun run(command: String, sudoPassword: String, timeoutSec: Int = 120): RunResult =
         call("run", stdin = sudoPassword + "\n" + timeoutSec + "\n" + command, timeoutMs = (timeoutSec + 30) * 1000L)
+    suspend fun restart(project: String): JsonObject { requireName(project); return call("restart $project") }
+    /** `claude <args>` from the Command Center's allowlist; args go on stdin. */
+    suspend fun claudeCmd(args: String): RunResult = call("claude-cmd", stdin = args.trim(), timeoutMs = 330_000)
     suspend fun installGlab(): JsonObject = call("install-cli glab", timeoutMs = 240_000)
     suspend fun loginCloudflare(token: String): LoginDone = call("login-cloudflare", stdin = token.trim())
 

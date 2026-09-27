@@ -326,7 +326,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
 }
 
 @Composable
-private fun Section(title: String) {
+internal fun Section(title: String) {
     Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
 }
 
