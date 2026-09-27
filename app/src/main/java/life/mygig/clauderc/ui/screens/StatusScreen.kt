@@ -56,7 +56,6 @@ fun StatusScreen(vm: MainViewModel) {
     val refreshing by vm.statusRefreshing.collectAsState()
     val guard = LocalGuard.current
     val latest by vm.latest.collectAsState()
-    val context = LocalContext.current
     val login = { kind: LoginKind -> guard.run("Log in on the server") { vm.showLogin(kind) } }
 
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = { vm.refreshStatus() }, modifier = Modifier.fillMaxSize()) {

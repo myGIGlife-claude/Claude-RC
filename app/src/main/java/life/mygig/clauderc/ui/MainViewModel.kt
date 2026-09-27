@@ -177,7 +177,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * installer. (The file lands in the app's own folder, not Downloads, so
      * the user would never find it by hand.)
      */
-    fun downloadAndInstall(url: String) = viewModelScope.launch {
+    fun downloadAndInstall(url: String): Job = viewModelScope.launch {
         val ctx = getApplication<Application>()
         val dm = ctx.getSystemService(DownloadManager::class.java)
         val name = url.substringAfterLast('/')
