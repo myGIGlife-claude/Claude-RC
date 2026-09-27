@@ -711,7 +711,7 @@ token_services_json() {
   for id in $TOKEN_SERVICES; do
     svc_def "$id"
     ok=true
-    for v in "${SVC_VARS[@]}"; do grep -q "^export $v=" "$SERVICES_ENV" 2>/dev/null || ok=false; done
+    grep -q "^export ${SVC_VARS[0]}=" "$SERVICES_ENV" 2>/dev/null || ok=false   # the first var is the required one
     inst=true
     [[ -z "$SVC_CLI" ]] || command -v "$SVC_CLI" >/dev/null 2>&1 || inst=false
     jq -cn --arg id "$id" --argjson i "$inst" --argjson o "$ok" \
@@ -1240,7 +1240,8 @@ svc_def() {
   SVC_CLI="" SVC_KEYFILE="" SVC_VARS=() SVC_RES=()
   local tok='^[A-Za-z0-9_-]{20,300}$'
   case "$1" in
-    cloudflare) SVC_VARS=(CLOUDFLARE_API_TOKEN) SVC_RES=('^[A-Za-z0-9_-]{30,100}$') ;;
+    # User tokens, or account tokens (cfat_…) with their account ID (optional var).
+    cloudflare) SVC_VARS=(CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID) SVC_RES=('^[A-Za-z0-9_-]{30,100}$' '^([0-9a-f]{32})?$') ;;
     vercel) SVC_VARS=(VERCEL_TOKEN) SVC_RES=("$tok") SVC_CLI=vercel ;;
     netlify) SVC_VARS=(NETLIFY_AUTH_TOKEN) SVC_RES=("$tok") SVC_CLI=netlify ;;
     fly) SVC_VARS=(FLY_API_TOKEN) SVC_RES=('^FlyV1 [A-Za-z0-9_+/=,-]{20,8000}$') SVC_CLI=flyctl ;;
@@ -1269,8 +1270,10 @@ curl_auth() {
 svc_verify() {
   local id="$1" r; shift
   case "$id" in
-    cloudflare) curl_auth "Authorization: Bearer $1" https://api.cloudflare.com/client/v4/user/tokens/verify |
-      jq -er 'select(.success == true) | "token OK"' ;;
+    cloudflare)  # account tokens verify under their account, user tokens under /user
+      if [[ -n "${2:-}" ]]; then r="accounts/$2"; else r="user"; fi
+      curl_auth "Authorization: Bearer $1" "https://api.cloudflare.com/client/v4/$r/tokens/verify" |
+        jq -er --arg k "${r%%/*}" 'select(.success == true) | if $k == "user" then "user token" else "account token" end' ;;
     vercel) curl_auth "Authorization: Bearer $1" https://api.vercel.com/v2/user | jq -er '.user.username' ;;
     netlify) curl_auth "Authorization: Bearer $1" -A "cLaudeRC" https://api.netlify.com/api/v1/user | jq -er '.email' ;;
     fly) echo "token saved (Fly checks it on first use)" ;;
@@ -1294,13 +1297,13 @@ svc_verify() {
 }
 
 # set_env <VAR> <value>: replace VAR's line in the env file (values are
-# regex-checked, so they never contain a quote).
+# regex-checked, so they never contain a quote). An empty value removes it.
 set_env() {
   local tmp
   mkdir -p "$LAUNCHER_CONFIG_DIR"
   tmp="$(mktemp "$SERVICES_ENV.XXXXXX")"
   chmod 600 "$tmp"
-  { grep -v "^export $1=" "$SERVICES_ENV" 2>/dev/null; printf "export %s='%s'\n" "$1" "$2"; } >"$tmp"
+  { grep -v "^export $1=" "$SERVICES_ENV" 2>/dev/null; [[ -z "$2" ]] || printf "export %s='%s'\n" "$1" "$2"; } >"$tmp"
   mv "$tmp" "$SERVICES_ENV"
 }
 
@@ -1329,6 +1332,8 @@ do_login_token() {
       vals+=("$v")
     done
     exec 0</dev/null
+    [[ "$id" == cloudflare && "${vals[0]}" == cfat_* && -z "${vals[1]}" ]] &&
+      api_err invalid_name "That's an account token (cfat_…): add its Account ID too (shown when you created it)."
     need curl
     who="$(svc_verify "$id" "${vals[@]}")" || api_err not_logged_in "The provider didn't accept that. Check it and try again."
     for ((i = 0; i < ${#SVC_VARS[@]}; i++)); do set_env "${SVC_VARS[$i]}" "${vals[$i]}"; done
