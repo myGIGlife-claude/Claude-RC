@@ -31,6 +31,7 @@ import life.mygig.clauderc.api.LoginUrl
 import life.mygig.clauderc.api.NewResult
 import life.mygig.clauderc.api.OwnersData
 import life.mygig.clauderc.api.Repo
+import life.mygig.clauderc.api.ServiceDef
 import life.mygig.clauderc.api.RunResult
 import life.mygig.clauderc.api.Session
 import life.mygig.clauderc.api.StatusData
@@ -43,7 +44,7 @@ import life.mygig.clauderc.ssh.SshKeyManager
 import life.mygig.clauderc.ssh.SshRunner
 
 enum class Tab { STATUS, NEW, PROJECTS, SESSIONS, COMMAND }
-enum class LoginKind { CLAUDE, GITHUB, AWS, GITLAB, DOCKER, CLOUDFLARE }
+enum class LoginKind { CLAUDE, GITHUB, AWS, GITLAB, DOCKER }
 
 /** What a snackbar's button does. */
 sealed interface Fix {
@@ -194,8 +195,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _showAdd.value = false
         val st = _status.value
         val svc = when (kind) {
-            LoginKind.GITLAB -> st?.services?.gitlab
-            LoginKind.DOCKER -> st?.services?.docker
+            LoginKind.GITLAB -> st?.services?.get("gitlab")
+            LoginKind.DOCKER -> st?.services?.get("docker")
             else -> null
         }
         when {
@@ -210,12 +211,45 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val setup = _setup.asStateFlow()
     fun showSetup(kind: LoginKind?) { _setup.value = kind }
 
-    fun installGlab() = action("Installing the GitLab CLI…") {
-        api.installGlab()
-        _setup.value = null
-        say("GitLab CLI installed")
+    fun installGlab() = installCli("glab") { _setup.value = null; _login.value = LoginKind.GITLAB }
+
+    /** Installs [name] on the server, then runs [then] (usually: open the login form). */
+    fun installCli(name: String, sudoPassword: String = "", then: () -> Unit = {}) = action("Installing $name on the server…") {
+        api.installCli(name, sudoPassword)
+        say("$name installed")
         refreshStatus()
-        _login.value = LoginKind.GITLAB
+        then()
+    }
+
+    /** The connect form for a token service (see Catalog), by id. */
+    private val _tokenService = MutableStateFlow<String?>(null)
+    val tokenService = _tokenService.asStateFlow()
+    private val _tokenError = MutableStateFlow<String?>(null)
+    val tokenError = _tokenError.asStateFlow()
+    fun showTokenService(id: String?) { _tokenError.value = null; _tokenService.value = id }
+
+    /** One tap from +: install the CLI if the server can and it's missing, then open the form. */
+    fun addTokenService(def: ServiceDef) {
+        _showAdd.value = false
+        val st = _status.value
+        val missing = st?.services?.get(def.id)?.installed == false
+        if (def.install != null && missing && (st?.scriptApi ?: 0) >= Updates.TOKEN_SERVICES_API) {
+            installCli(def.install) { showTokenService(def.id) }
+        } else {
+            showTokenService(def.id)
+        }
+    }
+
+    fun tokenLogin(def: ServiceDef, values: List<String>) {
+        _tokenError.value = null
+        action("Checking with ${def.name}…", onError = { e ->
+            if (_tokenService.value == def.id) _tokenError.value = friendly(e).first else report(e)
+        }) {
+            val r = api.loginToken(def.id, values)
+            if (_tokenService.value == def.id) _tokenService.value = null
+            say("${def.name} connected" + (r.user?.let { ": $it" } ?: "") + ". Restart running sessions to use it.")
+            refreshStatus()
+        }
     }
 
     /**
@@ -583,11 +617,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun dockerLogin(registry: String, user: String, token: String) = loginAction(LoginKind.DOCKER, "Logging in to the registry…") {
         api.loginDocker(registry, user, token)
         loginDone(LoginKind.DOCKER, "Logged in to ${registry.ifBlank { "docker.io" }}")
-    }
-
-    fun cloudflareLogin(token: String) = loginAction(LoginKind.CLOUDFLARE, "Checking Cloudflare token…") {
-        api.loginCloudflare(token)
-        loginDone(LoginKind.CLOUDFLARE, "Cloudflare token saved. Restart running sessions to use it.")
     }
 
     private fun loginDone(kind: LoginKind, text: String) {

@@ -11,7 +11,7 @@ data class StatusData(
     val hostname: String = "",
     val version: String = "",
     /** Missing when the server's scripts predate these services. */
-    val services: Services? = null,
+    val services: Map<String, ServiceStatus>? = null,
     /** Last commit that changed server/, as recorded by install.sh; null if unknown. */
     val commit: String? = null,
     @SerialName("script_api") val scriptApi: Int = 0,
@@ -23,13 +23,6 @@ data class ServiceStatus(
     val installed: Boolean = false,
     @SerialName("logged_in") val loggedIn: Boolean = false,
     val detail: String? = null,
-)
-
-@Serializable
-data class Services(
-    val gitlab: ServiceStatus = ServiceStatus(),
-    val docker: ServiceStatus = ServiceStatus(),
-    val cloudflare: ServiceStatus = ServiceStatus(),
 )
 
 @Serializable
