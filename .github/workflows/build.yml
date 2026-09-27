@@ -1,8 +1,9 @@
 name: build
 
 on:
+  # Branch pushes only build on main (and tags); pull requests build once.
   push:
-    branches: ["**"]
+    branches: [main]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
