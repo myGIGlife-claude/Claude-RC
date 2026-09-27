@@ -23,17 +23,20 @@ object Catalog {
     val services = listOf(
         ServiceDef(
             "cloudflare", "Cloudflare", "Workers, R2, KV, D1, Pages via wrangler",
-            listOf(FieldDef("API token", minLength = 30)),
+            listOf(FieldDef("API token", minLength = 30), FieldDef("Account ID (account tokens only)", secret = false, minLength = 0)),
             "https://dash.cloudflare.com/profile/api-tokens", "Create token on Cloudflare",
-            "A user API token: My Profile › API Tokens › Create Token. (Account-owned tokens from Manage Account " +
-                "aren't supported by this check.)\n\n" +
+            "Either kind of token works:\n" +
+                "• User token: My Profile › API Tokens › Create Token. Leave Account ID empty.\n" +
+                "• Account token (cfat_…): Manage Account › Account API tokens › Create Token. Paste the Account ID " +
+                "shown with it too (wrangler needs it).\n\n" +
                 "Easiest: the \"Edit Cloudflare Workers\" template. It contains:\n" +
                 "Account: Workers Scripts: Edit · Workers KV Storage: Edit · Workers R2 Storage: Edit · " +
                 "Workers Tail: Read · Account Settings: Read\n" +
                 "Zone: Workers Routes: Edit\n" +
-                "User: User Details: Read · Memberships: Read\n\n" +
+                "User: User Details: Read · Memberships: Read (user tokens only)\n\n" +
                 "Add if Claude uses them (Account): D1: Edit, Cloudflare Pages: Edit. Then choose the account and " +
-                "zone resources, Continue to summary › Create Token.\n\nSaved as CLOUDFLARE_API_TOKEN.",
+                "zone resources, Continue to summary › Create Token.\n\n" +
+                "Saved as CLOUDFLARE_API_TOKEN (and CLOUDFLARE_ACCOUNT_ID).",
         ),
         ServiceDef(
             "vercel", "Vercel", "Deploy with the vercel CLI",

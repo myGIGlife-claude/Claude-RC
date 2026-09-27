@@ -280,6 +280,10 @@ check "token login: malformed token" "$(jqt '.error.code=="invalid_name"')"
 api "login-token vercel" "abcdefghijklmnopqrstuvwxyz0123"
 check "token login: provider rejects (no network) → nothing saved" "$(jqt '.error.code=="not_logged_in"')"
 grep -q VERCEL_TOKEN "$HOME/.config/claude-launcher/env" 2>/dev/null; [[ $? -ne 0 ]]; check "rejected token not saved" $?
+api "login-token cloudflare" "cfat_abcdefghijklmnopqrstuvwxyz0123456789ABCD"
+check "cloudflare account token needs its account ID" "$(jqt '.error.code=="invalid_name" and (.error.message|test("Account ID"))')"
+api "login-token cloudflare" $'cfat_abcdefghijklmnopqrstuvwxyz0123456789ABCD\nnot-an-id'
+check "cloudflare account ID must be 32 hex" "$(jqt '.error.code=="invalid_name"')"
 api "login-token b2" $'onlyonevalue'
 check "b2 needs two valid values" "$(jqt '.error.code=="invalid_name"')"
 KEY='{"type":"service_account","project_id":"demo-proj","private_key":"x","client_email":"bot@demo-proj.iam.gserviceaccount.com"}'
