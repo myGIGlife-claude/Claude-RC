@@ -1,5 +1,16 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import life.mygig.clauderc.api.Updates
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -41,6 +52,8 @@ fun SessionsScreen(vm: MainViewModel) {
     val guard = LocalGuard.current
     val context = LocalContext.current
     var confirmStop by remember { mutableStateOf<Session?>(null) }
+    val settings by vm.settings.collectAsState()
+    var showRun by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { vm.refreshSessions() }
 
@@ -50,6 +63,14 @@ fun SessionsScreen(vm: MainViewModel) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { Text("", Modifier.padding(top = 2.dp)) }
+            // A shell on the server: only offered when App lock guards the app.
+            if (settings?.appLock == true) {
+                item {
+                    OutlinedButton(onClick = { showRun = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Run a command on the server")
+                    }
+                }
+            }
             if (sessions.isEmpty()) {
                 item { Text(if (refreshing) "Loading…" else "No Claude sessions running.") }
             }
@@ -73,6 +94,8 @@ fun SessionsScreen(vm: MainViewModel) {
         }
     }
 
+    if (showRun && settings?.appLock == true) RunCommandDialog(vm) { showRun = false }
+
     confirmStop?.let { s ->
         AlertDialog(
             onDismissRequest = { confirmStop = null },
@@ -87,4 +110,83 @@ fun SessionsScreen(vm: MainViewModel) {
             dismissButton = { TextButton(onClick = { confirmStop = null }) { Text("Cancel") } },
         )
     }
+}
+
+private const val ENABLE_RUN = "echo 'ALLOW_RUN=1' >> ~/.config/claude-launcher/config"
+
+/** Type or paste a command (e.g. one Claude asked you to run), with a sudo password if it needs one. */
+@Composable
+private fun RunCommandDialog(vm: MainViewModel, onClose: () -> Unit) {
+    val context = LocalContext.current
+    val guard = LocalGuard.current
+    val busy by vm.busy.collectAsState()
+    val status by vm.status.collectAsState()
+    val result by vm.runResult.collectAsState()
+    var command by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    val close = { vm.clearRunResult(); onClose() }
+    val st = status
+    AlertDialog(
+        onDismissRequest = { if (busy == null) close() },
+        title = { Text("Run a command") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                when {
+                    st != null && st.scriptApi < Updates.RUN_API ->
+                        Text("Update the server scripts first (the card at the top of Status).", color = MaterialTheme.colorScheme.error)
+                    st != null && !st.runEnabled -> {
+                        Text(
+                            "Running commands from the phone is off on this server. To allow it, run this " +
+                                "on the server once, then pull to refresh Status:",
+                        )
+                        SelectionContainer {
+                            Text(ENABLE_RUN, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                        }
+                        OutlinedButton(onClick = {
+                            copy(context, "Enable run", ENABLE_RUN)
+                            vm.say("Copied. Paste it into a terminal on the server.")
+                        }) { Text("Copy command") }
+                    }
+                    else -> {
+                        OutlinedTextField(
+                            value = command, onValueChange = { command = it },
+                            label = { Text("Command") }, minLines = 3, maxLines = 8,
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                        )
+                        OutlinedTextField(
+                            value = password, onValueChange = { password = it },
+                            label = { Text("sudo password (only if it uses sudo)") }, singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Button(
+                            onClick = { guard.run("Run a command on the server") { vm.runCommand(command, password) } },
+                            enabled = busy == null && command.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Run") }
+                        Text(
+                            "Runs in your home folder with bash, up to 2 minutes, no keyboard input " +
+                                "(interactive prompts won't work). The password goes on stdin only.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        result?.let { r ->
+                            Text(
+                                if (r.exitCode == 0) "Done (exit 0)" else "Exit code ${r.exitCode}",
+                                color = if (r.exitCode == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.labelLarge,
+                            )
+                            SelectionContainer(Modifier.heightIn(max = 320.dp).horizontalScroll(rememberScrollState())) {
+                                Text(r.output.ifBlank { "(no output)" }, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = close) { Text("Close") } },
+    )
 }

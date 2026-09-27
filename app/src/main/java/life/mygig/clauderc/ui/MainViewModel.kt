@@ -31,6 +31,7 @@ import life.mygig.clauderc.api.LoginUrl
 import life.mygig.clauderc.api.NewResult
 import life.mygig.clauderc.api.OwnersData
 import life.mygig.clauderc.api.Repo
+import life.mygig.clauderc.api.RunResult
 import life.mygig.clauderc.api.Session
 import life.mygig.clauderc.api.StatusData
 import life.mygig.clauderc.api.TailResult
@@ -157,6 +158,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 delay(60 * 60 * 1000L)
             }
         }
+    }
+
+    private val _runResult = MutableStateFlow<RunResult?>(null)
+    val runResult = _runResult.asStateFlow()
+    fun clearRunResult() { _runResult.value = null }
+
+    fun runCommand(command: String, sudoPassword: String) = action("Running on the server…") {
+        _runResult.value = null
+        _runResult.value = api.run(command, sudoPassword)
     }
 
     /** A service whose CLI isn't on the server yet: the setup guide for it. */

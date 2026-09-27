@@ -23,3 +23,7 @@ REPOS_CACHE_TTL=600
 
 # Where the runner finds claude-setup.sh (default: next to it, ~/bin, or ~).
 # SETUP_SCRIPT="$HOME/claude-setup.sh"
+
+# Let the phone run any command you type there (Sessions > Run a command,
+# only shown when App lock is on). Off by default: 1 to allow.
+ALLOW_RUN=0
