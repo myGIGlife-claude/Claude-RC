@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -38,7 +39,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import life.mygig.clauderc.api.Catalog
+import life.mygig.clauderc.api.ServiceDef
 import life.mygig.clauderc.api.TailResult
 import life.mygig.clauderc.api.Updates
 import life.mygig.clauderc.ui.LocalGuard
@@ -62,7 +66,6 @@ fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
                     LoginKind.AWS -> "Log in to AWS"
                     LoginKind.GITLAB -> "Log in to GitLab"
                     LoginKind.DOCKER -> "Log in to a container registry"
-                    LoginKind.CLOUDFLARE -> "Connect Cloudflare"
                 },
             )
         },
@@ -85,7 +88,6 @@ fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
                     LoginKind.AWS -> AwsLogin(vm, busy != null)
                     LoginKind.GITLAB -> GitlabLogin(vm, busy != null)
                     LoginKind.DOCKER -> DockerLogin(vm, busy != null)
-                    LoginKind.CLOUDFLARE -> CloudflareLogin(vm, busy != null)
                 }
             }
         },
@@ -100,16 +102,28 @@ fun AddServiceDialog(vm: MainViewModel) {
     val status by vm.status.collectAsState()
     val guard = LocalGuard.current
     val st = status
-    val options = buildList {
-        if (st?.aws?.loggedIn != true) add(Triple(LoginKind.AWS, "AWS", "Access keys or SSO for the AWS CLI"))
-        val sv = st?.services
-        if (sv?.gitlab?.loggedIn != true) {
-            add(Triple(LoginKind.GITLAB, "GitLab", if (sv?.gitlab?.installed == false) "Installs glab, then asks for a token" else "Personal access token"))
+    val sv = st?.services.orEmpty()
+    val newServer = (st?.scriptApi ?: 0) >= Updates.TOKEN_SERVICES_API
+    // name, hint, what a tap does
+    val options = buildList<Triple<String, String, () -> Unit>> {
+        if (st?.aws?.loggedIn != true) add(Triple("AWS", "Access keys or SSO for the AWS CLI") { vm.addService(LoginKind.AWS) })
+        if (sv["gitlab"]?.loggedIn != true) {
+            add(Triple("GitLab", if (sv["gitlab"]?.installed == false) "Installs glab, then asks for a token" else "Personal access token") {
+                vm.addService(LoginKind.GITLAB)
+            })
         }
-        if (sv?.docker?.loggedIn != true) {
-            add(Triple(LoginKind.DOCKER, "Docker Hub / GHCR", if (sv?.docker?.installed == false) "Docker isn't installed: shows how" else "Push and pull images"))
+        if (sv["docker"]?.loggedIn != true) {
+            add(Triple("Docker Hub / GHCR", if (sv["docker"]?.installed == false) "Installs Docker (asks for your sudo password)" else "Push and pull images") {
+                vm.addService(LoginKind.DOCKER)
+            })
         }
-        if (sv?.cloudflare?.loggedIn != true) add(Triple(LoginKind.CLOUDFLARE, "Cloudflare", "Workers, R2, KV, D1, Pages via wrangler"))
+        Catalog.services.filter { it.id == "cloudflare" || newServer }.forEach { def ->
+            val svc = sv[def.id]
+            if (svc?.loggedIn != true) {
+                val hint = if (def.install != null && svc?.installed == false) "Installs ${def.install}, then asks for credentials" else def.hint
+                add(Triple(def.name, hint) { vm.addTokenService(def) })
+            }
+        }
     }
     AlertDialog(
         onDismissRequest = { vm.showAddService(false) },
@@ -117,10 +131,13 @@ fun AddServiceDialog(vm: MainViewModel) {
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (st == null) Text("Check the server first (pull down on Status).")
+                if (st != null && !newServer) {
+                    Text("Update the server scripts (card at the top of Status) to see more services.", style = MaterialTheme.typography.bodySmall)
+                }
                 if (options.isEmpty() && st != null) Text("Everything here is already connected.")
-                options.forEach { (kind, name, hint) ->
+                options.forEach { (name, hint, go) ->
                     OutlinedButton(
-                        onClick = { guard.run("Connect $name") { vm.addService(kind) } },
+                        onClick = { guard.run("Connect $name") { go() } },
                         enabled = st != null,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
@@ -137,6 +154,56 @@ fun AddServiceDialog(vm: MainViewModel) {
     )
 }
 
+/** Connect form for a token service: create link, what Claude needs, the fields. */
+@Composable
+fun TokenServiceDialog(vm: MainViewModel, def: ServiceDef) {
+    val context = LocalContext.current
+    val busy by vm.busy.collectAsState()
+    val error by vm.tokenError.collectAsState()
+    val values = remember(def.id) { mutableStateListOf(*Array(def.fields.size) { "" }) }
+    var needs by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = { if (busy == null) vm.showTokenService(null) },
+        title = { Text("Connect ${def.name}") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                OutlinedButton(onClick = { openUrl(context, def.createUrl) }, modifier = Modifier.fillMaxWidth()) { Text(def.createLabel) }
+                TextButton(onClick = { needs = !needs }) { Text(if (needs) "Hide what Claude needs" else "What Claude needs (step by step)") }
+                if (needs) SelectionContainer { Text(def.needs, style = MaterialTheme.typography.bodySmall) }
+                def.fields.forEachIndexed { i, f ->
+                    OutlinedTextField(
+                        value = values[i],
+                        onValueChange = { values[i] = if (f.multiline) it else it.trim() },
+                        label = { Text(f.label) },
+                        singleLine = !f.multiline,
+                        minLines = if (f.multiline) 4 else 1,
+                        maxLines = if (f.multiline) 8 else 1,
+                        modifier = Modifier.fillMaxWidth(),
+                        visualTransformation = if (f.secret && !f.multiline) PasswordVisualTransformation() else VisualTransformation.None,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = if (f.secret && !f.multiline) KeyboardType.Password else KeyboardType.Text,
+                            autoCorrectEnabled = false,
+                        ),
+                    )
+                }
+                Button(
+                    onClick = { vm.tokenLogin(def, values.toList()) },
+                    enabled = busy == null && def.fields.indices.all { values[it].trim().length >= def.fields[it].minLength },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Connect") }
+                Text(
+                    "Checked with ${def.name}, then kept in a private file on the server that Claude's sessions load. " +
+                        "It travels over SSH on stdin only.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = { vm.showTokenService(null) }) { Text("Close") } },
+    )
+}
+
 /** Getting a service's CLI onto the server. */
 @Composable
 fun SetupDialog(vm: MainViewModel, kind: LoginKind) {
@@ -144,6 +211,7 @@ fun SetupDialog(vm: MainViewModel, kind: LoginKind) {
     val busy by vm.busy.collectAsState()
     val status by vm.status.collectAsState()
     val canInstall = (status?.scriptApi ?: 0) >= Updates.INSTALL_CLI_API
+    var sudoPw by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = { if (busy == null) vm.showSetup(null) },
         title = { Text(if (kind == LoginKind.GITLAB) "Set up the GitLab CLI" else "Set up Docker") },
@@ -165,6 +233,24 @@ fun SetupDialog(vm: MainViewModel, kind: LoginKind) {
                             color = MaterialTheme.colorScheme.error,
                         )
                     }
+                } else if ((status?.scriptApi ?: 0) >= Updates.TOKEN_SERVICES_API) {
+                    Text(
+                        "Docker needs root to install. Enter your sudo password and the server runs Docker's official " +
+                            "install script (get.docker.com), then adds you to the docker group. The password is used once " +
+                            "and never saved.",
+                    )
+                    OutlinedTextField(
+                        value = sudoPw, onValueChange = { sudoPw = it },
+                        label = { Text("sudo password") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                    )
+                    Button(
+                        onClick = { vm.installCli("docker", sudoPw) { vm.showSetup(null); vm.showLogin(LoginKind.DOCKER) } },
+                        enabled = busy == null,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Install Docker") }
+                    Text("This can take a few minutes.", style = MaterialTheme.typography.bodySmall)
                 } else {
                     Text("Docker needs root to install, so run this on the server yourself (it asks for your sudo password):")
                     SelectionContainer {
@@ -292,23 +378,6 @@ private fun permissionsText(kind: LoginKind): String = when (kind) {
             "• delete:packages: only if Claude should delete images\n" +
             "• Ticking write:packages also ticks repo; untick repo if you don't need it\n" +
             "• Username: your GitHub username"
-    LoginKind.CLOUDFLARE ->
-        "A user API token: My Profile › API Tokens › Create Token. (Account-owned tokens from Manage Account " +
-            "aren't supported by this check.)\n\n" +
-            "Easiest: use the \"Edit Cloudflare Workers\" template. It contains:\n" +
-            "Account:\n" +
-            "• Workers Scripts: Edit\n" +
-            "• Workers KV Storage: Edit\n" +
-            "• Workers R2 Storage: Edit\n" +
-            "• Workers Tail: Read\n" +
-            "• Account Settings: Read\n" +
-            "Zone:\n" +
-            "• Workers Routes: Edit\n" +
-            "User:\n" +
-            "• User Details: Read\n" +
-            "• Memberships: Read\n\n" +
-            "Add if Claude uses them (Account): D1: Edit, Cloudflare Pages: Edit.\n" +
-            "Then choose the account and zone resources the token may use, and Continue to summary › Create Token."
     LoginKind.CLAUDE -> ""
 }
 
@@ -382,24 +451,6 @@ private fun DockerLogin(vm: MainViewModel, busy: Boolean) {
         enabled = !busy && user.isNotBlank() && token.length >= 8,
         modifier = Modifier.fillMaxWidth(),
     ) { Text("Connect") }
-}
-
-@Composable
-private fun CloudflareLogin(vm: MainViewModel, busy: Boolean) {
-    val context = LocalContext.current
-    var token by remember { mutableStateOf("") }
-    Text(
-        "Create a user API token (the \"Edit Cloudflare Workers\" template suits wrangler). It's saved in a " +
-            "private file on the server that Claude's sessions load; restart running sessions to pick it up.",
-    )
-    OutlinedButton(onClick = { openUrl(context, "https://dash.cloudflare.com/profile/api-tokens") }, modifier = Modifier.fillMaxWidth()) {
-        Text("Create token on Cloudflare")
-    }
-    PermissionsLink(LoginKind.CLOUDFLARE)
-    SecretField(token, "API token") { token = it }
-    Button(onClick = { vm.cloudflareLogin(token) }, enabled = !busy && token.length >= 30, modifier = Modifier.fillMaxWidth()) {
-        Text("Connect")
-    }
 }
 
 @Composable

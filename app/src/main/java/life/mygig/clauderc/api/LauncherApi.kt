@@ -104,8 +104,12 @@ class LauncherApi(
     suspend fun restart(project: String): JsonObject { requireName(project); return call("restart $project") }
     /** `claude <args>` from the Command Center's allowlist; args go on stdin. */
     suspend fun claudeCmd(args: String): RunResult = call("claude-cmd", stdin = args.trim(), timeoutMs = 330_000)
-    suspend fun installGlab(): JsonObject = call("install-cli glab", timeoutMs = 240_000)
-    suspend fun loginCloudflare(token: String): LoginDone = call("login-cloudflare", stdin = token.trim())
+    /** Installs a CLI on the server; [sudoPassword] only for installs that need root (docker). */
+    suspend fun installCli(name: String, sudoPassword: String = ""): JsonObject =
+        call("install-cli $name", stdin = sudoPassword, timeoutMs = 660_000)
+    /** Saves a token service's credential; one value per field, or the whole JSON key. */
+    suspend fun loginToken(id: String, values: List<String>): LoginDone =
+        call("login-token $id", stdin = values.joinToString("\n") { it.trim() })
 
     private fun requireName(name: String) {
         if (!PROJECT_NAME_RE.matches(name)) {

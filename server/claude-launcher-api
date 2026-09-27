@@ -19,7 +19,7 @@ CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/claude-launcher/config"
 PROJECT_RE='^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$'
 REPO_RE='^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._][A-Za-z0-9._-]*$'
 OWNER_RE='^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'
-KNOWN="status owners repos sessions new open clone-status start stop tail login-claude-start login-claude-code login-claude-cancel login-github login-aws-keys login-aws-sso-start login-gitlab login-docker login-cloudflare self-update install-cli run claude-cmd restart"
+KNOWN="status owners repos sessions new open clone-status start stop tail login-claude-start login-claude-code login-claude-cancel login-github login-aws-keys login-aws-sso-start login-gitlab login-docker login-cloudflare self-update install-cli run claude-cmd restart login-token"
 TOKEN_RE='^[A-Za-z0-9._/=-]{1,200}$'
 
 mkdir -p "$STATE_DIR" 2>/dev/null
@@ -97,7 +97,10 @@ case "$sub" in
     ((nargs == 1)) || [[ "${args[1]}" == --start ]] || deny "$sub"
     ;;
   install-cli)
-    ((nargs == 1)) && [[ "${args[0]}" == glab ]] || deny "$sub"
+    ((nargs == 1)) && [[ " glab docker supabase flyctl stripe railway neon b2 vercel netlify firebase hf gcloud " == *" ${args[0]} "* ]] || deny "$sub"
+    ;;
+  login-token)
+    ((nargs == 1)) && [[ " cloudflare vercel netlify fly railway supabase neon npm stripe huggingface b2 gcp firebase " == *" ${args[0]} "* ]] || deny "$sub"
     ;;
   self-update)
     ((nargs == 1)) && [[ "${args[0]}" =~ ^[0-9a-f]{40}$ ]] || deny "$sub"

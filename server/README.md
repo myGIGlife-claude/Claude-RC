@@ -100,7 +100,8 @@ Exit code 0 = success, 1 = handled error, 2 = bad arguments.
 | `login-aws-keys` | key id, secret, region on stdin (one per line) | `account`, `arn`, `region` |
 | `login-aws-sso-start` | — | `url`, `code` (then poll `status`) |
 | `self-update` | `<40-hex commit>` | `commit`. Downloads that commit's `install.sh` and runs it (the phone's **Update now** button). |
-| `install-cli` | `glab` | `installed`, `name`, `version`. Latest glab release from gitlab.com, checked against its `checksums.txt`, into `~/.local/bin` (no sudo). |
+| `install-cli` | `glab`, `docker`, `supabase`, `flyctl`, `stripe`, `railway`, `neon`, `b2`, `vercel`, `netlify`, `firebase`, `hf`, `gcloud`; stdin: sudo password (docker only) | `installed`, `name`, `version`. Into `~/.local/bin` without sudo (Docker: get.docker.com with the password via askpass). SHA-256 checked where the vendor publishes checksums (glab, supabase, flyctl, stripe, b2). npm-based ones need Node.js. |
+| `login-token` | `<service>`; stdin: one value per line, or the whole service-account JSON (`gcp`, `firebase`) | `user`. Services: cloudflare, vercel, netlify, fly, railway, supabase, neon, npm, stripe, huggingface, b2, gcp, firebase. Checked with the provider's API, then saved to `~/.config/claude-launcher/env` (mode 600, loaded by `~/.bashrc`); JSON keys go to a mode-600 file. |
 | `run` | stdin: sudo password line (may be empty), timeout seconds line, then the command | `exit_code`, `output` (stdout+stderr, last 64 KB). Off unless `ALLOW_RUN=1` in the config (error `run_disabled`). |
 | `restart` | `<project or session>` | `session`, `path`, `restarted`. Stops the session and starts it again in the same folder (picks up new plugins). |
 | `claude-cmd` | stdin: the arguments after `claude` | `exit_code`, `output`. Only `doctor`, `update`, `--version`, `plugin …`, `plugin marketplace …`, `mcp list/get/remove`; no shell. |

@@ -32,6 +32,9 @@ object Updates {
     /** Server script API with restart and Command Center (claude-cmd). */
     const val COMMAND_CENTER_API = 6
 
+    /** Server script API with login-token services and more install-cli targets. */
+    const val TOKEN_SERVICES_API = 7
+
     /** Downloads and installs the server scripts (no clone), authorizing [key] if given. Rerun it to update. */
     fun installCommand(key: String? = null) =
         "curl -fsSL https://raw.githubusercontent.com/$REPO/main/server/install.sh | bash" +
