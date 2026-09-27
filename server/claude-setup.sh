@@ -13,9 +13,9 @@ set -uo pipefail
 
 SCRIPT_VERSION="2.0.0"
 # What the phone can rely on: 2 = extra services, 3 = self-update,
-# 4 = install-cli, 5 = run, 6 = restart + claude-cmd. Bump when the app starts
-# needing a new server feature.
-SCRIPT_API=6
+# 4 = install-cli, 5 = run, 6 = restart + claude-cmd, 7 = token services +
+# more CLIs. Bump when the app starts needing a new server feature.
+SCRIPT_API=7
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -31,6 +31,8 @@ SERVICES_ENV="$LAUNCHER_CONFIG_DIR/env"
 SERVICES_ENV_HOOK="[ -f \"$SERVICES_ENV\" ] && . \"$SERVICES_ENV\"  # cLaudeRC"
 LOCK_FILE="$API_STATE_DIR/api.lock"
 INSTALLED_COMMIT_FILE="$LAUNCHER_CONFIG_DIR/installed-commit"   # written by install.sh
+SERVICES_INFO="$LAUNCHER_CONFIG_DIR/services.json"   # who each token service is logged in as
+TOKEN_SERVICES="cloudflare vercel netlify fly railway supabase neon npm stripe huggingface b2 gcp firebase"
 
 CLAUDE_LOGIN_SESSION="claude-login"
 AWS_LOGIN_SESSION="aws-sso-login"
@@ -686,7 +688,7 @@ do_status() {
 
 # Extra services the phone can log in to. Each: installed, logged_in, detail.
 services_json() {
-  local gl_i=false gl_ok=false gl_user="" dk_i=false dk_regs="" cf_ok=false
+  local gl_i=false gl_ok=false gl_user="" dk_i=false dk_regs=""
   if command -v glab >/dev/null 2>&1; then
     gl_i=true
     gl_user="$(t 15 glab api user 2>/dev/null </dev/null | jq -r '.username // empty' 2>/dev/null)"
@@ -696,12 +698,26 @@ services_json() {
     dk_i=true
     dk_regs="$(jq -r '(.auths // {}) | keys | join(", ")' "$HOME/.docker/config.json" 2>/dev/null)"
   fi
-  grep -q '^export CLOUDFLARE_API_TOKEN=' "$SERVICES_ENV" 2>/dev/null && cf_ok=true
   jq -cn --argjson gi "$gl_i" --argjson go "$gl_ok" --arg gu "$gl_user" \
-    --argjson di "$dk_i" --arg dr "$dk_regs" --argjson co "$cf_ok" '{
+    --argjson di "$dk_i" --arg dr "$dk_regs" '{
       gitlab:{installed:$gi, logged_in:$go, detail:(if $gu=="" then null else $gu end)},
-      docker:{installed:$di, logged_in:($dr!=""), detail:(if $dr=="" then null else $dr end)},
-      cloudflare:{installed:true, logged_in:$co, detail:null}}'
+      docker:{installed:$di, logged_in:($dr!=""), detail:(if $dr=="" then null else $dr end)}}' |
+    jq -c --argjson t "$(token_services_json)" '. + $t'
+}
+
+# installed / logged_in / detail for every token service (no network calls).
+token_services_json() {
+  local id v ok inst
+  for id in $TOKEN_SERVICES; do
+    svc_def "$id"
+    ok=true
+    for v in "${SVC_VARS[@]}"; do grep -q "^export $v=" "$SERVICES_ENV" 2>/dev/null || ok=false; done
+    inst=true
+    [[ -z "$SVC_CLI" ]] || command -v "$SVC_CLI" >/dev/null 2>&1 || inst=false
+    jq -cn --arg id "$id" --argjson i "$inst" --argjson o "$ok" \
+      --arg d "$(jq -r --arg id "$id" '.[$id] // empty' "$SERVICES_INFO" 2>/dev/null)" \
+      '{($id):{installed:$i, logged_in:$o, detail:(if $d=="" then null else $d end)}}'
+  done | jq -sc 'add // {}'
 }
 
 do_owners() {
@@ -1212,29 +1228,125 @@ do_login_docker() {
   api_ok "$(jq -cn --arg r "$reg" --arg u "$user" '{logged_in:true, user:$u, registry:$r}')"
 }
 
-# wrangler has no lasting token login, so the token goes in a private env file
-# that ~/.bashrc loads (Claude Code picks up the shell's environment from it).
-do_login_cloudflare() {
-  local token ok tmp
-  token="$(read_secret_line)"
-  exec 0</dev/null
-  token="${token//[[:space:]]/}"
-  [[ "$token" =~ ^[A-Za-z0-9_-]{30,100}$ ]] || api_err invalid_name "That doesn't look like a Cloudflare API token."
-  need curl
-  # curl reads the header from its config on stdin, so the token isn't in the process list.
-  ok="$(printf 'header = "Authorization: Bearer %s"\n' "$token" |
-    curl -fsS --max-time 15 -K - https://api.cloudflare.com/client/v4/user/tokens/verify 2>/dev/null |
-    jq -r '.success // false' 2>/dev/null)"
-  [[ "$ok" == true ]] || api_err not_logged_in "Cloudflare didn't accept that token."
+# ---- Token services ----------------------------------------------------------
+# CLIs that read a token from the environment. The token is checked against
+# the provider's API, then kept in a mode-600 env file that ~/.bashrc loads
+# (Claude Code picks up the shell's environment from it).
+
+# svc_def <id>: SVC_VARS (env var names, in stdin order), SVC_RES (a regex per
+# var), SVC_CLI (binary to look for; empty = none needed), SVC_KEYFILE (the
+# credential is a service-account JSON file instead of a token).
+svc_def() {
+  SVC_CLI="" SVC_KEYFILE="" SVC_VARS=() SVC_RES=()
+  local tok='^[A-Za-z0-9_-]{20,300}$'
+  case "$1" in
+    cloudflare) SVC_VARS=(CLOUDFLARE_API_TOKEN) SVC_RES=('^[A-Za-z0-9_-]{30,100}$') ;;
+    vercel) SVC_VARS=(VERCEL_TOKEN) SVC_RES=("$tok") SVC_CLI=vercel ;;
+    netlify) SVC_VARS=(NETLIFY_AUTH_TOKEN) SVC_RES=("$tok") SVC_CLI=netlify ;;
+    fly) SVC_VARS=(FLY_API_TOKEN) SVC_RES=('^FlyV1 [A-Za-z0-9_+/=,-]{20,8000}$') SVC_CLI=flyctl ;;
+    railway) SVC_VARS=(RAILWAY_API_TOKEN) SVC_RES=("$tok") SVC_CLI=railway ;;
+    supabase) SVC_VARS=(SUPABASE_ACCESS_TOKEN) SVC_RES=("$tok") SVC_CLI=supabase ;;
+    neon) SVC_VARS=(NEON_API_KEY) SVC_RES=("$tok") SVC_CLI=neon ;;
+    npm) SVC_VARS=(NPM_TOKEN) SVC_RES=('^npm_[A-Za-z0-9]{20,100}$') SVC_CLI=npm ;;
+    stripe) SVC_VARS=(STRIPE_API_KEY) SVC_RES=('^(sk|rk)_(test|live)_[A-Za-z0-9]{10,250}$') SVC_CLI=stripe ;;
+    huggingface) SVC_VARS=(HF_TOKEN) SVC_RES=('^hf_[A-Za-z0-9]{20,100}$') SVC_CLI=hf ;;
+    b2) SVC_VARS=(B2_APPLICATION_KEY_ID B2_APPLICATION_KEY) SVC_RES=('^[A-Za-z0-9]{12,40}$' '^[A-Za-z0-9/+]{20,80}$') SVC_CLI=b2 ;;
+    gcp) SVC_VARS=(CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE CLOUDSDK_CORE_PROJECT) SVC_KEYFILE=gcp-key.json SVC_CLI=gcloud ;;
+    firebase) SVC_VARS=(GOOGLE_APPLICATION_CREDENTIALS) SVC_KEYFILE=firebase-key.json SVC_CLI=firebase ;;
+    *) return 1 ;;
+  esac
+}
+
+# curl_auth <header> [curl args…] <url>: the header travels in curl's config on
+# stdin, so the secret never shows up in the process list.
+curl_auth() {
+  local hdr="$1"; shift
+  printf 'header = "%s"\n' "$hdr" | curl -fsS --max-time 15 -K - "$@" 2>/dev/null
+}
+
+# svc_verify <id> <values…>: prints who the credential belongs to; fails if the
+# provider rejects it.
+svc_verify() {
+  local id="$1" r; shift
+  case "$id" in
+    cloudflare) curl_auth "Authorization: Bearer $1" https://api.cloudflare.com/client/v4/user/tokens/verify |
+      jq -er 'select(.success == true) | "token OK"' ;;
+    vercel) curl_auth "Authorization: Bearer $1" https://api.vercel.com/v2/user | jq -er '.user.username' ;;
+    netlify) curl_auth "Authorization: Bearer $1" -A "cLaudeRC" https://api.netlify.com/api/v1/user | jq -er '.email' ;;
+    fly) echo "token saved (Fly checks it on first use)" ;;
+    railway) curl_auth "Authorization: Bearer $1" -H 'Content-Type: application/json' \
+      -d '{"query":"query { me { email } }"}' https://backboard.railway.com/graphql/v2 | jq -er '.data.me.email' ;;
+    supabase) curl_auth "Authorization: Bearer $1" https://api.supabase.com/v1/profile |
+      jq -er '.username // .primary_email' ;;
+    neon) r="$(curl_auth "Authorization: Bearer $1" -H 'Accept: application/json' https://console.neon.tech/api/v2/users/me)" &&
+      jq -er '.email' <<<"$r" ||
+      { curl_auth "Authorization: Bearer $1" -H 'Accept: application/json' https://console.neon.tech/api/v2/projects >/dev/null &&
+        echo "API key OK"; } ;;
+    npm) curl_auth "Authorization: Bearer $1" https://registry.npmjs.org/-/whoami | jq -er '.username' ;;
+    stripe) curl_auth "Authorization: Bearer $1" https://api.stripe.com/v1/balance |
+      jq -er 'select(.object == "balance") | if .livemode then "live mode" else "test mode" end' ;;
+    huggingface) curl_auth "Authorization: Bearer $1" https://huggingface.co/api/whoami-v2 | jq -er '.name' ;;
+    b2) printf 'user = "%s:%s"\n' "$1" "$2" |
+      curl -fsS --max-time 15 -K - https://api.backblazeb2.com/b2api/v4/b2_authorize_account 2>/dev/null |
+      jq -er '"account " + .accountId' ;;
+    gcp | firebase) jq -er 'select(.type == "service_account" and .project_id and .client_email) | .client_email' <<<"$1" ;;
+  esac
+}
+
+# set_env <VAR> <value>: replace VAR's line in the env file (values are
+# regex-checked, so they never contain a quote).
+set_env() {
+  local tmp
   mkdir -p "$LAUNCHER_CONFIG_DIR"
   tmp="$(mktemp "$SERVICES_ENV.XXXXXX")"
   chmod 600 "$tmp"
-  { grep -v '^export CLOUDFLARE_API_TOKEN=' "$SERVICES_ENV" 2>/dev/null; printf "export CLOUDFLARE_API_TOKEN='%s'\n" "$token"; } >"$tmp"
+  { grep -v "^export $1=" "$SERVICES_ENV" 2>/dev/null; printf "export %s='%s'\n" "$1" "$2"; } >"$tmp"
   mv "$tmp" "$SERVICES_ENV"
-  unset token
-  grep -qF "$SERVICES_ENV_HOOK" "$HOME/.bashrc" 2>/dev/null || printf '\n%s\n' "$SERVICES_ENV_HOOK" >>"$HOME/.bashrc"
-  api_ok '{"logged_in":true}'
 }
+
+# login-token <service>: stdin = one value per SVC_VARS line, or the whole
+# service-account JSON for key-file services.
+do_login_token() {
+  [[ $# -eq 1 ]] && svc_def "$1" || bad_args "usage: login-token <service>"
+  local id="$1" who v i vals=() key tmp
+  if [[ -n "$SVC_KEYFILE" ]]; then
+    key="$(head -c 20000)"
+    exec 0</dev/null
+    who="$(svc_verify "$id" "$key")" || api_err invalid_name "That isn't a Google service-account JSON key."
+    mkdir -p "$LAUNCHER_CONFIG_DIR"
+    tmp="$(mktemp "$LAUNCHER_CONFIG_DIR/$SVC_KEYFILE.XXXXXX")"
+    chmod 600 "$tmp"
+    printf '%s\n' "$key" >"$tmp"
+    mv "$tmp" "$LAUNCHER_CONFIG_DIR/$SVC_KEYFILE"
+    set_env "${SVC_VARS[0]}" "$LAUNCHER_CONFIG_DIR/$SVC_KEYFILE"
+    [[ "$id" == gcp ]] && set_env CLOUDSDK_CORE_PROJECT "$(jq -r '.project_id' <<<"$key" | tr -cd 'a-z0-9-')"
+    unset key
+  else
+    for ((i = 0; i < ${#SVC_VARS[@]}; i++)); do
+      v="$(read_secret_line)"
+      v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"   # trim
+      [[ "$v" =~ ${SVC_RES[$i]} ]] || api_err invalid_name "That ${SVC_VARS[$i]} doesn't look right."
+      vals+=("$v")
+    done
+    exec 0</dev/null
+    need curl
+    who="$(svc_verify "$id" "${vals[@]}")" || api_err not_logged_in "The provider didn't accept that. Check it and try again."
+    for ((i = 0; i < ${#SVC_VARS[@]}; i++)); do set_env "${SVC_VARS[$i]}" "${vals[$i]}"; done
+    unset vals
+    # npm reads the token through ~/.npmrc, which expands ${NPM_TOKEN} itself.
+    if [[ "$id" == npm ]] && ! grep -qF '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' "$HOME/.npmrc" 2>/dev/null; then
+      printf '%s\n' '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >>"$HOME/.npmrc"
+    fi
+  fi
+  grep -qF "$SERVICES_ENV_HOOK" "$HOME/.bashrc" 2>/dev/null || printf '\n%s\n' "$SERVICES_ENV_HOOK" >>"$HOME/.bashrc"
+  tmp="$(mktemp "$SERVICES_INFO.XXXXXX")"
+  { jq -c . "$SERVICES_INFO" 2>/dev/null || echo '{}'; } | jq -c --arg id "$id" --arg w "$who" '.[$id] = $w' >"$tmp"
+  mv "$tmp" "$SERVICES_INFO"
+  api_ok "$(jq -cn --arg w "$who" '{logged_in:true, user:$w}')"
+}
+
+# Older apps call this name.
+do_login_cloudflare() { do_login_token cloudflare; }
 
 # Update these scripts to <commit> by running that commit's install.sh.
 do_self_update() {
@@ -1252,17 +1364,122 @@ do_self_update() {
   api_ok "$(jq -cn --arg c "$sha" '{commit:$c}')"
 }
 
-# Install a CLI the phone can't otherwise get onto the server. Only glab so far:
-# the latest official release from gitlab.com, checksum-verified, into
-# ~/.local/bin (no sudo).
+# sudo_askpass <dir> <password>: later `sudo` calls in this shell read the
+# password through an askpass helper from a private file: never on a command
+# line, never in the environment.
+sudo_askpass() {
+  local dir="$1" real_sudo
+  [[ -n "$2" ]] && real_sudo="$(command -v sudo)" || return 0
+  printf '%s\n' "$2" >"$dir/pw"
+  printf '#!/bin/sh\ncat %q\n' "$dir/pw" >"$dir/askpass"
+  mkdir -p "$dir/bin"
+  printf '#!/bin/sh\nexec %q -A "$@"\n' "$real_sudo" >"$dir/bin/sudo"
+  chmod 700 "$dir/askpass" "$dir/bin/sudo"
+  chmod 600 "$dir/pw"
+  export SUDO_ASKPASS="$dir/askpass" PATH="$dir/bin:$PATH"
+}
+
+put_bin() {  # put_bin <file> <name>: into ~/.local/bin, replaced by rename
+  mkdir -p "$HOME/.local/bin"
+  install -m 755 "$1" "$HOME/.local/bin/$2.new" && mv -f "$HOME/.local/bin/$2.new" "$HOME/.local/bin/$2"
+}
+
+gh_latest_tag() { curl -fsSL --max-time 20 "https://api.github.com/repos/$1/releases/latest" 2>/dev/null | jq -r '.tag_name // empty'; }
+
+# fetch <url> <file> [checksums-url]: download; with a checksums file, the
+# file's sha256 must be listed in it.
+fetch() {
+  curl -fsSL --max-time 480 "$1" -o "$2" 2>/dev/null || api_err internal "Downloading $(basename "$1") failed."
+  [[ -z "${3:-}" ]] && return 0
+  curl -fsSL --max-time 30 "$3" -o "$2.sums" 2>/dev/null || api_err internal "Downloading the checksums failed."
+  grep -qi "$(sha256sum "$2" | cut -d' ' -f1)" "$2.sums" ||
+    api_err internal "$(basename "$1") failed its checksum check; nothing was installed."
+}
+
+# from_tar <tgz> <binary> <dir>: extract, set FOUND to <binary>'s path inside.
+# (Not a $(…) helper: api_err must exit the script, not a subshell.)
+from_tar() {
+  mkdir -p "$3/x" && tar -xzf "$1" -C "$3/x" 2>/dev/null || api_err internal "$(basename "$1") isn't a valid archive."
+  FOUND="$(find "$3/x" -type f -name "$2" | head -n 1)"
+  [[ -n "$FOUND" ]] || api_err internal "$2 wasn't in $(basename "$1")."
+}
+
+INSTALLABLE="glab docker supabase flyctl stripe railway neon b2 vercel netlify firebase hf gcloud"
+
+# Install a CLI the phone can't otherwise get onto the server: into ~/.local/bin,
+# no sudo, checksum-verified where the vendor publishes checksums. Docker is
+# the one that needs root: stdin line 1 = sudo password.
 do_install_cli() {
-  [[ $# -eq 1 && "$1" == glab ]] || bad_args "usage: install-cli glab"
-  local arch rel ver tgz sums_url tgz_url dir want have
+  [[ $# -eq 1 && " $INSTALLABLE " == *" $1 "* ]] || bad_args "usage: install-cli <$INSTALLABLE>"
+  local name="$1" pw="" dir tag ver f a64 bin out
+  IFS= read -r -t 5 pw || true
+  exec 0</dev/null
   need curl; need tar; need sha256sum
-  case "$(uname -m)" in
-    x86_64) arch=amd64 ;; aarch64 | arm64) arch=arm64 ;; armv6l | armv7l) arch=armv6 ;; i?86) arch=386 ;;
-    *) api_err internal "No glab build for this CPU ($(uname -m))." ;;
+  case "$(uname -m)" in x86_64) a64=false ;; aarch64 | arm64) a64=true ;; *) api_err internal "No $name build for this CPU ($(uname -m))." ;; esac
+  dir="$(mktemp -d)"
+  trap 'rm -rf "$dir"; on_exit' EXIT
+  gh_ver() { tag="$(gh_latest_tag "$1")"; ver="${tag#v}"; [[ -n "$tag" ]] || api_err internal "Couldn't find the latest $name release."; }
+  case "$name" in
+    glab) install_glab "$dir" "$a64"; return ;;
+    docker)
+      sudo_askpass "$dir" "$pw"; unset pw
+      fetch https://get.docker.com "$dir/get-docker.sh"
+      out="$(t 600 sudo sh "$dir/get-docker.sh" </dev/null 2>&1 && sudo usermod -aG docker "$(id -un)" </dev/null 2>&1)" ||
+        api_err internal "Installing Docker failed: $(tail -n 3 <<<"$out")"
+      ver="$(docker --version 2>/dev/null)" ;;
+    supabase)
+      gh_ver supabase/cli; f="supabase_${ver}_linux_$($a64 && echo arm64 || echo amd64).tar.gz"
+      fetch "https://github.com/supabase/cli/releases/download/$tag/$f" "$dir/$f" "https://github.com/supabase/cli/releases/download/$tag/checksums.txt"
+      from_tar "$dir/$f" supabase "$dir"; put_bin "$FOUND" supabase ;;
+    flyctl)
+      gh_ver superfly/flyctl; f="flyctl_${ver}_Linux_$($a64 && echo arm64 || echo x86_64).tar.gz"
+      fetch "https://github.com/superfly/flyctl/releases/download/$tag/$f" "$dir/$f" "https://github.com/superfly/flyctl/releases/download/$tag/flyctl_${ver}_checksums.txt"
+      from_tar "$dir/$f" flyctl "$dir"; put_bin "$FOUND" flyctl
+      ln -sf flyctl "$HOME/.local/bin/fly" ;;
+    stripe)
+      gh_ver stripe/stripe-cli; f="stripe_${ver}_linux_$($a64 && echo arm64 || echo x86_64).tar.gz"
+      fetch "https://github.com/stripe/stripe-cli/releases/download/$tag/$f" "$dir/$f" "https://github.com/stripe/stripe-cli/releases/download/$tag/stripe-linux-checksums.txt"
+      from_tar "$dir/$f" stripe "$dir"; put_bin "$FOUND" stripe ;;
+    railway)  # no checksums published
+      gh_ver railwayapp/cli; f="railway-$tag-$($a64 && echo aarch64 || echo x86_64)-unknown-linux-musl.tar.gz"
+      fetch "https://github.com/railwayapp/cli/releases/download/$tag/$f" "$dir/$f"
+      from_tar "$dir/$f" railway "$dir"; put_bin "$FOUND" railway ;;
+    neon)  # standalone binary, no checksums published
+      f="neon-linux-$($a64 && echo arm64 || echo x64)"
+      fetch "https://github.com/neondatabase/neon-pkgs/releases/latest/download/$f" "$dir/$f"
+      put_bin "$dir/$f" neon; ln -sf neon "$HOME/.local/bin/neonctl"; ver="latest" ;;
+    b2)
+      f="b2-linux$($a64 && echo -aarch64)"
+      fetch "https://github.com/Backblaze/B2_Command_Line_Tool/releases/latest/download/$f" "$dir/$f" \
+        "https://github.com/Backblaze/B2_Command_Line_Tool/releases/latest/download/${f}_hashes.txt"
+      put_bin "$dir/$f" b2; ver="latest" ;;
+    vercel | netlify | firebase)
+      command -v npm >/dev/null 2>&1 || api_err internal "$name needs Node.js and npm on the server first (e.g. sudo apt install nodejs npm)."
+      f="$name"; [[ "$name" == netlify ]] && f=netlify-cli; [[ "$name" == firebase ]] && f=firebase-tools
+      out="$(t 480 npm install -g --prefix "$HOME/.local" "$f" </dev/null 2>&1)" || api_err internal "npm couldn't install $f: $(tail -n 3 <<<"$out")"
+      ver="latest" ;;
+    hf)  # Hugging Face's own installer: a venv in ~/.hf-cli and a wrapper in ~/.local/bin
+      command -v python3 >/dev/null 2>&1 || api_err internal "hf needs Python 3.10+ on the server first."
+      fetch https://hf.co/cli/install.sh "$dir/hf-install.sh"
+      out="$(t 480 bash "$dir/hf-install.sh" --exclude-skill --no-modify-path </dev/null 2>&1)" || api_err internal "The hf installer failed: $(tail -n 3 <<<"$out")"
+      ver="latest" ;;
+    gcloud)
+      [[ ! -e "$HOME/google-cloud-sdk" ]] || api_err internal "google-cloud-sdk already exists in your home folder; update it with 'gcloud components update'."
+      f="google-cloud-cli-linux-$($a64 && echo arm || echo x86_64).tar.gz"
+      fetch "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/$f" "$dir/$f"
+      tar -xzf "$dir/$f" -C "$HOME" 2>/dev/null || api_err internal "$f isn't a valid archive."
+      out="$(t 480 "$HOME/google-cloud-sdk/install.sh" --quiet --usage-reporting=false --path-update=false --command-completion=false </dev/null 2>&1)" ||
+        api_err internal "The gcloud installer failed: $(tail -n 3 <<<"$out")"
+      for bin in gcloud gsutil bq; do ln -sf "$HOME/google-cloud-sdk/bin/$bin" "$HOME/.local/bin/$bin"; done
+      ver="latest" ;;
   esac
+  api_ok "$(jq -cn --arg n "$name" --arg v "${ver:-}" '{installed:true, name:$n, version:$v}')"
+}
+
+# The latest official glab release from gitlab.com, checksum-verified.
+install_glab() {
+  local dir="$1" arch rel ver tgz sums_url tgz_url
+  arch="$($2 && echo arm64 || echo amd64)"
   rel="$(curl -fsSL --max-time 20 "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/releases/permalink/latest" 2>/dev/null)"
   ver="$(jq -r '.tag_name // empty' <<<"$rel" 2>/dev/null)"; ver="${ver#v}"
   [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || api_err internal "Couldn't find the latest glab release on gitlab.com."
@@ -1271,16 +1488,8 @@ do_install_cli() {
   sums_url="$(jq -r '.assets.links[] | select(.name=="checksums.txt") | .direct_asset_url' <<<"$rel")"
   [[ "$tgz_url" == https://gitlab.com/* && "$sums_url" == https://gitlab.com/* ]] ||
     api_err internal "The glab $ver release has no $tgz."
-  dir="$(mktemp -d)"
-  trap 'rm -rf "$dir"; on_exit' EXIT
-  curl -fsSL --max-time 120 "$tgz_url" -o "$dir/$tgz" && curl -fsSL --max-time 20 "$sums_url" -o "$dir/sums" ||
-    api_err internal "Downloading glab $ver failed."
-  want="$(awk -v f="$tgz" '$2==f {print $1}' "$dir/sums")"
-  have="$(sha256sum "$dir/$tgz" | cut -d' ' -f1)"
-  [[ -n "$want" && "$want" == "$have" ]] || api_err internal "glab $ver failed its checksum check; nothing was installed."
-  tar -xzf "$dir/$tgz" -C "$dir" bin/glab || api_err internal "The glab download was not a valid archive."
-  mkdir -p "$HOME/.local/bin"
-  install -m 755 "$dir/bin/glab" "$HOME/.local/bin/glab.new" && mv -f "$HOME/.local/bin/glab.new" "$HOME/.local/bin/glab"
+  fetch "$tgz_url" "$dir/$tgz" "$sums_url"
+  from_tar "$dir/$tgz" glab "$dir"; put_bin "$FOUND" glab
   api_ok "$(jq -cn --arg v "$ver" '{installed:true, name:"glab", version:$v}')"
 }
 
@@ -1292,7 +1501,7 @@ do_run() {
   [[ $# -eq 0 ]] || bad_args "run takes no arguments"
   [[ "$ALLOW_RUN" == 1 ]] ||
     api_err run_disabled "Running commands from the phone is off on this server. To allow it, run this on the server: echo 'ALLOW_RUN=1' >> ~/.config/claude-launcher/config"
-  local pw secs cmd dir out rc real_sudo
+  local pw secs cmd dir out rc
   IFS= read -r -t 15 pw || true; pw="${pw//$'\r'/}"
   IFS= read -r -t 15 secs || true
   cmd="$(head -c 65536)"
@@ -1301,17 +1510,7 @@ do_run() {
   [[ -n "${cmd//[[:space:]]/}" ]] || bad_args "empty command"
   dir="$(mktemp -d)"
   trap 'rm -rf "$dir"; on_exit' EXIT
-  if [[ -n "$pw" ]] && real_sudo="$(command -v sudo)"; then
-    # sudo reads the password through an askpass helper, from a private file:
-    # never on a command line, never in the environment.
-    printf '%s\n' "$pw" >"$dir/pw"
-    printf '#!/bin/sh\ncat %q\n' "$dir/pw" >"$dir/askpass"
-    mkdir "$dir/bin"
-    printf '#!/bin/sh\nexec %q -A "$@"\n' "$real_sudo" >"$dir/bin/sudo"
-    chmod 700 "$dir/askpass" "$dir/bin/sudo"
-    chmod 600 "$dir/pw"
-    export SUDO_ASKPASS="$dir/askpass" PATH="$dir/bin:$PATH"
-  fi
+  sudo_askpass "$dir" "$pw"
   unset pw
   out="$(cd "$HOME" && timeout --kill-after=5 "$secs" bash -c "$cmd" </dev/null 2>&1)"
   rc=$?
@@ -1363,7 +1562,7 @@ api_main() {
   local cmd="${1:-}"
   shift || true
   case "$cmd" in
-    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | login-cloudflare | run | claude-cmd) ;;  # these read stdin
+    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | login-cloudflare | run | claude-cmd | login-token | install-cli) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -1387,6 +1586,7 @@ api_main() {
     login-gitlab)        do_login_gitlab ;;
     login-docker)        do_login_docker ;;
     login-cloudflare)    do_login_cloudflare ;;
+    login-token)         do_login_token "$@" ;;
     self-update)         do_self_update "$@" ;;
     install-cli)         do_install_cli "$@" ;;
     run)                 do_run "$@" ;;

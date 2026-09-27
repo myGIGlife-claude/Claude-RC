@@ -25,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import life.mygig.clauderc.BuildConfig
+import life.mygig.clauderc.api.Catalog
 import life.mygig.clauderc.api.Updates
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -125,27 +126,29 @@ fun StatusScreen(vm: MainViewModel) {
                     }
                 }
                 // Only what's connected; the + button at the top adds more.
-                val connected = s.services?.let {
-                    listOf(
-                        Triple("GitLab", it.gitlab, LoginKind.GITLAB),
-                        Triple("Docker / GHCR", it.docker, LoginKind.DOCKER),
-                        Triple("Cloudflare", it.cloudflare, LoginKind.CLOUDFLARE),
-                    ).filter { (_, svc, _) -> svc.loggedIn }
-                }.orEmpty()
+                val sv = s.services.orEmpty()
+                // name, detail, tap
+                val connected = buildList<Triple<String, String?, () -> Unit>> {
+                    sv["gitlab"]?.takeIf { it.loggedIn }?.let { add(Triple("GitLab", it.detail) { login(LoginKind.GITLAB) }) }
+                    sv["docker"]?.takeIf { it.loggedIn }?.let { add(Triple("Docker / GHCR", it.detail) { login(LoginKind.DOCKER) }) }
+                    Catalog.services.forEach { def ->
+                        sv[def.id]?.takeIf { it.loggedIn }?.let { add(Triple(def.name, it.detail) { vm.showTokenService(def.id) }) }
+                    }
+                }
                 items(connected.size) { i ->
-                    val (title, svc, kind) = connected[i]
+                    val (title, detail, tap) = connected[i]
                     StatusRow(
                         title = title,
                         state = RowState.OK,
-                        detail = svc.detail?.let { "Connected: $it" } ?: "Connected",
-                        // Re-connecting is allowed, e.g. to add a second registry.
-                        onClick = { login(kind) },
+                        detail = detail?.let { "Connected: $it" } ?: "Connected",
+                        // Re-connecting is allowed, e.g. a new token or a second registry.
+                        onClick = tap,
                     )
                 }
                 if (connected.isEmpty() && !s.aws.loggedIn) {
                     item {
                         Text(
-                            "Tap + at the top to connect AWS, GitLab, Docker, Cloudflare and more.",
+                            "Tap + at the top to connect AWS, GitLab, Docker, Cloudflare, Vercel, Supabase and more.",
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(vertical = 4.dp),
                         )
