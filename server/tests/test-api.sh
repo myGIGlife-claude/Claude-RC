@@ -46,8 +46,8 @@ for bad in "" "bash" "status; bash" 'status $(id)' "status && id" "rm -rf /" "st
   "open a/b/c" "$(printf 'x%.0s' {1..500})" "start --dangerously-skip-permissions" "start -x" \
   "open owner/-x" "open -o/x" "new x --owner --start" "tail -x" "clone-status nope" \
   "login-gitlab glpat-x" "login-docker docker.io" "login-cloudflare tok" "self-update" "self-update main" \
-  "self-update 0123456789abcdef0123456789abcdef0123456" "self-update ../../etc" "install-cli" "install-cli docker" \
-  "install-cli glab extra"; do
+  "self-update 0123456789abcdef0123456789abcdef0123456" "self-update ../../etc" "install-cli" \
+  "install-cli glab extra" "install-cli rm" "login-token" "login-token evil" "login-token vercel x"; do
   api "$bad"
   check "forbidden: '${bad:0:30}'" "$(jqt '.ok==false and .error.code=="forbidden"')"
 done
@@ -271,6 +271,27 @@ api "run" $'pw-bad\n\nsudo echo root-ok'
 check "wrong sudo password fails" "$(jqt '.data.exit_code!=0')"
 grep -q "pw-ok" "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "sudo password not logged" $?
 sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
+
+echo "token services"
+api "status"
+check "status lists token services" "$(jqt '.data.services | (.vercel and .b2 and .gcp and .firebase and .cloudflare) and (.vercel.logged_in|not)')"
+api "login-token vercel" "short"
+check "token login: malformed token" "$(jqt '.error.code=="invalid_name"')"
+api "login-token vercel" "abcdefghijklmnopqrstuvwxyz0123"
+check "token login: provider rejects (no network) → nothing saved" "$(jqt '.error.code=="not_logged_in"')"
+grep -q VERCEL_TOKEN "$HOME/.config/claude-launcher/env" 2>/dev/null; [[ $? -ne 0 ]]; check "rejected token not saved" $?
+api "login-token b2" $'onlyonevalue'
+check "b2 needs two valid values" "$(jqt '.error.code=="invalid_name"')"
+KEY='{"type":"service_account","project_id":"demo-proj","private_key":"x","client_email":"bot@demo-proj.iam.gserviceaccount.com"}'
+api "login-token gcp" "$KEY"
+check "gcp key accepted" "$(jqt '.ok and .data.user=="bot@demo-proj.iam.gserviceaccount.com"')"
+[[ "$(stat -c %a "$HOME/.config/claude-launcher/gcp-key.json")" == 600 ]]; check "key file is mode 600" $?
+grep -q "^export CLOUDSDK_CORE_PROJECT='demo-proj'" "$HOME/.config/claude-launcher/env"; check "gcp project exported" $?
+api "login-token firebase" '{"type":"user"}'
+check "not a service account → refused" "$(jqt '.error.code=="invalid_name"')"
+api "status"
+check "status shows gcp connected with its account" "$(jqt '.data.services.gcp.logged_in and .data.services.gcp.detail=="bot@demo-proj.iam.gserviceaccount.com"')"
+grep -q "demo-proj\|private_key" "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "key never logged" $?
 
 echo "claude-cmd"
 api "claude-cmd" "doctor"
