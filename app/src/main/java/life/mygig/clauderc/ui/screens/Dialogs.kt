@@ -41,6 +41,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import life.mygig.clauderc.api.TailResult
 import life.mygig.clauderc.api.Updates
+import life.mygig.clauderc.ui.LocalGuard
 import life.mygig.clauderc.ui.LoginKind
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.openUrl
@@ -90,6 +91,49 @@ fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
         },
         confirmButton = {},
         dismissButton = { TextButton(onClick = { vm.showLogin(null) }) { Text("Close") } },
+    )
+}
+
+/** The + button: every service that isn't connected yet, one tap to set it up. */
+@Composable
+fun AddServiceDialog(vm: MainViewModel) {
+    val status by vm.status.collectAsState()
+    val guard = LocalGuard.current
+    val st = status
+    val options = buildList {
+        if (st?.aws?.loggedIn != true) add(Triple(LoginKind.AWS, "AWS", "Access keys or SSO for the AWS CLI"))
+        val sv = st?.services
+        if (sv?.gitlab?.loggedIn != true) {
+            add(Triple(LoginKind.GITLAB, "GitLab", if (sv?.gitlab?.installed == false) "Installs glab, then asks for a token" else "Personal access token"))
+        }
+        if (sv?.docker?.loggedIn != true) {
+            add(Triple(LoginKind.DOCKER, "Docker Hub / GHCR", if (sv?.docker?.installed == false) "Docker isn't installed: shows how" else "Push and pull images"))
+        }
+        if (sv?.cloudflare?.loggedIn != true) add(Triple(LoginKind.CLOUDFLARE, "Cloudflare", "Workers, R2, KV, D1, Pages via wrangler"))
+    }
+    AlertDialog(
+        onDismissRequest = { vm.showAddService(false) },
+        title = { Text("Connect a service") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (st == null) Text("Check the server first (pull down on Status).")
+                if (options.isEmpty() && st != null) Text("Everything here is already connected.")
+                options.forEach { (kind, name, hint) ->
+                    OutlinedButton(
+                        onClick = { guard.run("Connect $name") { vm.addService(kind) } },
+                        enabled = st != null,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.fillMaxWidth()) {
+                            Text(name, style = MaterialTheme.typography.titleSmall)
+                            Text(hint, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = { vm.showAddService(false) }) { Text("Close") } },
     )
 }
 
@@ -271,11 +315,11 @@ private fun permissionsText(kind: LoginKind): String = when (kind) {
 @Composable
 private fun PermissionsLink(kind: LoginKind) {
     var open by remember { mutableStateOf(false) }
-    TextButton(onClick = { open = true }) { Text("What permissions does it need?") }
+    TextButton(onClick = { open = true }) { Text("What Claude needs (step by step)") }
     if (open) {
         AlertDialog(
             onDismissRequest = { open = false },
-            title = { Text("Permissions needed") },
+            title = { Text("What Claude needs") },
             text = {
                 SelectionContainer(Modifier.verticalScroll(rememberScrollState())) { Text(permissionsText(kind)) }
             },
