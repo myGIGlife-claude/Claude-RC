@@ -1,6 +1,10 @@
 package life.mygig.clauderc.ui
 
 import android.app.Application
+import android.app.DownloadManager
+import android.content.Intent
+import android.net.Uri
+import android.os.Environment
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import java.util.concurrent.atomic.AtomicLong
@@ -51,6 +55,8 @@ sealed interface Fix {
 }
 
 data class UiMessage(val text: String, val actionLabel: String? = null, val fix: Fix? = null)
+
+private const val APK_MIME = "application/vnd.android.package-archive"
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -164,6 +170,55 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         say("GitLab CLI installed")
         refreshStatus()
         _login.value = LoginKind.GITLAB
+    }
+
+    /**
+     * Downloads the new APK with Android's download manager, then opens the
+     * installer. (The file lands in the app's own folder, not Downloads, so
+     * the user would never find it by hand.)
+     */
+    fun downloadAndInstall(url: String) = viewModelScope.launch {
+        val ctx = getApplication<Application>()
+        val dm = ctx.getSystemService(DownloadManager::class.java)
+        val name = url.substringAfterLast('/')
+        // Only ever keep the build being downloaded.
+        ctx.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+            ?.listFiles { f -> f.name.endsWith(".apk") }?.forEach { it.delete() }
+        val id = try {
+            dm.enqueue(
+                DownloadManager.Request(Uri.parse(url))
+                    .setTitle(name)
+                    .setMimeType(APK_MIME)
+                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
+                    .setDestinationInExternalFilesDir(ctx, Environment.DIRECTORY_DOWNLOADS, name),
+            )
+        } catch (e: Exception) {
+            say("Couldn't start the download: ${e.message}")
+            return@launch
+        }
+        say("Downloading $name…")
+        while (true) {
+            delay(1_000)
+            val status = dm.query(DownloadManager.Query().setFilterById(id))?.use { c ->
+                if (c.moveToFirst()) c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) else null
+            }
+            when (status) {
+                DownloadManager.STATUS_SUCCESSFUL -> {
+                    val uri = dm.getUriForDownloadedFile(id) ?: break
+                    try {
+                        ctx.startActivity(
+                            Intent(Intent.ACTION_VIEW).setDataAndType(uri, APK_MIME)
+                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    } catch (e: Exception) {
+                        say("Downloaded, but the installer didn't open: ${e.message}")
+                    }
+                    return@launch
+                }
+                DownloadManager.STATUS_FAILED, null -> break
+            }
+        }
+        say("The download failed.", "Retry", Fix.Retry { downloadAndInstall(url) })
     }
 
     fun updateServerScripts(commit: String) = action("Updating the server scripts…") {
