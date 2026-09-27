@@ -67,6 +67,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import life.mygig.clauderc.data.ThemeMode
+import life.mygig.clauderc.ui.screens.AddServiceDialog
 import life.mygig.clauderc.ui.screens.CommandCenterScreen
 import life.mygig.clauderc.ui.screens.HostKeyDialog
 import life.mygig.clauderc.ui.screens.LoginDialog
@@ -140,6 +141,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             val status by vm.status.collectAsState()
             val login by vm.login.collectAsState()
             val setup by vm.setup.collectAsState()
+            val showAdd by vm.showAdd.collectAsState()
             val tail by vm.tail.collectAsState()
             val pendingKey by vm.pendingHostKey.collectAsState()
 
@@ -233,6 +235,9 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                             },
                             actions = {
                                 if (!showSettings && !setupNeeded) {
+                                    IconButton(onClick = { vm.selectTab(Tab.STATUS); vm.showAddService(true) }) {
+                                        Icon(Icons.Filled.Add, contentDescription = "Connect a service")
+                                    }
                                     IconButton(onClick = { vm.openSettings(true) }) {
                                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
                                     }
@@ -278,6 +283,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
 
             login?.let { LoginDialog(vm, it) }
             setup?.let { SetupDialog(vm, it) }
+            if (showAdd) AddServiceDialog(vm)
             tail?.let { TailDialog(vm, it) }
             pendingKey?.let { HostKeyDialog(vm, it, s.hostKeyFingerprint.ifEmpty { s.previousFingerprint }) }
         }

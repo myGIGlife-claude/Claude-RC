@@ -86,8 +86,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _status = MutableStateFlow<StatusData?>(null)
     val status = _status.asStateFlow()
-    private val _statusCheckedAt = MutableStateFlow<Long?>(null)
-    val statusCheckedAt = _statusCheckedAt.asStateFlow()
     private val _statusRefreshing = MutableStateFlow(false)
     val statusRefreshing = _statusRefreshing.asStateFlow()
 
@@ -181,6 +179,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun claudeCommand(args: String) = action("Running claude ${args.trim()}…") {
         _ccResult.value = args.trim() to api.claudeCmd(args)
+    }
+
+    /** The + dialog: services that aren't connected yet. */
+    private val _showAdd = MutableStateFlow(false)
+    val showAdd = _showAdd.asStateFlow()
+    fun showAddService(show: Boolean) { _showAdd.value = show }
+
+    /**
+     * One tap from the + dialog: install the CLI if it's missing and we can,
+     * then open the login form.
+     */
+    fun addService(kind: LoginKind) {
+        _showAdd.value = false
+        val st = _status.value
+        val svc = when (kind) {
+            LoginKind.GITLAB -> st?.services?.gitlab
+            LoginKind.DOCKER -> st?.services?.docker
+            else -> null
+        }
+        when {
+            svc == null || svc.installed -> showLogin(kind)
+            kind == LoginKind.GITLAB && (st?.scriptApi ?: 0) >= Updates.INSTALL_CLI_API -> installGlab()
+            else -> showSetup(kind)
+        }
     }
 
     /** A service whose CLI isn't on the server yet: the setup guide for it. */
@@ -290,7 +312,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _statusRefreshing.value = true
             try {
                 _status.value = api.status()
-                _statusCheckedAt.value = System.currentTimeMillis()
             } catch (e: ApiException) {
                 report(e) { refreshStatus() }
             } finally {
@@ -302,7 +323,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun testConnection() = action("Testing connection…") {
         val s = api.status()
         _status.value = s
-        _statusCheckedAt.value = System.currentTimeMillis()
         say("Connected to ${s.hostname.ifBlank { "the server" }}")
     }
 
@@ -543,7 +563,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 if (_login.value != LoginKind.AWS) return@launch
                 val s = runCatching { api.status() }.getOrNull() ?: return@repeat
                 _status.value = s
-                _statusCheckedAt.value = System.currentTimeMillis()
                 if (s.aws.loggedIn) {
                     loginDone(LoginKind.AWS, "AWS SSO login complete")
                     return@launch
@@ -612,7 +631,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Forget everything shown from the previous server. */
     private fun clearServerState() {
         _status.value = null
-        _statusCheckedAt.value = null
         _repos.value = emptyList()
         _owners.value = null
         _ownersError.value = null
