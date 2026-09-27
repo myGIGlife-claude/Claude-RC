@@ -38,8 +38,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import java.text.DateFormat
-import java.util.Date
 import life.mygig.clauderc.ui.LocalGuard
 import life.mygig.clauderc.ui.LoginKind
 import life.mygig.clauderc.ui.MainViewModel
@@ -52,7 +50,6 @@ private val Amber = Color(0xFFE0A030)
 @Composable
 fun StatusScreen(vm: MainViewModel) {
     val status by vm.status.collectAsState()
-    val checkedAt by vm.statusCheckedAt.collectAsState()
     val refreshing by vm.statusRefreshing.collectAsState()
     val guard = LocalGuard.current
     val latest by vm.latest.collectAsState()
@@ -117,55 +114,41 @@ fun StatusScreen(vm: MainViewModel) {
                         onClick = if (state == RowState.OK) null else { { login(LoginKind.GITHUB) } },
                     )
                 }
-                item {
-                    val aws = s.aws
-                    StatusRow(
-                        title = "AWS",
-                        state = if (aws.loggedIn) RowState.OK else RowState.BAD,
-                        detail = if (aws.loggedIn) {
-                            (aws.identity?.arn ?: "Logged in") + " (profile ${aws.profile})"
-                        } else {
-                            "Not logged in — tap to log in"
-                        },
-                        onClick = if (aws.loggedIn) null else { { login(LoginKind.AWS) } },
-                    )
-                }
-                val svcs = s.services
-                if (svcs != null) {
-                    val services = listOf(
-                        Triple("GitLab", svcs.gitlab, LoginKind.GITLAB),
-                        Triple("Docker / GHCR", svcs.docker, LoginKind.DOCKER),
-                        Triple("Cloudflare", svcs.cloudflare, LoginKind.CLOUDFLARE),
-                    )
-                    items(services.size) { i ->
-                        val (title, svc, kind) = services[i]
+                if (s.aws.loggedIn) {
+                    item {
                         StatusRow(
-                            title = title,
-                            state = when {
-                                svc.loggedIn -> RowState.OK
-                                !svc.installed -> RowState.WARN
-                                else -> RowState.BAD
-                            },
-                            detail = when {
-                                svc.loggedIn -> svc.detail?.let { "Connected: $it" } ?: "Connected"
-                                !svc.installed -> "CLI not installed on the server — tap to set it up"
-                                else -> "Not connected — tap to connect"
-                            },
-                            // Re-connecting is allowed too, e.g. to add a second registry.
-                            onClick = if (svc.installed) { { login(kind) } } else { { vm.showSetup(kind) } },
+                            title = "AWS",
+                            state = RowState.OK,
+                            detail = (s.aws.identity?.arn ?: "Logged in") + " (profile ${s.aws.profile})",
+                            onClick = { login(LoginKind.AWS) },
                         )
                     }
                 }
-                item {
-                    Column(Modifier.padding(vertical = 8.dp)) {
-                        Text("Server: ${s.hostname}", style = MaterialTheme.typography.bodyMedium)
-                        Text("Script version: ${s.version}", style = MaterialTheme.typography.bodySmall)
-                        checkedAt?.let {
-                            Text(
-                                "Last checked: " + DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(it)),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
+                // Only what's connected; the + button at the top adds more.
+                val connected = s.services?.let {
+                    listOf(
+                        Triple("GitLab", it.gitlab, LoginKind.GITLAB),
+                        Triple("Docker / GHCR", it.docker, LoginKind.DOCKER),
+                        Triple("Cloudflare", it.cloudflare, LoginKind.CLOUDFLARE),
+                    ).filter { (_, svc, _) -> svc.loggedIn }
+                }.orEmpty()
+                items(connected.size) { i ->
+                    val (title, svc, kind) = connected[i]
+                    StatusRow(
+                        title = title,
+                        state = RowState.OK,
+                        detail = svc.detail?.let { "Connected: $it" } ?: "Connected",
+                        // Re-connecting is allowed, e.g. to add a second registry.
+                        onClick = { login(kind) },
+                    )
+                }
+                if (connected.isEmpty() && !s.aws.loggedIn) {
+                    item {
+                        Text(
+                            "Tap + at the top to connect AWS, GitLab, Docker, Cloudflare and more.",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(vertical = 4.dp),
+                        )
                     }
                 }
             }
