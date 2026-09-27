@@ -272,6 +272,16 @@ check "wrong sudo password fails" "$(jqt '.data.exit_code!=0')"
 grep -q "pw-ok" "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "sudo password not logged" $?
 sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
 
+echo "env hook"
+printf '# ~/.bashrc\ncase $- in\n  *i*) ;;\n  *) return;;\nesac\nalias ll=ls\n' >"$HOME/.bashrc"
+mkdir -p "$HOME/.config/claude-launcher"
+printf "export DEMO_TOKEN='hook-ok'\n" >"$HOME/.config/claude-launcher/env"
+printf '\n[ -f "%s" ] && . "%s"  # cLaudeRC\n' "$HOME/.config/claude-launcher/env" "$HOME/.config/claude-launcher/env" >>"$HOME/.bashrc"
+api "status"
+[[ "$(bash -c 'source ~/.bashrc; echo $DEMO_TOKEN')" == hook-ok ]]; check "non-interactive shells see service tokens" $?
+[[ "$(grep -c cLaudeRC "$HOME/.bashrc")" == 1 ]] && grep -q '^alias ll=ls$' "$HOME/.bashrc"; check "hook moved, not duplicated, rest kept" $?
+rm -f "$HOME/.config/claude-launcher/env"
+
 echo "token services"
 api "status"
 check "status lists token services" "$(jqt '.data.services | (.vercel and .b2 and .gcp and .firebase and .cloudflare) and (.vercel.logged_in|not)')"

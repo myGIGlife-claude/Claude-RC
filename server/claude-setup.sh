@@ -657,6 +657,7 @@ api_start_session() {
 }
 
 do_status() {
+  ensure_env_hook   # also repairs setups from before the hook moved to the top
   local claude_ok=false gh_ok=false gh_user="" scopes="[]" aws_ok=false aws_json="null" ident
   claude_logged_in && claude_ok=true
   if command -v gh >/dev/null 2>&1 && github_logged_in; then
@@ -1296,6 +1297,19 @@ svc_verify() {
   esac
 }
 
+# ensure_env_hook: the line that loads the env file must be the FIRST line of
+# ~/.bashrc. Ubuntu's .bashrc stops early for non-interactive shells, and
+# that's how Claude runs commands, so a line at the end is never reached.
+ensure_env_hook() {
+  [[ -f "$SERVICES_ENV" ]] || return 0
+  [[ "$(head -n 1 "$HOME/.bashrc" 2>/dev/null)" == "$SERVICES_ENV_HOOK" ]] && return 0
+  local tmp
+  tmp="$(mktemp "$HOME/.bashrc.XXXXXX")" || return 0
+  { printf '%s\n' "$SERVICES_ENV_HOOK"; grep -vF "$SERVICES_ENV_HOOK" "$HOME/.bashrc" 2>/dev/null; } >"$tmp"
+  cat "$tmp" >"$HOME/.bashrc"   # keep the file (and its permissions), replace the content
+  rm -f "$tmp"
+}
+
 # set_env <VAR> <value>: replace VAR's line in the env file (values are
 # regex-checked, so they never contain a quote). An empty value removes it.
 set_env() {
@@ -1343,7 +1357,7 @@ do_login_token() {
       printf '%s\n' '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >>"$HOME/.npmrc"
     fi
   fi
-  grep -qF "$SERVICES_ENV_HOOK" "$HOME/.bashrc" 2>/dev/null || printf '\n%s\n' "$SERVICES_ENV_HOOK" >>"$HOME/.bashrc"
+  ensure_env_hook
   tmp="$(mktemp "$SERVICES_INFO.XXXXXX")"
   { jq -c . "$SERVICES_INFO" 2>/dev/null || echo '{}'; } | jq -c --arg id "$id" --arg w "$who" '.[$id] = $w' >"$tmp"
   mv "$tmp" "$SERVICES_INFO"
