@@ -15,8 +15,18 @@ existing one, and start Claude in it, without opening an SSH terminal.
 
 - **App** (`app/`): Kotlin + Jetpack Compose, package `life.mygig.clauderc`.
 - **Server** (`server/`): `claude-setup.sh` (menu + `--api` JSON mode), the
-  forced-command runner `claude-launcher-api`, and `install-launcher-key.sh`.
+  forced-command runner `claude-launcher-api`, `install-launcher-key.sh`,
+  `claude-autostart.sh` and the one-line `install.sh`.
   See [server/README.md](server/README.md).
+
+## What you need
+
+- A Linux server you can SSH into, with [Claude Code](https://claude.com/claude-code)
+  (a claude.ai subscription login; Remote Control is used, never an API key).
+- `bash`, `curl`, `jq`, `tmux`, `git` and `flock` on it. `gh` and `aws` are
+  optional (the menu can install them).
+- An Android phone, Android 8.0 or newer, and the Claude app to open the
+  sessions.
 
 ## How it works
 
@@ -68,8 +78,7 @@ create, stop, logins), theme.
    is one the command printed → **Trust**.
 
 Updates install over the old version because every build is signed with the
-same key. Until the first real release that is the committed
-`app/debug.keystore`; switching to the release key later needs one uninstall.
+same key.
 
 ## Updates
 
@@ -100,8 +109,15 @@ compare.
   changed key is refused.
 - Tokens, codes and AWS keys travel on stdin only, never on a command line, and
   the audit log records only time, action and result code.
+- Service tokens (Cloudflare, Vercel, …) are checked with the provider, then
+  kept in `~/.config/claude-launcher/env` (mode 600); JSON keys in mode-600
+  files next to it.
 - Nothing personal is in this repo: server details live in the app's settings
   and in `~/.config/claude-launcher/config` on the server.
+
+Found a security problem? Please open a
+[private security advisory](https://github.com/myGIGlife-claude/Claude-RC/security/advisories/new)
+instead of a public issue.
 
 ## Building
 
@@ -123,7 +139,18 @@ Locally:
 ./gradlew assembleRelease   # debug-key signed; an untracked keystore.properties switches to the release key
 ```
 
-## License
+## Contributing
 
-[MIT](LICENSE): free to use, modify and share. Keep the copyright notice to
-credit the original project.
+Issues and pull requests are welcome. CI must pass: gitleaks, shellcheck, the
+server tests (`server/tests/test-api.sh`, `server/tests/test-sshd.sh`) and the
+Android build. Keep personal values (hosts, usernames, emails, keys) out of
+code, docs and commits.
+
+## License and credit
+
+[MIT](LICENSE) © 2026 myGIGlife. Free to use, change, share and build on,
+including commercially. The one condition: keep the copyright notice and the
+license text in copies and forks, so the original project is credited.
+
+If cLaudeRC helps you or you build on it, a link back to
+<https://github.com/myGIGlife-claude/Claude-RC> is appreciated.
