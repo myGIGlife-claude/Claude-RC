@@ -15,9 +15,9 @@ SCRIPT_VERSION="2.0.0"
 # What the phone can rely on: 2 = extra services, 3 = self-update,
 # 4 = install-cli, 5 = run, 6 = restart + claude-cmd, 7 = token services +
 # more CLIs, 8 = keys, 9 = safe restart (resume + busy check), 10 = MXroute
-# and tokens in Claude's settings env, 11 = custom API keys. Bump when the app
-# starts needing a new server feature.
-SCRIPT_API=11
+# and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play.
+# Bump when the app starts needing a new server feature.
+SCRIPT_API=12
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -38,7 +38,7 @@ CUSTOM_NAMES="$LAUNCHER_CONFIG_DIR/custom-names"   # names added with set-secret
 # A custom key's name: upper case, a credential-like suffix, never something
 # that changes how programs run (PATH, LD_*, CLAUDE_*, …).
 CUSTOM_NAME_RE='^[A-Z][A-Z0-9_]{0,55}_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT)$'
-TOKEN_SERVICES="cloudflare vercel netlify fly railway supabase neon npm stripe huggingface b2 gcp firebase mxroute"
+TOKEN_SERVICES="cloudflare vercel netlify fly railway supabase neon npm stripe huggingface b2 gcp firebase mxroute googleplay"
 
 CLAUDE_LOGIN_SESSION="claude-login"
 AWS_LOGIN_SESSION="aws-sso-login"
@@ -1312,6 +1312,10 @@ svc_def() {
     b2) SVC_VARS=(B2_APPLICATION_KEY_ID B2_APPLICATION_KEY) SVC_RES=('^[A-Za-z0-9]{12,40}$' '^[A-Za-z0-9/+]{20,80}$') SVC_CLI=b2 ;;
     gcp) SVC_VARS=(CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE CLOUDSDK_CORE_PROJECT) SVC_KEYFILE=gcp-key.json SVC_CLI=gcloud ;;
     firebase) SVC_VARS=(GOOGLE_APPLICATION_CREDENTIALS) SVC_KEYFILE=firebase-key.json SVC_CLI=firebase ;;
+    # Google Play Developer API: one service-account key, handed to the common
+    # tools: a path for fastlane (SUPPLY_JSON_KEY) and others, the contents for
+    # Gradle Play Publisher (ANDROID_PUBLISHER_CREDENTIALS).
+    googleplay) SVC_VARS=(GOOGLE_PLAY_JSON_KEY SUPPLY_JSON_KEY ANDROID_PUBLISHER_CREDENTIALS) SVC_KEYFILE=googleplay-key.json ;;
     mxroute) SVC_VARS=(MXROUTE_API_KEY MXROUTE_SERVER MXROUTE_USERNAME)
       SVC_RES=('^[A-Za-z0-9]{16,64}$' '^[a-z0-9][a-z0-9.-]{2,252}$' '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') ;;
     *) return 1 ;;
@@ -1354,6 +1358,8 @@ svc_verify() {
       jq -er '"account " + .accountId' ;;
     mxroute) printf 'header = "X-API-Key: %s"\nheader = "X-Server: %s"\nheader = "X-Username: %s"\n' "$1" "$2" "$3" |
       curl -fsS --max-time 15 -K - https://api.mxroute.com/domains >/dev/null 2>&1 && echo "$3@$2" ;;
+    googleplay) jq -e 'select(.type == "service_account" and .client_email and .private_key)' <<<"$1" >/dev/null &&
+      sa_token_ok "$1" https://www.googleapis.com/auth/androidpublisher && jq -r '.client_email' <<<"$1" ;;
     gcp | firebase) jq -er 'select(.type == "service_account" and .project_id and .client_email) | .client_email' <<<"$1" ;;
   esac
 }
@@ -1388,6 +1394,28 @@ ensure_env_hook() {
   rm -f "$tmp"
 }
 
+# sa_token_ok <service-account JSON> <scope>: sign a JWT with the key and ask
+# Google for an access token, which proves the key exists and isn't revoked.
+# (It can't prove Play Console access; that needs a package name.)
+sa_token_ok() {
+  local d email now hdr claims sig b64 tok
+  command -v openssl >/dev/null 2>&1 || return 0   # can't check here: accept the well-formed key
+  d="$(mktemp -d)" && chmod 700 "$d"
+  jq -r '.private_key' <<<"$1" >"$d/k.pem"; chmod 600 "$d/k.pem"
+  email="$(jq -r '.client_email' <<<"$1")"; now="$(date +%s)"
+  b64() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+  hdr="$(printf '{"alg":"RS256","typ":"JWT"}' | b64)"
+  claims="$(jq -cn --arg e "$email" --arg s "$2" --argjson n "$now" \
+    '{iss:$e, scope:$s, aud:"https://oauth2.googleapis.com/token", iat:$n, exp:($n + 600)}' | b64)"
+  sig="$(printf '%s.%s' "$hdr" "$claims" | openssl dgst -sha256 -sign "$d/k.pem" 2>/dev/null | b64)"
+  rm -rf "$d"
+  [[ -n "$sig" ]] || return 1
+  tok="$(curl -fsS --max-time 15 https://oauth2.googleapis.com/token \
+    -d grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer -d "assertion=$hdr.$claims.$sig" 2>/dev/null |
+    jq -r '.access_token // empty' 2>/dev/null)"
+  [[ -n "$tok" ]]
+}
+
 # set_env <VAR> <value>: replace VAR's line in the env file (values are
 # regex-checked, so they never contain a quote). An empty value removes it.
 set_env() {
@@ -1407,7 +1435,8 @@ do_login_token() {
   if [[ -n "$SVC_KEYFILE" ]]; then
     key="$(head -c 20000)"
     exec 0</dev/null
-    who="$(svc_verify "$id" "$key")" || api_err invalid_name "That isn't a Google service-account JSON key."
+    who="$(svc_verify "$id" "$key")" ||
+      api_err invalid_name "That isn't a working Google service-account JSON key (Google didn't accept it, or it's not a service-account key)."
     mkdir -p "$LAUNCHER_CONFIG_DIR"
     tmp="$(mktemp "$LAUNCHER_CONFIG_DIR/$SVC_KEYFILE.XXXXXX")"
     chmod 600 "$tmp"
@@ -1415,6 +1444,12 @@ do_login_token() {
     mv "$tmp" "$LAUNCHER_CONFIG_DIR/$SVC_KEYFILE"
     set_env "${SVC_VARS[0]}" "$LAUNCHER_CONFIG_DIR/$SVC_KEYFILE"
     [[ "$id" == gcp ]] && set_env CLOUDSDK_CORE_PROJECT "$(jq -r '.project_id' <<<"$key" | tr -cd 'a-z0-9-')"
+    if [[ "$id" == googleplay ]]; then
+      set_env SUPPLY_JSON_KEY "$LAUNCHER_CONFIG_DIR/$SVC_KEYFILE"
+      # One line of JSON; a key never contains a single quote, but refuse it if it does.
+      key="$(jq -c . <<<"$key")"
+      [[ "$key" != *"'"* ]] && set_env ANDROID_PUBLISHER_CREDENTIALS "$key"
+    fi
     unset key
   else
     for ((i = 0; i < ${#SVC_VARS[@]}; i++)); do

@@ -341,6 +341,9 @@ api "login-token gcp" "$KEY"
 check "gcp key accepted" "$(jqt '.ok and .data.user=="bot@demo-proj.iam.gserviceaccount.com"')"
 [[ "$(stat -c %a "$HOME/.config/claude-launcher/gcp-key.json")" == 600 ]]; check "key file is mode 600" $?
 grep -q "^export CLOUDSDK_CORE_PROJECT='demo-proj'" "$HOME/.config/claude-launcher/env"; check "gcp project exported" $?
+api "login-token googleplay" "$KEY"
+check "google play: a key Google doesn't accept is refused" "$(jqt '.error.code=="invalid_name"')"
+grep -q SUPPLY_JSON_KEY "$HOME/.config/claude-launcher/env"; [[ $? -ne 0 ]]; check "refused Play key not saved" $?
 api "login-token firebase" '{"type":"user"}'
 check "not a service account → refused" "$(jqt '.error.code=="invalid_name"')"
 api "status"
