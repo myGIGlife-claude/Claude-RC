@@ -304,6 +304,22 @@ echo 'not json' >"$S"; api "status"
 [[ "$(cat "$S")" == "not json" ]]; check "an unparsable settings.json is left alone" $?
 rm -f "$HOME/.config/claude-launcher/env" "$S" "$HOME/.config/claude-launcher/settings-env-names"
 
+echo "custom keys"
+api "set-secret ACME_API_KEY" "abc123"
+check "custom key saved" "$(jqt '.ok and .data.saved=="ACME_API_KEY"')"
+grep -q "^export ACME_API_KEY='abc123'$" "$HOME/.config/claude-launcher/env"; check "custom key in the env file" $?
+jq -e '.env.ACME_API_KEY=="abc123"' "$HOME/.claude/settings.json" >/dev/null; check "custom key reaches Claude's settings env" $?
+api "status"; check "status lists custom key names (not values)" "$(jqt '.data.custom==["ACME_API_KEY"]')"
+for bad in "set-secret PATH" "set-secret LD_PRELOAD" "set-secret CLAUDE_CODE_TOKEN" "set-secret acme_key" "set-secret NODE_OPTIONS" "set-secret"; do
+  api "$bad" "x"; check "set-secret refuses '$bad'" "$(jqt '.ok==false')"
+done
+api "set-secret ACME_API_KEY" "it's"; check "set-secret refuses a single quote" "$(jqt '.error.code=="invalid_name"')"
+api "remove-secret CLOUDFLARE_API_TOKEN"; check "remove-secret only removes custom keys" "$(jqt '.ok==false')"
+api "remove-secret ACME_API_KEY"; check "custom key removed" "$(jqt '.ok and .data.removed=="ACME_API_KEY"')"
+grep -q ACME_API_KEY "$HOME/.config/claude-launcher/env" "$HOME/.claude/settings.json"; [[ $? -ne 0 ]]; check "removed from env file and settings" $?
+grep -q abc123 "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "custom key value never logged" $?
+rm -f "$HOME/.config/claude-launcher/env"
+
 echo "token services"
 api "status"
 check "status lists token services" "$(jqt '.data.services | (.vercel and .b2 and .gcp and .firebase and .cloudflare) and (.vercel.logged_in|not)')"

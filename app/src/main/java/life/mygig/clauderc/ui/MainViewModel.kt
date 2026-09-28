@@ -271,6 +271,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         then()
     }
 
+    /** The custom API keys dialog. */
+    private val _showCustom = MutableStateFlow(false)
+    val showCustom = _showCustom.asStateFlow()
+    fun showCustomKeys(show: Boolean) { _showAdd.value = false; _showCustom.value = show }
+
+    fun setSecret(name: String, value: String) = action("Saving $name…") {
+        api.setSecret(name, value)
+        say("$name saved. Restart sessions to use it.")
+        refreshStatus()
+    }
+
+    fun removeSecret(name: String) = action("Removing $name…") {
+        api.removeSecret(name)
+        say("$name removed. Restart sessions to drop it.")
+        refreshStatus()
+    }
+
     /** The connect form for a token service (see Catalog), by id. */
     private val _tokenService = MutableStateFlow<String?>(null)
     val tokenService = _tokenService.asStateFlow()

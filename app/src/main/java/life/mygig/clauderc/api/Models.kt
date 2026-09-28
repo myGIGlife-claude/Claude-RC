@@ -16,6 +16,8 @@ data class StatusData(
     val commit: String? = null,
     @SerialName("script_api") val scriptApi: Int = 0,
     @SerialName("run_enabled") val runEnabled: Boolean = false,
+    /** Names of custom API keys (never their values). */
+    val custom: List<String> = emptyList(),
 )
 
 @Serializable

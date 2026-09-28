@@ -114,6 +114,9 @@ class LauncherApi(
     /** `claude <args>` from the Command Center's allowlist; args go on stdin. */
     suspend fun claudeCmd(args: String): RunResult = call("claude-cmd", stdin = args.trim(), timeoutMs = 330_000)
     /** Installs a CLI on the server; [sudoPassword] only for installs that need root (docker). */
+    /** Saves a custom API key (value on stdin) that every Claude session and MCP server sees. */
+    suspend fun setSecret(name: String, value: String): JsonObject = call("set-secret $name", stdin = value.trim())
+    suspend fun removeSecret(name: String): JsonObject = call("remove-secret $name")
     suspend fun installCli(name: String, sudoPassword: String = ""): JsonObject =
         call("install-cli $name", stdin = sudoPassword, timeoutMs = 660_000)
     /** Saves a token service's credential; one value per field, or the whole JSON key. */

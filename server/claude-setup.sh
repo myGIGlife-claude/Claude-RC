@@ -15,9 +15,9 @@ SCRIPT_VERSION="2.0.0"
 # What the phone can rely on: 2 = extra services, 3 = self-update,
 # 4 = install-cli, 5 = run, 6 = restart + claude-cmd, 7 = token services +
 # more CLIs, 8 = keys, 9 = safe restart (resume + busy check), 10 = MXroute
-# and tokens in Claude's settings env. Bump when the app starts needing a new
-# server feature.
-SCRIPT_API=10
+# and tokens in Claude's settings env, 11 = custom API keys. Bump when the app
+# starts needing a new server feature.
+SCRIPT_API=11
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -34,6 +34,10 @@ SERVICES_ENV_HOOK="[ -f \"$SERVICES_ENV\" ] && . \"$SERVICES_ENV\"  # cLaudeRC"
 LOCK_FILE="$API_STATE_DIR/api.lock"
 INSTALLED_COMMIT_FILE="$LAUNCHER_CONFIG_DIR/installed-commit"   # written by install.sh
 SERVICES_INFO="$LAUNCHER_CONFIG_DIR/services.json"   # who each token service is logged in as
+CUSTOM_NAMES="$LAUNCHER_CONFIG_DIR/custom-names"   # names added with set-secret
+# A custom key's name: upper case, a credential-like suffix, never something
+# that changes how programs run (PATH, LD_*, CLAUDE_*, …).
+CUSTOM_NAME_RE='^[A-Z][A-Z0-9_]{0,55}_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT)$'
 TOKEN_SERVICES="cloudflare vercel netlify fly railway supabase neon npm stripe huggingface b2 gcp firebase mxroute"
 
 CLAUDE_LOGIN_SESSION="claude-login"
@@ -677,6 +681,7 @@ do_status() {
   local commit
   commit="$(grep -oE '^[0-9a-f]{40}$' "$INSTALLED_COMMIT_FILE" 2>/dev/null | head -n 1)"
   api_ok "$(jq -cn --argjson services "$(services_json)" --arg commit "$commit" --argjson api "$SCRIPT_API" \
+    --argjson custom "$(if [[ -f "$CUSTOM_NAMES" ]]; then jq -Rsc 'split("\n") | map(select(. != ""))' "$CUSTOM_NAMES"; else echo '[]'; fi)" \
     --argjson run "$([[ "$ALLOW_RUN" == 1 ]] && echo true || echo false)" \
     --argjson c "$claude_ok" --argjson g "$gh_ok" --arg gu "$gh_user" --argjson gm "$scopes" \
     --argjson a "$aws_ok" --argjson ai "$aws_json" --arg ap "${AWS_PROFILE_NAME:-default}" \
@@ -685,7 +690,7 @@ do_status() {
       claude:{logged_in:$c},
       github:{logged_in:$g, user:(if $gu=="" then null else $gu end), missing_scopes:$gm},
       aws:{logged_in:$a, identity:$ai, profile:$ap, sso_configured:$sso},
-      hostname:$host, version:$v, services:$services,
+      hostname:$host, version:$v, services:$services, custom:$custom,
       commit:(if $commit=="" then null else $commit end), script_api:$api, run_enabled:$run}')"
 }
 
@@ -1440,6 +1445,34 @@ do_login_token() {
 # Older apps call this name.
 do_login_cloudflare() { do_login_token cloudflare; }
 
+custom_name_ok() { [[ "$1" =~ $CUSTOM_NAME_RE && "$1" != CLAUDE_* && "$1" != ANTHROPIC_* ]]; }
+
+# set-secret <NAME>: stdin = the value. For APIs without a built-in service:
+# saved like the others, so every Claude session and MCP server sees it.
+do_set_secret() {
+  [[ $# -eq 1 ]] && custom_name_ok "$1" || bad_args "usage: set-secret <NAME ending in _KEY, _TOKEN, _SECRET, …>"
+  local v
+  v="$(read_secret_line)"
+  exec 0</dev/null
+  v="${v#"${v%%[![:space:]]*}"}"; v="${v%"${v##*[![:space:]]}"}"
+  [[ -n "$v" && ${#v} -le 4000 && "$v" != *"'"* ]] || api_err invalid_name "The value is empty, too long, or contains a single quote."
+  set_env "$1" "$v"
+  unset v
+  { grep -vx "$1" "$CUSTOM_NAMES" 2>/dev/null; echo "$1"; } | sort -u >"$CUSTOM_NAMES.tmp" && mv "$CUSTOM_NAMES.tmp" "$CUSTOM_NAMES"
+  ensure_env_hook
+  api_ok "$(jq -cn --arg n "$1" '{saved:$n}')"
+}
+
+# remove-secret <NAME>: only names added with set-secret.
+do_remove_secret() {
+  [[ $# -eq 1 ]] && custom_name_ok "$1" || bad_args "usage: remove-secret <NAME>"
+  grep -qx "$1" "$CUSTOM_NAMES" 2>/dev/null || api_err invalid_name "$1 isn't a custom key."
+  set_env "$1" ""
+  grep -vx "$1" "$CUSTOM_NAMES" >"$CUSTOM_NAMES.tmp"; mv "$CUSTOM_NAMES.tmp" "$CUSTOM_NAMES"
+  ensure_env_hook
+  api_ok "$(jq -cn --arg n "$1" '{removed:$n}')"
+}
+
 # Update these scripts to <commit> by running that commit's install.sh.
 do_self_update() {
   local sha="${1:-}" dir out
@@ -1658,7 +1691,7 @@ api_main() {
   local cmd="${1:-}"
   shift || true
   case "$cmd" in
-    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | login-cloudflare | run | claude-cmd | login-token | install-cli) ;;  # these read stdin
+    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | login-cloudflare | run | claude-cmd | login-token | install-cli | set-secret) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -1689,6 +1722,8 @@ api_main() {
     claude-cmd)          do_claude_cmd "$@" ;;
     restart)             do_restart "$@" ;;
     keys)                do_keys "$@" ;;
+    set-secret)          do_set_secret "$@" ;;
+    remove-secret)       do_remove_secret "$@" ;;
     "")                  bad_args "missing subcommand" ;;
     *)                   bad_args "unknown subcommand '$cmd'" ;;
   esac
