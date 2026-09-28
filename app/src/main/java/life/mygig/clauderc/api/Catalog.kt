@@ -176,6 +176,25 @@ object Catalog {
                 "Saved as MXROUTE_API_KEY, MXROUTE_SERVER and MXROUTE_USERNAME, which also reach MCP servers that " +
                 "use them (like an MXroute MCP server).",
         ),
+        ServiceDef(
+            "googleplay", "Google Play Console", "Publish Android apps (fastlane, Gradle Play Publisher)",
+            listOf(FieldDef("Service account JSON key", multiline = true, minLength = 50)),
+            "https://developers.google.com/android-publisher/getting_started", "Open Google's setup guide",
+            "1. Google Cloud: pick or create a project and enable the Google Play Android Developer API.\n" +
+                "2. Create a service account (IAM & Admin › Service accounts), then Keys › Add key › JSON. No Cloud " +
+                "role is needed.\n" +
+                "3. Play Console › Users and permissions › Invite new users: enter the service account's email " +
+                "(client_email in the key) and grant, per app or for the account:\n" +
+                "• Release apps to testing tracks\n" +
+                "• Release to production, exclude devices, and use Play App Signing (only if Claude should ship to " +
+                "production)\n" +
+                "• View app information (read-only)\n" +
+                "Invite user. Linking a Cloud project under API access is no longer needed.\n" +
+                "4. Paste the whole JSON key here. The app checks it with Google (it can't check the Play Console " +
+                "invite itself).\n\n" +
+                "Saved to a private file: GOOGLE_PLAY_JSON_KEY and SUPPLY_JSON_KEY (fastlane) hold its path, " +
+                "ANDROID_PUBLISHER_CREDENTIALS (Gradle Play Publisher) its contents.",
+        ),
     )
 
     fun byId(id: String) = services.firstOrNull { it.id == id }
