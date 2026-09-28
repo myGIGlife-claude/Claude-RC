@@ -14,9 +14,10 @@ set -uo pipefail
 SCRIPT_VERSION="2.0.0"
 # What the phone can rely on: 2 = extra services, 3 = self-update,
 # 4 = install-cli, 5 = run, 6 = restart + claude-cmd, 7 = token services +
-# more CLIs, 8 = keys, 9 = safe restart (resume + busy check) and BASH_ENV.
-# Bump when the app starts needing a new server feature.
-SCRIPT_API=9
+# more CLIs, 8 = keys, 9 = safe restart (resume + busy check), 10 = MXroute
+# and tokens in Claude's settings env. Bump when the app starts needing a new
+# server feature.
+SCRIPT_API=10
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -33,7 +34,7 @@ SERVICES_ENV_HOOK="[ -f \"$SERVICES_ENV\" ] && . \"$SERVICES_ENV\"  # cLaudeRC"
 LOCK_FILE="$API_STATE_DIR/api.lock"
 INSTALLED_COMMIT_FILE="$LAUNCHER_CONFIG_DIR/installed-commit"   # written by install.sh
 SERVICES_INFO="$LAUNCHER_CONFIG_DIR/services.json"   # who each token service is logged in as
-TOKEN_SERVICES="cloudflare vercel netlify fly railway supabase neon npm stripe huggingface b2 gcp firebase"
+TOKEN_SERVICES="cloudflare vercel netlify fly railway supabase neon npm stripe huggingface b2 gcp firebase mxroute"
 
 CLAUDE_LOGIN_SESSION="claude-login"
 AWS_LOGIN_SESSION="aws-sso-login"
@@ -658,7 +659,7 @@ api_start_session() {
 }
 
 do_status() {
-  ensure_env_hook   # also sets up servers connected before BASH_ENV was used
+  ensure_env_hook   # keeps Claude's settings in step with the saved tokens
   local claude_ok=false gh_ok=false gh_user="" scopes="[]" aws_ok=false aws_json="null" ident
   claude_logged_in && claude_ok=true
   if command -v gh >/dev/null 2>&1 && github_logged_in; then
@@ -1306,6 +1307,8 @@ svc_def() {
     b2) SVC_VARS=(B2_APPLICATION_KEY_ID B2_APPLICATION_KEY) SVC_RES=('^[A-Za-z0-9]{12,40}$' '^[A-Za-z0-9/+]{20,80}$') SVC_CLI=b2 ;;
     gcp) SVC_VARS=(CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE CLOUDSDK_CORE_PROJECT) SVC_KEYFILE=gcp-key.json SVC_CLI=gcloud ;;
     firebase) SVC_VARS=(GOOGLE_APPLICATION_CREDENTIALS) SVC_KEYFILE=firebase-key.json SVC_CLI=firebase ;;
+    mxroute) SVC_VARS=(MXROUTE_API_KEY MXROUTE_SERVER MXROUTE_USERNAME)
+      SVC_RES=('^[A-Za-z0-9]{16,64}$' '^[a-z0-9][a-z0-9.-]{2,252}$' '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') ;;
     *) return 1 ;;
   esac
 }
@@ -1344,27 +1347,39 @@ svc_verify() {
     b2) printf 'user = "%s:%s"\n' "$1" "$2" |
       curl -fsS --max-time 15 -K - https://api.backblazeb2.com/b2api/v4/b2_authorize_account 2>/dev/null |
       jq -er '"account " + .accountId' ;;
+    mxroute) printf 'header = "X-API-Key: %s"\nheader = "X-Server: %s"\nheader = "X-Username: %s"\n' "$1" "$2" "$3" |
+      curl -fsS --max-time 15 -K - https://api.mxroute.com/domains >/dev/null 2>&1 && echo "$3@$2" ;;
     gcp | firebase) jq -er 'select(.type == "service_account" and .project_id and .client_email) | .client_email' <<<"$1" ;;
   esac
 }
 
-# ensure_env_hook: make the env file reach Claude's commands.
+# ensure_env_hook: make the saved tokens reach Claude sessions.
 # Claude sessions don't read ~/.bashrc (tmux starts claude directly, and its
-# shell snapshot keeps only functions, aliases and PATH), so the reliable path
-# is Claude Code's own settings: "env": {"BASH_ENV": <env file>} in
-# ~/.claude/settings.json. Bash sources $BASH_ENV before every non-interactive
-# command, which is how Claude runs them. The .bashrc line is kept for your own
-# terminal. Takes effect when a session (re)starts.
+# shell snapshot keeps only functions, aliases and PATH). Claude Code's own
+# settings do reach everything: the "env" block of ~/.claude/settings.json is
+# set on the claude process itself, so commands Claude runs AND MCP servers
+# (including ${VAR} in .mcp.json) see it. So the env file is mirrored there,
+# the file is kept mode 600, and names we added before but no longer have are
+# removed. The .bashrc line is kept for your own terminal. Applies when a
+# session (re)starts.
 ensure_env_hook() {
   [[ -f "$SERVICES_ENV" ]] || return 0
   grep -qF "$SERVICES_ENV_HOOK" "$HOME/.bashrc" 2>/dev/null || printf '\n%s\n' "$SERVICES_ENV_HOOK" >>"$HOME/.bashrc"
-  local f="$HOME/.claude/settings.json" tmp
-  [[ "$(jq -r '.env.BASH_ENV // empty' "$f" 2>/dev/null)" == "$SERVICES_ENV" ]] && return 0
+  local f="$HOME/.claude/settings.json" managed="$LAUNCHER_CONFIG_DIR/settings-env-names" tmp vars line old
+  vars="$(while IFS= read -r line; do
+      [[ "$line" =~ ^export\ ([A-Z_][A-Z0-9_]*)=\'(.*)\'$ ]] && jq -cn --arg k "${BASH_REMATCH[1]}" --arg v "${BASH_REMATCH[2]}" '{($k):$v}'
+    done <"$SERVICES_ENV" | jq -sc 'add // {}')"
   mkdir -p "$HOME/.claude"
   [[ -s "$f" ]] || echo '{}' >"$f"
   jq -e . "$f" >/dev/null 2>&1 || return 0   # never overwrite a settings file we can't parse
   tmp="$(mktemp "$f.XXXXXX")" || return 0
-  jq --arg p "$SERVICES_ENV" '.env = ((.env // {}) + {BASH_ENV: $p})' "$f" >"$tmp" && cat "$tmp" >"$f"
+  old='[]'
+  [[ -f "$managed" ]] && old="$(jq -Rsc 'split("\n") | map(select(. != ""))' "$managed")"
+  jq --argjson v "$vars" --argjson old "$old" \
+     --arg be "$SERVICES_ENV" '
+    .env = (((.env // {}) | with_entries(select((.key as $k | $old | index($k)) | not))
+             | if .BASH_ENV == $be then del(.BASH_ENV) else . end) + $v)' "$f" >"$tmp" &&
+    { chmod 600 "$f"; cat "$tmp" >"$f"; jq -r 'keys[]' <<<"$vars" >"$managed"; }
   rm -f "$tmp"
 }
 

@@ -46,7 +46,7 @@ see Security). There is no web server, open port or cloud service.
 
 | Tab | Shows | Actions |
 | --- | --- | --- |
-| **Status** | Claude and GitHub, plus every service you've connected | Pull to refresh; **+** connects AWS, GitLab, Docker/GHCR, Cloudflare, Vercel, Netlify, Fly.io, Railway, Supabase, Neon, npm, Stripe, Hugging Face, Backblaze B2, Google Cloud, Firebase (installs the CLI if needed, then asks for credentials) |
+| **Status** | Claude and GitHub, plus every service you've connected | Pull to refresh; **+** connects AWS, GitLab, Docker/GHCR, Cloudflare, Vercel, Netlify, Fly.io, Railway, Supabase, Neon, npm, Stripe, Hugging Face, Backblaze B2, Google Cloud, Firebase, MXroute (installs the CLI if needed, then asks for credentials) |
 | **New** | Name (validated live), owner (you or an org), Private/Public, “Start Claude now” | Create → repo link + **Open in Claude** |
 | **Projects** | All your repos, newest push first, with Private/Public, Org, On server, Running badges | Clone/pull + start, stop, tail log (long-press) |
 | **Sessions** | Running Claude sessions, uptime, attached | Stop, safe **Restart** / **Restart all** (reopens the same conversation, waits if Claude is busy, picks up new plugins, MCP servers and tokens), tail with **prompt keys** (1/2/3, Enter, Esc, arrows, y/n) to answer things like MCP approvals, **Open in Claude**; with App lock on, **Run a command** (type or paste, optional sudo password) |
@@ -111,8 +111,8 @@ compare.
   the audit log records only time, action and result code.
 - Service tokens (Cloudflare, Vercel, …) are checked with the provider, then
   kept in `~/.config/claude-launcher/env` (mode 600); JSON keys in mode-600
-  files next to it. Claude's sessions load that file through `BASH_ENV` in
-  `~/.claude/settings.json` (only the path is stored there).
+  files next to it. They reach Claude's sessions (commands and MCP servers)
+  through the `env` block of `~/.claude/settings.json`, which is kept mode 600.
 - Nothing personal is in this repo: server details live in the app's settings
   and in `~/.config/claude-launcher/config` on the server.
 

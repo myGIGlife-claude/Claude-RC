@@ -162,6 +162,20 @@ object Catalog {
                 "is deprecated).",
             install = "firebase",
         ),
+        ServiceDef(
+            "mxroute", "MXroute", "Email hosting: domains, accounts, forwarders via api.mxroute.com",
+            listOf(
+                FieldDef("API key", minLength = 16),
+                FieldDef("Server (e.g. yourserver.mxrouting.net)", secret = false, minLength = 3),
+                FieldDef("Username", secret = false, minLength = 1),
+            ),
+            "https://panel.mxroute.com/api-keys.php", "Create an API key on MXroute",
+            "MXroute panel › API Keys › create a key. Copy the key (shown once), your server name (the host in your " +
+                "panel address, e.g. yourserver.mxrouting.net) and your panel username.\n" +
+                "The app checks them by listing your domains.\n" +
+                "Saved as MXROUTE_API_KEY, MXROUTE_SERVER and MXROUTE_USERNAME, which also reach MCP servers that " +
+                "use them (like an MXroute MCP server).",
+        ),
     )
 
     fun byId(id: String) = services.firstOrNull { it.id == id }

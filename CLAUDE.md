@@ -45,11 +45,12 @@ and raise `MIN_SCRIPT_API` so old servers see "Server scripts need an update".
 
 Anything a Claude session needs from its environment (service tokens, key
 file paths) goes in `~/.config/claude-launcher/env` through `set_env` in
-`claude-setup.sh`. It reaches Claude through `BASH_ENV` in
-`~/.claude/settings.json` (`ensure_env_hook`), which bash sources before
-every command Claude runs. Claude sessions do NOT read `~/.bashrc`: tmux
-starts `claude` directly and Claude's shell snapshot keeps only functions,
-aliases and PATH. Changes apply when a session restarts. Tools install into
+`claude-setup.sh`. `ensure_env_hook` mirrors it into the `env` block of
+`~/.claude/settings.json` (kept mode 600): Claude Code sets those on its own
+process, so commands Claude runs and MCP servers (including `${VAR}` in
+`.mcp.json`) see them. Claude sessions do NOT read `~/.bashrc`: tmux starts
+`claude` directly and Claude's shell snapshot keeps only functions, aliases
+and PATH. Changes apply when a session restarts. Tools install into
 `~/.local/bin`, which is on the sessions' PATH. Group changes (e.g.
 `docker`) only reach sessions after the server restarts, so tell the user.
 
