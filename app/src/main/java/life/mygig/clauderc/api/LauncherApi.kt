@@ -38,6 +38,7 @@ object Codes {
     const val BUSY = "busy"
     const val INTERNAL = "internal"
     const val FORBIDDEN = "forbidden"
+    const val SESSION_BUSY = "session_busy"
 
     // Local, never sent by the server.
     const val HOST_KEY_CHANGED = "host_key_changed"
@@ -106,7 +107,10 @@ class LauncherApi(
         requireName(project)
         return call("keys $project " + keys.joinToString(" "))
     }
-    suspend fun restart(project: String): JsonObject { requireName(project); return call("restart $project") }
+    suspend fun restart(project: String, force: Boolean = false): JsonObject {
+        requireName(project)
+        return call("restart $project" + if (force) " --force" else "", timeoutMs = 120_000)
+    }
     /** `claude <args>` from the Command Center's allowlist; args go on stdin. */
     suspend fun claudeCmd(args: String): RunResult = call("claude-cmd", stdin = args.trim(), timeoutMs = 330_000)
     /** Installs a CLI on the server; [sudoPassword] only for installs that need root (docker). */

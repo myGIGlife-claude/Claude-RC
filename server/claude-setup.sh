@@ -14,8 +14,9 @@ set -uo pipefail
 SCRIPT_VERSION="2.0.0"
 # What the phone can rely on: 2 = extra services, 3 = self-update,
 # 4 = install-cli, 5 = run, 6 = restart + claude-cmd, 7 = token services +
-# more CLIs, 8 = keys. Bump when the app starts needing a new server feature.
-SCRIPT_API=8
+# more CLIs, 8 = keys, 9 = safe restart (resume + busy check) and BASH_ENV.
+# Bump when the app starts needing a new server feature.
+SCRIPT_API=9
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -657,7 +658,7 @@ api_start_session() {
 }
 
 do_status() {
-  ensure_env_hook   # also repairs setups from before the hook moved to the top
+  ensure_env_hook   # also sets up servers connected before BASH_ENV was used
   local claude_ok=false gh_ok=false gh_user="" scopes="[]" aws_ok=false aws_json="null" ident
   claude_logged_in && claude_ok=true
   if command -v gh >/dev/null 2>&1 && github_logged_in; then
@@ -827,25 +828,59 @@ do_stop() {
   api_ok "$(jq -cn --arg s "$sess" --argjson st "$stopped" '{session:$s, stopped:$st}')"
 }
 
-# Stop a session and start it again in the same folder, the same way the menu
-# starts sessions, so Claude picks up new plugins, skills and MCP servers.
+# Safe restart: stop a session and start it again in the same folder,
+# resuming the exact conversation it had (claude --resume <session id>), so
+# Claude picks up new plugins, skills and MCP servers without losing context.
+# Refuses while Claude is still working unless --force.
 do_restart() {
-  [[ $# -eq 1 ]] || bad_args "usage: restart <project or session>"
+  [[ $# -eq 1 || ($# -eq 2 && "$2" == --force) ]] || bad_args "usage: restart <project or session> [--force]"
   valid_project "$1" || api_err invalid_name "Invalid project name."
-  local sess dir name
+  local sess dir name sid="" pp resumed=false
   sess="$(resolve_session "$1")"
   tmux has-session -t "=$sess" 2>/dev/null || api_err invalid_name "No running session named '$1'."
+  if [[ "${2:-}" != --force ]] && tmux capture-pane -p -t "=$sess:" 2>/dev/null |
+    sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 8 | grep -q "esc to interrupt"; then
+    api_err session_busy "Claude is still working in '$sess'. Wait for it to finish, or restart anyway."
+  fi
   # The folder: claude-autostart's list first, else where the pane is.
   dir="$(awk -F'\t' -v s="$sess" '$1 == s {print $2; exit}' "$AUTOSTART_LIST" 2>/dev/null)"
   [[ -n "$dir" ]] || dir="$(tmux display-message -p -t "=$sess:" '#{pane_current_path}' 2>/dev/null)"
   [[ -d "$dir" ]] || api_err internal "Couldn't find the folder of session '$sess'."
   name="$(basename "$dir")"
   valid_project "$name" || api_err invalid_name "The folder name '$name' can't be used as a session name."
+  # The live conversation is the newest transcript in Claude's folder for this project.
+  sid="$(ls -t "$HOME/.claude/projects/${dir//[\/.]/-}/"*.jsonl 2>/dev/null | head -n 1 | xargs -r basename | sed 's/\.jsonl$//')"
+  [[ "$sid" =~ ^[0-9a-f-]{36}$ ]] || sid=""
   tmux kill-session -t "=$sess" 2>/dev/null
-  launch_session "$name" "$dir" || api_err internal "tmux could not start the session again."
   STARTED_SESSION="$(session_name "$name")"
+  if [[ -n "$sid" ]]; then
+    trust_folder "$dir"
+    tmux new-session -d -s "$STARTED_SESSION" -c "$dir" \
+      "env -u ANTHROPIC_API_KEY claude --remote-control $(printf %q "$name") --resume $sid; exec bash" &&
+      autostart_save
+    sleep 4
+    pp="$(tmux display-message -p -t "=$STARTED_SESSION:" '#{pane_pid}' 2>/dev/null)"
+    # Claude runs as a child of the pane's shell; once it exits the shell becomes bash with no child.
+    if [[ -n "$pp" ]] && pgrep -P "$pp" >/dev/null 2>&1; then
+      resumed=true
+    else   # resuming didn't stick: start fresh rather than leave nothing running
+      tmux kill-session -t "=$STARTED_SESSION" 2>/dev/null
+    fi
+  fi
+  if ! $resumed; then
+    launch_session "$name" "$dir" || api_err internal "tmux could not start the session again."
+  fi
   api_confirm_remote_control "$STARTED_SESSION"
-  api_ok "$(jq -cn --arg s "$STARTED_SESSION" --arg p "$dir" '{session:$s, path:$p, restarted:true}')"
+  # A question on screen (e.g. "New MCP server found… Enter to confirm") means the
+  # session is waiting for you; the app then opens it with the answer keys.
+  local screen waiting=false
+  sleep 2
+  screen="$(tmux capture-pane -p -J -t "=$STARTED_SESSION:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 120)"
+  grep -qE "Enter to confirm|\(y/n\)" <<<"$(tail -n 15 <<<"$screen")" && waiting=true
+  api_ok "$(jq -cn --arg s "$STARTED_SESSION" --arg p "$dir" --argjson r "$resumed" --arg id "$sid" \
+    --argjson w "$waiting" --arg t "$screen" \
+    '{session:$s, path:$p, restarted:true, resumed:$r, conversation:(if $r then $id else null end),
+      waiting:$w, text:(if $w then $t else null end)}')"
 }
 
 do_tail() {
@@ -1313,16 +1348,23 @@ svc_verify() {
   esac
 }
 
-# ensure_env_hook: the line that loads the env file must be the FIRST line of
-# ~/.bashrc. Ubuntu's .bashrc stops early for non-interactive shells, and
-# that's how Claude runs commands, so a line at the end is never reached.
+# ensure_env_hook: make the env file reach Claude's commands.
+# Claude sessions don't read ~/.bashrc (tmux starts claude directly, and its
+# shell snapshot keeps only functions, aliases and PATH), so the reliable path
+# is Claude Code's own settings: "env": {"BASH_ENV": <env file>} in
+# ~/.claude/settings.json. Bash sources $BASH_ENV before every non-interactive
+# command, which is how Claude runs them. The .bashrc line is kept for your own
+# terminal. Takes effect when a session (re)starts.
 ensure_env_hook() {
   [[ -f "$SERVICES_ENV" ]] || return 0
-  [[ "$(head -n 1 "$HOME/.bashrc" 2>/dev/null)" == "$SERVICES_ENV_HOOK" ]] && return 0
-  local tmp
-  tmp="$(mktemp "$HOME/.bashrc.XXXXXX")" || return 0
-  { printf '%s\n' "$SERVICES_ENV_HOOK"; grep -vF "$SERVICES_ENV_HOOK" "$HOME/.bashrc" 2>/dev/null; } >"$tmp"
-  cat "$tmp" >"$HOME/.bashrc"   # keep the file (and its permissions), replace the content
+  grep -qF "$SERVICES_ENV_HOOK" "$HOME/.bashrc" 2>/dev/null || printf '\n%s\n' "$SERVICES_ENV_HOOK" >>"$HOME/.bashrc"
+  local f="$HOME/.claude/settings.json" tmp
+  [[ "$(jq -r '.env.BASH_ENV // empty' "$f" 2>/dev/null)" == "$SERVICES_ENV" ]] && return 0
+  mkdir -p "$HOME/.claude"
+  [[ -s "$f" ]] || echo '{}' >"$f"
+  jq -e . "$f" >/dev/null 2>&1 || return 0   # never overwrite a settings file we can't parse
+  tmp="$(mktemp "$f.XXXXXX")" || return 0
+  jq --arg p "$SERVICES_ENV" '.env = ((.env // {}) + {BASH_ENV: $p})' "$f" >"$tmp" && cat "$tmp" >"$f"
   rm -f "$tmp"
 }
 

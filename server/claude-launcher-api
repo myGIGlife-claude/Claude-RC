@@ -81,8 +81,11 @@ case "$sub" in
   repos)
     ((nargs == 0)) || { ((nargs == 1)) && [[ "${args[0]}" == --refresh ]]; } || deny "$sub"
     ;;
-  start | stop | restart)
+  start | stop)
     ((nargs == 1)) && [[ "${args[0]}" =~ $PROJECT_RE ]] || deny "$sub"
+    ;;
+  restart)
+    [[ "${args[0]:-}" =~ $PROJECT_RE ]] && { ((nargs == 1)) || { ((nargs == 2)) && [[ "${args[1]}" == --force ]]; }; } || deny "$sub"
     ;;
   tail)
     [[ "${args[0]:-}" =~ $PROJECT_RE ]] || deny "$sub"
