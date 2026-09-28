@@ -145,6 +145,16 @@ fun StatusScreen(vm: MainViewModel) {
                         onClick = tap,
                     )
                 }
+                if (s.keystores.isNotEmpty()) {
+                    item {
+                        StatusRow(
+                            title = "Android signing keys",
+                            state = RowState.OK,
+                            detail = s.keystores.joinToString(", "),
+                            onClick = { vm.showKeystores(true) },
+                        )
+                    }
+                }
                 if (s.custom.isNotEmpty()) {
                     item {
                         StatusRow(
@@ -155,7 +165,7 @@ fun StatusScreen(vm: MainViewModel) {
                         )
                     }
                 }
-                if (connected.isEmpty() && !s.aws.loggedIn && s.custom.isEmpty()) {
+                if (connected.isEmpty() && !s.aws.loggedIn && s.custom.isEmpty() && s.keystores.isEmpty()) {
                     item {
                         Text(
                             "Tap + at the top to connect AWS, GitLab, Docker, Cloudflare, Vercel, Supabase and more.",

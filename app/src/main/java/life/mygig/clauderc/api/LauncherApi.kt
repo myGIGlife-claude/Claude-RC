@@ -116,6 +116,10 @@ class LauncherApi(
     /** Installs a CLI on the server; [sudoPassword] only for installs that need root (docker). */
     /** Saves a custom API key (value on stdin) that every Claude session and MCP server sees. */
     suspend fun setSecret(name: String, value: String): JsonObject = call("set-secret $name", stdin = value.trim())
+    /** Saves an Android signing key: alias, passwords and the file (base64) go on stdin. */
+    suspend fun loginKeystore(name: String, alias: String, storePassword: String, keyPassword: String, fileBase64: String): JsonObject =
+        call("login-keystore $name", stdin = listOf(alias.trim(), storePassword, keyPassword, fileBase64).joinToString("\n"))
+    suspend fun removeKeystore(name: String): JsonObject = call("remove-keystore $name")
     suspend fun removeSecret(name: String): JsonObject = call("remove-secret $name")
     suspend fun installCli(name: String, sudoPassword: String = ""): JsonObject =
         call("install-cli $name", stdin = sudoPassword, timeoutMs = 660_000)

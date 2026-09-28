@@ -320,6 +320,27 @@ grep -q ACME_API_KEY "$HOME/.config/claude-launcher/env" "$HOME/.claude/settings
 grep -q abc123 "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "custom key value never logged" $?
 rm -f "$HOME/.config/claude-launcher/env"
 
+echo "signing keys"
+KT="$(command -v keytool || ls /home/*/.jdks/*/bin/keytool /usr/lib/jvm/*/bin/keytool 2>/dev/null | head -n 1)"
+if [[ -n "$KT" ]]; then
+  "$KT" -genkeypair -keystore "$WORK/up.jks" -storetype PKCS12 -alias upload -keyalg RSA -keysize 2048 -validity 30 \
+    -dname CN=test -storepass s3cret-pw -keypass s3cret-pw >/dev/null 2>&1
+  api "login-keystore GTG" "$(printf 'upload\nwrong-pw\nwrong-pw\n'; base64 -w0 "$WORK/up.jks")"
+  check "signing key: wrong password refused" "$(jqt '.error.code=="not_logged_in"')"
+  api "login-keystore GTG" "$(printf 'upload\ns3cret-pw\ns3cret-pw\n'; base64 -w0 "$WORK/up.jks")"
+  check "signing key saved" "$(jqt '.ok and .data.saved=="GTG" and .data.alias=="upload"')"
+  cmp -s "$WORK/up.jks" "$HOME/.config/claude-launcher/keystores/GTG.jks" && [[ "$(stat -c %a "$HOME/.config/claude-launcher/keystores/GTG.jks")" == 600 ]]
+  check "keystore stored intact, mode 600" $?
+  jq -e '.env.GTG_KEY_ALIAS=="upload" and .env.GTG_KEYSTORE_PASSWORD=="s3cret-pw" and (.env.GTG_KEYSTORE_FILE|endswith("/keystores/GTG.jks"))' "$HOME/.claude/settings.json" >/dev/null
+  check "signing key reaches Claude's settings env" $?
+  api "status"; check "status lists signing keys" "$(jqt '.data.keystores==["GTG"]')"
+  grep -q "s3cret-pw" "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "keystore password never logged" $?
+  api "remove-keystore GTG"; check "signing key removed" "$(jqt '.ok and .data.removed=="GTG"')"
+  [[ ! -e "$HOME/.config/claude-launcher/keystores/GTG.jks" ]] && ! grep -q GTG_ "$HOME/.config/claude-launcher/env"; check "file and variables gone" $?
+fi
+api "login-keystore gtg" "x"; check "signing key name must be upper case" "$(jqt '.error.code=="forbidden"')"
+rm -f "$HOME/.config/claude-launcher/env"
+
 echo "token services"
 api "status"
 check "status lists token services" "$(jqt '.data.services | (.vercel and .b2 and .gcp and .firebase and .cloudflare) and (.vercel.logged_in|not)')"
