@@ -271,6 +271,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         then()
     }
 
+    /** The Android signing keys dialog. */
+    private val _showKeystores = MutableStateFlow(false)
+    val showKeystores = _showKeystores.asStateFlow()
+    fun showKeystores(show: Boolean) { _showAdd.value = false; _showKeystores.value = show }
+
+    fun saveKeystore(name: String, alias: String, storePassword: String, keyPassword: String, file: ByteArray) =
+        action("Checking and saving the $name signing key…") {
+            val b64 = android.util.Base64.encodeToString(file, android.util.Base64.NO_WRAP)
+            api.loginKeystore(name, alias, storePassword, keyPassword.ifEmpty { storePassword }, b64)
+            say("$name signing key saved. Restart sessions to use it.")
+            refreshStatus()
+        }
+
+    fun removeKeystore(name: String) = action("Removing the $name signing key…") {
+        api.removeKeystore(name)
+        say("$name signing key removed.")
+        refreshStatus()
+    }
+
     /** The custom API keys dialog. */
     private val _showCustom = MutableStateFlow(false)
     val showCustom = _showCustom.asStateFlow()

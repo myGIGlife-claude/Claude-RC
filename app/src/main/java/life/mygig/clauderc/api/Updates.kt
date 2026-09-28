@@ -41,6 +41,9 @@ object Updates {
     /** Server script API with custom API keys (set-secret / remove-secret). */
     const val CUSTOM_KEYS_API = 11
 
+    /** Server script API with Android signing keys (login-keystore). */
+    const val KEYSTORE_API = 13
+
     /** What the server accepts as a custom key name (claude-setup.sh CUSTOM_NAME_RE). */
     val CUSTOM_NAME = Regex("^[A-Z][A-Z0-9_]{0,55}_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT)$")
 

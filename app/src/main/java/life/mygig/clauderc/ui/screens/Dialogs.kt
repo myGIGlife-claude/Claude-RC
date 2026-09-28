@@ -1,5 +1,7 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
@@ -138,6 +140,14 @@ fun AddServiceDialog(vm: MainViewModel) {
                     Text("Update the server scripts (card at the top of Status) to see more services.", style = MaterialTheme.typography.bodySmall)
                 }
                 if (options.isEmpty() && st != null) Text("Everything here is already connected.")
+                if ((st?.scriptApi ?: 0) >= Updates.KEYSTORE_API) {
+                    OutlinedButton(onClick = { vm.showKeystores(true) }, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.fillMaxWidth()) {
+                            Text("Android signing key", style = MaterialTheme.typography.titleSmall)
+                            Text("Upload keystore (.jks) for signing app bundles", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
                 if ((st?.scriptApi ?: 0) >= Updates.CUSTOM_KEYS_API) {
                     OutlinedButton(onClick = { vm.showCustomKeys(true) }, modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.fillMaxWidth()) {
@@ -163,6 +173,103 @@ fun AddServiceDialog(vm: MainViewModel) {
         confirmButton = {},
         dismissButton = { TextButton(onClick = { vm.showAddService(false) }) { Text("Close") } },
     )
+}
+
+/** Android signing keys: pick a .jks from the phone, give it a short name; every session gets NAME_KEYSTORE_*. */
+@Composable
+fun KeystoresDialog(vm: MainViewModel) {
+    val context = LocalContext.current
+    val status by vm.status.collectAsState()
+    val busy by vm.busy.collectAsState()
+    val guard = LocalGuard.current
+    var name by remember { mutableStateOf("") }
+    var alias by remember { mutableStateOf("") }
+    var storePw by remember { mutableStateOf("") }
+    var keyPw by remember { mutableStateOf("") }
+    var file by remember { mutableStateOf<ByteArray?>(null) }
+    var fileName by remember { mutableStateOf("") }
+    var confirmRemove by remember { mutableStateOf<String?>(null) }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+            if (bytes == null || bytes.isEmpty() || bytes.size > 100_000) {
+                vm.say("That file couldn't be read (or it's too big for a keystore).")
+            } else {
+                file = bytes
+                fileName = uri.lastPathSegment?.substringAfterLast('/') ?: "keystore"
+            }
+        }
+    }
+    val nameOk = Regex("^[A-Z][A-Z0-9_]{0,30}$").matches(name) && !name.startsWith("CLAUDE") && !name.startsWith("ANTHROPIC")
+    val pwOk = storePw.isNotEmpty() && !storePw.contains('\'') && !keyPw.contains('\'')
+    AlertDialog(
+        onDismissRequest = { if (busy == null) vm.showKeystores(false) },
+        title = { Text("Android signing keys") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Your app's upload key, for signing bundles before they go to Google Play. The server checks the " +
+                        "passwords, keeps the file private, and every session gets NAME_KEYSTORE_FILE, " +
+                        "NAME_KEYSTORE_PASSWORD, NAME_KEY_ALIAS and NAME_KEY_PASSWORD after a restart.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                status?.keystores.orEmpty().forEach { n ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(n, fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { confirmRemove = n }, enabled = busy == null) { Text("Remove") }
+                    }
+                }
+                OutlinedTextField(
+                    value = name, onValueChange = { name = it.uppercase().replace(Regex("[^A-Z0-9_]"), "_") },
+                    label = { Text("Short name, e.g. GTG") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    isError = name.isNotEmpty() && !nameOk,
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                )
+                OutlinedButton(onClick = { pick.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (file == null) "Choose keystore file (.jks)" else "File: $fileName")
+                }
+                OutlinedTextField(
+                    value = alias, onValueChange = { alias = it.trim() },
+                    label = { Text("Key alias, e.g. upload") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                )
+                OutlinedTextField(
+                    value = storePw, onValueChange = { storePw = it },
+                    label = { Text("Keystore password") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                )
+                OutlinedTextField(
+                    value = keyPw, onValueChange = { keyPw = it },
+                    label = { Text("Key password (empty = same)") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                )
+                Button(
+                    onClick = {
+                        val f = file ?: return@Button
+                        guard.run("Save the $name signing key") {
+                            vm.saveKeystore(name, alias, storePw, keyPw, f)
+                            storePw = ""; keyPw = ""; file = null; fileName = ""
+                        }
+                    },
+                    enabled = busy == null && nameOk && file != null && alias.isNotBlank() && pwOk,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Check and save") }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = { vm.showKeystores(false) }) { Text("Close") } },
+    )
+    confirmRemove?.let { n ->
+        AlertDialog(
+            onDismissRequest = { confirmRemove = null },
+            title = { Text("Remove the $n signing key?") },
+            text = { Text("It's deleted from the server. Keep your own backup: Google Play only accepts bundles signed with this upload key.") },
+            confirmButton = { TextButton(onClick = { confirmRemove = null; guard.run("Remove $n") { vm.removeKeystore(n) } }) { Text("Remove") } },
+            dismissButton = { TextButton(onClick = { confirmRemove = null }) { Text("Cancel") } },
+        )
+    }
 }
 
 /** Custom API keys: add a NAME=value every session sees, or remove one. Values are never shown. */

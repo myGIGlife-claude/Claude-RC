@@ -72,6 +72,7 @@ import life.mygig.clauderc.ui.screens.AddServiceDialog
 import life.mygig.clauderc.ui.screens.TokenServiceDialog
 import life.mygig.clauderc.ui.screens.CommandCenterScreen
 import life.mygig.clauderc.ui.screens.CustomKeysDialog
+import life.mygig.clauderc.ui.screens.KeystoresDialog
 import life.mygig.clauderc.ui.screens.HostKeyDialog
 import life.mygig.clauderc.ui.screens.LoginDialog
 import life.mygig.clauderc.ui.screens.NewProjectScreen
@@ -146,6 +147,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             val setup by vm.setup.collectAsState()
             val showAdd by vm.showAdd.collectAsState()
             val showCustom by vm.showCustom.collectAsState()
+            val showKeystores by vm.showKeystores.collectAsState()
             val tokenService by vm.tokenService.collectAsState()
             val tail by vm.tail.collectAsState()
             val pendingKey by vm.pendingHostKey.collectAsState()
@@ -290,6 +292,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             setup?.let { SetupDialog(vm, it) }
             if (showAdd) AddServiceDialog(vm)
             if (showCustom) CustomKeysDialog(vm)
+            if (showKeystores) KeystoresDialog(vm)
             tokenService?.let { id -> Catalog.byId(id)?.let { TokenServiceDialog(vm, it) } }
             tail?.let { TailDialog(vm, it) }
             pendingKey?.let { HostKeyDialog(vm, it, s.hostKeyFingerprint.ifEmpty { s.previousFingerprint }) }

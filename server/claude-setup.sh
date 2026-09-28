@@ -15,9 +15,10 @@ SCRIPT_VERSION="2.0.0"
 # What the phone can rely on: 2 = extra services, 3 = self-update,
 # 4 = install-cli, 5 = run, 6 = restart + claude-cmd, 7 = token services +
 # more CLIs, 8 = keys, 9 = safe restart (resume + busy check), 10 = MXroute
-# and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play.
-# Bump when the app starts needing a new server feature.
-SCRIPT_API=12
+# and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
+# 13 = Android signing keys. Bump when the app starts needing a new server
+# feature.
+SCRIPT_API=13
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -681,6 +682,7 @@ do_status() {
   local commit
   commit="$(grep -oE '^[0-9a-f]{40}$' "$INSTALLED_COMMIT_FILE" 2>/dev/null | head -n 1)"
   api_ok "$(jq -cn --argjson services "$(services_json)" --arg commit "$commit" --argjson api "$SCRIPT_API" \
+    --argjson keystores "$(ls "$KEYSTORE_DIR" 2>/dev/null | sed -n 's/\.jks$//p' | jq -Rsc 'split("\n") | map(select(. != ""))')" \
     --argjson custom "$(if [[ -f "$CUSTOM_NAMES" ]]; then jq -Rsc 'split("\n") | map(select(. != ""))' "$CUSTOM_NAMES"; else echo '[]'; fi)" \
     --argjson run "$([[ "$ALLOW_RUN" == 1 ]] && echo true || echo false)" \
     --argjson c "$claude_ok" --argjson g "$gh_ok" --arg gu "$gh_user" --argjson gm "$scopes" \
@@ -690,7 +692,7 @@ do_status() {
       claude:{logged_in:$c},
       github:{logged_in:$g, user:(if $gu=="" then null else $gu end), missing_scopes:$gm},
       aws:{logged_in:$a, identity:$ai, profile:$ap, sso_configured:$sso},
-      hostname:$host, version:$v, services:$services, custom:$custom,
+      hostname:$host, version:$v, services:$services, custom:$custom, keystores:$keystores,
       commit:(if $commit=="" then null else $commit end), script_api:$api, run_enabled:$run}')"
 }
 
@@ -1498,6 +1500,63 @@ do_set_secret() {
   api_ok "$(jq -cn --arg n "$1" '{saved:$n}')"
 }
 
+KEYSTORE_DIR="$LAUNCHER_CONFIG_DIR/keystores"
+
+find_keytool() {
+  command -v keytool 2>/dev/null && return
+  ls "$HOME"/.jdks/*/bin/keytool /usr/lib/jvm/*/bin/keytool 2>/dev/null | head -n 1
+}
+
+# login-keystore <NAME>: an Android signing (upload) key. stdin: alias, keystore
+# password, key password, then the keystore file base64-encoded. Saved as
+# keystores/<NAME>.jks (mode 600); every session gets <NAME>_KEYSTORE_FILE,
+# <NAME>_KEYSTORE_PASSWORD, <NAME>_KEY_ALIAS and <NAME>_KEY_PASSWORD.
+do_login_keystore() {
+  [[ $# -eq 1 && "$1" =~ ^[A-Z][A-Z0-9_]{0,30}$ && "$1" != CLAUDE* && "$1" != ANTHROPIC* ]] ||
+    bad_args "usage: login-keystore <NAME, e.g. GTG>"
+  local n="$1" alias sp kp dir kt f out
+  alias="$(read_secret_line)"; sp="$(read_secret_line)"; kp="$(read_secret_line)"
+  dir="$(mktemp -d)" && chmod 700 "$dir"
+  trap 'rm -rf "$dir"; on_exit' EXIT
+  head -c 200000 | tr -d '[:space:]' | base64 -d >"$dir/ks" 2>/dev/null || api_err invalid_name "The keystore file didn't come through."
+  exec 0</dev/null
+  [[ -s "$dir/ks" ]] || api_err invalid_name "The keystore file is empty."
+  [[ "$alias" =~ ^[A-Za-z0-9._-]{1,100}$ ]] || api_err invalid_name "That key alias doesn't look right."
+  [[ -n "$sp" && "$sp" != *"'"* && "$kp" != *"'"* ]] ||
+    api_err invalid_name "Passwords can't be empty or contain a single quote (')."
+  [[ -n "$kp" ]] || kp="$sp"
+  # The passwords must open the key: keytool if a JDK is here, else openssl (PKCS12 keystores).
+  printf '%s' "$sp" >"$dir/sp"; printf '%s' "$kp" >"$dir/kp"; chmod 600 "$dir/sp" "$dir/kp"
+  kt="$(find_keytool)"
+  if [[ -n "$kt" ]]; then
+    out="$("$kt" -list -keystore "$dir/ks" -storepass:file "$dir/sp" -alias "$alias" 2>&1)" ||
+      api_err not_logged_in "keytool couldn't open it: $(tail -n 1 <<<"$out")"
+  elif ! openssl pkcs12 -in "$dir/ks" -passin "file:$dir/sp" -noout 2>/dev/null; then
+    api_err not_logged_in "The keystore password doesn't open this file (or it's an old JKS keystore and no JDK is installed to check it)."
+  fi
+  mkdir -p "$KEYSTORE_DIR" && chmod 700 "$KEYSTORE_DIR"
+  f="$KEYSTORE_DIR/$n.jks"
+  install -m 600 "$dir/ks" "$f.new" && mv -f "$f.new" "$f"
+  set_env "${n}_KEYSTORE_FILE" "$f"
+  set_env "${n}_KEYSTORE_PASSWORD" "$sp"
+  set_env "${n}_KEY_ALIAS" "$alias"
+  set_env "${n}_KEY_PASSWORD" "$kp"
+  unset sp kp
+  ensure_env_hook
+  api_ok "$(jq -cn --arg n "$n" --arg a "$alias" '{saved:$n, alias:$a}')"
+}
+
+# remove-keystore <NAME>
+do_remove_keystore() {
+  [[ $# -eq 1 && "$1" =~ ^[A-Z][A-Z0-9_]{0,30}$ ]] || bad_args "usage: remove-keystore <NAME>"
+  [[ -f "$KEYSTORE_DIR/$1.jks" ]] || api_err invalid_name "No signing key named $1."
+  rm -f "$KEYSTORE_DIR/$1.jks"
+  local v
+  for v in KEYSTORE_FILE KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do set_env "${1}_$v" ""; done
+  ensure_env_hook
+  api_ok "$(jq -cn --arg n "$1" '{removed:$n}')"
+}
+
 # remove-secret <NAME>: only names added with set-secret.
 do_remove_secret() {
   [[ $# -eq 1 ]] && custom_name_ok "$1" || bad_args "usage: remove-secret <NAME>"
@@ -1726,7 +1785,7 @@ api_main() {
   local cmd="${1:-}"
   shift || true
   case "$cmd" in
-    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | login-cloudflare | run | claude-cmd | login-token | install-cli | set-secret) ;;  # these read stdin
+    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | login-cloudflare | run | claude-cmd | login-token | install-cli | set-secret | login-keystore) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -1759,6 +1818,8 @@ api_main() {
     keys)                do_keys "$@" ;;
     set-secret)          do_set_secret "$@" ;;
     remove-secret)       do_remove_secret "$@" ;;
+    login-keystore)      do_login_keystore "$@" ;;
+    remove-keystore)     do_remove_keystore "$@" ;;
     "")                  bad_args "missing subcommand" ;;
     *)                   bad_args "unknown subcommand '$cmd'" ;;
   esac

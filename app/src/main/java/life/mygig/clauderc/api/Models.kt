@@ -18,6 +18,8 @@ data class StatusData(
     @SerialName("run_enabled") val runEnabled: Boolean = false,
     /** Names of custom API keys (never their values). */
     val custom: List<String> = emptyList(),
+    /** Names of Android signing keys saved on the server. */
+    val keystores: List<String> = emptyList(),
 )
 
 @Serializable
