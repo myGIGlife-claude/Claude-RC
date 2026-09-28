@@ -16,9 +16,9 @@ SCRIPT_VERSION="2.0.0"
 # 4 = install-cli, 5 = run, 6 = restart + claude-cmd, 7 = token services +
 # more CLIs, 8 = keys, 9 = safe restart (resume + busy check), 10 = MXroute
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
-# 13 = Android signing keys. Bump when the app starts needing a new server
-# feature.
-SCRIPT_API=13
+# 13 = Android signing keys, 14 = YouTube. Bump when the app starts needing a
+# new server feature.
+SCRIPT_API=14
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -39,7 +39,7 @@ CUSTOM_NAMES="$LAUNCHER_CONFIG_DIR/custom-names"   # names added with set-secret
 # A custom key's name: upper case, a credential-like suffix, never something
 # that changes how programs run (PATH, LD_*, CLAUDE_*, …).
 CUSTOM_NAME_RE='^[A-Z][A-Z0-9_]{0,55}_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT)$'
-TOKEN_SERVICES="cloudflare vercel netlify fly railway supabase neon npm stripe huggingface b2 gcp firebase mxroute googleplay"
+TOKEN_SERVICES="cloudflare vercel netlify fly railway supabase neon npm stripe huggingface b2 gcp firebase mxroute googleplay youtube"
 
 CLAUDE_LOGIN_SESSION="claude-login"
 AWS_LOGIN_SESSION="aws-sso-login"
@@ -1318,6 +1318,8 @@ svc_def() {
     # tools: a path for fastlane (SUPPLY_JSON_KEY) and others, the contents for
     # Gradle Play Publisher (ANDROID_PUBLISHER_CREDENTIALS).
     googleplay) SVC_VARS=(GOOGLE_PLAY_JSON_KEY SUPPLY_JSON_KEY ANDROID_PUBLISHER_CREDENTIALS) SVC_KEYFILE=googleplay-key.json ;;
+    # Signed in with youtube-login-start / -poll (Google's device flow), not login-token.
+    youtube) SVC_VARS=(YOUTUBE_REFRESH_TOKEN YOUTUBE_CLIENT_ID YOUTUBE_CLIENT_SECRET) SVC_CLI=youtube-upload ;;
     mxroute) SVC_VARS=(MXROUTE_API_KEY MXROUTE_SERVER MXROUTE_USERNAME)
       SVC_RES=('^[A-Za-z0-9]{16,64}$' '^[a-z0-9][a-z0-9.-]{2,252}$' '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') ;;
     *) return 1 ;;
@@ -1557,6 +1559,58 @@ do_remove_keystore() {
   api_ok "$(jq -cn --arg n "$1" '{removed:$n}')"
 }
 
+# ---- YouTube: Google's device flow ("TVs and Limited Input devices" client).
+# youtube-upload.upload isn't allowed in that flow, the broader youtube scope is.
+YT_PENDING="$API_STATE_DIR/youtube-login.json"
+YT_SCOPE="https://www.googleapis.com/auth/youtube"
+
+# youtube-login-start: stdin = client ID, client secret. Returns the code to
+# enter at the verification URL; the app then polls youtube-login-poll.
+do_youtube_login_start() {
+  [[ $# -eq 0 ]] || bad_args "youtube-login-start takes no arguments"
+  local id secret resp
+  id="$(read_secret_line)"; secret="$(read_secret_line)"
+  exec 0</dev/null
+  id="${id//[[:space:]]/}" secret="${secret//[[:space:]]/}"
+  [[ "$id" =~ ^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$ ]] || api_err invalid_name "That doesn't look like a Google OAuth client ID (…apps.googleusercontent.com)."
+  [[ "$secret" =~ ^[A-Za-z0-9_-]{10,100}$ ]] || api_err invalid_name "That client secret doesn't look right."
+  need curl
+  resp="$(curl -sS --max-time 20 https://oauth2.googleapis.com/device/code \
+    --data-urlencode "client_id=$id" --data-urlencode "scope=$YT_SCOPE" 2>/dev/null)"
+  jq -e '.device_code' <<<"$resp" >/dev/null 2>&1 ||
+    api_err not_logged_in "Google didn't start the sign-in: $(jq -r '.error_description // .error // "no answer"' <<<"$resp" 2>/dev/null). The client must be type 'TVs and Limited Input devices'."
+  ( umask 077; jq -c --arg i "$id" --arg s "$secret" '{client_id:$i, client_secret:$s, device_code, interval}' <<<"$resp" >"$YT_PENDING" )
+  api_ok "$(jq -c '{url:(.verification_url // .verification_uri), code:.user_code, interval:(.interval // 5), expires_in}' <<<"$resp")"
+}
+
+# youtube-login-poll: {pending:true} until you approve, then saves the login.
+do_youtube_login_poll() {
+  [[ $# -eq 0 ]] || bad_args "youtube-login-poll takes no arguments"
+  [[ -f "$YT_PENDING" ]] || api_err not_logged_in "No YouTube sign-in in progress. Start it again."
+  local id secret dc resp err rt at chan
+  id="$(jq -r .client_id "$YT_PENDING")"; secret="$(jq -r .client_secret "$YT_PENDING")"; dc="$(jq -r .device_code "$YT_PENDING")"
+  resp="$(curl -sS --max-time 20 https://oauth2.googleapis.com/token \
+    --data-urlencode "client_id=$id" --data-urlencode "client_secret=$secret" --data-urlencode "device_code=$dc" \
+    --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:device_code" 2>/dev/null)"
+  err="$(jq -r '.error // empty' <<<"$resp" 2>/dev/null)"
+  case "$err" in
+    authorization_pending | slow_down) api_ok '{"pending":true}' ;;
+    "") ;;
+    *) rm -f "$YT_PENDING"; api_err not_logged_in "Google says: $(jq -r '.error_description // .error' <<<"$resp"). Start the sign-in again." ;;
+  esac
+  rt="$(jq -r '.refresh_token // empty' <<<"$resp")"; at="$(jq -r '.access_token // empty' <<<"$resp")"
+  [[ -n "$rt" && -n "$at" ]] || { rm -f "$YT_PENDING"; api_err not_logged_in "Google didn't return a lasting login. Start again."; }
+  chan="$(curl_auth "Authorization: Bearer $at" "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true" |
+    jq -r '.items[0].snippet.title // empty')"
+  [[ -n "$chan" ]] || { rm -f "$YT_PENDING"; api_err not_logged_in "Signed in, but that Google account has no YouTube channel."; }
+  set_env YOUTUBE_CLIENT_ID "$id"; set_env YOUTUBE_CLIENT_SECRET "$secret"; set_env YOUTUBE_REFRESH_TOKEN "$rt"
+  rm -f "$YT_PENDING"
+  local tmp; tmp="$(mktemp "$SERVICES_INFO.XXXXXX")"
+  { jq -c . "$SERVICES_INFO" 2>/dev/null || echo '{}'; } | jq -c --arg w "$chan" '.youtube = $w' >"$tmp" && mv "$tmp" "$SERVICES_INFO"
+  ensure_env_hook
+  api_ok "$(jq -cn --arg c "$chan" '{logged_in:true, user:$c}')"
+}
+
 # remove-secret <NAME>: only names added with set-secret.
 do_remove_secret() {
   [[ $# -eq 1 ]] && custom_name_ok "$1" || bad_args "usage: remove-secret <NAME>"
@@ -1785,7 +1839,7 @@ api_main() {
   local cmd="${1:-}"
   shift || true
   case "$cmd" in
-    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | login-cloudflare | run | claude-cmd | login-token | install-cli | set-secret | login-keystore) ;;  # these read stdin
+    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | login-cloudflare | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | youtube-login-start) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -1819,6 +1873,8 @@ api_main() {
     set-secret)          do_set_secret "$@" ;;
     remove-secret)       do_remove_secret "$@" ;;
     login-keystore)      do_login_keystore "$@" ;;
+    youtube-login-start) do_youtube_login_start "$@" ;;
+    youtube-login-poll)  do_youtube_login_poll "$@" ;;
     remove-keystore)     do_remove_keystore "$@" ;;
     "")                  bad_args "missing subcommand" ;;
     *)                   bad_args "unknown subcommand '$cmd'" ;;

@@ -128,6 +128,9 @@ data class TailResult(val session: String, val lines: Int = 0, val text: String 
 data class LoginUrl(val url: String, val code: String? = null)
 
 @Serializable
+data class YoutubeStart(val url: String, val code: String, val interval: Int = 5, @SerialName("expires_in") val expiresIn: Int = 1800)
+
+@Serializable
 data class LoginDone(
     @SerialName("logged_in") val loggedIn: Boolean = false,
     val user: String? = null,

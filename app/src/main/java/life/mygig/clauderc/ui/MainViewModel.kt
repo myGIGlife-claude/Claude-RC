@@ -48,7 +48,7 @@ import life.mygig.clauderc.ssh.SshKeyManager
 import life.mygig.clauderc.ssh.SshRunner
 
 enum class Tab { STATUS, NEW, PROJECTS, SESSIONS, COMMAND }
-enum class LoginKind { CLAUDE, GITHUB, AWS, GITLAB, DOCKER }
+enum class LoginKind { CLAUDE, GITHUB, AWS, GITLAB, DOCKER, YOUTUBE }
 
 /** What a snackbar's button does. */
 sealed interface Fix {
@@ -725,6 +725,36 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun dockerLogin(registry: String, user: String, token: String) = loginAction(LoginKind.DOCKER, "Logging in to the registry…") {
         api.loginDocker(registry, user, token)
         loginDone(LoginKind.DOCKER, "Logged in to ${registry.ifBlank { "docker.io" }}")
+    }
+
+    /** YouTube: start Google's device sign-in, then poll until you approve it on google.com/device. */
+    fun youtubeStart(clientId: String, clientSecret: String) = loginAction(LoginKind.YOUTUBE, "Starting Google sign-in…") {
+        val st = api.youtubeStart(clientId, clientSecret)
+        if (_login.value != LoginKind.YOUTUBE) return@loginAction
+        _loginUrl.value = LoginUrl(st.url, st.code)
+        ssoPoller?.cancel()
+        ssoPoller = viewModelScope.launch {
+            val until = System.currentTimeMillis() + st.expiresIn * 1000L
+            while (System.currentTimeMillis() < until && _login.value == LoginKind.YOUTUBE) {
+                delay(st.interval.coerceAtLeast(5) * 1000L)
+                val r = try {
+                    api.youtubePoll()
+                } catch (e: ApiException) {
+                    if (e.code == Codes.NETWORK || e.code == Codes.TIMEOUT) continue
+                    _loginUrl.value = null
+                    _loginError.value = friendly(e).first
+                    return@launch
+                }
+                if (r["logged_in"]?.jsonPrimitive?.booleanOrNull == true) {
+                    loginDone(LoginKind.YOUTUBE, "YouTube connected: ${r["user"]?.jsonPrimitive?.contentOrNull}. Restart sessions to use it.")
+                    return@launch
+                }
+            }
+            if (_login.value == LoginKind.YOUTUBE && _loginUrl.value != null) {
+                _loginUrl.value = null
+                _loginError.value = "The code expired before it was approved. Start the sign-in again."
+            }
+        }
     }
 
     private fun loginDone(kind: LoginKind, text: String) {

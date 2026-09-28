@@ -44,6 +44,9 @@ object Updates {
     /** Server script API with Android signing keys (login-keystore). */
     const val KEYSTORE_API = 13
 
+    /** Server script API with YouTube sign-in and youtube-upload. */
+    const val YOUTUBE_API = 14
+
     /** What the server accepts as a custom key name (claude-setup.sh CUSTOM_NAME_RE). */
     val CUSTOM_NAME = Regex("^[A-Z][A-Z0-9_]{0,55}_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT)$")
 

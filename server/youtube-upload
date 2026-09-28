@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""youtube-upload: upload a video to your YouTube channel (YouTube Data API v3).
+
+Credentials come from the environment, set up with the cLaudeRC app (+ > YouTube):
+YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN.
+
+  youtube-upload video.mp4 --title "My app demo" [--description "..."] [--tags a,b]
+                 [--privacy private|unlisted|public] [--category 28] [--made-for-kids]
+
+Uses a resumable upload (retries and resumes on network errors). Prints the video URL.
+Note: videos from API projects that Google hasn't audited stay private whatever --privacy says.
+"""
+import argparse, json, os, sys, time, urllib.error, urllib.parse, urllib.request
+
+CHUNK = 8 * 1024 * 1024
+
+
+def fail(msg):
+    print(f"youtube-upload: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def access_token():
+    need = ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN")
+    missing = [n for n in need if not os.environ.get(n)]
+    if missing:
+        fail("missing " + ", ".join(missing) + ": connect YouTube in the cLaudeRC app (+ > YouTube), then restart this session")
+    body = urllib.parse.urlencode({
+        "client_id": os.environ["YOUTUBE_CLIENT_ID"],
+        "client_secret": os.environ["YOUTUBE_CLIENT_SECRET"],
+        "refresh_token": os.environ["YOUTUBE_REFRESH_TOKEN"],
+        "grant_type": "refresh_token",
+    }).encode()
+    try:
+        with urllib.request.urlopen("https://oauth2.googleapis.com/token", body, timeout=30) as r:
+            return json.load(r)["access_token"]
+    except urllib.error.HTTPError as e:
+        fail(f"Google refused the YouTube login ({e.code}: {e.read().decode(errors='replace')[:200]}). "
+             "Reconnect YouTube in the cLaudeRC app.")
+
+
+def main():
+    p = argparse.ArgumentParser(description="Upload a video to your YouTube channel.")
+    p.add_argument("file")
+    p.add_argument("--title", required=True)
+    p.add_argument("--description", default="")
+    p.add_argument("--tags", default="", help="comma separated")
+    p.add_argument("--privacy", choices=["private", "unlisted", "public"], default="private")
+    p.add_argument("--category", default="28", help="category id (28 = Science & Technology)")
+    p.add_argument("--made-for-kids", action="store_true")
+    a = p.parse_args()
+    if not os.path.isfile(a.file):
+        fail(f"no such file: {a.file}")
+    size = os.path.getsize(a.file)
+    token = access_token()
+    meta = {
+        "snippet": {"title": a.title[:100], "description": a.description[:5000], "categoryId": a.category,
+                    "tags": [t.strip() for t in a.tags.split(",") if t.strip()]},
+        "status": {"privacyStatus": a.privacy, "selfDeclaredMadeForKids": a.made_for_kids},
+    }
+    req = urllib.request.Request(
+        "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+        data=json.dumps(meta).encode(), method="POST",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=UTF-8",
+                 "X-Upload-Content-Length": str(size), "X-Upload-Content-Type": "video/*"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            session = r.headers["Location"]
+    except urllib.error.HTTPError as e:
+        fail(f"YouTube refused the upload ({e.code}): {e.read().decode(errors='replace')[:300]}")
+
+    sent, tries = 0, 0
+    with open(a.file, "rb") as f:
+        while True:
+            f.seek(sent)
+            chunk = f.read(CHUNK)
+            end = sent + len(chunk) - 1
+            put = urllib.request.Request(session, data=chunk, method="PUT", headers={
+                "Authorization": f"Bearer {token}", "Content-Length": str(len(chunk)),
+                "Content-Range": f"bytes {sent}-{end}/{size}"})
+            try:
+                with urllib.request.urlopen(put, timeout=300) as r:
+                    video = json.load(r)
+                    print(f"https://youtu.be/{video['id']}  ({video['status']['privacyStatus']})")
+                    return
+            except urllib.error.HTTPError as e:
+                if e.code == 308:  # chunk accepted, more to send
+                    rng = e.headers.get("Range")
+                    sent = int(rng.split("-")[1]) + 1 if rng else 0
+                    tries = 0
+                    print(f"  {sent * 100 // size}%", file=sys.stderr)
+                    continue
+                if e.code in (500, 502, 503, 504) and tries < 8:
+                    tries += 1
+                else:
+                    fail(f"upload failed ({e.code}): {e.read().decode(errors='replace')[:300]}")
+            except (urllib.error.URLError, TimeoutError, ConnectionError):
+                if tries >= 8:
+                    fail("upload kept failing on the network")
+                tries += 1
+            # Ask YouTube how much it has, then resume from there.
+            time.sleep(min(2 ** tries, 60))
+            probe = urllib.request.Request(session, data=b"", method="PUT", headers={
+                "Authorization": f"Bearer {token}", "Content-Range": f"bytes */{size}"})
+            try:
+                with urllib.request.urlopen(probe, timeout=60) as r:
+                    video = json.load(r)
+                    print(f"https://youtu.be/{video['id']}  ({video['status']['privacyStatus']})")
+                    return
+            except urllib.error.HTTPError as e:
+                if e.code == 308:
+                    rng = e.headers.get("Range")
+                    sent = int(rng.split("-")[1]) + 1 if rng else 0
+            except (urllib.error.URLError, TimeoutError, ConnectionError):
+                pass
+
+
+if __name__ == "__main__":
+    main()
