@@ -340,6 +340,14 @@ fun TokenServiceDialog(vm: MainViewModel, def: ServiceDef) {
     val error by vm.tokenError.collectAsState()
     val values = remember(def.id) { mutableStateListOf(*Array(def.fields.size) { "" }) }
     var needs by remember { mutableStateOf(false) }
+    // JSON keys can be picked as a file instead of pasted (the field that's multiline).
+    val jsonField = def.fields.indexOfFirst { it.multiline }
+    val pickJson = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null && jsonField >= 0) {
+            val text = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() } }.getOrNull()
+            if (text.isNullOrBlank() || text.length > 20_000) vm.say("That file couldn't be read.") else values[jsonField] = text.trim()
+        }
+    }
     AlertDialog(
         onDismissRequest = { if (busy == null) vm.showTokenService(null) },
         title = { Text("Connect ${def.name}") },
@@ -349,6 +357,12 @@ fun TokenServiceDialog(vm: MainViewModel, def: ServiceDef) {
                 OutlinedButton(onClick = { openUrl(context, def.createUrl) }, modifier = Modifier.fillMaxWidth()) { Text(def.createLabel) }
                 TextButton(onClick = { needs = !needs }) { Text(if (needs) "Hide what Claude needs" else "What Claude needs (step by step)") }
                 if (needs) SelectionContainer { Text(def.needs, style = MaterialTheme.typography.bodySmall) }
+                if (jsonField >= 0) {
+                    Button(onClick = { pickJson.launch(arrayOf("application/json", "text/plain", "*/*")) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (values[jsonField].isBlank()) "Choose JSON key file" else "JSON key loaded — choose another")
+                    }
+                    Text("…or paste it below.", style = MaterialTheme.typography.bodySmall)
+                }
                 def.fields.forEachIndexed { i, f ->
                     OutlinedTextField(
                         value = values[i],
