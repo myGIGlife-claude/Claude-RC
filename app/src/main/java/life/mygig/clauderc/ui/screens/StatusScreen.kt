@@ -131,6 +131,7 @@ fun StatusScreen(vm: MainViewModel) {
                 val connected = buildList<Triple<String, String?, () -> Unit>> {
                     sv["gitlab"]?.takeIf { it.loggedIn }?.let { add(Triple("GitLab", it.detail) { login(LoginKind.GITLAB) }) }
                     sv["docker"]?.takeIf { it.loggedIn }?.let { add(Triple("Docker / GHCR", it.detail) { login(LoginKind.DOCKER) }) }
+                    sv["youtube"]?.takeIf { it.loggedIn }?.let { add(Triple("YouTube", it.detail) { login(LoginKind.YOUTUBE) }) }
                     Catalog.services.forEach { def ->
                         sv[def.id]?.takeIf { it.loggedIn }?.let { add(Triple(def.name, it.detail) { vm.showTokenService(def.id) }) }
                     }

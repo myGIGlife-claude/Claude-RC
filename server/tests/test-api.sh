@@ -341,6 +341,15 @@ fi
 api "login-keystore gtg" "x"; check "signing key name must be upper case" "$(jqt '.error.code=="forbidden"')"
 rm -f "$HOME/.config/claude-launcher/env"
 
+echo "youtube"
+api "youtube-login-start" $'not-a-client-id\nsecret1234567'
+check "youtube: bad client ID refused" "$(jqt '.error.code=="invalid_name"')"
+api "youtube-login-poll"; check "youtube: poll without a sign-in in progress" "$(jqt '.error.code=="not_logged_in"')"
+api "youtube-login-start extra"; check "youtube-login-start takes no arguments" "$(jqt '.error.code=="forbidden"')"
+python3 -m py_compile "$SERVER/youtube-upload"; check "youtube-upload is valid Python" $?
+OUT="$(env -u YOUTUBE_CLIENT_ID python3 "$SERVER/youtube-upload" /etc/hostname --title t 2>&1)"
+[[ "$OUT" == *"connect YouTube in the cLaudeRC app"* ]]; check "youtube-upload explains missing credentials" $?
+
 echo "token services"
 api "status"
 check "status lists token services" "$(jqt '.data.services | (.vercel and .b2 and .gcp and .firebase and .cloudflare) and (.vercel.logged_in|not)')"
@@ -412,7 +421,7 @@ echo old >"$IH/claude-setup.sh"
 mkdir -p "$IH/.local/bin" && touch "$IH/.local/bin/claude-autostart" && chmod +x "$IH/.local/bin/claude-autostart"
 # Real curl, not the stub.
 OUT="$(HOME="$IH" PATH=/usr/local/bin:/usr/bin:/bin CLAUDERC_BASE="file://$SERVER" bash -s -- "$(cat "$WORK/phone.pub")" <"$SERVER/install.sh" 2>&1)"
-[[ -x "$IH/claude-setup.sh" && -x "$IH/bin/claude-launcher-api" && -x "$IH/bin/install-launcher-key.sh" ]]; check "install.sh installs the scripts" $?
+[[ -x "$IH/claude-setup.sh" && -x "$IH/bin/claude-launcher-api" && -x "$IH/bin/install-launcher-key.sh" && -x "$IH/.local/bin/youtube-upload" ]]; check "install.sh installs the scripts (and youtube-upload)" $?
 [[ "$(cat "$IH/claude-setup.sh.bak")" == old ]]; check "install.sh backs up a changed claude-setup.sh" $?
 grep -q "^restrict,command=\"$IH/bin/claude-launcher-api\" ssh-ed25519 " "$IH/.ssh/authorized_keys"; check "install.sh authorizes the key" $?
 [[ "$OUT" == *"already set up"* && "$OUT" == *"Username: $(id -un)"* ]]; check "install.sh skips autostart and prints app details" $?

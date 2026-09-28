@@ -70,6 +70,7 @@ fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
                     LoginKind.GITHUB -> "Log in to GitHub"
                     LoginKind.AWS -> "Log in to AWS"
                     LoginKind.GITLAB -> "Log in to GitLab"
+                    LoginKind.YOUTUBE -> "Connect YouTube"
                     LoginKind.DOCKER -> "Log in to a container registry"
                 },
             )
@@ -92,6 +93,7 @@ fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
                     LoginKind.GITHUB -> GithubLogin(vm, busy != null)
                     LoginKind.AWS -> AwsLogin(vm, busy != null)
                     LoginKind.GITLAB -> GitlabLogin(vm, busy != null)
+                    LoginKind.YOUTUBE -> YoutubeLogin(vm, busy != null)
                     LoginKind.DOCKER -> DockerLogin(vm, busy != null)
                 }
             }
@@ -121,6 +123,9 @@ fun AddServiceDialog(vm: MainViewModel) {
             add(Triple("Docker Hub / GHCR", if (sv["docker"]?.installed == false) "Installs Docker (asks for your sudo password)" else "Push and pull images") {
                 vm.addService(LoginKind.DOCKER)
             })
+        }
+        if ((st?.scriptApi ?: 0) >= Updates.YOUTUBE_API && sv["youtube"]?.loggedIn != true) {
+            add(Triple("YouTube", "Upload videos to your channel (youtube-upload)") { vm.showAddService(false); vm.showLogin(LoginKind.YOUTUBE) })
         }
         if ((st?.scriptApi ?: 0) >= Updates.KEYSTORE_API) {
             add(Triple("Android signing key", "Upload keystore (.jks) for signing app bundles") { vm.showKeystores(true) })
@@ -560,6 +565,23 @@ private fun permissionsText(kind: LoginKind): String = when (kind) {
             "• delete:packages: only if Claude should delete images\n" +
             "• Ticking write:packages also ticks repo; untick repo if you don't need it\n" +
             "• Username: your GitHub username"
+    LoginKind.YOUTUBE ->
+        "YouTube needs your own sign-in (Google doesn't allow service accounts to upload). One-time setup in " +
+            "Google Cloud Console:\n" +
+            "1. Enable \"YouTube Data API v3\" (APIs & Services › Library).\n" +
+            "2. Google Auth Platform › Branding: app name and your email. Audience: External, then Publish app " +
+            "so it's \"In production\". Unverified is fine for your own channel (you'll see a warning; continue). " +
+            "In \"Testing\" Google expires the login after 7 days.\n" +
+            "3. Google Auth Platform › Clients › Create client › type \"TVs and Limited Input devices\" › Create. " +
+            "Copy the client ID and secret here.\n" +
+            "4. Start sign-in: open google.com/device, enter the code, pick the Google account that owns the channel, " +
+            "allow access.\n\n" +
+            "Good to know (Google's rules):\n" +
+            "• Videos uploaded through the API by projects Google hasn't audited stay private until the project " +
+            "passes an audit (you can change them in YouTube Studio).\n" +
+            "• 100 uploads per day.\n\n" +
+            "Saved as YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN. Claude uploads with: " +
+            "youtube-upload video.mp4 --title \"…\" --description \"…\" --privacy unlisted"
     LoginKind.CLAUDE -> ""
 }
 
@@ -593,6 +615,38 @@ private fun PlainField(value: String, label: String, onChange: (String) -> Unit)
     label = { Text(label) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
     keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
 )
+
+@Composable
+private fun YoutubeLogin(vm: MainViewModel, busy: Boolean) {
+    val context = LocalContext.current
+    val url by vm.loginUrl.collectAsState()
+    var id by remember { mutableStateOf("") }
+    var secret by remember { mutableStateOf("") }
+    val u = url
+    if (u == null) {
+        Text("Enter your Google OAuth client (type TVs and Limited Input devices), then sign in with the account that owns the channel.")
+        OutlinedButton(onClick = { openUrl(context, "https://console.cloud.google.com/auth/clients") }, modifier = Modifier.fillMaxWidth()) {
+            Text("Open Google Auth Platform › Clients")
+        }
+        PermissionsLink(LoginKind.YOUTUBE)
+        PlainField(id, "Client ID (…apps.googleusercontent.com)") { id = it }
+        SecretField(secret, "Client secret") { secret = it }
+        Button(
+            onClick = { vm.youtubeStart(id, secret) },
+            enabled = !busy && id.endsWith(".apps.googleusercontent.com") && secret.length >= 10,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Start sign-in") }
+    } else {
+        Text("Open the link, enter this code, choose the account that owns your channel, and allow access.")
+        u.code?.let {
+            SelectionContainer {
+                Text(it, style = MaterialTheme.typography.headlineMedium, fontFamily = FontFamily.Monospace)
+            }
+        }
+        Button(onClick = { openUrl(context, u.url) }, modifier = Modifier.fillMaxWidth()) { Text("Open ${u.url.removePrefix("https://")}") }
+        Text("Waiting for approval… this closes by itself when YouTube is connected.", style = MaterialTheme.typography.bodySmall)
+    }
+}
 
 @Composable
 private fun GitlabLogin(vm: MainViewModel, busy: Boolean) {

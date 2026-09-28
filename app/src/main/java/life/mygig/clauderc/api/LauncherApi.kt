@@ -117,6 +117,10 @@ class LauncherApi(
     /** Saves a custom API key (value on stdin) that every Claude session and MCP server sees. */
     suspend fun setSecret(name: String, value: String): JsonObject = call("set-secret $name", stdin = value.trim())
     /** Saves an Android signing key: alias, passwords and the file (base64) go on stdin. */
+    /** Google device sign-in for YouTube: client ID and secret on stdin; returns the code to enter. */
+    suspend fun youtubeStart(clientId: String, clientSecret: String): YoutubeStart =
+        call("youtube-login-start", stdin = clientId.trim() + "\n" + clientSecret.trim())
+    suspend fun youtubePoll(): JsonObject = call("youtube-login-poll")
     suspend fun loginKeystore(name: String, alias: String, storePassword: String, keyPassword: String, fileBase64: String): JsonObject =
         call("login-keystore $name", stdin = listOf(alias.trim(), storePassword, keyPassword, fileBase64).joinToString("\n"))
     suspend fun removeKeystore(name: String): JsonObject = call("remove-keystore $name")
