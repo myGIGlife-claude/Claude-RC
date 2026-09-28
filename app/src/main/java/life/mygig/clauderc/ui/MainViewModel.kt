@@ -22,6 +22,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import life.mygig.clauderc.api.ApiException
@@ -170,9 +172,55 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _runResult.value = api.run(command, sudoPassword)
     }
 
-    fun restartSession(name: String) = action("Restarting $name…") {
-        api.restart(name)
-        say("$name restarted")
+    /** A restart that was refused because Claude is still working: ask before forcing it. */
+    private val _busyRestart = MutableStateFlow<String?>(null)
+    val busyRestart = _busyRestart.asStateFlow()
+    fun dismissBusyRestart() { _busyRestart.value = null }
+
+    /** Safe restart: resumes the same conversation; refuses while Claude works unless [force]. */
+    fun restartSession(name: String, force: Boolean = false) {
+        _busyRestart.value = null
+        action("Restarting $name…", onError = { e ->
+            if (e.code == Codes.SESSION_BUSY) _busyRestart.value = name else report(e)
+        }) {
+            val r = api.restart(name, force)
+            val resumed = r["resumed"]?.jsonPrimitive?.booleanOrNull == true
+            say(if (resumed) "$name restarted with the same conversation" else "$name restarted (new conversation)")
+            showIfWaiting(r)
+            refreshSessions()
+        }
+    }
+
+    /** A restarted session stopped on a question (e.g. approve a new MCP server): open it with the answer keys. */
+    private fun showIfWaiting(r: JsonObject): Boolean {
+        if (r["waiting"]?.jsonPrimitive?.booleanOrNull != true) return false
+        val session = r["session"]?.jsonPrimitive?.contentOrNull ?: return false
+        tailTarget = session
+        _tail.value = TailResult(session, 120, r["text"]?.jsonPrimitive?.contentOrNull.orEmpty())
+        _tailUpdatedAt.value = System.currentTimeMillis()
+        say("$session is waiting for an answer")
+        return true
+    }
+
+    /** Safe-restarts every session one by one; skips those where Claude is still working. */
+    fun restartAll() = action("Restarting all sessions…") {
+        val names = api.sessions().sessions.map { it.name }
+        val busy = mutableListOf<String>()
+        var done = 0
+        var waitingShown = false
+        for (n in names) {
+            try {
+                val r = api.restart(n)
+                done++
+                if (!waitingShown) waitingShown = showIfWaiting(r)
+            } catch (e: ApiException) {
+                if (e.code == Codes.SESSION_BUSY) busy += n else throw e
+            }
+        }
+        if (!waitingShown) {
+            say("Restarted $done session" + (if (done == 1) "" else "s") +
+                if (busy.isEmpty()) "" else ". Still working, skipped: ${busy.joinToString(", ")}")
+        }
         refreshSessions()
     }
 

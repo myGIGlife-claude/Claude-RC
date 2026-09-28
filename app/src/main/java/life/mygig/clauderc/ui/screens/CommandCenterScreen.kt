@@ -126,6 +126,12 @@ fun CommandCenterScreen(vm: MainViewModel) {
                     SelectionContainer(Modifier.horizontalScroll(rememberScrollState())) {
                         Text(r.output.ifBlank { "(no output)" }, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
                     }
+                    // Sessions only load plugins and MCP servers when they start.
+                    val changes = Regex("^(plugins? (install|i|uninstall|remove|enable|disable|update)|mcp remove)\\b")
+                    if (r.exitCode == 0 && changes.containsMatchIn(args)) {
+                        Text("Running sessions pick this up after a restart.", style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(onClick = { vm.selectTab(Tab.SESSIONS) }) { Text("Go to Sessions to restart") }
+                    }
                 }
             }
         }

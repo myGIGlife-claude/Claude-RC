@@ -140,8 +140,12 @@ api "stop my.dotted"
 check "stop" "$(jqt '.ok and .data.stopped==true and .data.session=="my-dotted"')"
 grep -q "^my-dotted	" "$LIST"; [[ $? -ne 0 ]]; check "stopped session dropped from autostart list" $?
 old_pid="$(tmux display-message -p -t "=demo-app2:" '#{pane_pid}')"
+D2="$(tmux display-message -p -t "=demo-app2:" '#{pane_current_path}')"
+SID=11111111-2222-3333-4444-555555555555
+mkdir -p "$HOME/.claude/projects/${D2//[\/.]/-}" && echo '{}' >"$HOME/.claude/projects/${D2//[\/.]/-}/$SID.jsonl"
 api "restart demo-app2"
-check "restart" "$(jqt '.ok and .data.restarted and .data.session=="demo-app2"')"
+check "restart resumes the same conversation" "$(jqt '.ok and .data.restarted and .data.session=="demo-app2" and .data.resumed and .data.conversation=="'$SID'"')"
+tmux list-panes -t "=demo-app2" -F '#{pane_start_command}' | grep -q -- "--resume $SID"; check "restarted with --resume <id>" $?
 [[ "$(tmux display-message -p -t "=demo-app2:" '#{pane_pid}' 2>/dev/null)" != "$old_pid" ]]; check "restart made a new process" $?
 grep -q "^demo-app2	" "$LIST"; check "restarted session still in autostart list" $?
 api "keys demo-app2 Enter"
@@ -150,6 +154,13 @@ for bad in "keys demo-app2" "keys demo-app2 ls" "keys demo-app2 C-c" "keys -x En
   api "$bad"
   check "keys refuses '$bad'" "$(jqt '.ok==false and .error.code=="forbidden"')"
 done
+tmux send-keys -t "=demo-app2:" "echo working... esc to interrupt" Enter; sleep 0.5
+api "restart demo-app2"
+check "restart refuses while Claude is working" "$(jqt '.error.code=="session_busy"')"
+api "restart demo-app2 --force"
+check "restart --force goes ahead" "$(jqt '.ok and .data.restarted')"
+api "restart demo-app2 --now"
+check "restart refuses other options" "$(jqt '.error.code=="forbidden"')"
 api "restart nope"
 check "restart missing session" "$(jqt '.error.code=="invalid_name"')"
 api "restart -x"
@@ -279,14 +290,17 @@ grep -q "pw-ok" "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; ch
 sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
 
 echo "env hook"
-printf '# ~/.bashrc\ncase $- in\n  *i*) ;;\n  *) return;;\nesac\nalias ll=ls\n' >"$HOME/.bashrc"
-mkdir -p "$HOME/.config/claude-launcher"
+printf '# ~/.bashrc\ncase $- in\n  *i*) ;;\n  *) return;;\nesac\n' >"$HOME/.bashrc"
+mkdir -p "$HOME/.config/claude-launcher" "$HOME/.claude"
 printf "export DEMO_TOKEN='hook-ok'\n" >"$HOME/.config/claude-launcher/env"
-printf '\n[ -f "%s" ] && . "%s"  # cLaudeRC\n' "$HOME/.config/claude-launcher/env" "$HOME/.config/claude-launcher/env" >>"$HOME/.bashrc"
+echo '{"permissions":{"allow":["Bash(ls)"]}}' >"$HOME/.claude/settings.json"
 api "status"
-[[ "$(bash -c 'source ~/.bashrc; echo $DEMO_TOKEN')" == hook-ok ]]; check "non-interactive shells see service tokens" $?
-[[ "$(grep -c cLaudeRC "$HOME/.bashrc")" == 1 ]] && grep -q '^alias ll=ls$' "$HOME/.bashrc"; check "hook moved, not duplicated, rest kept" $?
-rm -f "$HOME/.config/claude-launcher/env"
+BE="$(jq -r '.env.BASH_ENV' "$HOME/.claude/settings.json")"
+[[ "$BE" == "$HOME/.config/claude-launcher/env" ]] && jq -e '.permissions.allow[0]=="Bash(ls)"' "$HOME/.claude/settings.json" >/dev/null
+check "settings.json gets BASH_ENV, keeps the rest" $?
+echo 'not json' >"$HOME/.claude/settings.json"; api "status"
+[[ "$(cat "$HOME/.claude/settings.json")" == "not json" ]]; check "an unparsable settings.json is left alone" $?
+rm -f "$HOME/.config/claude-launcher/env" "$HOME/.claude/settings.json"
 
 echo "token services"
 api "status"

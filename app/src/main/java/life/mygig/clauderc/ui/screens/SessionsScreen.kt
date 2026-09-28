@@ -53,6 +53,8 @@ fun SessionsScreen(vm: MainViewModel) {
     val context = LocalContext.current
     var confirmStop by remember { mutableStateOf<Session?>(null) }
     var confirmRestart by remember { mutableStateOf<Session?>(null) }
+    val busyRestart by vm.busyRestart.collectAsState()
+    var confirmRestartAll by remember { mutableStateOf(false) }
     val settings by vm.settings.collectAsState()
     var showRun by remember { mutableStateOf(false) }
 
@@ -64,6 +66,13 @@ fun SessionsScreen(vm: MainViewModel) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { Text("", Modifier.padding(top = 2.dp)) }
+            if (sessions.size > 1) {
+                item {
+                    OutlinedButton(onClick = { confirmRestartAll = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Restart all sessions")
+                    }
+                }
+            }
             // A shell on the server: only offered when App lock guards the app.
             if (settings?.appLock == true) {
                 item {
@@ -98,6 +107,37 @@ fun SessionsScreen(vm: MainViewModel) {
 
     if (showRun && settings?.appLock == true) RunCommandDialog(vm) { showRun = false }
 
+    if (confirmRestartAll) {
+        AlertDialog(
+            onDismissRequest = { confirmRestartAll = false },
+            title = { Text("Restart all sessions?") },
+            text = {
+                Text(
+                    "Each session restarts in its folder and reopens the same conversation, so new plugins, skills, " +
+                        "MCP servers and tokens are picked up. Sessions where Claude is still working are skipped.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmRestartAll = false; guard.run("Restart all sessions") { vm.restartAll() } }) {
+                    Text("Restart all")
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmRestartAll = false }) { Text("Cancel") } },
+        )
+    }
+
+    busyRestart?.let { name ->
+        AlertDialog(
+            onDismissRequest = { vm.dismissBusyRestart() },
+            title = { Text("Claude is still working") },
+            text = { Text("Restarting now interrupts what it's doing in $name. The conversation comes back, but the current step stops.") },
+            confirmButton = {
+                TextButton(onClick = { guard.run("Restart $name") { vm.restartSession(name, force = true) } }) { Text("Restart anyway") }
+            },
+            dismissButton = { TextButton(onClick = { vm.dismissBusyRestart() }) { Text("Wait") } },
+        )
+    }
+
     confirmRestart?.let { s ->
         AlertDialog(
             onDismissRequest = { confirmRestart = null },
@@ -105,7 +145,8 @@ fun SessionsScreen(vm: MainViewModel) {
             text = {
                 Text(
                     "Stops this Claude session and starts it again in the same folder, so it picks up new " +
-                        "plugins, skills and MCP servers. The conversation in it starts fresh.",
+                        "plugins, skills, MCP servers and tokens. It reopens the same conversation, so nothing is lost. " +
+                        "If Claude is still working, you'll be asked first.",
                 )
             },
             confirmButton = {

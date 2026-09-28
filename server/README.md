@@ -104,14 +104,14 @@ Exit code 0 = success, 1 = handled error, 2 = bad arguments.
 | `login-token` | `<service>`; stdin: one value per line, or the whole service-account JSON (`gcp`, `firebase`) | `user`. Services: cloudflare, vercel, netlify, fly, railway, supabase, neon, npm, stripe, huggingface, b2, gcp, firebase. Checked with the provider's API, then saved to `~/.config/claude-launcher/env` (mode 600, loaded by `~/.bashrc`); JSON keys go to a mode-600 file. |
 | `run` | stdin: sudo password line (may be empty), timeout seconds line, then the command | `exit_code`, `output` (stdout+stderr, last 64 KB). Off unless `ALLOW_RUN=1` in the config (error `run_disabled`). |
 | `keys` | `<session> <key>…` (up to 5) | `session`, `text` (the screen after). Keys: `1`–`9`, `Enter`, `Escape`, `Up`, `Down`, `Tab`, `Space`, `y`, `n`; never text. For answering prompts such as approving a new MCP server. |
-| `restart` | `<project or session>` | `session`, `path`, `restarted`. Stops the session and starts it again in the same folder (picks up new plugins). |
+| `restart` | `<project or session> [--force]` | `session`, `path`, `restarted`, `resumed`, `conversation`, `waiting`, `text`. Safe restart: refuses with `session_busy` while Claude is working (unless `--force`), then starts it again in the same folder with `claude --resume <id>` so the same conversation comes back (falls back to a fresh start). `waiting` + `text` when the new session stops on a question, e.g. approving a new MCP server. |
 | `claude-cmd` | stdin: the arguments after `claude` | `exit_code`, `output`. Only `doctor`, `update`, `--version`, `plugin …`, `plugin marketplace …`, `mcp list/get/remove`; no shell. |
 | `login-gitlab` | token, host (default gitlab.com) on stdin | `user` (uses `glab auth login --stdin`) |
 | `login-docker` | registry (default docker.io), username, token on stdin | `registry`, `user` (uses `docker login --password-stdin`) |
 | `login-cloudflare` | API token on stdin | `logged_in`. Verified with Cloudflare, then saved as `CLOUDFLARE_API_TOKEN` in `~/.config/claude-launcher/env` (mode 600); one line in `~/.bashrc` loads it so Claude's sessions (and `wrangler`) see it. |
 
 Error codes: `not_logged_in_claude`, `not_logged_in_github`, `missing_scopes`,
-`not_logged_in_aws`, `not_logged_in` (GitLab / registry / Cloudflare), `repo_exists`, `folder_dirty`, `invalid_name`, `run_disabled`, `busy`,
+`not_logged_in_aws`, `not_logged_in` (GitLab / registry / Cloudflare), `repo_exists`, `folder_dirty`, `invalid_name`, `run_disabled`, `session_busy`, `busy`,
 `internal`, `bad_args`, and `forbidden` from the runner.
 
 `open` returns `action: "not_updated"` with a `note` when `git pull --ff-only`
