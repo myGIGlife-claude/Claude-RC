@@ -145,7 +145,17 @@ fun StatusScreen(vm: MainViewModel) {
                         onClick = tap,
                     )
                 }
-                if (connected.isEmpty() && !s.aws.loggedIn) {
+                if (s.custom.isNotEmpty()) {
+                    item {
+                        StatusRow(
+                            title = "Custom API keys",
+                            state = RowState.OK,
+                            detail = s.custom.joinToString(", "),
+                            onClick = { vm.showCustomKeys(true) },
+                        )
+                    }
+                }
+                if (connected.isEmpty() && !s.aws.loggedIn && s.custom.isEmpty()) {
                     item {
                         Text(
                             "Tap + at the top to connect AWS, GitLab, Docker, Cloudflare, Vercel, Supabase and more.",

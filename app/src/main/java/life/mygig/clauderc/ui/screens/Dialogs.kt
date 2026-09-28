@@ -138,6 +138,14 @@ fun AddServiceDialog(vm: MainViewModel) {
                     Text("Update the server scripts (card at the top of Status) to see more services.", style = MaterialTheme.typography.bodySmall)
                 }
                 if (options.isEmpty() && st != null) Text("Everything here is already connected.")
+                if ((st?.scriptApi ?: 0) >= Updates.CUSTOM_KEYS_API) {
+                    OutlinedButton(onClick = { vm.showCustomKeys(true) }, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.fillMaxWidth()) {
+                            Text("Custom API key", style = MaterialTheme.typography.titleSmall)
+                            Text("Any other API: a name like ACME_API_KEY and its value", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
                 options.forEach { (name, hint, go) ->
                     OutlinedButton(
                         onClick = { guard.run("Connect $name") { go() } },
@@ -155,6 +163,66 @@ fun AddServiceDialog(vm: MainViewModel) {
         confirmButton = {},
         dismissButton = { TextButton(onClick = { vm.showAddService(false) }) { Text("Close") } },
     )
+}
+
+/** Custom API keys: add a NAME=value every session sees, or remove one. Values are never shown. */
+@Composable
+fun CustomKeysDialog(vm: MainViewModel) {
+    val status by vm.status.collectAsState()
+    val busy by vm.busy.collectAsState()
+    val guard = LocalGuard.current
+    var name by remember { mutableStateOf("") }
+    var value by remember { mutableStateOf("") }
+    var confirmRemove by remember { mutableStateOf<String?>(null) }
+    val nameOk = Updates.CUSTOM_NAME.matches(name) && !name.startsWith("CLAUDE_") && !name.startsWith("ANTHROPIC_")
+    AlertDialog(
+        onDismissRequest = { if (busy == null) vm.showCustomKeys(false) },
+        title = { Text("Custom API keys") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "For APIs without a built-in service. The key reaches every Claude session and MCP server after a " +
+                        "restart, as an environment variable (use \${NAME} in MCP configs).",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                status?.custom.orEmpty().forEach { n ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(n, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { confirmRemove = n }, enabled = busy == null) { Text("Remove") }
+                    }
+                }
+                OutlinedTextField(
+                    value = name, onValueChange = { name = it.uppercase().replace(Regex("[^A-Z0-9_]"), "_") },
+                    label = { Text("Name, e.g. ACME_API_KEY") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    isError = name.isNotEmpty() && !nameOk,
+                    supportingText = { Text("Ends in _KEY, _TOKEN, _SECRET, _PASSWORD, _USERNAME, _USER, _SERVER, _HOST, _URL, _ID, _EMAIL, _REGION, _PROJECT, _ENDPOINT, _ORG or _ACCOUNT") },
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                )
+                OutlinedTextField(
+                    value = value, onValueChange = { value = it.trim() },
+                    label = { Text("Value") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                )
+                Button(
+                    onClick = { guard.run("Save $name") { vm.setSecret(name, value); name = ""; value = "" } },
+                    enabled = busy == null && nameOk && value.isNotEmpty() && !value.contains('\''),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Save") }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = { vm.showCustomKeys(false) }) { Text("Close") } },
+    )
+    confirmRemove?.let { n ->
+        AlertDialog(
+            onDismissRequest = { confirmRemove = null },
+            title = { Text("Remove $n?") },
+            text = { Text("Sessions lose it after their next restart.") },
+            confirmButton = { TextButton(onClick = { confirmRemove = null; guard.run("Remove $n") { vm.removeSecret(n) } }) { Text("Remove") } },
+            dismissButton = { TextButton(onClick = { confirmRemove = null }) { Text("Cancel") } },
+        )
+    }
 }
 
 /** Connect form for a token service: create link, what Claude needs, the fields. */

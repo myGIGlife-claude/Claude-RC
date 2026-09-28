@@ -38,6 +38,12 @@ object Updates {
     /** Server script API that can send prompt keys to a session. */
     const val KEYS_API = 8
 
+    /** Server script API with custom API keys (set-secret / remove-secret). */
+    const val CUSTOM_KEYS_API = 11
+
+    /** What the server accepts as a custom key name (claude-setup.sh CUSTOM_NAME_RE). */
+    val CUSTOM_NAME = Regex("^[A-Z][A-Z0-9_]{0,55}_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT)$")
+
     /** Downloads and installs the server scripts (no clone), authorizing [key] if given. Rerun it to update. */
     fun installCommand(key: String? = null) =
         "curl -fsSL https://raw.githubusercontent.com/$REPO/main/server/install.sh | bash" +
