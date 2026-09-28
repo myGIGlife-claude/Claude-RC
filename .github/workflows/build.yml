@@ -120,6 +120,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/*.apk --title "cLaudeRC $GITHUB_REF_NAME" --generate-notes \
             || gh release upload "$GITHUB_REF_NAME" dist/*.apk --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false
 
       - name: Publish latest main build
         if: github.ref == 'refs/heads/main'
@@ -131,3 +132,7 @@ jobs:
           gh release create latest-main dist/*.apk --prerelease --target "$GITHUB_SHA" \
             --title "Latest main build ($VERSION_NAME)" \
             --notes "Built from $GITHUB_SHA. Tagged releases (v*) are the stable ones."
+          # Deleting and recreating the tag can race, and GitHub then leaves the
+          # release as an "untagged" draft that nobody can download. Make sure it's public.
+          sleep 5
+          gh release edit latest-main --draft=false --prerelease
