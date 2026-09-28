@@ -190,8 +190,10 @@ object Catalog {
                 "production)\n" +
                 "• View app information (read-only)\n" +
                 "Invite user. Linking a Cloud project under API access is no longer needed.\n" +
-                "4. Paste the whole JSON key here. The app checks it with Google (it can't check the Play Console " +
-                "invite itself).\n\n" +
+                "4. Choose the downloaded JSON key file here (or paste it). The app checks it with Google (it can't " +
+                "check the Play Console invite itself).\n" +
+                "One key covers all your apps: in Play Console grant the service account each app (Users and " +
+                "permissions › the account › App permissions › Add app).\n\n" +
                 "Saved to a private file: GOOGLE_PLAY_JSON_KEY and SUPPLY_JSON_KEY (fastlane) hold its path, " +
                 "ANDROID_PUBLISHER_CREDENTIALS (Gradle Play Publisher) its contents.",
         ),
