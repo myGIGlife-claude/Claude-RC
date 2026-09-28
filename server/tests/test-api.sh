@@ -290,17 +290,19 @@ grep -q "pw-ok" "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; ch
 sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
 
 echo "env hook"
-printf '# ~/.bashrc\ncase $- in\n  *i*) ;;\n  *) return;;\nesac\n' >"$HOME/.bashrc"
 mkdir -p "$HOME/.config/claude-launcher" "$HOME/.claude"
-printf "export DEMO_TOKEN='hook-ok'\n" >"$HOME/.config/claude-launcher/env"
-echo '{"permissions":{"allow":["Bash(ls)"]}}' >"$HOME/.claude/settings.json"
+printf "export DEMO_TOKEN='hook-ok'\nexport OTHER_KEY='two'\n" >"$HOME/.config/claude-launcher/env"
+echo '{"permissions":{"allow":["Bash(ls)"]},"env":{"MINE":"keep","BASH_ENV":"'"$HOME"'/.config/claude-launcher/env"}}' >"$HOME/.claude/settings.json"
 api "status"
-BE="$(jq -r '.env.BASH_ENV' "$HOME/.claude/settings.json")"
-[[ "$BE" == "$HOME/.config/claude-launcher/env" ]] && jq -e '.permissions.allow[0]=="Bash(ls)"' "$HOME/.claude/settings.json" >/dev/null
-check "settings.json gets BASH_ENV, keeps the rest" $?
-echo 'not json' >"$HOME/.claude/settings.json"; api "status"
-[[ "$(cat "$HOME/.claude/settings.json")" == "not json" ]]; check "an unparsable settings.json is left alone" $?
-rm -f "$HOME/.config/claude-launcher/env" "$HOME/.claude/settings.json"
+S="$HOME/.claude/settings.json"
+jq -e '.env.DEMO_TOKEN=="hook-ok" and .env.OTHER_KEY=="two" and .env.MINE=="keep" and (.env.BASH_ENV|not) and .permissions.allow[0]=="Bash(ls)"' "$S" >/dev/null
+check "tokens mirrored into Claude's settings env, the rest kept" $?
+[[ "$(stat -c %a "$S")" == 600 ]]; check "settings.json made private (600)" $?
+printf "export DEMO_TOKEN='hook-ok'\n" >"$HOME/.config/claude-launcher/env"; api "status"
+jq -e '(.env.OTHER_KEY|not) and .env.MINE=="keep"' "$S" >/dev/null; check "a removed token is taken out; your own env kept" $?
+echo 'not json' >"$S"; api "status"
+[[ "$(cat "$S")" == "not json" ]]; check "an unparsable settings.json is left alone" $?
+rm -f "$HOME/.config/claude-launcher/env" "$S" "$HOME/.config/claude-launcher/settings-env-names"
 
 echo "token services"
 api "status"
@@ -314,6 +316,8 @@ api "login-token cloudflare" "cfat_abcdefghijklmnopqrstuvwxyz0123456789ABCD"
 check "cloudflare account token needs its account ID" "$(jqt '.error.code=="invalid_name" and (.error.message|test("Account ID"))')"
 api "login-token cloudflare" $'cfat_abcdefghijklmnopqrstuvwxyz0123456789ABCD\nnot-an-id'
 check "cloudflare account ID must be 32 hex" "$(jqt '.error.code=="invalid_name"')"
+api "login-token mxroute" $'Mx8d989005f0cded8371b7d7271c50K1\n-evil.example\nuser'
+check "mxroute server can't start with -" "$(jqt '.error.code=="invalid_name"')"
 api "login-token b2" $'onlyonevalue'
 check "b2 needs two valid values" "$(jqt '.error.code=="invalid_name"')"
 KEY='{"type":"service_account","project_id":"demo-proj","private_key":"x","client_email":"bot@demo-proj.iam.gserviceaccount.com"}'
