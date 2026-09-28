@@ -1398,7 +1398,7 @@ ensure_env_hook() {
 # Google for an access token, which proves the key exists and isn't revoked.
 # (It can't prove Play Console access; that needs a package name.)
 sa_token_ok() {
-  local d email now hdr claims sig b64 tok
+  local d email now hdr claims sig tok
   command -v openssl >/dev/null 2>&1 || return 0   # can't check here: accept the well-formed key
   d="$(mktemp -d)" && chmod 700 "$d"
   jq -r '.private_key' <<<"$1" >"$d/k.pem"; chmod 600 "$d/k.pem"
