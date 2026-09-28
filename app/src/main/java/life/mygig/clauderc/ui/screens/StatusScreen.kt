@@ -56,7 +56,7 @@ fun StatusScreen(vm: MainViewModel) {
     val latest by vm.latest.collectAsState()
     val login = { kind: LoginKind -> guard.run("Log in on the server") { vm.showLogin(kind) } }
 
-    PullToRefreshBox(isRefreshing = refreshing, onRefresh = { vm.refreshStatus() }, modifier = Modifier.fillMaxSize()) {
+    PullToRefreshBox(isRefreshing = refreshing, onRefresh = { vm.refreshAll() }, modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             Modifier.fillMaxSize().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),

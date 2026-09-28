@@ -156,11 +156,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             while (true) {
-                // Offline or rate-limited: keep the last answer and try again next hour.
-                runCatching { Updates.fetch() }.getOrNull()?.let { _latest.value = it }
+                checkUpdates()
                 delay(60 * 60 * 1000L)
             }
         }
+    }
+
+    /** Newest app build and server scripts on GitHub. Offline or rate-limited: keep the last answer. */
+    suspend fun checkUpdates() {
+        withContext(Dispatchers.IO) { runCatching { Updates.fetch() }.getOrNull() }?.let { _latest.value = it }
+    }
+
+    /** Pull-to-refresh on Status: the server's status and the update check together. */
+    fun refreshAll() {
+        refreshStatus()
+        viewModelScope.launch { checkUpdates() }
     }
 
     private val _runResult = MutableStateFlow<RunResult?>(null)
