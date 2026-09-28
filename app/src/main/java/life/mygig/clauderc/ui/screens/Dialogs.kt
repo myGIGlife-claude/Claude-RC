@@ -122,6 +122,12 @@ fun AddServiceDialog(vm: MainViewModel) {
                 vm.addService(LoginKind.DOCKER)
             })
         }
+        if ((st?.scriptApi ?: 0) >= Updates.KEYSTORE_API) {
+            add(Triple("Android signing key", "Upload keystore (.jks) for signing app bundles") { vm.showKeystores(true) })
+        }
+        if ((st?.scriptApi ?: 0) >= Updates.CUSTOM_KEYS_API) {
+            add(Triple("Custom API key", "Any other API: a name like ACME_API_KEY and its value") { vm.showCustomKeys(true) })
+        }
         Catalog.services.filter { it.id == "cloudflare" || newServer }.forEach { def ->
             val svc = sv[def.id]
             if (svc?.loggedIn != true) {
@@ -140,23 +146,7 @@ fun AddServiceDialog(vm: MainViewModel) {
                     Text("Update the server scripts (card at the top of Status) to see more services.", style = MaterialTheme.typography.bodySmall)
                 }
                 if (options.isEmpty() && st != null) Text("Everything here is already connected.")
-                if ((st?.scriptApi ?: 0) >= Updates.KEYSTORE_API) {
-                    OutlinedButton(onClick = { vm.showKeystores(true) }, modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.fillMaxWidth()) {
-                            Text("Android signing key", style = MaterialTheme.typography.titleSmall)
-                            Text("Upload keystore (.jks) for signing app bundles", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-                if ((st?.scriptApi ?: 0) >= Updates.CUSTOM_KEYS_API) {
-                    OutlinedButton(onClick = { vm.showCustomKeys(true) }, modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.fillMaxWidth()) {
-                            Text("Custom API key", style = MaterialTheme.typography.titleSmall)
-                            Text("Any other API: a name like ACME_API_KEY and its value", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-                options.forEach { (name, hint, go) ->
+                options.sortedBy { it.first.lowercase() }.forEach { (name, hint, go) ->
                     OutlinedButton(
                         onClick = { guard.run("Connect $name") { go() } },
                         enabled = st != null,
