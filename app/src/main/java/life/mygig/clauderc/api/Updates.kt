@@ -35,6 +35,9 @@ object Updates {
     /** Server script API with login-token services and more install-cli targets. */
     const val TOKEN_SERVICES_API = 7
 
+    /** Server script API that can send prompt keys to a session. */
+    const val KEYS_API = 8
+
     /** Downloads and installs the server scripts (no clone), authorizing [key] if given. Rerun it to update. */
     fun installCommand(key: String? = null) =
         "curl -fsSL https://raw.githubusercontent.com/$REPO/main/server/install.sh | bash" +

@@ -2,6 +2,9 @@ package life.mygig.clauderc.ui.screens
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Switch
@@ -518,6 +521,11 @@ private fun AwsLogin(vm: MainViewModel, busy: Boolean) {
 
 @Composable
 fun TailDialog(vm: MainViewModel, tail: TailResult) {
+    val guard = LocalGuard.current
+    val status by vm.status.collectAsState()
+    val busy by vm.busy.collectAsState()
+    // Answering prompts (e.g. approving an MCP server) asks for App lock once per window.
+    var keysUnlocked by remember { mutableStateOf(false) }
     val updatedAt by vm.tailUpdatedAt.collectAsState()
     val refreshing by vm.tailRefreshing.collectAsState()
     var live by remember { mutableStateOf(true) }
@@ -561,6 +569,26 @@ fun TailDialog(vm: MainViewModel, tail: TailResult) {
                             .verticalScroll(vScroll)
                             .horizontalScroll(rememberScrollState()),
                     )
+                }
+                if ((status?.scriptApi ?: 0) >= Updates.KEYS_API) {
+                    Text("Answer a prompt:", style = MaterialTheme.typography.labelMedium)
+                    @OptIn(ExperimentalLayoutApi::class)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("1" to "1", "2" to "2", "3" to "3", "Enter" to "Enter", "Escape" to "Esc", "Up" to "↑", "Down" to "↓", "y" to "y", "n" to "n")
+                            .forEach { (key, label) ->
+                                OutlinedButton(
+                                    onClick = {
+                                        if (keysUnlocked) {
+                                            vm.sendKey(key)
+                                        } else {
+                                            guard.run("Answer prompts in ${tail.session}") { keysUnlocked = true; vm.sendKey(key) }
+                                        }
+                                    },
+                                    enabled = busy == null,
+                                    contentPadding = PaddingValues(horizontal = 12.dp),
+                                ) { Text(label) }
+                            }
+                    }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Switch(checked = live, onCheckedChange = { live = it })

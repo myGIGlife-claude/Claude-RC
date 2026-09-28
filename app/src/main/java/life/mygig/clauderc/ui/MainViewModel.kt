@@ -477,6 +477,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val tailRefreshing = _tailRefreshing.asStateFlow()
     private var tailJob: Job? = null
 
+    /** Answers a prompt in the session shown in Tail, then shows the new screen. */
+    fun sendKey(key: String) {
+        val target = tailTarget ?: return
+        action("Sending $key…") {
+            val r = api.keys(target, key)
+            if (tailTarget == target) {
+                _tail.value = r
+                _tailUpdatedAt.value = System.currentTimeMillis()
+            }
+        }
+    }
+
     fun loadTail(target: String) = action("Reading log…") {
         tailTarget = target
         _tail.value = api.tail(target, 120)

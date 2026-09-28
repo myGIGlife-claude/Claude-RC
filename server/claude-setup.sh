@@ -14,8 +14,8 @@ set -uo pipefail
 SCRIPT_VERSION="2.0.0"
 # What the phone can rely on: 2 = extra services, 3 = self-update,
 # 4 = install-cli, 5 = run, 6 = restart + claude-cmd, 7 = token services +
-# more CLIs. Bump when the app starts needing a new server feature.
-SCRIPT_API=7
+# more CLIs, 8 = keys. Bump when the app starts needing a new server feature.
+SCRIPT_API=8
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -868,6 +868,22 @@ do_tail() {
   api_ok "$(jq -cn --arg s "$sess" --arg t "$text" --argjson n "$lines" '{session:$s, lines:$n, text:$t}')"
 }
 
+# keys <session> <key>…: answer a prompt in a session (e.g. Claude asking to
+# approve a new MCP server after a restart). Only these keys, never text.
+KEYS_ALLOWED="1 2 3 4 5 6 7 8 9 Enter Escape Up Down Tab Space y n"
+do_keys() {
+  (($# >= 2 && $# <= 6)) || bad_args "usage: keys <session> <key>… (up to 5)"
+  valid_project "$1" || api_err invalid_name "Invalid project name."
+  local sess k text
+  sess="$(resolve_session "$1")"; shift
+  for k in "$@"; do [[ " $KEYS_ALLOWED " == *" $k "* ]] || api_err invalid_name "Key '$k' isn't allowed."; done
+  tmux has-session -t "=$sess" 2>/dev/null || api_err invalid_name "No running session named '$sess'."
+  for k in "$@"; do tmux send-keys -t "=$sess:" "$k"; sleep 0.2; done
+  sleep 1   # let the screen redraw before reading it back
+  text="$(tmux capture-pane -p -J -t "=$sess:" -S -500 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 120)"
+  api_ok "$(jq -cn --arg s "$sess" --arg t "$text" '{session:$s, lines:120, text:$t}')"
+}
+
 do_new() {
   local name="" owner="" vis="private" start=0
   while [[ $# -gt 0 ]]; do
@@ -1615,6 +1631,7 @@ api_main() {
     run)                 do_run "$@" ;;
     claude-cmd)          do_claude_cmd "$@" ;;
     restart)             do_restart "$@" ;;
+    keys)                do_keys "$@" ;;
     "")                  bad_args "missing subcommand" ;;
     *)                   bad_args "unknown subcommand '$cmd'" ;;
   esac

@@ -144,6 +144,12 @@ api "restart demo-app2"
 check "restart" "$(jqt '.ok and .data.restarted and .data.session=="demo-app2"')"
 [[ "$(tmux display-message -p -t "=demo-app2:" '#{pane_pid}' 2>/dev/null)" != "$old_pid" ]]; check "restart made a new process" $?
 grep -q "^demo-app2	" "$LIST"; check "restarted session still in autostart list" $?
+api "keys demo-app2 Enter"
+check "keys sends and returns the screen" "$(jqt '.ok and .data.session=="demo-app2" and (.data.text|type)=="string"')"
+for bad in "keys demo-app2" "keys demo-app2 ls" "keys demo-app2 C-c" "keys -x Enter" "keys demo-app2 1 2 3 4 5 6"; do
+  api "$bad"
+  check "keys refuses '$bad'" "$(jqt '.ok==false and .error.code=="forbidden"')"
+done
 api "restart nope"
 check "restart missing session" "$(jqt '.error.code=="invalid_name"')"
 api "restart -x"
