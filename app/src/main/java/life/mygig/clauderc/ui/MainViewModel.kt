@@ -39,7 +39,9 @@ import life.mygig.clauderc.api.McpServer
 import life.mygig.clauderc.api.PluginsData
 import life.mygig.clauderc.api.ChatData
 import life.mygig.clauderc.api.PinStatus
+import life.mygig.clauderc.api.ChatLogEntry
 import life.mygig.clauderc.api.Repo
+import life.mygig.clauderc.notify.SessionWatcher
 import life.mygig.clauderc.api.ServiceDef
 import life.mygig.clauderc.api.RunResult
 import life.mygig.clauderc.api.Session
@@ -174,6 +176,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 checkUpdates()
                 delay(60 * 60 * 1000L)
             }
+        }
+        viewModelScope.launch {
+            if (store.current().notify && SessionWatcher.allowed(getApplication())) SessionWatcher.schedule(getApplication())
         }
         viewModelScope.launch {
             delay(3_000)   // let the first status call land
@@ -342,6 +347,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _chat.value = c
         val shown = c.messages.filter { it.role == "user" }.map { it.text.trim() }.toSet()
         _chatPending.value = _chatPending.value.filterNot { it in shown }
+    }
+
+    /** Send a file from the phone into the chat's project folder; [onDone] gets its path. */
+    fun uploadToChat(name: String, bytes: ByteArray, onDone: (String) -> Unit) {
+        val session = _chatSession.value ?: return
+        val pin = chatPin ?: return
+        action("Sending $name…") {
+            val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            onDone(api.upload(session, pin, name, b64).path)
+        }
+    }
+
+    private val _chatLog = MutableStateFlow<List<ChatLogEntry>?>(null)
+    val chatLog = _chatLog.asStateFlow()
+    fun loadChatLog() = action("Loading the chat log…") { _chatLog.value = api.chatLog() }
+    fun clearChatLog() { _chatLog.value = null }
+
+    /** Session notifications: on only after Android's permission (the Settings screen asks). */
+    fun setNotify(on: Boolean) = viewModelScope.launch {
+        store.setNotify(on)
+        val ctx = getApplication<Application>()
+        if (on) SessionWatcher.schedule(ctx) else SessionWatcher.cancel(ctx)
     }
 
     fun interruptChat() {

@@ -47,6 +47,8 @@ data class AppSettings(
     val hostKeyFingerprint: String = "",
     val previousFingerprint: String = "",
     val appLock: Boolean = false,
+    /** Session notifications (needs Android's notification permission). */
+    val notify: Boolean = false,
     val theme: ThemeMode = ThemeMode.SYSTEM,
     val servers: List<Server> = emptyList(),
     val activeId: String = "",
@@ -77,6 +79,7 @@ class SettingsStore(private val context: Context) {
         val HK_FP = stringPreferencesKey("host_key_fp")
         val HK_PREV_FP = stringPreferencesKey("host_key_prev_fp")
         val APP_LOCK = booleanPreferencesKey("app_lock")
+        val NOTIFY = booleanPreferencesKey("notify")
         val THEME = stringPreferencesKey("theme")
         val REPOS_CACHE = stringPreferencesKey("repos_cache")
         val OWNERS_CACHE = stringPreferencesKey("owners_cache")
@@ -113,6 +116,7 @@ class SettingsStore(private val context: Context) {
             hostKeyFingerprint = a.hostKeyFingerprint,
             previousFingerprint = a.previousFingerprint,
             appLock = p[K.APP_LOCK] ?: false,
+            notify = p[K.NOTIFY] ?: false,
             theme = runCatching { ThemeMode.valueOf(p[K.THEME] ?: "SYSTEM") }.getOrDefault(ThemeMode.SYSTEM),
             servers = list,
             activeId = id,
@@ -184,6 +188,7 @@ class SettingsStore(private val context: Context) {
     private fun newId() = UUID.randomUUID().toString()
 
     suspend fun setAppLock(on: Boolean) = context.dataStore.edit { it[K.APP_LOCK] = on }
+    suspend fun setNotify(on: Boolean) = context.dataStore.edit { it[K.NOTIFY] = on }
     suspend fun setTheme(mode: ThemeMode) = context.dataStore.edit { it[K.THEME] = mode.name }
 
     suspend fun reposCache(): String? = context.dataStore.data.first()[K.REPOS_CACHE]

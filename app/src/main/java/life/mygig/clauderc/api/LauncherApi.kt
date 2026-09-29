@@ -135,6 +135,12 @@ class LauncherApi(
         requireName(session)
         return call("chat-send $session", stdin = pin + "\n" + text)
     }
+    /** Sends a file into the session's project (uploads/<name>); PIN-protected like chat. */
+    suspend fun upload(session: String, pin: String, name: String, base64: String): UploadResult {
+        requireName(session)
+        return call("upload $session", stdin = pin + "\n" + name + "\n" + base64, timeoutMs = 240_000)
+    }
+    suspend fun chatLog(): List<ChatLogEntry> = call("chat-log")
     suspend fun chatInterrupt(session: String, pin: String): JsonObject { requireName(session); return call("chat-interrupt $session", stdin = pin) }
     suspend fun loginKeystore(name: String, alias: String, storePassword: String, keyPassword: String, fileBase64: String): JsonObject =
         call("login-keystore $name", stdin = listOf(alias.trim(), storePassword, keyPassword, fileBase64).joinToString("\n"))

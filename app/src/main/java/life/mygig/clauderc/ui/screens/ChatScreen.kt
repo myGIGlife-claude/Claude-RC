@@ -1,6 +1,12 @@
 package life.mygig.clauderc.ui.screens
 
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.ui.platform.LocalContext
+import life.mygig.clauderc.api.Updates
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
@@ -187,9 +193,28 @@ private fun PromptCard(vm: MainViewModel, screen: String, enabled: Boolean) {
 
 @Composable
 private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
-    val guard = LocalGuard.current
+    val context = LocalContext.current
+    val status by vm.status.collectAsState()
     var text by rememberSaveable { mutableStateOf("") }
+    // Attach: the file goes into the project's uploads/ folder; its path goes in the message.
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        } ?: "file"
+        val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+        if (bytes == null || bytes.isEmpty() || bytes.size > 15 * 1024 * 1024) {
+            vm.say("That file couldn't be read, or it's bigger than 15 MB.")
+        } else {
+            vm.uploadToChat(name, bytes) { path -> text = (text.trimEnd() + " [attached: $path]").trim() }
+        }
+    }
     Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if ((status?.scriptApi ?: 0) >= Updates.UPLOAD_API) {
+            IconButton(onClick = { pick.launch(arrayOf("*/*")) }, enabled = enabled, modifier = Modifier.height(52.dp)) {
+                Icon(Icons.Filled.AttachFile, contentDescription = "Attach a file or photo")
+            }
+        }
         OutlinedTextField(
             value = text, onValueChange = { text = it }, placeholder = { Text("Message Claude") },
             modifier = Modifier.weight(1f), maxLines = 6, shape = RoundedCornerShape(22.dp),
