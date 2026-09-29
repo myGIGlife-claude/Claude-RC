@@ -850,7 +850,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun loadTail(target: String) = action("Reading log…") {
+    fun loadTail(target: String) = action("Opening terminal…") {
         tailTarget = target
         _tail.value = api.tail(target, 120)
         _tailUpdatedAt.value = System.currentTimeMillis()

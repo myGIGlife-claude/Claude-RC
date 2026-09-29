@@ -126,7 +126,7 @@ fun ProjectsScreen(vm: MainViewModel) {
                     )
                 }
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    Text("Tap a project for Open in Claude, clone/pull + start, stop, log or GitHub. Long-press a running one for its log.",
+                    Text("Tap a project for Open in Claude, clone/pull + start, stop, terminal or GitHub. Long-press a running one for its terminal.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -205,7 +205,7 @@ private fun RepoActions(vm: MainViewModel, repo: Repo, onDismiss: () -> Unit) {
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Stop") }
                     OutlinedButton(onClick = { vm.loadTail(repo.name); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Tail log")
+                        Text("Terminal")
                     }
                 }
                 TextButton(onClick = { openUrl(context, "https://github.com/${repo.fullName}") }) {

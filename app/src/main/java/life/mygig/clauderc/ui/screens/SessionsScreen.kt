@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -192,13 +193,14 @@ private fun SessionCard(s: Session, chat: (() -> Unit)?, onOpen: () -> Unit, onL
                     ) { OneLine("Answer") }
                 } else {
                     if (chat != null) {
-                        Button(onClick = chat, modifier = Modifier.weight(1f).height(40.dp)) { OneLine("Chat") }
+                        Button(onClick = chat, modifier = Modifier.height(40.dp)) { OneLine("Chat") }
                     } else {
-                        Button(onClick = onOpen, modifier = Modifier.weight(1f).height(40.dp)) { OneLine(if (narrow) "Open" else "Open in Claude") }
+                        Button(onClick = onOpen, modifier = Modifier.height(40.dp)) { OneLine(if (narrow) "Open" else "Open in Claude") }
                     }
-                    OutlinedButton(onClick = onLog, modifier = Modifier.height(40.dp)) { OneLine("Log") }
+                    OutlinedButton(onClick = onLog, modifier = Modifier.height(40.dp)) { OneLine("Terminal") }
                 }
                 TextButton(onClick = onRestart) { OneLine("Restart") }
+                if (!s.waiting) Spacer(Modifier.weight(1f))
                 Box {
                     IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More for ${s.project}") }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
