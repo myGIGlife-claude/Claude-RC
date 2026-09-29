@@ -51,7 +51,9 @@ import life.mygig.clauderc.api.Session
 import life.mygig.clauderc.ui.LocalGuard
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.components.Health
+import life.mygig.clauderc.ui.components.OneLine
 import life.mygig.clauderc.ui.components.StatusDot
+import life.mygig.clauderc.ui.components.isNarrow
 import life.mygig.clauderc.ui.formatUptime
 import life.mygig.clauderc.ui.openInClaude
 import life.mygig.clauderc.ui.theme.Term
@@ -69,6 +71,7 @@ fun SessionsScreen(vm: MainViewModel) {
     var confirmRestart by remember { mutableStateOf<Session?>(null) }
     var confirmRestartAll by remember { mutableStateOf(false) }
     val busyRestart by vm.busyRestart.collectAsState()
+    val narrow = isNarrow()
 
     // Previews and "needs an answer" stay current while the tab is open.
     LaunchedEffect(Unit) {
@@ -87,11 +90,11 @@ fun SessionsScreen(vm: MainViewModel) {
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (sessions.size > 1) {
-                        OutlinedButton(onClick = { confirmRestartAll = true }, modifier = Modifier.weight(1f)) { Text("Restart all") }
+                        OutlinedButton(onClick = { confirmRestartAll = true }, modifier = Modifier.weight(1f)) { OneLine("Restart all") }
                     }
                     // A shell on the server: only offered when App lock guards the app.
                     if (settings?.appLock == true) {
-                        OutlinedButton(onClick = { vm.showRun(true) }, modifier = Modifier.weight(1f)) { Text(">_ Run a command") }
+                        OutlinedButton(onClick = { vm.showRun(true) }, modifier = Modifier.weight(1f)) { OneLine(if (narrow) ">_ Run" else ">_ Run a command") }
                     }
                 }
             }
@@ -150,6 +153,7 @@ fun SessionsScreen(vm: MainViewModel) {
 @Composable
 private fun SessionCard(s: Session, onOpen: () -> Unit, onLog: () -> Unit, onRestart: () -> Unit, onStop: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
+    val narrow = isNarrow()
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -181,12 +185,12 @@ private fun SessionCard(s: Session, onOpen: () -> Unit, onLog: () -> Unit, onRes
                         onClick = onLog,
                         modifier = Modifier.weight(1f).height(40.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = WarnAmber, contentColor = Color(0xFF1A1305)),
-                    ) { Text("Answer") }
+                    ) { OneLine("Answer") }
                 } else {
-                    Button(onClick = onOpen, modifier = Modifier.weight(1f).height(40.dp)) { Text("Open in Claude") }
-                    OutlinedButton(onClick = onLog, modifier = Modifier.height(40.dp)) { Text("Log") }
+                    Button(onClick = onOpen, modifier = Modifier.weight(1f).height(40.dp)) { OneLine(if (narrow) "Open" else "Open in Claude") }
+                    OutlinedButton(onClick = onLog, modifier = Modifier.height(40.dp)) { OneLine("Log") }
                 }
-                TextButton(onClick = onRestart) { Text("Restart") }
+                TextButton(onClick = onRestart) { OneLine("Restart") }
                 Box {
                     IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More for ${s.project}") }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {

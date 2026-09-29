@@ -41,6 +41,7 @@ import life.mygig.clauderc.ui.Tab
 import life.mygig.clauderc.ui.components.CardBox
 import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.InfoRows
+import life.mygig.clauderc.ui.components.OneLine
 import life.mygig.clauderc.ui.components.SectionLabel
 import life.mygig.clauderc.ui.components.StatusDot
 import life.mygig.clauderc.ui.components.color
@@ -202,8 +203,8 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
         }
         page.note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            page.edit?.let { (label, go) -> Button(onClick = go, enabled = busy == null, modifier = Modifier.weight(1f).height(48.dp)) { Text(label) } }
-            page.test?.let { (label, go) -> OutlinedButton(onClick = go, enabled = busy == null, modifier = Modifier.weight(1f).height(48.dp)) { Text(label) } }
+            page.edit?.let { (label, go) -> Button(onClick = go, enabled = busy == null, modifier = Modifier.weight(1f).height(48.dp)) { OneLine(label) } }
+            page.test?.let { (label, go) -> OutlinedButton(onClick = go, enabled = busy == null, modifier = Modifier.weight(1f).height(48.dp)) { OneLine(label) } }
         }
         page.link?.let { (label, url) -> OutlinedButton(onClick = { openUrl(context, url) }, modifier = Modifier.fillMaxWidth()) { Text(label) } }
         page.remove?.let { (label, _) ->
