@@ -1955,6 +1955,7 @@ do_mcp_auth_start() {
   need tmux
   command -v claude >/dev/null 2>&1 || api_err internal "'claude' is not installed on the server."
   mkdir -p "$CACHE_DIR/mcp-auth"
+  printf '%s' "$name" >"$CACHE_DIR/mcp-auth/server"
   (cd "$CACHE_DIR/mcp-auth" && start_login_session "$MCP_AUTH_SESSION" "$(command -v claude)" /mcp) ||
     api_err internal "Could not start Claude."
   for ((i = 0; i < 120; i++)); do
@@ -1980,37 +1981,43 @@ do_mcp_auth_start() {
 }
 
 # mcp-auth-finish (callback URL on stdin): the MCP list, checked again.
+# Claude can finish the sign-in by itself and leave the paste box, so the URL
+# is only typed while that box is on screen (never into Claude's chat), and
+# the answer comes from a fresh `claude mcp list`.
 do_mcp_auth_finish() {
-  local cb i text msg=""
+  local cb i text msg="" name
   cb="$(read_secret_line)"
   exec 0</dev/null
   cb="${cb//[[:space:]]/}"
   [[ "$cb" =~ ^http://(localhost|127\.0\.0\.1):[0-9]{1,5}/ && ${#cb} -le 4000 ]] ||
     api_err invalid_name "Paste the whole address from the browser: it starts with http://localhost:"
-  tmux has-session -t "=$MCP_AUTH_SESSION" 2>/dev/null || api_err internal "The sign-in expired. Start it again."
-  tmux send-keys -t "=$MCP_AUTH_SESSION:" -l -- "$cb"
-  tmux send-keys -t "=$MCP_AUTH_SESSION:" Enter
-  for ((i = 0; i < 45; i++)); do
-    sleep 1
-    text="$(mcp_auth_screen)"
-    # Back on the server's page: signed in, or the reason it failed.
-    if grep -q 'Config location' <<<"$text"; then
-      if grep -qE '(Status|Auth): +✔' <<<"$text"; then
-        end_login "$MCP_AUTH_SESSION"
-        need claude
-        mcp_refresh_now
-        api_ok "$(jq -cn --argjson s "$(mcp_json)" '{servers:$s, checked_seconds_ago:0, refreshing:false}')"
+  name="$(cat "$CACHE_DIR/mcp-auth/server" 2>/dev/null)"
+  need claude
+  if tmux has-session -t "=$MCP_AUTH_SESSION" 2>/dev/null && grep -q 'paste the URL' <<<"$(mcp_auth_screen)"; then
+    tmux send-keys -t "=$MCP_AUTH_SESSION:" -l -- "$cb"
+    tmux send-keys -t "=$MCP_AUTH_SESSION:" Enter
+    for ((i = 0; i < 45; i++)); do
+      sleep 1
+      text="$(mcp_auth_screen)"
+      # A URL from another sign-in: this one is still waiting for the right one.
+      if ((i >= 3)) && msg="$(grep -m1 "isn't this sign-in" <<<"$text")"; then
+        api_err invalid_name "$(sed 's/^ *//; s/ *$//' <<<"$msg")"
       fi
-      msg="$(awk '/Config location/{f=1; next} /❯/{f=0} f' <<<"$text" | sed 's/^ *//; s/ *$//' | grep -v '^$' | head -n 2)"
-      end_login "$MCP_AUTH_SESSION"
-      api_err internal "Sign-in failed${msg:+: $msg}. Start it again."
-    fi
-    # A URL from another sign-in: this one is still waiting for the right one.
-    if ((i >= 3)) && msg="$(grep -m1 "isn't this sign-in" <<<"$text")"; then
-      api_err invalid_name "$(sed 's/^ *//; s/ *$//' <<<"$msg")"
-    fi
-  done
-  api_err internal "Claude didn't finish the sign-in in 45 s." "$(jq -cn --arg t "$(grep -v '^\s*$' <<<"$text" | tail -n 12)" '{pane:$t}')"
+      grep -q 'paste the URL' <<<"$text" && continue
+      # Back on the server's page: any error shows above its menu.
+      grep -q 'Config location' <<<"$text" &&
+        msg="$(awk '/Config location/{f=1; next} /❯/{f=0} f' <<<"$text" | sed 's/^ *//; s/ *$//' | grep -v '^$' | head -n 2)"
+      break
+    done
+  fi
+  end_login "$MCP_AUTH_SESSION"
+  mcp_refresh_now
+  local servers
+  servers="$(mcp_json)"
+  if [[ -n "$name" ]] && jq -e --arg n "$name" 'any(.[]; .name == $n and .health == "connected")' >/dev/null <<<"$servers"; then
+    api_ok "$(jq -cn --argjson s "$servers" '{servers:$s, checked_seconds_ago:0, refreshing:false}')"
+  fi
+  api_err internal "Sign-in didn't complete${msg:+: $msg}. Start it again."
 }
 
 do_mcp_auth_cancel() {
