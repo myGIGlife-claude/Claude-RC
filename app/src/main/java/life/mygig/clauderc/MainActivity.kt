@@ -32,6 +32,7 @@ class MainActivity : FragmentActivity(), AppLock {
 
     override fun onStart() {
         super.onStart()
+        vm.resumeChat()
         // Lock again after a while in the background. The short grace period
         // covers the PIN screen (its own activity) and quick trips to the
         // browser during a login.

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,6 +37,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -227,17 +229,19 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
 }
 
 /** Enter the chat PIN, or create one the first time. The app never stores or shows it. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun PinGate(vm: MainViewModel, status: PinStatus, error: String?) {
     var pin by remember { mutableStateOf("") }
     var again by remember { mutableStateOf("") }
+    var keep by rememberSaveable { mutableStateOf(0) }
     val setup = !status.set
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.padding(top = 24.dp).height(48.dp))
         Text(if (setup) "Create a chat PIN" else "Enter your chat PIN", style = MaterialTheme.typography.headlineSmall)
         Text(
             if (setup) "6 to 12 digits. It's kept only on your server, in ~/.config/claude-launcher/chat-pin, which is where you can find it if you forget it. This app never shows it."
-            else "Asked every time you open a chat or come back to the app. Forgot it? It's in ~/.config/claude-launcher/chat-pin on your server.",
+            else "Asked when you open a chat or come back to the app. Forgot it? It's in ~/.config/claude-launcher/chat-pin on your server.",
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         val digits = { s: String -> s.filter(Char::isDigit).take(12) }
@@ -254,11 +258,22 @@ private fun PinGate(vm: MainViewModel, status: PinStatus, error: String?) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
             )
         }
+        if (!setup) {
+            Text("Don't ask again for", style = MaterialTheme.typography.labelLarge)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(0 to "Ask always", 30 to "30 min", 60 to "1 h", 240 to "4 h").forEach { (m, label) ->
+                    FilterChip(selected = keep == m, onClick = { keep = m }, label = { Text(label) })
+                }
+            }
+            if (keep > 0) {
+                Text("Restarting the phone asks again.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         Button(
             onClick = {
                 val p = pin
-                if (setup) vm.setChatPin(p) else vm.unlockChat(p)
+                if (setup) vm.setChatPin(p) else vm.unlockChat(p, keep)
                 pin = ""; again = ""
             },
             enabled = pin.length >= 6 && (!setup || again == pin),
