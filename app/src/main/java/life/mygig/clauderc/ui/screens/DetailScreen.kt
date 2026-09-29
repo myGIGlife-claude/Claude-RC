@@ -23,6 +23,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -73,6 +74,7 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
     val mcp by vm.mcp.collectAsState()
     val busy by vm.busy.collectAsState()
     val mcpAuth by vm.mcpAuth.collectAsState()
+    val plugins by vm.plugins.collectAsState()
     val context = LocalContext.current
     var confirm by remember { mutableStateOf(false) }
     BackHandler { vm.openDetail(null) }
@@ -130,6 +132,8 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
         is Detail.Mcp -> {
             val m = mcp?.servers?.firstOrNull { it.name == d.server.name } ?: d.server
             val signIn = m.health == "needs_auth" && (m.scope == "user" || m.scope == "plugin")
+            if (m.scope == "plugin") LaunchedEffect(Unit) { if (plugins == null) vm.loadPlugins() }
+            val pluginId = plugins?.installed?.firstOrNull { it.name == m.plugin && it.enabled }?.id
             Page(
                 title = m.label,
                 health = mcpHealth(m),
@@ -154,8 +158,13 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
                     else -> null
                 },
                 test = "Test now" to { vm.refreshMcp(check = true) },
-                remove = if (m.scope == "user") ("Remove ${m.label}" to { vm.removeMcp(m.name) }) else null,
-                removeConfirm = "claude mcp remove ${m.name} -s user. Sessions lose it after their next restart.",
+                remove = when {
+                    m.scope == "user" -> "Remove ${m.label}" to { vm.removeMcp(m.name) }
+                    pluginId != null -> "Disable the ${m.plugin} plugin" to { vm.disablePlugin(pluginId) }
+                    else -> null
+                },
+                removeConfirm = if (m.scope == "user") "claude mcp remove ${m.name} -s user. Sessions lose it after their next restart."
+                    else "claude plugin disable $pluginId. Its MCP server and skills go away after sessions restart; turn it back on in the Claude tab.",
                 link = when (m.scope) {
                     "claude.ai" -> "Open claude.ai connectors" to "https://claude.ai/settings/connectors"
                     else -> null
