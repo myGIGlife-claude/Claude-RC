@@ -46,7 +46,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import life.mygig.clauderc.api.PROJECT_NAME_RE
-import life.mygig.clauderc.ui.LocalGuard
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.openInClaude
 import life.mygig.clauderc.ui.openUrl
@@ -58,7 +57,6 @@ fun NewProjectScreen(vm: MainViewModel) {
     val ownersError by vm.ownersError.collectAsState()
     val busy by vm.busy.collectAsState()
     val result by vm.newResult.collectAsState()
-    val guard = LocalGuard.current
     val context = LocalContext.current
 
     var name by rememberSaveable { mutableStateOf("") }
@@ -126,7 +124,7 @@ fun NewProjectScreen(vm: MainViewModel) {
         }
 
         Button(
-            onClick = { guard.run("Create $owner/$name") { vm.createProject(name, owner, private, start) } },
+            onClick = { vm.createProject(name, owner, private, start) },
             enabled = canCreate,
             modifier = Modifier.fillMaxWidth().height(52.dp),
         ) { Text("Create project") }

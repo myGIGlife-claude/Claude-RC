@@ -7,7 +7,6 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
-import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -70,14 +69,6 @@ class SettingsStore(private val context: Context) {
     private object K {
         val SERVERS = stringPreferencesKey("servers")
         val ACTIVE = stringPreferencesKey("active_server")
-        // Before multi-server: one server in these keys. Read once, then removed.
-        val HOST = stringPreferencesKey("host")
-        val PORT = intPreferencesKey("port")
-        val USER = stringPreferencesKey("user")
-        val HK_TYPE = stringPreferencesKey("host_key_type")
-        val HK_BLOB = stringPreferencesKey("host_key_blob")
-        val HK_FP = stringPreferencesKey("host_key_fp")
-        val HK_PREV_FP = stringPreferencesKey("host_key_prev_fp")
         val APP_LOCK = booleanPreferencesKey("app_lock")
         val NOTIFY = booleanPreferencesKey("notify")
         val THEME = stringPreferencesKey("theme")
@@ -89,15 +80,6 @@ class SettingsStore(private val context: Context) {
 
     private fun servers(p: Preferences): List<Server> =
         p[K.SERVERS]?.let { runCatching { json.decodeFromString<List<Server>>(it) }.getOrNull() }
-            ?: p[K.HOST]?.let { host ->
-                listOf(
-                    Server(
-                        id = "default", host = host, port = p[K.PORT] ?: 22, user = p[K.USER].orEmpty(),
-                        hostKeyType = p[K.HK_TYPE].orEmpty(), hostKeyBlob = p[K.HK_BLOB].orEmpty(),
-                        hostKeyFingerprint = p[K.HK_FP].orEmpty(), previousFingerprint = p[K.HK_PREV_FP].orEmpty(),
-                    ),
-                )
-            }
             ?: emptyList()
 
     private fun activeId(p: Preferences, list: List<Server>): String =
@@ -133,7 +115,6 @@ class SettingsStore(private val context: Context) {
             val after = change(list, before)
             p[K.SERVERS] = json.encodeToString(list.toList())
             p[K.ACTIVE] = after
-            listOf(K.HOST, K.PORT, K.USER, K.HK_TYPE, K.HK_BLOB, K.HK_FP, K.HK_PREV_FP).forEach { p.remove(it) }
             // The cached lists belong to one server.
             if (after != before) { p.remove(K.REPOS_CACHE); p.remove(K.OWNERS_CACHE) }
         }

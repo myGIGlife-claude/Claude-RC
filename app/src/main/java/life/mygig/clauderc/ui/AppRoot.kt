@@ -63,7 +63,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -102,12 +101,6 @@ interface AppLock {
     suspend fun unlock(reason: String): Boolean
 }
 
-/** Runs an action, asking for fingerprint/PIN first when App lock is on. */
-fun interface Guard {
-    fun run(reason: String, action: () -> Unit)
-}
-
-val LocalGuard = staticCompositionLocalOf { Guard { _, action -> action() } }
 val LocalAppLock = staticCompositionLocalOf<AppLock?> { null }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -124,10 +117,6 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
     }
 
     val scope = rememberCoroutineScope()
-    // App lock is asked to open the app, and again only for Settings (key,
-    // servers) and Run a command; chat has its own PIN. Everyday actions don't
-    // prompt: they're what the Claude app does without a lock.
-    val guard = remember { Guard { _, action -> action() } }
     val unlockThen = { reason: String, action: () -> Unit -> scope.launch { if (lock.unlock(reason)) action() }; Unit }
 
     // App lock is required: turn it on first (or set a screen lock on the phone).
@@ -154,10 +143,8 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
     }
 
     ClaudeRcTheme(s.theme) {
-        CompositionLocalProvider(LocalGuard provides guard, LocalAppLock provides lock) {
+        CompositionLocalProvider(LocalAppLock provides lock) {
             val context = LocalContext.current
-            // The snackbar collector below lives for the whole screen; always use the current guard.
-            val currentGuard by rememberUpdatedState(guard)
             val snackbar = remember { SnackbarHostState() }
             val busy by vm.busy.collectAsState()
             val tab by vm.tab.collectAsState()
@@ -188,7 +175,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                     )
                     if (r == SnackbarResult.ActionPerformed) {
                         when (val f = m.fix) {
-                            is Fix.Login -> currentGuard.run("Log in on the server") { vm.showLogin(f.kind) }
+                            is Fix.Login -> vm.showLogin(f.kind)
                             is Fix.GoTo -> vm.selectTab(f.tab)
                             is Fix.StartAnyway -> vm.startProject(f.project)
                             is Fix.Retry -> f.block()

@@ -9,7 +9,6 @@ data class StatusData(
     val github: GithubStatus = GithubStatus(),
     val aws: AwsStatus = AwsStatus(),
     val hostname: String = "",
-    val version: String = "",
     /** Missing when the server's scripts predate these services. */
     val services: Map<String, ServiceStatus>? = null,
     /** Last commit that changed server/, as recorded by install.sh; null if unknown. */

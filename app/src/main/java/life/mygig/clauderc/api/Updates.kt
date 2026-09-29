@@ -18,43 +18,7 @@ object Updates {
     const val REPO = "myGIGlife-claude/Claude-RC"
 
     /** Oldest server script API this app works with (claude-setup.sh SCRIPT_API). */
-    const val MIN_SCRIPT_API = 2
-
-    /** Server script API that has self-update. */
-    const val SELF_UPDATE_API = 3
-
-    /** Server script API that can install glab. */
-    const val INSTALL_CLI_API = 4
-
-    /** Server script API that can run a command typed on the phone. */
-    const val RUN_API = 5
-
-    /** Server script API with restart and Command Center (claude-cmd). */
-    const val COMMAND_CENTER_API = 6
-
-    /** Server script API with login-token services and more install-cli targets. */
-    const val TOKEN_SERVICES_API = 7
-
-    /** Server script API that can send prompt keys to a session. */
-    const val KEYS_API = 8
-
-    /** Server script API with custom API keys (set-secret / remove-secret). */
-    const val CUSTOM_KEYS_API = 11
-
-    /** Server script API with Android signing keys (login-keystore). */
-    const val KEYSTORE_API = 13
-
-    /** Server script API with YouTube sign-in and youtube-upload. */
-    const val YOUTUBE_API = 14
-
-    /** Server script API with mcp, plugins, disconnect and session previews. */
-    const val CONNECTIONS_API = 15
-
-    /** Server script API with in-app chat (PIN). */
-    const val CHAT_API = 16
-
-    /** Server script API with chat uploads and the chat access log. */
-    const val UPLOAD_API = 17
+    const val MIN_SCRIPT_API = 17
 
     /** What the server accepts as a custom key name (claude-setup.sh CUSTOM_NAME_RE). */
     val CUSTOM_NAME = Regex("^[A-Z][A-Z0-9_]{0,55}_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT)$")

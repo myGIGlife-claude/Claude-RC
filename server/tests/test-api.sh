@@ -45,7 +45,7 @@ for bad in "" "bash" "status; bash" 'status $(id)' "status && id" "rm -rf /" "st
   "new x --visibility secret" "tail x --lines 9999" "status extra" "new -x" "login-github token" \
   "open a/b/c" "$(printf 'x%.0s' {1..500})" "start --dangerously-skip-permissions" "start -x" \
   "open owner/-x" "open -o/x" "new x --owner --start" "tail -x" "clone-status nope" \
-  "login-gitlab glpat-x" "login-docker docker.io" "login-cloudflare tok" "self-update" "self-update main" \
+  "login-gitlab glpat-x" "login-docker docker.io" "self-update" "self-update main" \
   "self-update 0123456789abcdef0123456789abcdef0123456" "self-update ../../etc" "install-cli" \
   "install-cli glab extra" "install-cli rm" "login-token" "login-token evil" "login-token vercel x"; do
   api "$bad"
@@ -78,11 +78,6 @@ api "login-gitlab" $'glpat-good-token-00000000\n--hostname=evil'
 check "gitlab host can't start with -" "$(jqt '.error.code=="invalid_name"')"
 api "login-docker" $'ghcr.io\ndemo\ngood-password'
 check "docker login ok" "$(jqt '.ok and .data.registry=="ghcr.io"')"
-api "login-cloudflare" "not a token"
-check "cloudflare malformed token" "$(jqt '.error.code=="invalid_name"')"
-api "login-cloudflare" "abcdefghijklmnopqrstuvwxyz0123456789ABCD"
-check "cloudflare unverified token rejected, nothing saved" "$(jqt '.error.code=="not_logged_in"')"
-[[ ! -e "$HOME/.config/claude-launcher/env" ]]; check "no env file after rejected token" $?
 api "status"
 check "status shows gitlab + docker" "$(jqt '.data.services.gitlab.detail=="demo-gl" and .data.services.docker.detail=="ghcr.io"')"
 
@@ -293,10 +288,10 @@ sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
 echo "env hook"
 mkdir -p "$HOME/.config/claude-launcher" "$HOME/.claude"
 printf "export DEMO_TOKEN='hook-ok'\nexport OTHER_KEY='two'\n" >"$HOME/.config/claude-launcher/env"
-echo '{"permissions":{"allow":["Bash(ls)"]},"env":{"MINE":"keep","BASH_ENV":"'"$HOME"'/.config/claude-launcher/env"}}' >"$HOME/.claude/settings.json"
+echo '{"permissions":{"allow":["Bash(ls)"]},"env":{"MINE":"keep"}}' >"$HOME/.claude/settings.json"
 api "status"
 S="$HOME/.claude/settings.json"
-jq -e '.env.DEMO_TOKEN=="hook-ok" and .env.OTHER_KEY=="two" and .env.MINE=="keep" and (.env.BASH_ENV|not) and .permissions.allow[0]=="Bash(ls)"' "$S" >/dev/null
+jq -e '.env.DEMO_TOKEN=="hook-ok" and .env.OTHER_KEY=="two" and .env.MINE=="keep" and .permissions.allow[0]=="Bash(ls)"' "$S" >/dev/null
 check "tokens mirrored into Claude's settings env, the rest kept" $?
 [[ "$(stat -c %a "$S")" == 600 ]]; check "settings.json made private (600)" $?
 printf "export DEMO_TOKEN='hook-ok'\n" >"$HOME/.config/claude-launcher/env"; api "status"

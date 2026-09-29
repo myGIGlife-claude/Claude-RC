@@ -220,7 +220,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** MCP servers from the server's cache; [check] runs a fresh health check (~10 s). */
     fun refreshMcp(check: Boolean = false) {
-        if ((_status.value?.scriptApi ?: 0) < Updates.CONNECTIONS_API) return
+        if ((_status.value?.scriptApi ?: 0) < Updates.MIN_SCRIPT_API) return
         if (check) {
             action("Checking MCP servers…") { _mcp.value = api.mcpRefresh() }
         } else {
@@ -240,7 +240,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val pluginsLoading = _pluginsLoading.asStateFlow()
 
     fun loadPlugins() {
-        if (_pluginsLoading.value || (_status.value?.scriptApi ?: 0) < Updates.CONNECTIONS_API) return
+        if (_pluginsLoading.value || (_status.value?.scriptApi ?: 0) < Updates.MIN_SCRIPT_API) return
         viewModelScope.launch {
             _pluginsLoading.value = true
             try { _plugins.value = api.plugins() } catch (e: ApiException) { report(e) } finally { _pluginsLoading.value = false }
@@ -488,7 +488,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         when {
             svc == null || svc.installed -> showLogin(kind)
-            kind == LoginKind.GITLAB && (st?.scriptApi ?: 0) >= Updates.INSTALL_CLI_API -> installGlab()
+            kind == LoginKind.GITLAB -> installGlab()
             else -> showSetup(kind)
         }
     }
@@ -556,7 +556,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _showAdd.value = false
         val st = _status.value
         val missing = st?.services?.get(def.id)?.installed == false
-        if (def.install != null && missing && (st?.scriptApi ?: 0) >= Updates.TOKEN_SERVICES_API) {
+        if (def.install != null && missing) {
             installCli(def.install) { showTokenService(def.id) }
         } else {
             showTokenService(def.id)

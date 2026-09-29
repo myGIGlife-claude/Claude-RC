@@ -54,7 +54,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import life.mygig.clauderc.api.Repo
-import life.mygig.clauderc.ui.LocalGuard
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.openUrl
 
@@ -173,7 +172,6 @@ private fun Badge(text: String) {
 
 @Composable
 private fun RepoActions(vm: MainViewModel, repo: Repo, onDismiss: () -> Unit) {
-    val guard = LocalGuard.current
     val context = LocalContext.current
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -199,7 +197,7 @@ private fun RepoActions(vm: MainViewModel, repo: Repo, onDismiss: () -> Unit) {
                     }
                 } else {
                     Button(
-                        onClick = { guard.run("Stop ${repo.name}") { vm.stopProject(repo.name) }; onDismiss() },
+                        onClick = { vm.stopProject(repo.name); onDismiss() },
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Stop") }
                     OutlinedButton(onClick = { vm.loadTail(repo.name); onDismiss() }, modifier = Modifier.fillMaxWidth()) {

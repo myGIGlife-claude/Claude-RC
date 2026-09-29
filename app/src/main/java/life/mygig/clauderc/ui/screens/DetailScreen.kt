@@ -34,7 +34,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import life.mygig.clauderc.api.Catalog
 import life.mygig.clauderc.ui.Detail
-import life.mygig.clauderc.ui.LocalGuard
 import life.mygig.clauderc.ui.LoginKind
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.Tab
@@ -69,13 +68,12 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
     val status by vm.status.collectAsState()
     val mcp by vm.mcp.collectAsState()
     val busy by vm.busy.collectAsState()
-    val guard = LocalGuard.current
     val context = LocalContext.current
     var confirm by remember { mutableStateOf(false) }
     BackHandler { vm.openDetail(null) }
     val s = status ?: return
     val sv = s.services.orEmpty()
-    val login = { k: LoginKind -> { guard.run("Log in on the server") { vm.showLogin(k) } } }
+    val login = { k: LoginKind -> { vm.showLogin(k) } }
 
     val page: Page = when (d) {
         is Detail.Service -> {
@@ -221,7 +219,7 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
             onDismissRequest = { confirm = false },
             title = { Text("$label?") },
             text = { Text(page.removeConfirm ?: "") },
-            confirmButton = { TextButton(onClick = { confirm = false; guard.run(label) { go() } }) { Text("Yes") } },
+            confirmButton = { TextButton(onClick = { confirm = false; go() }) { Text("Yes") } },
             dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
         )
     }
