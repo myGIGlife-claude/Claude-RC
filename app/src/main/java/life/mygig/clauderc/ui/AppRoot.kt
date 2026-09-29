@@ -63,6 +63,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
@@ -274,7 +275,9 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                 bottomBar = {
                     if (!showSettings && !setupNeeded) {
                         NavigationBar {
-                            TabItem(tab, Tab.STATUS, "Connections", Icons.Filled.Hub, vm)
+                            // Narrow screens (e.g. a foldable's cover display) get the short label.
+                            val narrow = LocalConfiguration.current.screenWidthDp < 400
+                            TabItem(tab, Tab.STATUS, if (narrow) "Connect" else "Connections", Icons.Filled.Hub, vm)
                             TabItem(tab, Tab.NEW, "New", Icons.Filled.AddCircle, vm)
                             TabItem(tab, Tab.PROJECTS, "Projects", Icons.AutoMirrored.Filled.List, vm)
                             TabItem(tab, Tab.SESSIONS, "Sessions", Icons.Filled.Terminal, vm)
@@ -343,6 +346,6 @@ private fun androidx.compose.foundation.layout.RowScope.TabItem(
         selected = current == tab,
         onClick = { vm.openDetail(null); vm.selectTab(tab) },
         icon = { Icon(icon, contentDescription = null) },
-        label = { Text(label) },
+        label = { Text(label, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip) },
     )
 }
