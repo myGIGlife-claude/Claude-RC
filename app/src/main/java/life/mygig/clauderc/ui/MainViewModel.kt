@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui
 
+import android.os.SystemClock
 import android.app.Application
 import android.app.DownloadManager
 import android.content.Intent
@@ -251,7 +252,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- In-app chat ------------------------------------------------------------------
     // The PIN is kept only in memory while the chat is unlocked, and forgotten the
-    // moment the app goes to the background (lockChat, from MainActivity.onStop).
+    // moment the app goes to the background (lockChat, from MainActivity.onStop),
+    // unless you chose "don't ask again for" a while. Never written to disk, so a
+    // phone restart (or Android closing the app) always asks again.
 
     private val _chatSession = MutableStateFlow<String?>(null)
     val chatSession = _chatSession.asStateFlow()
@@ -262,6 +265,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _chat = MutableStateFlow<ChatData?>(null)
     val chat = _chat.asStateFlow()
     private var chatPin: String? = null
+    /** elapsedRealtime until which going to the background keeps the chat unlocked. */
+    private var chatUnlockedUntil = 0L
     /** Messages you sent that the conversation file doesn't show yet (Claude queues them while it works). */
     private val _chatPending = MutableStateFlow<List<String>>(emptyList())
     val chatPending = _chatPending.asStateFlow()
@@ -290,9 +295,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** App went to the background: forget the PIN; the chat asks again on return. */
     fun lockChat() {
-        chatPin = null
         chatPoller?.cancel()
+        if (chatPin != null && SystemClock.elapsedRealtime() < chatUnlockedUntil) return
+        chatPin = null
+        chatUnlockedUntil = 0
         if (_chatSession.value != null) { _chat.value = null; _chatPinNeeded.value = PinStatus(set = true) }
+    }
+
+    /** Back in front while still unlocked: carry on polling. */
+    fun resumeChat() {
+        if (chatPin != null && _chatSession.value != null && _chatPinNeeded.value == null) startChatPolling()
     }
 
     fun setChatPin(newPin: String) = viewModelScope.launch {
@@ -303,12 +315,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         } catch (e: ApiException) { _chatError.value = friendly(e).first }
     }
 
-    fun unlockChat(pin: String) = viewModelScope.launch {
+    /** [keepMinutes] > 0: don't ask again for that long, even after leaving the app. */
+    fun unlockChat(pin: String, keepMinutes: Int = 0) = viewModelScope.launch {
         val session = _chatSession.value ?: return@launch
         _chatError.value = null
         try {
             api.chatOpen(session, pin)
             chatPin = pin
+            chatUnlockedUntil = if (keepMinutes > 0) SystemClock.elapsedRealtime() + keepMinutes * 60_000L else 0
             _chatPinNeeded.value = null
             startChatPolling()
         } catch (e: ApiException) { _chatError.value = friendly(e).first }
@@ -324,7 +338,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     setChat(api.chatHistory(session, pin))
                     _chatError.value = null
                 } catch (e: ApiException) {
-                    if (e.code in setOf("wrong_pin", "chat_locked", "pin_not_set")) { lockChat(); _chatError.value = friendly(e).first; break }
+                    if (e.code in setOf("wrong_pin", "chat_locked", "pin_not_set")) { chatUnlockedUntil = 0; lockChat(); _chatError.value = friendly(e).first; break }
                     _chatError.value = friendly(e).first
                 }
                 delay(if (_chat.value?.busy == true) 2_000 else 4_000)
