@@ -50,7 +50,7 @@ restore() {
     sleep 5
   done
 
-  local sess dir name
+  local sess dir name sid cmd
   while IFS=$'\t' read -r sess dir; do
     [[ -z "$sess" ]] && continue
     if [[ ! -d "$dir" ]]; then
@@ -62,9 +62,14 @@ restore() {
       continue
     fi
     name="$(basename "$dir")"
-    tmux new-session -d -s "$sess" -c "$dir" \
-      "env -u ANTHROPIC_API_KEY claude --remote-control $(printf %q "$name"); exec bash"
-    log "$sess: started in $dir"
+    # Pick up the project's last conversation (the newest transcript), so a
+    # restart doesn't leave a blank chat; start fresh if that can't resume.
+    sid="$(ls -t "$HOME/.claude/projects/${dir//[\/.]/-}/"*.jsonl 2>/dev/null | head -n 1 | xargs -r basename | sed 's/\.jsonl$//' || true)"
+    [[ "$sid" =~ ^[0-9a-f-]{36}$ ]] || sid=""
+    cmd="env -u ANTHROPIC_API_KEY claude --remote-control $(printf %q "$name")"
+    [[ -n "$sid" ]] && cmd="$cmd --resume $sid || $cmd"
+    tmux new-session -d -s "$sess" -c "$dir" "$cmd; exec bash"
+    log "$sess: started in $dir${sid:+ (resumed $sid)}"
     sleep 2
   done <"$LIST"
 }
@@ -129,6 +134,12 @@ OnUnitActiveSec=2min
 [Install]
 WantedBy=timers.target
 EOF
+
+  # Ubuntu's needrestart restarts services after library updates (e.g. libevent
+  # for tmux), which would kill every session: leave this one alone.
+  if [[ -d /etc/needrestart/conf.d ]]; then
+    echo '$nrconf{override_rc}{qr(^claude-sessions)} = 0;' | sudo tee /etc/needrestart/conf.d/claude-sessions.conf >/dev/null
+  fi
 
   save
   sudo systemctl daemon-reload

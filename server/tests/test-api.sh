@@ -215,6 +215,11 @@ echo "claude-autostart (reboot)"
 tmux kill-server 2>/dev/null; sleep 0.5
 "$HOME/.local/bin/claude-autostart" restore >/dev/null
 tmux has-session -t "=org-app" 2>/dev/null && tmux has-session -t "=demo-app2" 2>/dev/null; check "autostart restores phone-started sessions" $?
+d="$(awk -F'\t' '$1 == "org-app" {print $2}' "$LIST")"; t="$HOME/.claude/projects/${d//[\/.]/-}"
+mkdir -p "$t" && touch "$t/11111111-2222-3333-4444-555555555555.jsonl"
+tmux kill-server 2>/dev/null; sleep 0.5
+"$HOME/.local/bin/claude-autostart" restore >/dev/null
+tmux list-panes -t "=org-app" -F '#{pane_start_command}' | grep -q -- '--resume 11111111-2222-3333-4444-555555555555'; check "autostart resumes the last conversation" $?
 
 echo "stop the last session drops it from autostart"
 tmux kill-server 2>/dev/null; sleep 0.3

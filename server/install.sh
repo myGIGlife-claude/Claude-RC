@@ -60,7 +60,11 @@ main() {
   "$HOME/claude-setup.sh" --api status </dev/null >/dev/null 2>&1 || true
 
   if command -v claude-autostart >/dev/null || [[ -x "$HOME/.local/bin/claude-autostart" ]]; then
-    echo "claude-autostart is already set up."
+    # Update the script itself (no sudo); the systemd units stay as they are.
+    install -m 755 "$tmp/claude-autostart.sh" "$HOME/.local/bin/claude-autostart"
+    echo "claude-autostart is already set up (script updated)."
+    [[ ! -d /etc/needrestart/conf.d || -f /etc/needrestart/conf.d/claude-sessions.conf ]] ||
+      echo "Tip: run 'claude-autostart install' once so system updates stop restarting your Claude sessions."
   else
     echo "Setting up claude-autostart (restores Claude sessions after a reboot; asks for sudo)..."
     bash "$tmp/claude-autostart.sh" install </dev/null ||
