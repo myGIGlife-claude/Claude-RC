@@ -78,13 +78,11 @@ import life.mygig.clauderc.data.ThemeMode
 import life.mygig.clauderc.ssh.HostKeyInfo
 import kotlinx.coroutines.launch
 import life.mygig.clauderc.ui.LocalAppLock
-import life.mygig.clauderc.ui.LocalGuard
 import life.mygig.clauderc.ui.MainViewModel
 
 @Composable
 fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
     val context = LocalContext.current
-    val guard = LocalGuard.current
     val publicKey by vm.publicKey.collectAsState()
     val busy by vm.busy.collectAsState()
 
@@ -141,7 +139,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
 
         // On first run the setup card above already carries the key.
         if (!firstRun) {
-            Section("This phone's key")
+            SectionLabel("This phone's key")
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (publicKey.isBlank()) {
@@ -173,7 +171,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
 
         }
 
-        Section("Server")
+        SectionLabel("Server")
         OutlinedTextField(
             value = host, onValueChange = { host = it.trim() },
             label = { Text("Host") }, placeholder = { Text("your-server.example.com") },
@@ -195,7 +193,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 visualTransformation = if (showUser) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
                     IconButton(onClick = {
-                        if (showUser) showUser = false else guard.run("Show username") { showUser = true }
+                        showUser = !showUser
                     }) {
                         Icon(
                             if (showUser) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
@@ -227,7 +225,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
         }
 
         if (!firstRun) {
-            Section("Servers")
+            SectionLabel("Servers")
             CardBox {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     s.servers.filter { it.isConfigured }.forEach { srv ->
@@ -245,7 +243,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 }
             }
 
-            Section("Notifications")
+            SectionLabel("Notifications")
             CardBox {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -268,7 +266,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 }
             }
 
-            Section("Chat")
+            SectionLabel("Chat")
             CardBox {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -279,7 +277,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 }
             }
 
-            Section("App")
+            SectionLabel("App")
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("App lock")
@@ -347,7 +345,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
             confirmButton = {
                 TextButton(onClick = {
                     regenStep = 0
-                    guard.run("Regenerate SSH key") { vm.regenerateKey() }
+                    vm.regenerateKey()
                 }) { Text("Yes, regenerate", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { regenStep = 0 }) { Text("Cancel") } },
@@ -371,9 +369,6 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
         )
     }
 }
-
-@Composable
-internal fun Section(title: String) = SectionLabel(title)
 
 /** A numbered step on the first-run screen. */
 @Composable

@@ -57,8 +57,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import life.mygig.clauderc.api.InstalledPlugin
 import life.mygig.clauderc.api.PluginsData
-import life.mygig.clauderc.api.Updates
-import life.mygig.clauderc.ui.LocalGuard
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.Tab
 import life.mygig.clauderc.ui.components.CardBox
@@ -78,22 +76,14 @@ fun ClaudeScreen(vm: MainViewModel) {
     val loading by vm.pluginsLoading.collectAsState()
     val result by vm.ccResult.collectAsState()
     val busy by vm.busy.collectAsState()
-    val guard = LocalGuard.current
     var install by remember { mutableStateOf(false) }
     var open by remember { mutableStateOf<InstalledPlugin?>(null) }
     var addMarket by remember { mutableStateOf(false) }
     var custom by remember { mutableStateOf(false) }
-    val change = { args: String -> guard.run("Run claude $args") { vm.claudeCommand(args) } }
+    val change = { args: String -> vm.claudeCommand(args) }
 
     LaunchedEffect(status?.scriptApi) { vm.loadPlugins() }
 
-    if ((status?.scriptApi ?: 0) < Updates.CONNECTIONS_API) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Update the server scripts first (the card on the Connections tab).", color = MaterialTheme.colorScheme.error)
-            OutlinedButton(onClick = { vm.selectTab(Tab.STATUS) }) { Text("Go to Connections") }
-        }
-        return
-    }
 
     val p = plugins
     PullToRefreshBox(isRefreshing = loading, onRefresh = { vm.loadPlugins() }, modifier = Modifier.fillMaxSize()) {
@@ -214,11 +204,10 @@ private fun LazyGridScope.fullItem(content: @Composable () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PluginSheet(vm: MainViewModel, pl: InstalledPlugin, p: PluginsData?, onClose: () -> Unit) {
-    val guard = LocalGuard.current
     val busy by vm.busy.collectAsState()
     var confirm by remember { mutableStateOf(false) }
     val desc = p?.available?.firstOrNull { it.id == pl.id }?.description
-    val change = { args: String -> onClose(); guard.run("Run claude $args") { vm.claudeCommand(args) } }
+    val change = { args: String -> onClose(); vm.claudeCommand(args) }
     ModalBottomSheet(onDismissRequest = onClose, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(pl.name, style = MaterialTheme.typography.headlineSmall)
@@ -255,7 +244,6 @@ private fun PluginSheet(vm: MainViewModel, pl: InstalledPlugin, p: PluginsData?,
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun InstallPluginSheet(vm: MainViewModel, p: PluginsData, onClose: () -> Unit, onAddMarketplace: () -> Unit) {
-    val guard = LocalGuard.current
     val busy by vm.busy.collectAsState()
     var query by rememberSaveable { mutableStateOf("") }
     var market by rememberSaveable { mutableStateOf<String?>(null) }
@@ -289,7 +277,7 @@ private fun InstallPluginSheet(vm: MainViewModel, p: PluginsData, onClose: () ->
                             if (a.installed) {
                                 Text("Installed", color = Color(0xFF7FD4A8), style = MaterialTheme.typography.bodySmall)
                             } else {
-                                Button(onClick = { onClose(); guard.run("Install ${a.name}") { vm.claudeCommand("plugin install ${a.id}") } }, enabled = busy == null) { Text("Install") }
+                                Button(onClick = { onClose(); vm.claudeCommand("plugin install ${a.id}") }, enabled = busy == null) { Text("Install") }
                             }
                         }
                     }

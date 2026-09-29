@@ -83,7 +83,7 @@ Exit code 0 = success, 1 = handled error, 2 = bad arguments.
 
 | Subcommand | Args | `data` |
 | --- | --- | --- |
-| `status` | — | `claude.logged_in`, `github.{logged_in,user,missing_scopes}`, `aws.{logged_in,identity,profile,sso_configured}`, `services.{gitlab,docker,cloudflare}.{installed,logged_in,detail}`, `commit` (last commit that changed `server/`, recorded by `install.sh`), `script_api`, `hostname`, `version` |
+| `status` | — | `claude.logged_in`, `github.{logged_in,user,missing_scopes}`, `aws.{logged_in,identity,profile,sso_configured}`, `services.{gitlab,docker,cloudflare}.{installed,logged_in,detail}`, `commit` (last commit that changed `server/`, recorded by `install.sh`), `script_api`, `hostname` |
 | `owners` | — | `user`, `orgs[{login}]`, `default_owner` |
 | `repos` | `[--refresh]` | `repos[{full_name,name,owner,owner_type,private,pushed_at,local,running,cloning}]` (cached for `REPOS_CACHE_TTL`). `local` means the folder's `origin` is this repo. |
 | `sessions` | — | `sessions[{name,project,dir,started_at,attached,uptime_seconds,preview,waiting,busy}]`: `preview` is the last lines (Claude's input box and status bar left out), `waiting` a question on screen, `busy` Claude working. |
@@ -123,7 +123,6 @@ Exit code 0 = success, 1 = handled error, 2 = bad arguments.
 | `chat-interrupt` | `<session>`; stdin: PIN | `interrupted` (Esc). |
 | `login-gitlab` | token, host (default gitlab.com) on stdin | `user` (uses `glab auth login --stdin`) |
 | `login-docker` | registry (default docker.io), username, token on stdin | `registry`, `user` (uses `docker login --password-stdin`) |
-| `login-cloudflare` | API token on stdin | `logged_in`. Verified with Cloudflare, then saved as `CLOUDFLARE_API_TOKEN` in `~/.config/claude-launcher/env` (mode 600); one line in `~/.bashrc` loads it so Claude's sessions (and `wrangler`) see it. |
 
 Error codes: `not_logged_in_claude`, `not_logged_in_github`, `missing_scopes`,
 `not_logged_in_aws`, `not_logged_in` (GitLab / registry / Cloudflare), `repo_exists`, `folder_dirty`, `invalid_name`, `run_disabled`, `session_busy`, `wrong_pin`, `chat_locked`, `pin_not_set`, `busy`,

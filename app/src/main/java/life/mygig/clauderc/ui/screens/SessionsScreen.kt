@@ -48,9 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import life.mygig.clauderc.api.Session
-import life.mygig.clauderc.api.Updates
 import life.mygig.clauderc.ui.LocalAppLock
-import life.mygig.clauderc.ui.LocalGuard
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import life.mygig.clauderc.ui.MainViewModel
@@ -69,7 +67,6 @@ fun SessionsScreen(vm: MainViewModel) {
     val sessions by vm.sessions.collectAsState()
     val refreshing by vm.sessionsRefreshing.collectAsState()
     val settings by vm.settings.collectAsState()
-    val guard = LocalGuard.current
     val context = LocalContext.current
     var confirmStop by remember { mutableStateOf<Session?>(null) }
     var confirmRestart by remember { mutableStateOf<Session?>(null) }
@@ -78,8 +75,6 @@ fun SessionsScreen(vm: MainViewModel) {
     val narrow = isNarrow()
     val appLock = LocalAppLock.current
     val scope = rememberCoroutineScope()
-    val status by vm.status.collectAsState()
-    val chatOk = (status?.scriptApi ?: 0) >= Updates.CHAT_API
 
     // Previews and "needs an answer" stay current while the tab is open.
     LaunchedEffect(Unit) {
@@ -111,7 +106,7 @@ fun SessionsScreen(vm: MainViewModel) {
             items(sessions.sortedByDescending { it.waiting }, key = { it.name }) { s ->
                 SessionCard(
                     s,
-                    chat = if (chatOk) ({ vm.openChat(s.name) }) else null,
+                    chat = { vm.openChat(s.name) },
                     onOpen = { openInClaude(context) },
                     onLog = { vm.loadTail(s.name) },
                     onRestart = { confirmRestart = s },
@@ -126,7 +121,7 @@ fun SessionsScreen(vm: MainViewModel) {
             onDismissRequest = { confirmRestartAll = false },
             title = { Text("Restart all sessions?") },
             text = { Text("Each session restarts in its folder and reopens the same conversation, so new plugins, skills, MCP servers and tokens are picked up. Sessions where Claude is still working are skipped.") },
-            confirmButton = { TextButton(onClick = { confirmRestartAll = false; guard.run("Restart all sessions") { vm.restartAll() } }) { Text("Restart all") } },
+            confirmButton = { TextButton(onClick = { confirmRestartAll = false; vm.restartAll() }) { Text("Restart all") } },
             dismissButton = { TextButton(onClick = { confirmRestartAll = false }) { Text("Cancel") } },
         )
     }
@@ -135,7 +130,7 @@ fun SessionsScreen(vm: MainViewModel) {
             onDismissRequest = { vm.dismissBusyRestart() },
             title = { Text("Claude is still working") },
             text = { Text("Restarting now interrupts what it's doing in $name. The conversation comes back, but the current step stops.") },
-            confirmButton = { TextButton(onClick = { guard.run("Restart $name") { vm.restartSession(name, force = true) } }) { Text("Restart anyway") } },
+            confirmButton = { TextButton(onClick = { vm.restartSession(name, force = true) }) { Text("Restart anyway") } },
             dismissButton = { TextButton(onClick = { vm.dismissBusyRestart() }) { Text("Wait") } },
         )
     }
@@ -144,7 +139,7 @@ fun SessionsScreen(vm: MainViewModel) {
             onDismissRequest = { confirmRestart = null },
             title = { Text("Restart ${s.project}?") },
             text = { Text("Stops this Claude session and starts it again in the same folder, so it picks up new plugins, skills, MCP servers and tokens. It reopens the same conversation, so nothing is lost. If Claude is still working, you'll be asked first.") },
-            confirmButton = { TextButton(onClick = { confirmRestart = null; guard.run("Restart ${s.project}") { vm.restartSession(s.name) } }) { Text("Restart") } },
+            confirmButton = { TextButton(onClick = { confirmRestart = null; vm.restartSession(s.name) }) { Text("Restart") } },
             dismissButton = { TextButton(onClick = { confirmRestart = null }) { Text("Cancel") } },
         )
     }
@@ -153,7 +148,7 @@ fun SessionsScreen(vm: MainViewModel) {
             onDismissRequest = { confirmStop = null },
             title = { Text("Stop ${s.project}?") },
             text = { Text("This ends the Claude Remote Control session on the server.") },
-            confirmButton = { TextButton(onClick = { confirmStop = null; guard.run("Stop ${s.project}") { vm.stopProject(s.name) } }) { Text("Stop") } },
+            confirmButton = { TextButton(onClick = { confirmStop = null; vm.stopProject(s.name) }) { Text("Stop") } },
             dismissButton = { TextButton(onClick = { confirmStop = null }) { Text("Cancel") } },
         )
     }

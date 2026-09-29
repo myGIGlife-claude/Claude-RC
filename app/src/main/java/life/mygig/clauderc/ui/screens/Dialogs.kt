@@ -61,7 +61,6 @@ import life.mygig.clauderc.api.Catalog
 import life.mygig.clauderc.api.ServiceDef
 import life.mygig.clauderc.api.TailResult
 import life.mygig.clauderc.api.Updates
-import life.mygig.clauderc.ui.LocalGuard
 import life.mygig.clauderc.ui.LoginKind
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.openUrl
@@ -119,10 +118,8 @@ fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
 @Composable
 fun AddServiceDialog(vm: MainViewModel) {
     val status by vm.status.collectAsState()
-    val guard = LocalGuard.current
     val st = status
     val sv = st?.services.orEmpty()
-    val newServer = (st?.scriptApi ?: 0) >= Updates.TOKEN_SERVICES_API
     // name, hint, what a tap does
     val options = buildList<Triple<String, String, () -> Unit>> {
         if (st?.aws?.loggedIn != true) add(Triple("AWS", "Access keys or SSO for the AWS CLI") { vm.addService(LoginKind.AWS) })
@@ -136,16 +133,12 @@ fun AddServiceDialog(vm: MainViewModel) {
                 vm.addService(LoginKind.DOCKER)
             })
         }
-        if ((st?.scriptApi ?: 0) >= Updates.YOUTUBE_API && sv["youtube"]?.loggedIn != true) {
+        if (sv["youtube"]?.loggedIn != true) {
             add(Triple("YouTube", "Upload videos to your channel (youtube-upload)") { vm.showAddService(false); vm.showLogin(LoginKind.YOUTUBE) })
         }
-        if ((st?.scriptApi ?: 0) >= Updates.KEYSTORE_API) {
-            add(Triple("Android signing key", "Upload keystore (.jks) for signing app bundles") { vm.showKeystores(true) })
-        }
-        if ((st?.scriptApi ?: 0) >= Updates.CUSTOM_KEYS_API) {
-            add(Triple("Custom API key", "Any other API: a name like ACME_API_KEY and its value") { vm.showCustomKeys(true) })
-        }
-        Catalog.services.filter { it.id == "cloudflare" || newServer }.forEach { def ->
+        add(Triple("Android signing key", "Upload keystore (.jks) for signing app bundles") { vm.showKeystores(true) })
+        add(Triple("Custom API key", "Any other API: a name like ACME_API_KEY and its value") { vm.showCustomKeys(true) })
+        Catalog.services.forEach { def ->
             val svc = sv[def.id]
             if (svc?.loggedIn != true) {
                 val hint = if (def.install != null && svc?.installed == false) "Installs ${def.install}, then asks for credentials" else def.hint
@@ -165,7 +158,6 @@ fun AddServiceDialog(vm: MainViewModel) {
                 keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
             )
             if (st == null) Text("Check the server first (pull down on Connections).")
-            if (st != null && !newServer) Text("Update the server scripts (card on Connections) to see more services.", style = MaterialTheme.typography.bodySmall)
             if (options.isEmpty() && st != null) Text("Everything here is already connected.")
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
@@ -176,7 +168,7 @@ fun AddServiceDialog(vm: MainViewModel) {
                 items(shown.size) { i ->
                     val (name, hint, go) = shown[i]
                     Surface(
-                        onClick = { guard.run("Connect $name") { go() } },
+                        onClick = { go() },
                         enabled = st != null,
                         shape = RoundedCornerShape(14.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -203,7 +195,6 @@ fun KeystoresDialog(vm: MainViewModel) {
     val context = LocalContext.current
     val status by vm.status.collectAsState()
     val busy by vm.busy.collectAsState()
-    val guard = LocalGuard.current
     var name by remember { mutableStateOf("") }
     var alias by remember { mutableStateOf("") }
     var storePw by remember { mutableStateOf("") }
@@ -270,10 +261,8 @@ fun KeystoresDialog(vm: MainViewModel) {
                 Button(
                     onClick = {
                         val f = file ?: return@Button
-                        guard.run("Save the $name signing key") {
-                            vm.saveKeystore(name, alias, storePw, keyPw, f)
-                            storePw = ""; keyPw = ""; file = null; fileName = ""
-                        }
+                        vm.saveKeystore(name, alias, storePw, keyPw, f)
+                        storePw = ""; keyPw = ""; file = null; fileName = ""
                     },
                     enabled = busy == null && nameOk && file != null && alias.isNotBlank() && pwOk,
                     modifier = Modifier.fillMaxWidth(),
@@ -288,7 +277,7 @@ fun KeystoresDialog(vm: MainViewModel) {
             onDismissRequest = { confirmRemove = null },
             title = { Text("Remove the $n signing key?") },
             text = { Text("It's deleted from the server. Keep your own backup: Google Play only accepts bundles signed with this upload key.") },
-            confirmButton = { TextButton(onClick = { confirmRemove = null; guard.run("Remove $n") { vm.removeKeystore(n) } }) { Text("Remove") } },
+            confirmButton = { TextButton(onClick = { confirmRemove = null; vm.removeKeystore(n) }) { Text("Remove") } },
             dismissButton = { TextButton(onClick = { confirmRemove = null }) { Text("Cancel") } },
         )
     }
@@ -299,7 +288,6 @@ fun KeystoresDialog(vm: MainViewModel) {
 fun CustomKeysDialog(vm: MainViewModel) {
     val status by vm.status.collectAsState()
     val busy by vm.busy.collectAsState()
-    val guard = LocalGuard.current
     var name by remember { mutableStateOf("") }
     var value by remember { mutableStateOf("") }
     var confirmRemove by remember { mutableStateOf<String?>(null) }
@@ -334,7 +322,7 @@ fun CustomKeysDialog(vm: MainViewModel) {
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
                 )
                 Button(
-                    onClick = { guard.run("Save $name") { vm.setSecret(name, value); name = ""; value = "" } },
+                    onClick = { vm.setSecret(name, value); name = ""; value = "" },
                     enabled = busy == null && nameOk && value.isNotEmpty() && !value.contains('\''),
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Save") }
@@ -348,7 +336,7 @@ fun CustomKeysDialog(vm: MainViewModel) {
             onDismissRequest = { confirmRemove = null },
             title = { Text("Remove $n?") },
             text = { Text("Sessions lose it after their next restart.") },
-            confirmButton = { TextButton(onClick = { confirmRemove = null; guard.run("Remove $n") { vm.removeSecret(n) } }) { Text("Remove") } },
+            confirmButton = { TextButton(onClick = { confirmRemove = null; vm.removeSecret(n) }) { Text("Remove") } },
             dismissButton = { TextButton(onClick = { confirmRemove = null }) { Text("Cancel") } },
         )
     }
@@ -421,10 +409,7 @@ fun TokenServiceDialog(vm: MainViewModel, def: ServiceDef) {
 /** Getting a service's CLI onto the server. */
 @Composable
 fun SetupDialog(vm: MainViewModel, kind: LoginKind) {
-    val context = LocalContext.current
     val busy by vm.busy.collectAsState()
-    val status by vm.status.collectAsState()
-    val canInstall = (status?.scriptApi ?: 0) >= Updates.INSTALL_CLI_API
     var sudoPw by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = { if (busy == null) vm.showSetup(null) },
@@ -437,17 +422,10 @@ fun SetupDialog(vm: MainViewModel, kind: LoginKind) {
                             "official release from gitlab.com into ~/.local/bin, checks it against the release's " +
                             "checksums, and needs no sudo. Then you can log in.",
                     )
-                    if (canInstall) {
-                        Button(onClick = { vm.installGlab() }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) {
-                            Text("Install glab")
-                        }
-                    } else {
-                        Text(
-                            "Update the server scripts first (the card at the top of Status), then come back here.",
-                            color = MaterialTheme.colorScheme.error,
-                        )
+                    Button(onClick = { vm.installGlab() }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) {
+                        Text("Install glab")
                     }
-                } else if ((status?.scriptApi ?: 0) >= Updates.TOKEN_SERVICES_API) {
+                } else {
                     Text(
                         "Docker needs root to install. Enter your sudo password and the server runs Docker's official " +
                             "install script (get.docker.com), then adds you to the docker group. The password is used once " +
@@ -465,23 +443,6 @@ fun SetupDialog(vm: MainViewModel, kind: LoginKind) {
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Install Docker") }
                     Text("This can take a few minutes.", style = MaterialTheme.typography.bodySmall)
-                } else {
-                    Text("Docker needs root to install, so run this on the server yourself (it asks for your sudo password):")
-                    SelectionContainer {
-                        Text(DOCKER_INSTALL, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
-                    }
-                    OutlinedButton(onClick = {
-                        copy(context, "Docker install", DOCKER_INSTALL)
-                        vm.say("Copied. Paste it into a terminal on the server.")
-                    }, modifier = Modifier.fillMaxWidth()) { Text("Copy command") }
-                    Text(
-                        "It uses Docker's official install script (get.docker.com) and adds you to the docker " +
-                            "group so docker works without sudo. Then tap Check again.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Button(onClick = { vm.showSetup(null); vm.refreshStatus() }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Check again")
-                    }
                 }
             }
         },
@@ -489,8 +450,6 @@ fun SetupDialog(vm: MainViewModel, kind: LoginKind) {
         dismissButton = { TextButton(onClick = { vm.showSetup(null) }) { Text("Close") } },
     )
 }
-
-private const val DOCKER_INSTALL = "curl -fsSL https://get.docker.com | sudo sh && sudo usermod -aG docker \"\$USER\""
 
 @Composable
 private fun ClaudeLogin(vm: MainViewModel, busy: Boolean) {

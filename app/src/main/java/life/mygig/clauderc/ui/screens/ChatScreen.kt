@@ -6,7 +6,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.ui.platform.LocalContext
-import life.mygig.clauderc.api.Updates
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
@@ -63,7 +62,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import life.mygig.clauderc.api.ChatMessage
 import life.mygig.clauderc.api.PinStatus
-import life.mygig.clauderc.ui.LocalGuard
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.StatusDot
@@ -194,7 +192,6 @@ private fun PromptCard(vm: MainViewModel, screen: String, enabled: Boolean) {
 @Composable
 private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
     val context = LocalContext.current
-    val status by vm.status.collectAsState()
     var text by rememberSaveable { mutableStateOf("") }
     // Attach: the file goes into the project's uploads/ folder; its path goes in the message.
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -210,10 +207,8 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
         }
     }
     Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        if ((status?.scriptApi ?: 0) >= Updates.UPLOAD_API) {
-            IconButton(onClick = { pick.launch(arrayOf("*/*")) }, enabled = enabled, modifier = Modifier.height(52.dp)) {
-                Icon(Icons.Filled.AttachFile, contentDescription = "Attach a file or photo")
-            }
+        IconButton(onClick = { pick.launch(arrayOf("*/*")) }, enabled = enabled, modifier = Modifier.height(52.dp)) {
+            Icon(Icons.Filled.AttachFile, contentDescription = "Attach a file or photo")
         }
         OutlinedTextField(
             value = text, onValueChange = { text = it }, placeholder = { Text("Message Claude") },
@@ -232,7 +227,6 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
 /** Enter the chat PIN, or create one the first time. The app never stores or shows it. */
 @Composable
 private fun PinGate(vm: MainViewModel, status: PinStatus, error: String?) {
-    val guard = LocalGuard.current
     var pin by remember { mutableStateOf("") }
     var again by remember { mutableStateOf("") }
     val setup = !status.set
@@ -262,7 +256,7 @@ private fun PinGate(vm: MainViewModel, status: PinStatus, error: String?) {
         Button(
             onClick = {
                 val p = pin
-                if (setup) guard.run("Create chat PIN") { vm.setChatPin(p) } else vm.unlockChat(p)
+                if (setup) vm.setChatPin(p) else vm.unlockChat(p)
                 pin = ""; again = ""
             },
             enabled = pin.length >= 6 && (!setup || again == pin),

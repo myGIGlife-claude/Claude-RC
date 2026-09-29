@@ -11,7 +11,6 @@
 
 set -uo pipefail
 
-SCRIPT_VERSION="2.0.0"
 # What the phone can rely on: 2 = extra services, 3 = self-update,
 # 4 = install-cli, 5 = run, 6 = restart + claude-cmd, 7 = token services +
 # more CLIs, 8 = keys, 9 = safe restart (resume + busy check), 10 = MXroute
@@ -701,11 +700,11 @@ do_status() {
     --argjson c "$claude_ok" --argjson g "$gh_ok" --arg gu "$gh_user" --argjson gm "$scopes" \
     --argjson a "$aws_ok" --argjson ai "$aws_json" --arg ap "${AWS_PROFILE_NAME:-default}" \
     --argjson sso "$(aws_sso_configured && echo true || echo false)" \
-    --arg host "$(hostname -s 2>/dev/null || hostname)" --arg v "$SCRIPT_VERSION" '{
+    --arg host "$(hostname -s 2>/dev/null || hostname)" '{
       claude:{logged_in:$c},
       github:{logged_in:$g, user:(if $gu=="" then null else $gu end), missing_scopes:$gm},
       aws:{logged_in:$a, identity:$ai, profile:$ap, sso_configured:$sso},
-      hostname:$host, version:$v, services:$services, custom:$custom, keystores:$keystores,
+      hostname:$host, services:$services, custom:$custom, keystores:$keystores,
       commit:(if $commit=="" then null else $commit end), script_api:$api, run_enabled:$run}')"
 }
 
@@ -1418,10 +1417,8 @@ ensure_env_hook() {
   tmp="$(mktemp "$f.XXXXXX")" || return 0
   old='[]'
   [[ -f "$managed" ]] && old="$(jq -Rsc 'split("\n") | map(select(. != ""))' "$managed")"
-  jq --argjson v "$vars" --argjson old "$old" \
-     --arg be "$SERVICES_ENV" '
-    .env = (((.env // {}) | with_entries(select((.key as $k | $old | index($k)) | not))
-             | if .BASH_ENV == $be then del(.BASH_ENV) else . end) + $v)' "$f" >"$tmp" &&
+  jq --argjson v "$vars" --argjson old "$old" '
+    .env = (((.env // {}) | with_entries(select((.key as $k | $old | index($k)) | not))) + $v)' "$f" >"$tmp" &&
     { chmod 600 "$f"; cat "$tmp" >"$f"; jq -r 'keys[]' <<<"$vars" >"$managed"; }
   rm -f "$tmp"
 }
@@ -1510,7 +1507,6 @@ do_login_token() {
 }
 
 # Older apps call this name.
-do_login_cloudflare() { do_login_token cloudflare; }
 
 custom_name_ok() { [[ "$1" =~ $CUSTOM_NAME_RE && "$1" != CLAUDE_* && "$1" != ANTHROPIC_* ]]; }
 
@@ -2167,7 +2163,7 @@ api_main() {
   local cmd="${1:-}"
   shift || true
   case "$cmd" in
-    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | login-cloudflare | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | youtube-login-start | \
+    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | youtube-login-start | \
       chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | upload) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
@@ -2191,7 +2187,6 @@ api_main() {
     login-aws-sso-start) do_login_aws_sso_start ;;
     login-gitlab)        do_login_gitlab ;;
     login-docker)        do_login_docker ;;
-    login-cloudflare)    do_login_cloudflare ;;
     login-token)         do_login_token "$@" ;;
     self-update)         do_self_update "$@" ;;
     install-cli)         do_install_cli "$@" ;;
@@ -2231,7 +2226,7 @@ main() {
     --api) shift; api_main "$@" ;;
     --clone-worker) shift; clone_worker "$@" ;;
     --mcp-refresh) mcp_refresh_now ;;
-    --version) echo "$SCRIPT_VERSION" ;;
+    --version) echo "$SCRIPT_API" ;;
     -h | --help) sed -n '2,10p' "$SCRIPT_PATH" | sed 's/^# \{0,1\}//' ;;
     "") menu_main ;;
     *) echo "Unknown option: $1 (try --help)" >&2; exit 2 ;;

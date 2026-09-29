@@ -38,7 +38,6 @@ import life.mygig.clauderc.api.Catalog
 import life.mygig.clauderc.api.McpServer
 import life.mygig.clauderc.api.Updates
 import life.mygig.clauderc.ui.Detail
-import life.mygig.clauderc.ui.LocalGuard
 import life.mygig.clauderc.ui.LoginKind
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.components.Health
@@ -74,8 +73,7 @@ fun ConnectionsScreen(vm: MainViewModel) {
     val refreshing by vm.statusRefreshing.collectAsState()
     val latest by vm.latest.collectAsState()
     val mcp by vm.mcp.collectAsState()
-    val guard = LocalGuard.current
-    val login = { kind: LoginKind -> guard.run("Log in on the server") { vm.showLogin(kind) } }
+    val login = { kind: LoginKind -> vm.showLogin(kind) }
     val detail = { d: Detail -> vm.openDetail(d) }
 
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = { vm.refreshAll() }, modifier = Modifier.fillMaxSize()) {
@@ -104,7 +102,7 @@ fun ConnectionsScreen(vm: MainViewModel) {
             val required = s.scriptApi < Updates.MIN_SCRIPT_API
             val newCommit = l?.serverCommit?.takeIf { it != s.commit }
             if (required || newCommit != null) {
-                full { ServerUpdateCard(vm, required, newCommit.takeIf { s.scriptApi >= Updates.SELF_UPDATE_API }) }
+                full { ServerUpdateCard(vm, required, newCommit) }
             }
 
             section("Core", listOf(
@@ -192,7 +190,6 @@ private fun Banner(title: String, text: String, onClick: () -> Unit) {
 @Composable
 private fun ServerUpdateCard(vm: MainViewModel, required: Boolean, commit: String?) {
     val context = LocalContext.current
-    val guard = LocalGuard.current
     val busy by vm.busy.collectAsState()
     var confirm by remember { mutableStateOf(false) }
     Surface(
@@ -226,7 +223,7 @@ private fun ServerUpdateCard(vm: MainViewModel, required: Boolean, commit: Strin
             title = { Text("Update the server scripts?") },
             text = { Text("The server downloads install.sh from GitHub at commit ${commit.take(7)} and runs it. Running sessions keep going.") },
             confirmButton = {
-                TextButton(onClick = { confirm = false; guard.run("Update the server scripts") { vm.updateServerScripts(commit) } }) { Text("Update") }
+                TextButton(onClick = { confirm = false; vm.updateServerScripts(commit) }) { Text("Update") }
             },
             dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
         )

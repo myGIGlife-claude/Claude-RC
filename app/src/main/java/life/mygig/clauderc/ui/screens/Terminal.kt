@@ -63,8 +63,6 @@ import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.delay
 import life.mygig.clauderc.api.TailResult
-import life.mygig.clauderc.api.Updates
-import life.mygig.clauderc.ui.LocalGuard
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.theme.Term
 
@@ -117,13 +115,9 @@ private fun TermButton(label: String, onClick: () -> Unit, enabled: Boolean = tr
 /** A session's screen, live, with keys to answer its prompts. */
 @Composable
 fun TailScreen(vm: MainViewModel, tail: TailResult) {
-    val guard = LocalGuard.current
-    val status by vm.status.collectAsState()
     val busy by vm.busy.collectAsState()
     val updatedAt by vm.tailUpdatedAt.collectAsState()
     val refreshing by vm.tailRefreshing.collectAsState()
-    // Answering prompts (e.g. approving an MCP server) asks for App lock once per window.
-    var keysUnlocked by remember { mutableStateOf(false) }
     var live by remember { mutableStateOf(true) }
     var size by rememberSaveable { mutableIntStateOf(13) }
     val vScroll = rememberScrollState()
@@ -151,16 +145,11 @@ fun TailScreen(vm: MainViewModel, tail: TailResult) {
             )
         }
         Column(Modifier.fillMaxWidth().background(Term.Panel).padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if ((status?.scriptApi ?: 0) >= Updates.KEYS_API) {
-                Text("ANSWER THE PROMPT", color = Term.Label, fontSize = 11.sp, letterSpacing = 1.sp)
-                val keys = listOf("1" to "1", "2" to "2", "3" to "3", "Up" to "↑", "Down" to "↓", "y" to "y", "n" to "n", "Escape" to "Esc")
-                val send = { key: String ->
-                    if (keysUnlocked) vm.sendKey(key) else guard.run("Answer prompts in ${tail.session}") { keysUnlocked = true; vm.sendKey(key) }
-                }
-                LazyVerticalGrid(columns = GridCells.Fixed(5), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(100.dp)) {
-                    keys.forEach { (k, label) -> item { TermButton(label, { send(k) }, enabled = busy == null) } }
-                    item(span = { GridItemSpan(2) }) { TermButton("Enter ⏎", { send("Enter") }, enabled = busy == null, primary = true) }
-                }
+            Text("ANSWER THE PROMPT", color = Term.Label, fontSize = 11.sp, letterSpacing = 1.sp)
+            val keys = listOf("1" to "1", "2" to "2", "3" to "3", "Up" to "↑", "Down" to "↓", "y" to "y", "n" to "n", "Escape" to "Esc")
+            LazyVerticalGrid(columns = GridCells.Fixed(5), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(100.dp)) {
+                keys.forEach { (k, label) -> item { TermButton(label, { vm.sendKey(k) }, enabled = busy == null) } }
+                item(span = { GridItemSpan(2) }) { TermButton("Enter ⏎", { vm.sendKey("Enter") }, enabled = busy == null, primary = true) }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Switch(checked = live, onCheckedChange = { live = it }, colors = SwitchDefaults.colors(checkedTrackColor = Term.Dim, checkedThumbColor = Term.Fg))
@@ -174,7 +163,6 @@ fun TailScreen(vm: MainViewModel, tail: TailResult) {
 /** Run a command: type or paste, optional sudo password; each run's output stays in the scrollback. */
 @Composable
 fun RunScreen(vm: MainViewModel) {
-    val guard = LocalGuard.current
     val busy by vm.busy.collectAsState()
     val status by vm.status.collectAsState()
     val history by vm.runHistory.collectAsState()
@@ -188,7 +176,6 @@ fun RunScreen(vm: MainViewModel) {
             SelectionContainer {
                 Column(Modifier.fillMaxSize().verticalScroll(vScroll).padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     when {
-                        st != null && st.scriptApi < Updates.RUN_API -> Text("Update the server scripts first (Connections tab).", style = termText(13).copy(color = Term.Amber))
                         st != null && !st.runEnabled -> {
                             Text("Running commands from the phone is off on this server. To allow it, run this there once, then pull to refresh Connections:", style = termText(13).copy(color = Term.Amber))
                             Text("$ $ENABLE_RUN_CMD", style = termText(13).copy(color = Term.Head))
@@ -223,7 +210,7 @@ fun RunScreen(vm: MainViewModel) {
             )
             TermButton(
                 "Run ⏎",
-                { guard.run("Run a command on the server") { vm.runCommand(command, password); command = "" } },
+                { vm.runCommand(command, password); command = "" },
                 enabled = busy == null && command.isNotBlank() && st != null && st.runEnabled,
                 primary = true,
                 modifier = Modifier.fillMaxWidth(),
