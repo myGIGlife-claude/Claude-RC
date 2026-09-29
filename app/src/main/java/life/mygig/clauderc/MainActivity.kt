@@ -42,7 +42,10 @@ class MainActivity : FragmentActivity(), AppLock {
 
     override fun onStop() {
         super.onStop()
-        if (!isChangingConfigurations) backgroundedAt = SystemClock.elapsedRealtime()
+        if (!isChangingConfigurations) {
+            backgroundedAt = SystemClock.elapsedRealtime()
+            vm.lockChat()   // chat needs the PIN again after any trip away from the app
+        }
     }
 
     override fun canAuthenticate(): Boolean =
