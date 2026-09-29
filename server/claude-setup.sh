@@ -1517,6 +1517,8 @@ do_login_token() {
       vals+=("$v")
     done
     exec 0</dev/null
+    [[ "$id" == supabase && "${vals[0]}" != sbp_* ]] &&
+      api_err invalid_name "That's a project API key. Supabase needs a personal access token (starts with sbp_): Account › Access Tokens."
     [[ "$id" == cloudflare && "${vals[0]}" == cfat_* && -z "${vals[1]}" ]] &&
       api_err invalid_name "That's an account token (cfat_…): add its Account ID too (shown when you created it)."
     need curl
@@ -1973,6 +1975,19 @@ do_mcp_auth_start() {
       [[ " $sel " == *" $name "* ]] && mcp_auth_key Enter || mcp_auth_key Down
     fi
   done
+  # The provider can forget the app registration Claude saved for this server
+  # ("Unrecognized client_id"): drop it so Claude registers again, and retry once.
+  local probe=""
+  [[ -n "$url" && -z "${MCP_AUTH_RETRY:-}" ]] && probe="$(t 15 curl -s --max-time 10 -w '\n%{http_code}' "$url" 2>/dev/null)"
+  if [[ "${probe##*$'\n'}" =~ ^4[0-9][0-9]$ ]] && grep -qiE 'client_id|invalid_client|unknown client' <<<"$probe"; then
+    end_login "$MCP_AUTH_SESSION"
+    local cred="$HOME/.claude/.credentials.json" tmp
+    tmp="$(mktemp "$cred.XXXXXX")" &&
+      jq --arg n "$name" '.mcpOAuth |= with_entries(select(.value.serverName != $n))' "$cred" >"$tmp" 2>/dev/null &&
+      chmod 600 "$tmp" && mv -f "$tmp" "$cred" || rm -f "$tmp"
+    printf '%s\n' "$name" | MCP_AUTH_RETRY=1 "$SCRIPT_PATH" --api mcp-auth-start >&3
+    EMITTED=1; exit 0
+  fi
   if [[ -z "$url" ]]; then
     end_login "$MCP_AUTH_SESSION"
     api_err internal "Claude didn't offer a sign-in for $name." "$(jq -cn --arg t "$(grep -v '^\s*$' <<<"$text" | tail -n 12)" '{pane:$t}')"
