@@ -1,5 +1,17 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import life.mygig.clauderc.ui.components.Health
+import life.mygig.clauderc.ui.components.StatusDot
+
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -35,6 +47,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -86,30 +99,26 @@ fun ProjectsScreen(vm: MainViewModel) {
             }
         }
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = { vm.refreshRepos(true) }, modifier = Modifier.fillMaxSize()) {
-            LazyColumn(Modifier.fillMaxSize()) {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 if (shown.isEmpty()) {
-                    item {
-                        Text(
-                            if (refreshing) "Loading repos…" else "No repos match.",
-                            modifier = Modifier.padding(16.dp),
-                        )
-                    }
+                    item(span = { GridItemSpan(maxLineSpan) }) { Text(if (refreshing) "Loading repos…" else "No repos match.") }
                 }
                 items(shown, key = { it.fullName }) { repo ->
-                    ListItem(
-                        headlineContent = { Text(repo.name) },
-                        supportingContent = {
-                            Column {
-                                Text(repo.owner, style = MaterialTheme.typography.bodySmall)
-                                Badges(repo)
-                            }
-                        },
-                        modifier = Modifier.combinedClickable(
-                            onClick = { selected = repo },
-                            onLongClick = { if (repo.running) vm.loadTail(repo.name) else selected = repo },
-                        ),
+                    RepoTile(
+                        repo,
+                        onClick = { selected = repo },
+                        onLongClick = { if (repo.running) vm.loadTail(repo.name) else selected = repo },
                     )
-                    HorizontalDivider()
+                }
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Text("Tap a project for Open in Claude, clone/pull + start, stop, log or GitHub. Long-press a running one for its log.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -118,29 +127,37 @@ fun ProjectsScreen(vm: MainViewModel) {
     selected?.let { repo -> RepoActions(vm, repo) { selected = null } }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun Badges(repo: Repo) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Badge(if (repo.private) "Private" else "Public")
-        if (repo.isOrg) Badge("Org")
-        if (repo.cloning) Badge("Cloning…") else if (repo.local) Badge("On server")
-        if (repo.running) Badge("Running")
+private fun RepoTile(repo: Repo, onClick: () -> Unit, onLongClick: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).combinedClickable(onClick = onClick, onLongClick = onLongClick),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatusDot(when { repo.running -> Health.OK; repo.cloning -> Health.WARN; repo.local -> Health.OFF; else -> Health.NONE })
+                Text(repo.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Text(
+                when { repo.cloning -> "Cloning…"; repo.running -> "Running"; repo.local -> "On server"; else -> "GitHub only" } +
+                    (repo.pushedAt?.take(10)?.let { " · $it" } ?: ""),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Badge(if (repo.private) "Private" else "Public")
+                if (repo.isOrg) Badge(repo.owner)
+            }
+        }
     }
 }
 
 /** A plain label (not a button) so screen readers don't announce it as tappable. */
 @Composable
 private fun Badge(text: String) {
-    Surface(
-        shape = MaterialTheme.shapes.small,
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        modifier = Modifier.padding(top = 4.dp),
-    ) {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-        )
+    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
+        Text(text, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), maxLines = 1)
     }
 }
 

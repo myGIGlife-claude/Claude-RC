@@ -1,5 +1,11 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Switch
+import life.mygig.clauderc.ui.components.SectionLabel
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -45,7 +51,7 @@ import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.openInClaude
 import life.mygig.clauderc.ui.openUrl
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun NewProjectScreen(vm: MainViewModel) {
     val owners by vm.owners.collectAsState()
@@ -59,7 +65,6 @@ fun NewProjectScreen(vm: MainViewModel) {
     var owner by rememberSaveable { mutableStateOf("") }
     var private by rememberSaveable { mutableStateOf(true) }
     var start by rememberSaveable { mutableStateOf(true) }
-    var ownerMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { vm.loadOwners() }
     LaunchedEffect(owners) {
@@ -76,8 +81,9 @@ fun NewProjectScreen(vm: MainViewModel) {
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        SectionLabel("New project")
         OutlinedTextField(
             value = name,
             onValueChange = { name = it.trim() },
@@ -94,60 +100,36 @@ fun NewProjectScreen(vm: MainViewModel) {
         )
 
         val choices = owners?.let { listOf(it.user) + it.orgs.map { o -> o.login } }.orEmpty()
-        ExposedDropdownMenuBox(expanded = ownerMenu, onExpandedChange = { ownerMenu = it }) {
-            OutlinedTextField(
-                value = owner,
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("Owner") },
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(ownerMenu) },
-                isError = owners == null && ownersError != null,
-                supportingText = {
-                    when {
-                        owners != null -> {}
-                        ownersError != null -> Text(ownersError!!)
-                        else -> Text("Loading owners…")
-                    }
-                },
-                modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
-            )
-            ExposedDropdownMenu(expanded = ownerMenu, onDismissRequest = { ownerMenu = false }) {
+        Text("Owner", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        when {
+            owners != null -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 choices.forEach { c ->
-                    DropdownMenuItem(
-                        text = { Text(if (c == owners?.user) "$c (you)" else c) },
-                        onClick = { owner = c; ownerMenu = false },
-                    )
+                    FilterChip(selected = owner == c, onClick = { owner = c }, label = { Text(if (c == owners?.user) "$c (you)" else c) })
                 }
             }
+            ownersError != null -> {
+                Text(ownersError!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(onClick = { vm.loadOwners() }) { Text("Retry loading owners") }
+            }
+            else -> Text("Loading owners…", style = MaterialTheme.typography.bodySmall)
         }
 
-        if (owners == null && ownersError != null) {
-            OutlinedButton(onClick = { vm.loadOwners() }) { Text("Retry loading owners") }
-        }
-
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-            SegmentedButton(
-                selected = private,
-                onClick = { private = true },
-                shape = SegmentedButtonDefaults.itemShape(0, 2),
-            ) { Text("Private") }
-            SegmentedButton(
-                selected = !private,
-                onClick = { private = false },
-                shape = SegmentedButtonDefaults.itemShape(1, 2),
-            ) { Text("Public") }
+        Text("Visibility", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = private, onClick = { private = true }, label = { Text("Private") })
+            FilterChip(selected = !private, onClick = { private = false }, label = { Text("Public") })
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = start, onCheckedChange = { start = it })
-            Text("Start Claude now")
+            Text("Start Claude now", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+            Switch(checked = start, onCheckedChange = { start = it })
         }
 
         Button(
             onClick = { guard.run("Create $owner/$name") { vm.createProject(name, owner, private, start) } },
             enabled = canCreate,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Create") }
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+        ) { Text("Create project") }
 
         result?.let { r ->
             Card(Modifier.fillMaxWidth()) {

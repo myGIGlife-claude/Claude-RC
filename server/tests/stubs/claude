@@ -25,7 +25,12 @@ case "$1 ${2:-}" in
     fi
     exec sleep 1000 ;;
   "doctor ") printf '\033[1mNo installation issues found.\033[0m\n' ;;
-  "plugin list") echo "Installed plugins: demo@market" ;;
+  "plugin list")
+    if [[ " $* " == *" --json "* ]]; then
+      echo '{"installed":[{"id":"demo@market","version":"1.0","scope":"user","enabled":true}],"available":[{"pluginId":"demo@market","name":"demo","description":"A demo","marketplaceName":"market","installCount":3},{"pluginId":"other@market","name":"other","description":"Other","marketplaceName":"market","installCount":1}]}'
+    else echo "Installed plugins: demo@market"; fi ;;
+  "plugin marketplace") echo '[{"name":"market","source":"github","repo":"demo/market"}]' ;;
+  "--version ") echo "2.1.999 (Claude Code)" ;;
   "plugin install") echo "Installed $3" ;;
   *) echo "claude stub: $*" >&2; exit 1 ;;
 esac

@@ -22,6 +22,8 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -70,7 +72,11 @@ import life.mygig.clauderc.data.ThemeMode
 import life.mygig.clauderc.api.Catalog
 import life.mygig.clauderc.ui.screens.AddServiceDialog
 import life.mygig.clauderc.ui.screens.TokenServiceDialog
-import life.mygig.clauderc.ui.screens.CommandCenterScreen
+import life.mygig.clauderc.ui.screens.ClaudeScreen
+import life.mygig.clauderc.ui.screens.ConnectionsScreen
+import life.mygig.clauderc.ui.screens.DetailScreen
+import life.mygig.clauderc.ui.screens.RunScreen
+import life.mygig.clauderc.ui.screens.TailScreen
 import life.mygig.clauderc.ui.screens.CustomKeysDialog
 import life.mygig.clauderc.ui.screens.KeystoresDialog
 import life.mygig.clauderc.ui.screens.HostKeyDialog
@@ -80,8 +86,6 @@ import life.mygig.clauderc.ui.screens.ProjectsScreen
 import life.mygig.clauderc.ui.screens.SessionsScreen
 import life.mygig.clauderc.ui.screens.SettingsScreen
 import life.mygig.clauderc.ui.screens.SetupDialog
-import life.mygig.clauderc.ui.screens.StatusScreen
-import life.mygig.clauderc.ui.screens.TailDialog
 import life.mygig.clauderc.ui.theme.ClaudeRcTheme
 
 /** Fingerprint / device-PIN check, implemented by the activity. */
@@ -146,6 +150,8 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             val login by vm.login.collectAsState()
             val setup by vm.setup.collectAsState()
             val showAdd by vm.showAdd.collectAsState()
+            val detail by vm.detail.collectAsState()
+            val showRun by vm.showRun.collectAsState()
             val showCustom by vm.showCustom.collectAsState()
             val showKeystores by vm.showKeystores.collectAsState()
             val tokenService by vm.tokenService.collectAsState()
@@ -231,6 +237,10 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                                     IconButton(onClick = { vm.removeServer(s.activeId) }) {
                                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Cancel adding server")
                                     }
+                                } else if (detail != null && !showSettings && !setupNeeded) {
+                                    IconButton(onClick = { vm.openDetail(null) }) {
+                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                                    }
                                 } else if (showSettings && !setupNeeded) {
                                     IconButton(onClick = { vm.openSettings(false) }) {
                                         Icon(
@@ -264,11 +274,11 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                 bottomBar = {
                     if (!showSettings && !setupNeeded) {
                         NavigationBar {
-                            TabItem(tab, Tab.STATUS, "Status", Icons.Filled.CheckCircle, vm)
+                            TabItem(tab, Tab.STATUS, "Connections", Icons.Filled.Hub, vm)
                             TabItem(tab, Tab.NEW, "New", Icons.Filled.AddCircle, vm)
                             TabItem(tab, Tab.PROJECTS, "Projects", Icons.AutoMirrored.Filled.List, vm)
                             TabItem(tab, Tab.SESSIONS, "Sessions", Icons.Filled.Terminal, vm)
-                            TabItem(tab, Tab.COMMAND, "Command", Icons.Filled.Build, vm)
+                            TabItem(tab, Tab.COMMAND, "Claude", Icons.Filled.AutoAwesome, vm)
                         }
                     }
                 },
@@ -279,11 +289,12 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                 Box(Modifier.padding(padding).consumeWindowInsets(padding).imePadding().fillMaxSize()) {
                     when {
                         showSettings || setupNeeded -> SettingsScreen(vm, s, firstRun = setupNeeded)
-                        tab == Tab.STATUS -> StatusScreen(vm)
+                        detail != null -> DetailScreen(vm, detail!!)
+                        tab == Tab.STATUS -> ConnectionsScreen(vm)
                         tab == Tab.NEW -> NewProjectScreen(vm)
                         tab == Tab.PROJECTS -> ProjectsScreen(vm)
                         tab == Tab.SESSIONS -> SessionsScreen(vm)
-                        tab == Tab.COMMAND -> CommandCenterScreen(vm)
+                        tab == Tab.COMMAND -> ClaudeScreen(vm)
                     }
                 }
             }
@@ -294,7 +305,8 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             if (showCustom) CustomKeysDialog(vm)
             if (showKeystores) KeystoresDialog(vm)
             tokenService?.let { id -> Catalog.byId(id)?.let { TokenServiceDialog(vm, it) } }
-            tail?.let { TailDialog(vm, it) }
+            tail?.let { TailScreen(vm, it) }
+            if (showRun) RunScreen(vm)
             pendingKey?.let { HostKeyDialog(vm, it, s.hostKeyFingerprint.ifEmpty { s.previousFingerprint }) }
         }
     }
@@ -329,7 +341,7 @@ private fun androidx.compose.foundation.layout.RowScope.TabItem(
 ) {
     NavigationBarItem(
         selected = current == tab,
-        onClick = { vm.selectTab(tab) },
+        onClick = { vm.openDetail(null); vm.selectTab(tab) },
         icon = { Icon(icon, contentDescription = null) },
         label = { Text(label) },
     )

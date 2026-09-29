@@ -350,6 +350,23 @@ python3 -m py_compile "$SERVER/youtube-upload"; check "youtube-upload is valid P
 OUT="$(env -u YOUTUBE_CLIENT_ID python3 "$SERVER/youtube-upload" /etc/hostname --title t 2>&1)"
 [[ "$OUT" == *"connect YouTube in the cLaudeRC app"* ]]; check "youtube-upload explains missing credentials" $?
 
+echo "mcp, plugins, disconnect"
+mkdir -p "$HOME/.cache/claude-launcher"
+printf 'Checking MCP server health…\n\nclaude.ai Docs: https://example.com/mcp - ✔ Connected\nplugin:gh:github: https://api.example.com/mcp/ (HTTP) - ✘ Failed to connect\nmine: uv run --script /x/server.py --token SECRET - ✔ Connected\n' >"$HOME/.cache/claude-launcher/mcp-list.txt"
+echo '{"mcpServers":{"mine":{}}}' >"$HOME/.claude.json"
+api "mcp"
+check "mcp lists cached servers with scope and health" "$(jqt '.ok and (.data.servers|length)==3 and .data.servers[0].scope=="claude.ai" and .data.servers[0].label=="Docs" and .data.servers[1].scope=="plugin" and .data.servers[1].health=="failed" and .data.servers[2].scope=="user"')"
+check "mcp never shows stdio arguments (they can hold secrets)" "$(jqt '.data.servers[2].target=="uv run" and (tostring|test("SECRET")|not)')"
+api "plugins"
+check "plugins: installed, available, marketplaces, version" "$(jqt '.ok and .data.installed[0].name=="demo" and .data.installed[0].enabled and (.data.available|length)==2 and .data.available[0].installed and (.data.available[1].installed|not) and .data.marketplaces[0].name=="market" and .data.claude_version=="2.1.999"')"
+api "sessions"; check "sessions carry preview/waiting/busy" "$(jqt '.ok and (.data.sessions|length) > 0 and (.data.sessions[0]|has("preview") and has("waiting") and has("busy"))')"
+mkdir -p "$HOME/.config/claude-launcher"; printf "export VERCEL_TOKEN='abc'\n" >"$HOME/.config/claude-launcher/env"
+api "disconnect vercel"; check "disconnect removes a service's token" "$(jqt '.ok and .data.disconnected=="vercel"')"
+grep -q VERCEL_TOKEN "$HOME/.config/claude-launcher/env"; [[ $? -ne 0 ]]; check "token gone from the env file" $?
+api "disconnect github"; check "disconnect only takes token services" "$(jqt '.error.code=="forbidden"')"
+api "login-token youtube" "x"; check "youtube can't be set with login-token" "$(jqt '.ok==false')"
+rm -f "$HOME/.config/claude-launcher/env" "$HOME/.claude.json"
+
 echo "token services"
 api "status"
 check "status lists token services" "$(jqt '.data.services | (.vercel and .b2 and .gcp and .firebase and .cloudflare) and (.vercel.logged_in|not)')"

@@ -16,9 +16,9 @@ SCRIPT_VERSION="2.0.0"
 # 4 = install-cli, 5 = run, 6 = restart + claude-cmd, 7 = token services +
 # more CLIs, 8 = keys, 9 = safe restart (resume + busy check), 10 = MXroute
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
-# 13 = Android signing keys, 14 = YouTube. Bump when the app starts needing a
-# new server feature.
-SCRIPT_API=14
+# 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
+# session previews. Bump when the app starts needing a new server feature.
+SCRIPT_API=15
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -595,6 +595,15 @@ api_ok() {
   exit 0
 }
 
+# api_ok_file <file>: like api_ok, for answers too big for an argument.
+api_ok_file() {
+  jq -e . "$1" >/dev/null 2>&1 || { rm -f "$1"; api_err internal "The server couldn't build its answer."; }
+  jq -c '{ok:true,data:.}' "$1" >&3
+  rm -f "$1"
+  EMITTED=1
+  exit 0
+}
+
 # api_err <code> <message> [extra-json-object] [exit-code]
 api_err() {
   jq -cn --arg c "$1" --arg m "$2" --argjson x "${3:-"{}"}" \
@@ -806,7 +815,22 @@ do_sessions() {
     jq -Rc 'split("@@") | {name:.[0], dir:.[1], project:(.[1] | split("/") | last),
       started_at:(.[4] | tonumber), attached:((.[5] | tonumber) > 0)}' |
     jq -sc --argjson now "$(date +%s)" 'map(. + {uptime_seconds:($now - .started_at)}) | sort_by(.started_at)')"
-  api_ok "$(jq -cn --argjson s "${s:-[]}" --argjson now "$(date +%s)" '{now:$now, sessions:$s}')"
+  # Each session's last lines, and whether it's waiting on a question or working.
+  local out="[]" row name screen tail4 waiting busy
+  while IFS= read -r row; do
+    [[ -n "$row" ]] || continue
+    name="$(jq -r .name <<<"$row")"
+    screen="$(tmux capture-pane -p -J -t "=$name:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15)"
+    # Drop Claude's input box and status bar: separators, the empty ❯ prompt, mode/shortcut hints.
+    tail4="$(grep -v '^[[:space:]]*$' <<<"$screen" | grep -vE '^[─━╭╰│ ]+$|^ *❯|⏵⏵|shift\+tab|for shortcuts|← for agents|esc to interrupt|^ *⎿? *Tip:|/clear to save|Restart to update' |
+      sed -e 's/[[:space:]]*$//' -e 's/^[[:space:]]\{8,\}//' | tail -n 3 | cut -c1-120)"
+    waiting=false busy=false
+    grep -qE "Enter to confirm|\(y/n\)" <<<"$screen" && waiting=true
+    grep -q "esc to interrupt" <<<"$screen" && busy=true
+    out="$(jq -c --argjson r "$row" --arg p "$tail4" --argjson w "$waiting" --argjson b "$busy" \
+      '. + [$r + {preview:$p, waiting:$w, busy:$b}]' <<<"$out")"
+  done < <(jq -c '.[]' <<<"${s:-[]}")
+  api_ok "$(jq -cn --argjson s "$out" --argjson now "$(date +%s)" '{now:$now, sessions:$s}')"
 }
 
 do_start() {
@@ -1434,7 +1458,7 @@ set_env() {
 # login-token <service>: stdin = one value per SVC_VARS line, or the whole
 # service-account JSON for key-file services.
 do_login_token() {
-  [[ $# -eq 1 ]] && svc_def "$1" || bad_args "usage: login-token <service>"
+  [[ $# -eq 1 && "$1" != youtube ]] && svc_def "$1" || bad_args "usage: login-token <service>"
   local id="$1" who v i vals=() key tmp
   if [[ -n "$SVC_KEYFILE" ]]; then
     key="$(head -c 20000)"
@@ -1827,6 +1851,108 @@ do_claude_cmd() {
   api_ok "$(jq -cn --arg o "$out" --argjson rc "$rc" '{exit_code:$rc, output:$o}')"
 }
 
+# ---- MCP servers --------------------------------------------------------------
+# `claude mcp list` starts every server to check it (~10 s), so its output is
+# cached and refreshed in the background at most every 5 minutes.
+MCP_CACHE="$CACHE_DIR/mcp-list.txt"
+
+mcp_refresh_now() {
+  local d; d="$(mktemp -d)"
+  (cd "$d" && t 120 claude mcp list </dev/null >"$MCP_CACHE.tmp" 2>&1) && mv -f "$MCP_CACHE.tmp" "$MCP_CACHE"
+  rm -rf "$d" "$MCP_CACHE.tmp"
+}
+
+# The cached list as JSON: name, scope (user|project|plugin|claude.ai), kind,
+# target (a URL, or just the program for stdio: arguments can hold secrets),
+# health (connected|failed|needs_auth|unknown).
+mcp_json() {
+  local users
+  users="$(jq -c '.mcpServers // {} | keys' "$HOME/.claude.json" 2>/dev/null || echo '[]')"
+  { grep -E '^.+: .+ - (✔|✘|!)' "$MCP_CACHE" 2>/dev/null || true; } | jq -Rsc --argjson users "$users" '
+    split("\n") | map(select(length > 0)) | map(
+      (index(": ")) as $i | .[0:$i] as $name | .[$i+2:] as $rest |
+      ($rest | split(" - ") | last) as $st | ($rest | split(" - ") | .[0:-1] | join(" - ")) as $target |
+      {name:$name,
+       scope:(if ($name | startswith("claude.ai ")) then "claude.ai"
+              elif ($name | startswith("plugin:")) then "plugin"
+              elif ($users | index($name)) then "user" else "project" end),
+       plugin:(if ($name | startswith("plugin:")) then ($name | split(":")[1]) else null end),
+       label:(if ($name | startswith("claude.ai ")) then $name[10:]
+              elif ($name | startswith("plugin:")) then ($name | split(":") | last) else $name end),
+       kind:(if ($target | test("^https?://")) then "http" else "stdio" end),
+       target:(if ($target | test("^https?://")) then ($target | split(" ")[0])
+               else ($target | split(" ")[0:2] | join(" ") | .[0:60]) end),
+       health:(if ($st | startswith("✔")) then "connected" elif ($st | startswith("!")) then "needs_auth"
+               elif ($st | startswith("✘")) then "failed" else "unknown" end),
+       detail:($st | sub("^[✔✘!] *"; "") | .[0:160])})'
+}
+
+# mcp: the cached list (starts a background refresh when it's stale).
+do_mcp() {
+  [[ $# -eq 0 ]] || bad_args "mcp takes no arguments"
+  local age=999999 refreshing=false
+  [[ -f "$MCP_CACHE" ]] && age=$(($(date +%s) - $(stat -c %Y "$MCP_CACHE")))
+  if ((age > 300)) && command -v claude >/dev/null 2>&1 && ! pgrep -f "claude-setup.sh --mcp-refresh" >/dev/null; then
+    # Fully detached, holding neither the SSH channel (fd 3) nor the lock (fd 9).
+    setsid "$SCRIPT_PATH" --mcp-refresh </dev/null >/dev/null 2>&1 3>&- 9>&- &
+    refreshing=true
+  fi
+  api_ok "$(jq -cn --argjson s "$(mcp_json)" --argjson age "$age" --argjson r "$refreshing" \
+    '{servers:$s, checked_seconds_ago:(if $age == 999999 then null else $age end), refreshing:$r}')"
+}
+
+# mcp-refresh: check every server now (~10 s), then the list.
+do_mcp_refresh() {
+  [[ $# -eq 0 ]] || bad_args "mcp-refresh takes no arguments"
+  need claude
+  mcp_refresh_now
+  api_ok "$(jq -cn --argjson s "$(mcp_json)" '{servers:$s, checked_seconds_ago:0, refreshing:false}')"
+}
+
+# plugins: installed + available (from your marketplaces) + marketplaces + Claude's version.
+do_plugins() {
+  [[ $# -eq 0 ]] || bad_args "plugins takes no arguments"
+  need claude
+  local d pl mk ver
+  d="$(mktemp -d)"
+  pl="$(cd "$d" && t 60 claude plugin list --json --available </dev/null 2>/dev/null)"
+  mk="$(cd "$d" && t 30 claude plugin marketplace list --json </dev/null 2>/dev/null)"
+  ver="$(t 10 claude --version 2>/dev/null </dev/null | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)"
+  rm -rf "$d"
+  # The plugin catalog is large: pass it to jq through files, not arguments.
+  printf '%s' "$pl" >"$d.pl"; printf '%s' "$mk" >"$d.mk"
+  jq -e . "$d.pl" >/dev/null 2>&1 || { rm -f "$d.pl" "$d.mk"; api_err internal "claude plugin list gave no answer."; }
+  jq -e . "$d.mk" >/dev/null 2>&1 || echo '[]' >"$d.mk"
+  local res
+  res="$(jq -cn --slurpfile pp "$d.pl" --slurpfile mm "$d.mk" --arg v "$ver" '$pp[0] as $p | $mm[0] as $m |
+    ($p.installed // []) as $inst | ($inst | map(.id)) as $ids |
+    {claude_version:(if $v == "" then null else $v end),
+     installed:($inst | map({id, name:(.id | split("@")[0]), marketplace:(.id | split("@")[1:] | join("@")),
+       version:(.version // ""), enabled:(.enabled // false), scope:(.scope // "user")})),
+     available:(($p.available // []) | map({id:.pluginId, name, marketplace:.marketplaceName,
+       description:((.description // "") | .[0:200]), installs:(.installCount // 0),
+       installed:(.pluginId as $x | $ids | index($x) != null)})),
+     marketplaces:($m | map({name, source:(.repo // .url // .source // "")}))}')"
+  rm -f "$d.pl" "$d.mk"
+  printf '%s' "$res" >"$d.res"
+  api_ok_file "$d.res"
+}
+
+# disconnect <service>: forget a token service's credentials (and its key file).
+do_disconnect() {
+  [[ $# -eq 1 && " $TOKEN_SERVICES " == *" $1 "* ]] && svc_def "$1" || bad_args "usage: disconnect <service>"
+  local v tmp
+  for v in "${SVC_VARS[@]}"; do set_env "$v" ""; done
+  [[ "$1" == gcp ]] && set_env CLOUDSDK_CORE_PROJECT ""
+  [[ "$1" == googleplay ]] && { set_env SUPPLY_JSON_KEY ""; set_env ANDROID_PUBLISHER_CREDENTIALS ""; }
+  [[ -n "$SVC_KEYFILE" ]] && rm -f "$LAUNCHER_CONFIG_DIR/$SVC_KEYFILE"
+  if [[ -f "$SERVICES_INFO" ]]; then
+    tmp="$(mktemp "$SERVICES_INFO.XXXXXX")" && jq -c --arg id "$1" 'del(.[$id])' "$SERVICES_INFO" >"$tmp" && mv "$tmp" "$SERVICES_INFO"
+  fi
+  ensure_env_hook
+  api_ok "$(jq -cn --arg id "$1" '{disconnected:$id}')"
+}
+
 api_main() {
   # fd 3 = the one JSON object; everything else goes to stderr.
   exec 3>&1 1>&2
@@ -1875,6 +2001,10 @@ api_main() {
     login-keystore)      do_login_keystore "$@" ;;
     youtube-login-start) do_youtube_login_start "$@" ;;
     youtube-login-poll)  do_youtube_login_poll "$@" ;;
+    mcp)                 do_mcp "$@" ;;
+    mcp-refresh)         do_mcp_refresh "$@" ;;
+    plugins)             do_plugins "$@" ;;
+    disconnect)          do_disconnect "$@" ;;
     remove-keystore)     do_remove_keystore "$@" ;;
     "")                  bad_args "missing subcommand" ;;
     *)                   bad_args "unknown subcommand '$cmd'" ;;
@@ -1889,6 +2019,7 @@ main() {
   case "${1:-}" in
     --api) shift; api_main "$@" ;;
     --clone-worker) shift; clone_worker "$@" ;;
+    --mcp-refresh) mcp_refresh_now ;;
     --version) echo "$SCRIPT_VERSION" ;;
     -h | --help) sed -n '2,10p' "$SCRIPT_PATH" | sed 's/^# \{0,1\}//' ;;
     "") menu_main ;;

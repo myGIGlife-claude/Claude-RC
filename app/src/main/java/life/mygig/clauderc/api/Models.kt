@@ -87,6 +87,12 @@ data class Session(
     @SerialName("started_at") val startedAt: Long = 0,
     val attached: Boolean = false,
     @SerialName("uptime_seconds") val uptimeSeconds: Long = 0,
+    /** The session's last lines (Claude's input box and status bar left out). */
+    val preview: String = "",
+    /** A question on screen (e.g. approve a new MCP server). */
+    val waiting: Boolean = false,
+    /** Claude is working. */
+    val busy: Boolean = false,
 )
 
 @Serializable
@@ -150,4 +156,56 @@ data class CloneStatus(
 data class RunResult(
     @SerialName("exit_code") val exitCode: Int = 0,
     val output: String = "",
+)
+
+@Serializable
+data class McpServer(
+    val name: String,
+    val label: String = name,
+    /** user | project | plugin | claude.ai */
+    val scope: String = "user",
+    val plugin: String? = null,
+    val kind: String = "stdio",
+    val target: String = "",
+    /** connected | failed | needs_auth | unknown */
+    val health: String = "unknown",
+    val detail: String = "",
+)
+
+@Serializable
+data class McpData(
+    val servers: List<McpServer> = emptyList(),
+    @SerialName("checked_seconds_ago") val checkedSecondsAgo: Long? = null,
+    val refreshing: Boolean = false,
+)
+
+@Serializable
+data class InstalledPlugin(
+    val id: String,
+    val name: String,
+    val marketplace: String = "",
+    val version: String = "",
+    val enabled: Boolean = false,
+    val scope: String = "user",
+)
+
+@Serializable
+data class AvailablePlugin(
+    val id: String,
+    val name: String,
+    val marketplace: String = "",
+    val description: String = "",
+    val installs: Long = 0,
+    val installed: Boolean = false,
+)
+
+@Serializable
+data class Marketplace(val name: String, val source: String = "")
+
+@Serializable
+data class PluginsData(
+    @SerialName("claude_version") val claudeVersion: String? = null,
+    val installed: List<InstalledPlugin> = emptyList(),
+    val available: List<AvailablePlugin> = emptyList(),
+    val marketplaces: List<Marketplace> = emptyList(),
 )

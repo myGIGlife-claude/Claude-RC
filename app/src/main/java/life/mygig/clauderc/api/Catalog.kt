@@ -200,4 +200,24 @@ object Catalog {
     )
 
     fun byId(id: String) = services.firstOrNull { it.id == id }
+
+    /** The environment variables each connection gives Claude's sessions (names only). */
+    val envVars = mapOf(
+        "cloudflare" to listOf("CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"),
+        "vercel" to listOf("VERCEL_TOKEN"),
+        "netlify" to listOf("NETLIFY_AUTH_TOKEN"),
+        "fly" to listOf("FLY_API_TOKEN"),
+        "railway" to listOf("RAILWAY_API_TOKEN"),
+        "supabase" to listOf("SUPABASE_ACCESS_TOKEN"),
+        "neon" to listOf("NEON_API_KEY"),
+        "npm" to listOf("NPM_TOKEN"),
+        "stripe" to listOf("STRIPE_API_KEY"),
+        "huggingface" to listOf("HF_TOKEN"),
+        "b2" to listOf("B2_APPLICATION_KEY_ID", "B2_APPLICATION_KEY"),
+        "gcp" to listOf("CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE", "CLOUDSDK_CORE_PROJECT"),
+        "firebase" to listOf("GOOGLE_APPLICATION_CREDENTIALS"),
+        "mxroute" to listOf("MXROUTE_API_KEY", "MXROUTE_SERVER", "MXROUTE_USERNAME"),
+        "googleplay" to listOf("GOOGLE_PLAY_JSON_KEY", "SUPPLY_JSON_KEY", "ANDROID_PUBLISHER_CREDENTIALS"),
+        "youtube" to listOf("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN"),
+    )
 }

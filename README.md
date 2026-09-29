@@ -44,18 +44,20 @@ see Security). There is no web server, open port or cloud service.
 
 ## Screens
 
+Five tabs, the same tile style throughout: **Connections · New · Projects · Sessions · Claude**.
+
 | Tab | Shows | Actions |
 | --- | --- | --- |
-| **Status** | Claude and GitHub, plus every service you've connected | Pull to refresh; **+** connects AWS, GitLab, Docker/GHCR, Cloudflare, Vercel, Netlify, Fly.io, Railway, Supabase, Neon, npm, Stripe, Hugging Face, Backblaze B2, Google Cloud, Firebase, MXroute, Google Play Console, YouTube (with a `youtube-upload` command for every session), an **Android signing key** (upload keystore), or any **Custom API key** (installs the CLI if needed, then asks for credentials) |
-| **New** | Name (validated live), owner (you or an org), Private/Public, “Start Claude now” | Create → repo link + **Open in Claude** |
-| **Projects** | All your repos, newest push first, with Private/Public, Org, On server, Running badges | Clone/pull + start, stop, tail log (long-press) |
-| **Sessions** | Running Claude sessions, uptime, attached | Stop, safe **Restart** / **Restart all** (reopens the same conversation, waits if Claude is busy, picks up new plugins, MCP servers and tokens), tail with **prompt keys** (1/2/3, Enter, Esc, arrows, y/n) to answer things like MCP approvals, **Open in Claude**; with App lock on, **Run a command** (type or paste, optional sudo password) |
-| **Command** | Claude Code housekeeping | Doctor, version, update; list / install / update / uninstall plugins; add and update marketplaces; list MCP servers; other allowed `claude` commands |
+| **Connections** | Everything Claude on your server is connected to, as tiles in groups: **Core** (Claude, GitHub), **Services** (AWS, GitLab, Docker/GHCR, YouTube, Cloudflare, Vercel, MXroute, …), **MCP servers** (found automatically: your own, plugin ones and claude.ai connectors, with a live health dot, refreshed every 5 min) and **Keys** (signing keys, custom API keys). Update cards on top. | Tap a tile for its details: status, public info, the variable names sessions get (never values), **Edit** (new key), **Test now**, **Disconnect/Remove**. **+** (top right) connects a new service from a searchable A–Z list: AWS, GitLab, Docker/GHCR, Cloudflare, Vercel, Netlify, Fly.io, Railway, Supabase, Neon, npm, Stripe, Hugging Face, Backblaze B2, Google Cloud, Firebase, MXroute, Google Play Console, YouTube (with a `youtube-upload` command for every session), an **Android signing key**, or any **Custom API key**; it installs the CLI if needed, then asks for credentials. |
+| **New** | Name (validated live), owner and visibility chips, “Start Claude now” | Create → repo link + **Open in Claude** |
+| **Projects** | Your repos as tiles, newest first: running / on server / GitHub only, private/public, org | Search and filter; tap for Open in Claude, clone/pull + start, stop, log, GitHub; long-press a running one for its log |
+| **Sessions** | Each running Claude session with its last lines in green, busy/idle, and an amber **needs an answer** card when it's waiting on a question (e.g. approving a new MCP server) | **Open in Claude**, **Log** (a full-screen green-on-black terminal with A−/A+, live refresh and answer keys 1/2/3, ↑/↓, y/n, Esc, Enter), safe **Restart** / **Restart all** (reopens the same conversation, waits if Claude is busy), Stop; with App lock on, **Run a command** (terminal-style, type or paste, optional sudo password, keeps a scrollback of runs) |
+| **Claude** | Claude Code's version, installed plugins as tiles (on / disabled), your marketplaces | **Doctor**, **Update Claude**; tap a plugin to enable, disable, update or uninstall it; **+ Install** searches every plugin across your marketplaces (with **Add marketplace** at the bottom for anything not listed); other allowed `claude` commands |
 
 **Servers**: add as many as you like; tap the server name under the title to
 switch. All of them use this phone's one key.
 
-**Settings**: servers (add, switch, remove), host, port, username, pinned host key fingerprint, this phone's
+**Settings** (gear): servers (add, switch, remove), host, port, username, pinned host key fingerprint, this phone's
 key (regenerate, with two warnings, then the new install command), app lock (fingerprint/PIN before
 create, stop, logins), theme.
 
