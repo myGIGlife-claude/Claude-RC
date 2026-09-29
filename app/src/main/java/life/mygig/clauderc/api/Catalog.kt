@@ -82,7 +82,8 @@ object Catalog {
             "supabase", "Supabase", "Projects, migrations, functions via the supabase CLI",
             listOf(FieldDef("Access token")),
             "https://supabase.com/dashboard/account/tokens", "Create token on Supabase",
-            "Account › Access Tokens › Generate new token. It has the same access as your account (no scopes); " +
+            "Account › Access Tokens › Generate new token (starts with sbp_; project API keys won't work). " +
+                "It has the same access as your account (no scopes); " +
                 "set an expiry.\nSaved as SUPABASE_ACCESS_TOKEN.",
             install = "supabase",
         ),
