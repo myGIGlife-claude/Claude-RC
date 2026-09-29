@@ -43,6 +43,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -75,6 +78,8 @@ fun ClaudeScreen(vm: MainViewModel) {
     val plugins by vm.plugins.collectAsState()
     val loading by vm.pluginsLoading.collectAsState()
     val result by vm.ccResult.collectAsState()
+    val sessions by vm.sessions.collectAsState()
+    var pickSession by remember { mutableStateOf(false) }
     val busy by vm.busy.collectAsState()
     var install by remember { mutableStateOf(false) }
     var open by remember { mutableStateOf<InstalledPlugin?>(null) }
@@ -83,6 +88,7 @@ fun ClaudeScreen(vm: MainViewModel) {
     val change = { args: String -> vm.claudeCommand(args) }
 
     LaunchedEffect(status?.scriptApi) { vm.loadPlugins() }
+    LaunchedEffect(Unit) { vm.refreshSessions() }
 
 
     val p = plugins
@@ -99,9 +105,25 @@ fun ClaudeScreen(vm: MainViewModel) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("Claude Code ${p?.claudeVersion ?: ""}".trim(), fontWeight = FontWeight.SemiBold)
-                            Text("Doctor checks the install; Update gets the newest version.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Doctor checks the install. Full checkup runs /doctor in a session's chat, where Claude can also fix what it finds.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        OutlinedButton(onClick = { vm.claudeCommand("doctor") }, enabled = busy == null) { Text("Doctor") }
+                        Column(horizontalAlignment = Alignment.End) {
+                            OutlinedButton(onClick = { vm.claudeCommand("doctor") }, enabled = busy == null) { Text("Doctor") }
+                            Box {
+                                TextButton(onClick = {
+                                    when (sessions.size) {
+                                        0 -> vm.say("Start a session first: /doctor runs inside one.")
+                                        1 -> vm.openChatWith(sessions[0].name, "/doctor")
+                                        else -> pickSession = true
+                                    }
+                                }) { Text("Full checkup") }
+                                DropdownMenu(expanded = pickSession, onDismissRequest = { pickSession = false }) {
+                                    sessions.forEach { s ->
+                                        DropdownMenuItem(text = { Text(s.project) }, onClick = { pickSession = false; vm.openChatWith(s.name, "/doctor") })
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
