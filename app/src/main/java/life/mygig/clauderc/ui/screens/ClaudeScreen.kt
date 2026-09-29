@@ -64,7 +64,9 @@ import life.mygig.clauderc.ui.Tab
 import life.mygig.clauderc.ui.components.CardBox
 import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.InfoTile
+import life.mygig.clauderc.ui.components.OneLine
 import life.mygig.clauderc.ui.components.SectionLabel
+import life.mygig.clauderc.ui.components.isNarrow
 import life.mygig.clauderc.ui.theme.Term
 
 /** Claude tab: Claude Code itself, plugins and marketplaces, other claude commands. */
@@ -116,7 +118,7 @@ fun ClaudeScreen(vm: MainViewModel) {
             fullItem {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     SectionLabel("Plugins" + (p?.installed?.size?.let { " · $it" } ?: ""), Modifier.weight(1f))
-                    Button(onClick = { install = true }, enabled = p != null) { Text("+ Install") }
+                    Button(onClick = { install = true }, enabled = p != null) { OneLine("+ Install") }
                 }
             }
             if (p == null) fullItem { Text(if (loading) "Loading plugins…" else "Pull down to load plugins.") }
@@ -125,8 +127,8 @@ fun ClaudeScreen(vm: MainViewModel) {
             }
             fullItem { Text("Tap a plugin to enable, disable, update or remove it. Sessions pick changes up after a restart.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             fullItem { SectionLabel("Tools") }
-            item { OutlinedButton(onClick = { change("update") }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) { Text("Update Claude") } }
-            item { OutlinedButton(onClick = { custom = true }, modifier = Modifier.fillMaxWidth()) { Text("claude … command") } }
+            item { OutlinedButton(onClick = { change("update") }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) { OneLine("Update Claude") } }
+            item { OutlinedButton(onClick = { custom = true }, modifier = Modifier.fillMaxWidth()) { OneLine(if (isNarrow()) "claude …" else "claude … command") } }
             fullItem { SectionLabel("Marketplaces") }
             fullItem {
                 CardBox {

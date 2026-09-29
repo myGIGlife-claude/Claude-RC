@@ -29,6 +29,14 @@ import life.mygig.clauderc.ui.theme.OffGrey
 import life.mygig.clauderc.ui.theme.OkGreen
 import life.mygig.clauderc.ui.theme.WarnAmber
 
+/** True on narrow screens such as a foldable's cover display: use short labels there. */
+@Composable
+fun isNarrow(): Boolean = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < 400
+
+/** A button label that never wraps. */
+@Composable
+fun OneLine(text: String) = Text(text, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+
 /** A tile's health: the coloured dot. */
 enum class Health { OK, WARN, BAD, OFF, NONE }
 
