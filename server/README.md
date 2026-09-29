@@ -111,6 +111,7 @@ Exit code 0 = success, 1 = handled error, 2 = bad arguments.
 | `set-secret` / `remove-secret` | `<NAME>` (upper case, ending in `_KEY`, `_TOKEN`, `_SECRET`, …; never `CLAUDE_*`/`ANTHROPIC_*`); stdin: the value | `saved` / `removed`. Custom API keys, saved and mirrored like the services above; `status` lists their names as `custom`. |
 | `mcp` | — | `servers[{name,label,scope,plugin,kind,target,health,detail}]`, `checked_seconds_ago`, `refreshing`. From `claude mcp list`, cached and refreshed in the background at most every 5 minutes (it starts every server). `scope`: user, project, plugin or claude.ai; `target` is a URL or just the program (arguments can hold secrets); `health`: connected, failed, needs_auth, unknown. |
 | `mcp-refresh` | — | Same, checked now (~10 s). |
+| `repo-edit` | `delete <owner/repo>`, `rename <owner/repo> <new name>` or `visibility <owner/repo> private\|public` | `done`, `repo`, `value`. On GitHub only; a folder on the server keeps its name. Delete needs the `delete_repo` token scope (error `missing_scopes` with `missing:["delete_repo"]`). |
 | `mcp-auth-start` | server name on stdin | `url` to sign in (a user or plugin server that needs it). |
 | `mcp-auth-finish` | stdin: the `http://localhost…` address the browser ended on | Same as `mcp-refresh` once signed in. |
 | `mcp-auth-cancel` | — | `cancelled` |

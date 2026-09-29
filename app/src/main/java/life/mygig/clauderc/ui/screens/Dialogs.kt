@@ -66,7 +66,7 @@ import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.openUrl
 
 private const val GITHUB_TOKEN_URL =
-    "https://github.com/settings/tokens/new?scopes=repo,read:org,gist,workflow&description=cLaudeRC%20server"
+    "https://github.com/settings/tokens/new?scopes=repo,read:org,gist,workflow,delete_repo&description=cLaudeRC%20server"
 
 @Composable
 fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
@@ -484,7 +484,7 @@ private fun GithubLogin(vm: MainViewModel, busy: Boolean) {
     val context = LocalContext.current
     var token by remember { mutableStateOf("") }
     Text(
-        "Create a classic personal access token with these scopes: repo, read:org, gist, workflow.",
+        "Create a classic personal access token with these scopes: repo, read:org, gist, workflow (and delete_repo to delete repos from the app).",
     )
     OutlinedButton(onClick = { openUrl(context, GITHUB_TOKEN_URL) }, modifier = Modifier.fillMaxWidth()) {
         Text("Create token on GitHub")

@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in.
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility.
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=18
+SCRIPT_API=19
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -1103,6 +1103,34 @@ do_open() {
   fi
   api_ok "$(jq -cn --arg p "$dir" --arg a "$action" --arg s "$sess" --argjson pe "$pending" --arg r "$repo" --arg n "$note" \
     '{repo:$r, path:$p, action:$a, pending:$pe, note:(if $n=="" then null else $n end), session:(if $s=="" then null else $s end)}')"
+}
+
+# repo-edit delete|rename|visibility <owner/repo> [<new name> | private | public]
+# Changes the repo on GitHub only: a folder on the server keeps its name.
+do_repo_edit() {
+  local what="${1:-}" repo="${2:-}" arg="${3:-}" err rc
+  [[ "$repo" =~ $REPO_RE ]] || api_err invalid_name "Invalid repo name."
+  case "$what" in
+    delete) (($# == 2)) || bad_args "usage: repo-edit delete <owner/repo>" ;;
+    rename) (($# == 3)) || bad_args "usage: repo-edit rename <owner/repo> <new name>"
+      valid_project "$arg" || api_err invalid_name "Names may use letters, digits, '.', '_' and '-' (not first), up to 100." ;;
+    visibility) (($# == 3)) && [[ "$arg" == private || "$arg" == public ]] || bad_args "usage: repo-edit visibility <owner/repo> private|public" ;;
+    *) bad_args "usage: repo-edit delete|rename|visibility <owner/repo> [arg]" ;;
+  esac
+  require_github
+  case "$what" in
+    delete) err="$(t 60 gh repo delete "$repo" --yes 2>&1 </dev/null)" ;;
+    rename) err="$(t 60 gh repo rename "$arg" -R "$repo" --yes 2>&1 </dev/null)" ;;
+    visibility) err="$(t 60 gh repo edit "$repo" --visibility "$arg" --accept-visibility-change-consequences 2>&1 </dev/null)" ;;
+  esac
+  rc=$?
+  if ((rc != 0)); then
+    [[ "$what" == delete ]] && grep -qiE 'delete_repo|HTTP 403' <<<"$err" &&
+      api_err missing_scopes "Deleting repos needs the delete_repo scope on your GitHub token." '{"missing":["delete_repo"]}'
+    api_err internal "GitHub refused: $(tail -n 2 <<<"$err")"
+  fi
+  rm -f "$CACHE_DIR/repos.json"
+  api_ok "$(jq -cn --arg w "$what" --arg r "$repo" --arg a "$arg" '{done:$w, repo:$r, value:(if $a=="" then null else $a end)}')"
 }
 
 # ---------------- Login flows (secrets arrive on stdin only) ----------------
@@ -2280,6 +2308,7 @@ api_main() {
     login-keystore)      do_login_keystore "$@" ;;
     youtube-login-start) do_youtube_login_start "$@" ;;
     youtube-login-poll)  do_youtube_login_poll "$@" ;;
+    repo-edit)           do_repo_edit "$@" ;;
     mcp)                 do_mcp "$@" ;;
     mcp-refresh)         do_mcp_refresh "$@" ;;
     mcp-auth-start)      [[ $# -eq 0 ]] || bad_args "mcp-auth-start reads the name on stdin"; do_mcp_auth_start ;;
