@@ -17,6 +17,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -28,6 +30,7 @@ import life.mygig.clauderc.ui.theme.BadRed
 import life.mygig.clauderc.ui.theme.OffGrey
 import life.mygig.clauderc.ui.theme.OkGreen
 import life.mygig.clauderc.ui.theme.WarnAmber
+import kotlinx.coroutines.delay
 
 /** True on narrow screens such as a foldable's cover display: use short labels there. */
 @Composable
@@ -45,6 +48,14 @@ fun Health.color(): Color = when (this) {
     Health.WARN -> WarnAmber
     Health.BAD -> BadRed
     Health.OFF, Health.NONE -> OffGrey
+}
+
+/** A Claude session's light: green idle, amber working, red when it needs an answer or has worked 5+ minutes
+ *  (timed from when this screen first saw it busy). */
+@Composable
+fun claudeHealth(busy: Boolean, waiting: Boolean): Health {
+    val longRun by produceState(false, busy) { value = false; if (busy) { delay(5 * 60_000L); value = true } }
+    return when { waiting || longRun -> Health.BAD; busy -> Health.WARN; else -> Health.OK }
 }
 
 @Composable
