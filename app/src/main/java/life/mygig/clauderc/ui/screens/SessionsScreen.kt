@@ -52,9 +52,9 @@ import life.mygig.clauderc.ui.LocalAppLock
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import life.mygig.clauderc.ui.MainViewModel
-import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.OneLine
 import life.mygig.clauderc.ui.components.StatusDot
+import life.mygig.clauderc.ui.components.claudeHealth
 import life.mygig.clauderc.ui.components.isNarrow
 import life.mygig.clauderc.ui.formatUptime
 import life.mygig.clauderc.ui.openInClaude
@@ -166,7 +166,7 @@ private fun SessionCard(s: Session, chat: (() -> Unit)?, onOpen: () -> Unit, onL
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatusDot(if (s.waiting) Health.WARN else Health.OK)
+                StatusDot(claudeHealth(s.busy, s.waiting))
                 Text(s.project, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     when {
