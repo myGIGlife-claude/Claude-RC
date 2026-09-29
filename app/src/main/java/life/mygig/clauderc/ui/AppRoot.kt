@@ -124,11 +124,11 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
     }
 
     val scope = rememberCoroutineScope()
-    val guard = remember(s.appLock) {
-        Guard { reason, action ->
-            if (!s.appLock) action() else scope.launch { if (lock.unlock(reason)) action() }
-        }
-    }
+    // App lock is asked to open the app, and again only for Settings (key,
+    // servers) and Run a command; chat has its own PIN. Everyday actions don't
+    // prompt: they're what the Claude app does without a lock.
+    val guard = remember { Guard { _, action -> action() } }
+    val unlockThen = { reason: String, action: () -> Unit -> scope.launch { if (lock.unlock(reason)) action() }; Unit }
 
     // App lock is required: turn it on first (or set a screen lock on the phone).
     if (!s.appLock) {
@@ -192,7 +192,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                             is Fix.GoTo -> vm.selectTab(f.tab)
                             is Fix.StartAnyway -> vm.startProject(f.project)
                             is Fix.Retry -> f.block()
-                            Fix.OpenSettings -> vm.openSettings(true)
+                            Fix.OpenSettings -> unlockThen("Open settings") { vm.openSettings(true) }
                             Fix.OpenClaude -> openInClaude(context)
                             null -> {}
                         }
@@ -273,7 +273,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                                     IconButton(onClick = { vm.selectTab(Tab.STATUS); vm.showAddService(true) }) {
                                         Icon(Icons.Filled.Add, contentDescription = "Connect a service")
                                     }
-                                    IconButton(onClick = { vm.openSettings(true) }) {
+                                    IconButton(onClick = { unlockThen("Open settings") { vm.openSettings(true) } }) {
                                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
                                     }
                                 }

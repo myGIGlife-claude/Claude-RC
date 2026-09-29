@@ -138,9 +138,11 @@ compare.
   in the app **and** the server's config has `ALLOW_RUN=1`, so a lost phone
   can't enable it. Each run asks for your fingerprint/PIN. The sudo password
   reaches sudo through a private askpass file, never a command line or log.
-- App lock is required: fingerprint, face or screen lock to open the app,
-  again after 30 s in the background, and before creating, stopping, logging in
-  or showing the key; it also hides the app from the Recents screen.
+- App lock is required: fingerprint, face or screen lock to open the app and
+  again after 30 s in the background, and to open Settings (servers, this
+  phone's key) and Run a command; it also hides the app from the Recents
+  screen. Everyday actions (start, stop, restart, create, install, connect)
+  don't ask again: they're what the Claude app itself does.
 - In-app chat needs a second secret, a chat PIN (6–12 digits), asked every time
   a chat opens and again after any trip away from the app. It exists only in
   `~/.config/claude-launcher/chat-pin` (mode 600) on the server, which is how
