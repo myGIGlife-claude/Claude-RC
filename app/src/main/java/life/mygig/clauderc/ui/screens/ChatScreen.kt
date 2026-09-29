@@ -266,7 +266,7 @@ private fun PinGate(vm: MainViewModel, status: PinStatus, error: String?) {
                 }
             }
             if (keep > 0) {
-                Text("Restarting the phone asks again.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Restarting the phone asks again. Until then the PIN is kept encrypted on this phone.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
