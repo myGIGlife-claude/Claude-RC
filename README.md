@@ -9,6 +9,8 @@
 
 **[⬇ Download the latest APK](https://github.com/myGIGlife-claude/Claude-RC/releases/tag/latest-main)**
 
+<p align="center"><img src="docs/screens/tour.gif" width="300" alt="A tour of cLaudeRC: sessions, the session log with answer keys, connections, a connection's details, connecting a service, the Claude tab and installing a plugin, projects"></p>
+
 Start and manage Claude Code **Remote Control** sessions on your own server
 from your Android phone — check logins, create a new GitHub project or open an
 existing one, and start Claude in it, without opening an SSH terminal.
@@ -27,6 +29,40 @@ existing one, and start Claude in it, without opening an SSH terminal.
   optional (the menu can install them).
 - An Android phone, Android 8.0 or newer, and the Claude app to open the
   sessions.
+
+## Screenshots
+
+<table>
+<tr>
+<td><img src="docs/screens/sessions.png" width="200" alt="Sessions: each Claude session with its last lines; one waiting for an answer"></td>
+<td><img src="docs/screens/session-log.png" width="200" alt="Session log: green terminal with answer keys"></td>
+<td><img src="docs/screens/connections.png" width="200" alt="Connections: tiles for core logins, services, MCP servers and keys"></td>
+<td><img src="docs/screens/details.png" width="200" alt="A connection's details with edit, test and disconnect"></td>
+</tr>
+<tr>
+<td align="center">Sessions</td><td align="center">Session log</td><td align="center">Connections</td><td align="center">Details</td>
+</tr>
+<tr>
+<td><img src="docs/screens/add-service.png" width="200" alt="Connect a service: searchable A–Z list"></td>
+<td><img src="docs/screens/claude-tab.png" width="200" alt="Claude tab: version, plugins, tools, marketplaces"></td>
+<td><img src="docs/screens/install-plugin.png" width="200" alt="Install a plugin from your marketplaces"></td>
+<td><img src="docs/screens/projects.png" width="200" alt="Projects as tiles with filters"></td>
+</tr>
+<tr>
+<td align="center">+ Connect a service</td><td align="center">Claude tab</td><td align="center">Install a plugin</td><td align="center">Projects</td>
+</tr>
+<tr>
+<td><img src="docs/screens/run-command.png" width="200" alt="Run a command: terminal with scrollback and sudo password"></td>
+<td><img src="docs/screens/new-project.png" width="200" alt="New project"></td>
+<td><img src="docs/screens/settings.png" width="200" alt="Settings: servers, security, appearance"></td>
+<td><img src="docs/screens/setup.png" width="200" alt="First run: add your server with one command"></td>
+</tr>
+<tr>
+<td align="center">Run a command</td><td align="center">New project</td><td align="center">Settings</td><td align="center">First run</td>
+</tr>
+</table>
+
+Screens shown with made-up example data (projects, accounts and hosts are not real).
 
 ## How it works
 
