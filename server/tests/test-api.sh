@@ -106,6 +106,7 @@ api "owners"
 check "owners" "$(jqt '.ok and .data.user=="demo-user" and .data.orgs[0].login=="example-org"')"
 api "repos --refresh"
 check "repos newest first + fields" "$(jqt '.ok and .data.repos[0].full_name=="example-org/org-app" and .data.repos[0].owner_type=="Organization" and .data.repos[0].private==false and .data.repos[1].private==true and .data.repos[0].local==false')"
+check "repos marks archived ones (phone asks for them)" "$(jqt '[.data.repos[] | select(.archived)] | map(.name) == ["old-app"]')"
 
 echo "new (first start answers the one-time Remote Control prompt)"
 api "new bad/name --owner demo-user"

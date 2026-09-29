@@ -17,7 +17,12 @@ case "$1 $2" in
     logged_in || exit 1
     [[ -f "$S/fail_list" ]] && exit 1
     case "$3" in
-      demo-user) echo '[{"nameWithOwner":"demo-user/demo-app","name":"demo-app","pushedAt":"2026-09-01T00:00:00Z","visibility":"PRIVATE"}]' ;;
+      demo-user)
+        if [[ " $* " == *" --no-archived "* ]]; then
+          echo '[{"nameWithOwner":"demo-user/demo-app","name":"demo-app","pushedAt":"2026-09-01T00:00:00Z","visibility":"PRIVATE","isArchived":false}]'
+        else
+          echo '[{"nameWithOwner":"demo-user/demo-app","name":"demo-app","pushedAt":"2026-09-01T00:00:00Z","visibility":"PRIVATE","isArchived":false},{"nameWithOwner":"demo-user/old-app","name":"old-app","pushedAt":"2025-01-01T00:00:00Z","visibility":"PRIVATE","isArchived":true}]'
+        fi ;;
       example-org) echo '[{"nameWithOwner":"example-org/org-app","name":"org-app","pushedAt":"2026-09-20T00:00:00Z","visibility":"PUBLIC"}]' ;;
       *) echo '[]' ;;
     esac ;;

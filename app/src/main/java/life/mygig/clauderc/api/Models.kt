@@ -72,6 +72,8 @@ data class Repo(
     val running: Boolean = false,
     /** A clone started from the phone is still running in the background. */
     val cloning: Boolean = false,
+    /** Archived on GitHub (read-only there). */
+    val archived: Boolean = false,
 ) {
     val isOrg: Boolean get() = ownerType == "Organization"
 }

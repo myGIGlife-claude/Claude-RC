@@ -568,11 +568,14 @@ menu_main() {
 
 # Your repos plus every org's, newest push first (gh repo list JSON).
 # Fails if your own list can't be fetched; an org that fails is skipped.
+# Archived repos only with --with-archived (the phone's Archived filter);
+# the menu keeps its original list.
 list_repos_raw() {
-  local owner out lists=()
+  local owner out lists=() arch=(--no-archived)
+  [[ "${1:-}" == --with-archived ]] && arch=()
   for owner in "$GH_USER" "${GH_ORGS[@]}"; do
-    if out="$(t 30 gh repo list "$owner" --limit 200 --no-archived \
-      --json nameWithOwner,name,pushedAt,visibility 2>/dev/null </dev/null)"; then
+    if out="$(t 30 gh repo list "$owner" --limit 200 "${arch[@]}" \
+      --json nameWithOwner,name,pushedAt,visibility,isArchived 2>/dev/null </dev/null)"; then
       lists+=("$out")
     elif [[ "$owner" == "$GH_USER" ]]; then
       return 1
@@ -770,7 +773,7 @@ do_repos() {
     jq -e 'type == "array"' >/dev/null 2>&1 <<<"$raw" || { rm -f "$cache"; raw=""; }
   fi
   if [[ -z "$raw" ]]; then
-    raw="$(list_repos_raw)" || api_err internal "Could not list your GitHub repos."
+    raw="$(list_repos_raw --with-archived)" || api_err internal "Could not list your GitHub repos."
     printf '%s' "$raw" >"$cache.$$" && mv "$cache.$$" "$cache"
   fi
 
@@ -801,7 +804,7 @@ do_repos() {
           full_name:.nameWithOwner, name, owner:(.nameWithOwner | split("/")[0]),
           owner_type:(if (.nameWithOwner | split("/")[0]) == $gu then "User" else "Organization" end),
           private:((.visibility // "" | ascii_downcase) != "public"), pushed_at:.pushedAt,
-          local:$local, cloning:$cloning,
+          local:$local, cloning:$cloning, archived:(.isArchived // false),
           running:($local and ((.name | gsub("[.:]"; "-")) as $s | $r | index($s) != null))
         })}' <<<"$raw")"
 }
