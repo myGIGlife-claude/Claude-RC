@@ -46,6 +46,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -67,6 +68,7 @@ import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.StatusDot
 import life.mygig.clauderc.ui.theme.Term
 import life.mygig.clauderc.ui.theme.WarnAmber
+import kotlinx.coroutines.delay
 
 /** Chat with a Claude session inside the app. Behind App lock and the chat PIN. */
 @Composable
@@ -88,7 +90,9 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                         Text(session, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
                         val c = chat
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            StatusDot(when { c == null -> Health.OFF; c.waiting -> Health.WARN; else -> Health.OK })
+                            // Timed from when the app first saw it busy, so reopening the chat restarts the clock.
+                            val longRun by produceState(false, c?.busy) { value = false; if (c?.busy == true) { delay(5 * 60_000L); value = true } }
+                            StatusDot(when { c == null -> Health.OFF; c.waiting || longRun -> Health.BAD; c.busy -> Health.WARN; else -> Health.OK })
                             Text(
                                 when { pinNeeded != null -> "locked"; c == null -> "loading…"; c.waiting -> "needs an answer"; c.busy -> "working…"; else -> "idle" },
                                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
