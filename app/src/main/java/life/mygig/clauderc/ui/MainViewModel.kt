@@ -388,7 +388,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** The tile detail page that's open, if any. */
     private val _detail = MutableStateFlow<Detail?>(null)
     val detail = _detail.asStateFlow()
-    fun openDetail(d: Detail?) { _detail.value = d }
+    fun openDetail(d: Detail?) {
+        if (_mcpAuth.value != null) { _mcpAuth.value = null; viewModelScope.launch { runCatching { api.mcpAuthCancel() } } }
+        _detail.value = d
+    }
+
+    /** An MCP sign-in in progress: server name to the sign-in URL. */
+    private val _mcpAuth = MutableStateFlow<Pair<String, String>?>(null)
+    val mcpAuth = _mcpAuth.asStateFlow()
+
+    fun mcpAuthStart(name: String) = action("Starting sign-in for $name…") {
+        _mcpAuth.value = name to api.mcpAuthStart(name).url
+    }
+
+    fun mcpAuthFinish(callbackUrl: String) = action("Finishing sign-in…") {
+        _mcp.value = api.mcpAuthFinish(callbackUrl)
+        _mcpAuth.value = null
+        say("Signed in. Restart sessions to use it.")
+    }
+
 
     fun disconnect(id: String, name: String) = action("Disconnecting $name…") {
         api.disconnect(id)
