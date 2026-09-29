@@ -118,6 +118,8 @@ Exit code 0 = success, 1 = handled error, 2 = bad arguments.
 | `chat-open` | `<session>`; stdin: PIN | `session`. Checks the PIN (5 wrong → `chat_locked` for 30 min; `wrong_pin`, `pin_not_set`). |
 | `chat-history` | `<session>`; stdin: PIN | `messages[{id,role,text,ts}]` (role user/assistant/tool, from Claude's transcript), `waiting`, `busy`, `screen` (the question when waiting). |
 | `chat-send` | `<session>`; stdin: PIN, then the message | `sent`. Pasted into the session (bracketed paste, multi-line ok), then Enter. |
+| `upload` | `<session>`; stdin: PIN, file name, file base64 (≤15 MB) | `path` (`uploads/<name>` in the project), `bytes`. |
+| `chat-log` | — | The last 100 chat opens/sends/uploads/pin-sets (`ts`, `session`, `action`), newest first; never contents. |
 | `chat-interrupt` | `<session>`; stdin: PIN | `interrupted` (Esc). |
 | `login-gitlab` | token, host (default gitlab.com) on stdin | `user` (uses `glab auth login --stdin`) |
 | `login-docker` | registry (default docker.io), username, token on stdin | `registry`, `user` (uses `docker login --password-stdin`) |

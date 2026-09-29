@@ -17,9 +17,9 @@ SCRIPT_VERSION="2.0.0"
 # more CLIs, 8 = keys, 9 = safe restart (resume + busy check), 10 = MXroute
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
-# session previews, 16 = in-app chat (PIN). Bump when the app starts needing a
-# new server feature.
-SCRIPT_API=16
+# session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log.
+# Bump when the app starts needing a new server feature.
+SCRIPT_API=17
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -2120,6 +2120,41 @@ do_chat_interrupt() {
   api_ok '{"interrupted":true}'
 }
 
+# upload <session>: stdin = PIN, file name, then the file base64-encoded (up to
+# ~15 MB). Saved as <project>/uploads/<name> so Claude can open it; returns
+# that path.
+do_upload() {
+  [[ $# -eq 1 ]] || bad_args "usage: upload <session>"
+  local pin name sess dir d tmp size
+  pin="$(read_secret_line)"; name="$(read_secret_line)"
+  tmp="$(mktemp)"
+  head -c 21000000 | tr -d '[:space:]' | base64 -d >"$tmp" 2>/dev/null || { rm -f "$tmp"; api_err invalid_name "The file didn't come through."; }
+  exec 0</dev/null
+  sess="$(chat_session "$1")"
+  check_pin "$pin"
+  # A plain file name: no folders, no leading dot or dash.
+  name="$(basename -- "$name")"
+  name="$(printf '%s' "$name" | tr -c 'A-Za-z0-9._-' '_' | sed 's/^[.-]*//' | cut -c1-100)"
+  [[ -n "$name" ]] || name="upload-$(date +%s)"
+  size=$(stat -c %s "$tmp")
+  ((size > 0 && size <= 15728640)) || { rm -f "$tmp"; api_err invalid_name "The file is empty or bigger than 15 MB."; }
+  dir="$(awk -F'\t' -v s="$sess" '$1 == s {print $2; exit}' "$AUTOSTART_LIST" 2>/dev/null)"
+  [[ -n "$dir" ]] || dir="$(tmux display-message -p -t "=$sess:" '#{pane_current_path}' 2>/dev/null)"
+  [[ -d "$dir" ]] || { rm -f "$tmp"; api_err internal "Couldn't find the session's folder."; }
+  d="$dir/uploads"; mkdir -p "$d"
+  [[ -e "$d/$name" ]] && name="$(date +%H%M%S)-$name"
+  install -m 644 "$tmp" "$d/$name"; rm -f "$tmp"
+  chat_log "$sess" upload
+  api_ok "$(jq -cn --arg p "uploads/$name" --argjson n "$size" '{path:$p, bytes:$n}')"
+}
+
+# chat-log: the last chat opens/sends/uploads (no contents), newest first.
+do_chat_log() {
+  [[ $# -eq 0 ]] || bad_args "chat-log takes no arguments"
+  api_ok "$( { tail -n 100 "$CHAT_LOG" 2>/dev/null || true; } | jq -Rsc '
+    split("\n") | map(select(length > 0) | split("\t") | {ts:.[0], session:.[1], action:.[2]}) | reverse')"
+}
+
 api_main() {
   # fd 3 = the one JSON object; everything else goes to stderr.
   exec 3>&1 1>&2
@@ -2133,7 +2168,7 @@ api_main() {
   shift || true
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | login-cloudflare | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | youtube-login-start | \
-      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt) ;;  # these read stdin
+      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | upload) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -2179,6 +2214,8 @@ api_main() {
     chat-history)        do_chat_history "$@" ;;
     chat-send)           do_chat_send "$@" ;;
     chat-interrupt)      do_chat_interrupt "$@" ;;
+    upload)              do_upload "$@" ;;
+    chat-log)            do_chat_log "$@" ;;
     remove-keystore)     do_remove_keystore "$@" ;;
     "")                  bad_args "missing subcommand" ;;
     *)                   bad_args "unknown subcommand '$cmd'" ;;

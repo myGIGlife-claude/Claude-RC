@@ -53,6 +53,9 @@ object Updates {
     /** Server script API with in-app chat (PIN). */
     const val CHAT_API = 16
 
+    /** Server script API with chat uploads and the chat access log. */
+    const val UPLOAD_API = 17
+
     /** What the server accepts as a custom key name (claude-setup.sh CUSTOM_NAME_RE). */
     val CUSTOM_NAME = Regex("^[A-Z][A-Z0-9_]{0,55}_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT)$")
 

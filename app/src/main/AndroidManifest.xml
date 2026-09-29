@@ -3,6 +3,8 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- Session notifications; Android asks the user first (Settings › Notifications). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Opens the installer for a downloaded app update; Android asks the user first. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
