@@ -53,6 +53,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import life.mygig.clauderc.api.PROJECT_NAME_RE
 import life.mygig.clauderc.api.Repo
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.openUrl
@@ -173,6 +174,9 @@ private fun Badge(text: String) {
 @Composable
 private fun RepoActions(vm: MainViewModel, repo: Repo, onDismiss: () -> Unit) {
     val context = LocalContext.current
+    var ask by remember { mutableStateOf<Ask?>(null) }
+    var newName by remember { mutableStateOf(repo.name) }
+    var typed by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(repo.fullName) },
@@ -207,9 +211,80 @@ private fun RepoActions(vm: MainViewModel, repo: Repo, onDismiss: () -> Unit) {
                 TextButton(onClick = { openUrl(context, "https://github.com/${repo.fullName}") }) {
                     Text("Open on GitHub")
                 }
+                HorizontalDivider()
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { ask = Ask.RENAME }) { Text("Rename") }
+                    TextButton(onClick = { ask = Ask.VISIBILITY }) { Text(if (repo.private) "Make public" else "Make private") }
+                    TextButton(onClick = { ask = Ask.DELETE }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                }
             }
         },
         confirmButton = {},
         dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
+
+    val cancel = { ask = null }
+    when (ask) {
+        Ask.RENAME -> AlertDialog(
+            onDismissRequest = cancel,
+            title = { Text("Rename ${repo.name}") },
+            text = {
+                OutlinedTextField(
+                    value = newName, onValueChange = { newName = it.trim() }, label = { Text("New name") }, singleLine = true,
+                    isError = newName.isNotEmpty() && !PROJECT_NAME_RE.matches(newName),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { ask = Ask.RENAME_SURE }, enabled = newName != repo.name && PROJECT_NAME_RE.matches(newName)) { Text("Rename") }
+            },
+            dismissButton = { TextButton(onClick = cancel) { Text("Cancel") } },
+        )
+        Ask.RENAME_SURE -> AlertDialog(
+            onDismissRequest = cancel,
+            title = { Text("Are you sure?") },
+            text = {
+                Text("Rename ${repo.fullName} to ${repo.owner}/$newName on GitHub. Links to the old name redirect." +
+                    if (repo.local) " The folder on the server keeps its old name." else "")
+            },
+            confirmButton = { TextButton(onClick = { vm.renameRepo(repo, newName); ask = null; onDismiss() }) { Text("Yes, rename") } },
+            dismissButton = { TextButton(onClick = cancel) { Text("Cancel") } },
+        )
+        Ask.VISIBILITY -> AlertDialog(
+            onDismissRequest = cancel,
+            title = { Text("Are you sure?") },
+            text = {
+                Text(
+                    if (repo.private) "Make ${repo.fullName} public? Anyone can then see its code and history."
+                    else "Make ${repo.fullName} private? Stars and watchers from others are removed, and forks may break.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.setRepoPrivate(repo, !repo.private); ask = null; onDismiss() }) {
+                    Text(if (repo.private) "Yes, make public" else "Yes, make private")
+                }
+            },
+            dismissButton = { TextButton(onClick = cancel) { Text("Cancel") } },
+        )
+        Ask.DELETE -> AlertDialog(
+            onDismissRequest = cancel,
+            title = { Text("Delete ${repo.fullName}?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("This deletes the repo on GitHub for good: code, issues, pull requests and releases. It can't be undone." +
+                        if (repo.local) " The folder on the server stays." else "")
+                    Text("Type delete to confirm.")
+                    OutlinedTextField(value = typed, onValueChange = { typed = it }, singleLine = true)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.deleteRepo(repo); ask = null; onDismiss() }, enabled = typed.trim().equals("delete", ignoreCase = true)) {
+                    Text("Delete forever", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = cancel) { Text("Cancel") } },
+        )
+        null -> {}
+    }
 }
+
+private enum class Ask { RENAME, RENAME_SURE, VISIBILITY, DELETE }

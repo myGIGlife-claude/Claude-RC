@@ -35,6 +35,8 @@ case "$1 $2" in
     [[ -n "${STUB_CLONE_SLEEP:-}" ]] && sleep "$STUB_CLONE_SLEEP"
     mkdir -p "$4" && git -C "$4" init -q && touch "$4/README.md" && git -C "$4" add . && git -C "$4" commit -qm init ;;
   "auth login") read -r tok; [[ "$tok" == ghp_* ]] || { echo "bad token" >&2; exit 1; }; echo "$tok" > "$S/gh_token" ;;
+  "repo delete") [[ -f "$S/gh_no_delete" ]] && { echo "HTTP 403: Must have admin rights to Repository. This API operation needs the \"delete_repo\" scope." >&2; exit 1; }; true ;;
+  "repo rename" | "repo edit") true ;;
   "auth setup-git") ;;
   *) echo "gh stub: unhandled $*" >&2; exit 1 ;;
 esac

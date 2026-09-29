@@ -75,6 +75,11 @@ class LauncherApi(
     suspend fun open(fullName: String, start: Boolean): OpenResult =
         call("open $fullName" + if (start) " --start" else "", timeoutMs = 120_000)
 
+    suspend fun repoDelete(fullName: String): JsonObject = call("repo-edit delete $fullName", timeoutMs = 90_000)
+    suspend fun repoRename(fullName: String, name: String): JsonObject { requireName(name); return call("repo-edit rename $fullName $name", timeoutMs = 90_000) }
+    suspend fun repoVisibility(fullName: String, private: Boolean): JsonObject =
+        call("repo-edit visibility $fullName " + if (private) "private" else "public", timeoutMs = 90_000)
+
     suspend fun cloneStatus(fullName: String): CloneStatus = call("clone-status $fullName")
 
     suspend fun start(project: String): StartResult { requireName(project); return call("start $project") }

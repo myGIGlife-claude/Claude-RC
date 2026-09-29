@@ -124,6 +124,14 @@ case "$sub" in
   self-update)
     ((nargs == 1)) && [[ "${args[0]}" =~ ^[0-9a-f]{40}$ ]] || deny "$sub"
     ;;
+  repo-edit)
+    case "${args[0]:-}" in
+      delete) ((nargs == 2)) ;;
+      rename) ((nargs == 3)) && [[ "${args[2]}" =~ $PROJECT_RE ]] ;;
+      visibility) ((nargs == 3)) && [[ "${args[2]}" == private || "${args[2]}" == public ]] ;;
+      *) false ;;
+    esac && [[ "${args[1]}" =~ $REPO_RE ]] || deny "$sub"
+    ;;
   clone-status)
     ((nargs == 1)) && [[ "${args[0]}" =~ $REPO_RE ]] || deny "$sub"
     ;;

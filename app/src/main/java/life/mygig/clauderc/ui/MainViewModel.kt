@@ -736,6 +736,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun deleteRepo(repo: Repo) = action("Deleting ${repo.fullName}…") {
+        api.repoDelete(repo.fullName)
+        say("${repo.fullName} deleted on GitHub." + if (repo.local) " Its folder on the server is still there." else "")
+        refreshRepos(true)
+    }
+
+    fun renameRepo(repo: Repo, name: String) = action("Renaming ${repo.name}…") {
+        api.repoRename(repo.fullName, name)
+        say("Renamed to ${repo.owner}/$name." + if (repo.local) " The folder on the server keeps its old name." else "")
+        refreshRepos(true)
+    }
+
+    fun setRepoPrivate(repo: Repo, private: Boolean) = action("Making ${repo.name} ${if (private) "private" else "public"}…") {
+        api.repoVisibility(repo.fullName, private)
+        say("${repo.fullName} is now ${if (private) "private" else "public"}.")
+        refreshRepos(true)
+    }
+
     fun openRepo(repo: Repo, start: Boolean) = action(
         if (repo.local) "Updating ${repo.name}…" else "Cloning ${repo.name}…",
         onError = { e ->
