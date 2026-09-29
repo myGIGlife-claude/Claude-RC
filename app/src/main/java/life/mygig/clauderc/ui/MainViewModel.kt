@@ -34,6 +34,9 @@ import life.mygig.clauderc.api.Updates
 import life.mygig.clauderc.api.LoginUrl
 import life.mygig.clauderc.api.NewResult
 import life.mygig.clauderc.api.OwnersData
+import life.mygig.clauderc.api.McpData
+import life.mygig.clauderc.api.McpServer
+import life.mygig.clauderc.api.PluginsData
 import life.mygig.clauderc.api.Repo
 import life.mygig.clauderc.api.ServiceDef
 import life.mygig.clauderc.api.RunResult
@@ -63,6 +66,16 @@ sealed interface Fix {
 data class UiMessage(val text: String, val actionLabel: String? = null, val fix: Fix? = null)
 
 private const val APK_MIME = "application/vnd.android.package-archive"
+
+/** What a Connections tile opens. */
+sealed interface Detail {
+    /** A service from the + catalog (Cloudflare, Vercel, MXroute, …). */
+    data class Service(val id: String) : Detail
+    /** Claude, GitHub, AWS, GitLab, Docker, YouTube. */
+    data class Login(val kind: LoginKind) : Detail
+    data class Mcp(val server: McpServer) : Detail
+    data class Keystore(val name: String) : Detail
+}
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -160,6 +173,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 delay(60 * 60 * 1000L)
             }
         }
+        viewModelScope.launch {
+            delay(3_000)   // let the first status call land
+            while (true) {
+                refreshMcp()
+                delay(5 * 60 * 1000L)
+            }
+        }
     }
 
     /** Newest app build and server scripts on GitHub. Offline or rate-limited: keep the last answer. */
@@ -170,16 +190,74 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Pull-to-refresh on Status: the server's status and the update check together. */
     fun refreshAll() {
         refreshStatus()
+        refreshMcp()
         viewModelScope.launch { checkUpdates() }
     }
 
-    private val _runResult = MutableStateFlow<RunResult?>(null)
-    val runResult = _runResult.asStateFlow()
-    fun clearRunResult() { _runResult.value = null }
+    /** Run a command: what ran and what it printed, newest last (this app session only). */
+    private val _runHistory = MutableStateFlow<List<Pair<String, RunResult>>>(emptyList())
+    val runHistory = _runHistory.asStateFlow()
+    private val _showRun = MutableStateFlow(false)
+    val showRun = _showRun.asStateFlow()
+    fun showRun(show: Boolean) { _showRun.value = show }
 
     fun runCommand(command: String, sudoPassword: String) = action("Running on the server…") {
-        _runResult.value = null
-        _runResult.value = api.run(command, sudoPassword)
+        val r = api.run(command, sudoPassword)
+        _runHistory.value = (_runHistory.value + (command.trim() to r)).takeLast(20)
+    }
+
+    // ---- Connections: MCP servers, plugins, tile details ---------------------------
+
+    private val _mcp = MutableStateFlow<McpData?>(null)
+    val mcp = _mcp.asStateFlow()
+
+    /** MCP servers from the server's cache; [check] runs a fresh health check (~10 s). */
+    fun refreshMcp(check: Boolean = false) {
+        if ((_status.value?.scriptApi ?: 0) < Updates.CONNECTIONS_API) return
+        if (check) {
+            action("Checking MCP servers…") { _mcp.value = api.mcpRefresh() }
+        } else {
+            viewModelScope.launch {
+                runCatching { api.mcp() }.getOrNull()?.let { m ->
+                    _mcp.value = m
+                    // The server started a background check: pick up its result shortly.
+                    if (m.refreshing) { delay(20_000); runCatching { api.mcp() }.getOrNull()?.let { _mcp.value = it } }
+                }
+            }
+        }
+    }
+
+    private val _plugins = MutableStateFlow<PluginsData?>(null)
+    val plugins = _plugins.asStateFlow()
+    private val _pluginsLoading = MutableStateFlow(false)
+    val pluginsLoading = _pluginsLoading.asStateFlow()
+
+    fun loadPlugins() {
+        if (_pluginsLoading.value || (_status.value?.scriptApi ?: 0) < Updates.CONNECTIONS_API) return
+        viewModelScope.launch {
+            _pluginsLoading.value = true
+            try { _plugins.value = api.plugins() } catch (e: ApiException) { report(e) } finally { _pluginsLoading.value = false }
+        }
+    }
+
+    /** The tile detail page that's open, if any. */
+    private val _detail = MutableStateFlow<Detail?>(null)
+    val detail = _detail.asStateFlow()
+    fun openDetail(d: Detail?) { _detail.value = d }
+
+    fun disconnect(id: String, name: String) = action("Disconnecting $name…") {
+        api.disconnect(id)
+        _detail.value = null
+        say("$name disconnected. Restart sessions to drop it.")
+        refreshStatus()
+    }
+
+    fun removeMcp(name: String) = action("Removing $name…") {
+        val r = api.claudeCmd("mcp remove $name -s user")
+        if (r.exitCode != 0) throw ApiException(Codes.INTERNAL, r.output.ifBlank { "claude mcp remove failed" })
+        _detail.value = null
+        say("$name removed. Restart sessions to drop it.")
+        _mcp.value = api.mcpRefresh()
     }
 
     /** A restart that was refused because Claude is still working: ask before forcing it. */
@@ -240,7 +318,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun claudeCommand(args: String) = action("Running claude ${args.trim()}…") {
         _ccResult.value = args.trim() to api.claudeCmd(args)
+        // Plugin and marketplace changes: show the new list.
+        if (args.trim().startsWith("plugin")) {
+            runCatching { api.plugins() }.getOrNull()?.let { _plugins.value = it }
+        }
     }
+
+    fun clearCcResult() { _ccResult.value = null }
 
     /** The + dialog: services that aren't connected yet. */
     private val _showAdd = MutableStateFlow(false)

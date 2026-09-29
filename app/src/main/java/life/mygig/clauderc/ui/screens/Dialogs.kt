@@ -1,5 +1,15 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
+import androidx.compose.material3.rememberModalBottomSheetState
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
@@ -104,6 +114,7 @@ fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
 }
 
 /** The + button: every service that isn't connected yet, one tap to set it up. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddServiceDialog(vm: MainViewModel) {
     val status by vm.status.collectAsState()
@@ -141,33 +152,48 @@ fun AddServiceDialog(vm: MainViewModel) {
             }
         }
     }
-    AlertDialog(
-        onDismissRequest = { vm.showAddService(false) },
-        title = { Text("Connect a service") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (st == null) Text("Check the server first (pull down on Status).")
-                if (st != null && !newServer) {
-                    Text("Update the server scripts (card at the top of Status) to see more services.", style = MaterialTheme.typography.bodySmall)
-                }
-                if (options.isEmpty() && st != null) Text("Everything here is already connected.")
-                options.sortedBy { it.first.lowercase() }.forEach { (name, hint, go) ->
-                    OutlinedButton(
+    var query by remember { mutableStateOf("") }
+    val shown = options.filter { query.isBlank() || it.first.contains(query.trim(), true) || it.second.contains(query.trim(), true) }
+        .sortedBy { it.first.lowercase() }
+    ModalBottomSheet(onDismissRequest = { vm.showAddService(false) }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.fillMaxHeight(0.92f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Connect a service", style = MaterialTheme.typography.titleLarge)
+            OutlinedTextField(
+                value = query, onValueChange = { query = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Search services") }, shape = RoundedCornerShape(24.dp),
+                keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+            )
+            if (st == null) Text("Check the server first (pull down on Connections).")
+            if (st != null && !newServer) Text("Update the server scripts (card on Connections) to see more services.", style = MaterialTheme.typography.bodySmall)
+            if (options.isEmpty() && st != null) Text("Everything here is already connected.")
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(shown.size) { i ->
+                    val (name, hint, go) = shown[i]
+                    Surface(
                         onClick = { guard.run("Connect $name") { go() } },
                         enabled = st != null,
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Column(Modifier.fillMaxWidth()) {
-                            Text(name, style = MaterialTheme.typography.titleSmall)
-                            Text(hint, style = MaterialTheme.typography.bodySmall)
+                        Column(Modifier.padding(12.dp)) {
+                            Text(name, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
                         }
                     }
                 }
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Text("A–Z · connected ones move to the Connections tab", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 24.dp))
+                }
             }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = { vm.showAddService(false) }) { Text("Close") } },
-    )
+        }
+    }
 }
 
 /** Android signing keys: pick a .jks from the phone, give it a short name; every session gets NAME_KEYSTORE_*. */
@@ -752,86 +778,3 @@ private fun AwsLogin(vm: MainViewModel, busy: Boolean) {
     }
 }
 
-@Composable
-fun TailDialog(vm: MainViewModel, tail: TailResult) {
-    val guard = LocalGuard.current
-    val status by vm.status.collectAsState()
-    val busy by vm.busy.collectAsState()
-    // Answering prompts (e.g. approving an MCP server) asks for App lock once per window.
-    var keysUnlocked by remember { mutableStateOf(false) }
-    val updatedAt by vm.tailUpdatedAt.collectAsState()
-    val refreshing by vm.tailRefreshing.collectAsState()
-    var live by remember { mutableStateOf(true) }
-    val vScroll = rememberScrollState()
-    // Stay at the bottom as new output arrives.
-    LaunchedEffect(tail.text) { vScroll.scrollTo(vScroll.maxValue) }
-    // Live: re-read every 5 s while the window is open.
-    LaunchedEffect(live) {
-        while (live) {
-            delay(5_000)
-            vm.refreshTail(manual = false)
-        }
-    }
-    AlertDialog(
-        onDismissRequest = { vm.closeTail() },
-        title = {
-            Column {
-                Text(tail.session)
-                Text(
-                    when {
-                        refreshing -> "Refreshing…"
-                        updatedAt != null ->
-                            "Updated " + DateFormat.getTimeInstance(DateFormat.MEDIUM).format(Date(updatedAt!!)) +
-                                if (live) " · live" else ""
-                        else -> ""
-                    },
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (refreshing) LinearProgressIndicator(Modifier.fillMaxWidth())
-                SelectionContainer {
-                    Text(
-                        tail.text.ifBlank { "(no output yet)" },
-                        fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier
-                            .heightIn(max = 480.dp)
-                            .verticalScroll(vScroll)
-                            .horizontalScroll(rememberScrollState()),
-                    )
-                }
-                if ((status?.scriptApi ?: 0) >= Updates.KEYS_API) {
-                    Text("Answer a prompt:", style = MaterialTheme.typography.labelMedium)
-                    @OptIn(ExperimentalLayoutApi::class)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("1" to "1", "2" to "2", "3" to "3", "Enter" to "Enter", "Escape" to "Esc", "Up" to "↑", "Down" to "↓", "y" to "y", "n" to "n")
-                            .forEach { (key, label) ->
-                                OutlinedButton(
-                                    onClick = {
-                                        if (keysUnlocked) {
-                                            vm.sendKey(key)
-                                        } else {
-                                            guard.run("Answer prompts in ${tail.session}") { keysUnlocked = true; vm.sendKey(key) }
-                                        }
-                                    },
-                                    enabled = busy == null,
-                                    contentPadding = PaddingValues(horizontal = 12.dp),
-                                ) { Text(label) }
-                            }
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Switch(checked = live, onCheckedChange = { live = it })
-                    Text("  Auto-refresh", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { vm.refreshTail() }, enabled = !refreshing) { Text("Refresh") }
-        },
-        dismissButton = { TextButton(onClick = { vm.closeTail() }) { Text("Close") } },
-    )
-}
