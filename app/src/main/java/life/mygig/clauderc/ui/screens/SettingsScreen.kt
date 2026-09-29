@@ -1,5 +1,20 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import life.mygig.clauderc.ui.components.CardBox
+import life.mygig.clauderc.ui.components.Health
+import life.mygig.clauderc.ui.components.SectionLabel
+import life.mygig.clauderc.ui.components.StatusDot
+import life.mygig.clauderc.ui.theme.Term
+
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -90,40 +105,30 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (firstRun) {
-            Text("Add your server", style = MaterialTheme.typography.headlineSmall)
-            Text(
-                "1. On your Linux server, open a terminal as the user Claude should run as.\n" +
-                    "2. Run this one command. It installs the cLaudeRC scripts and session " +
-                    "auto-restore (asks for sudo once) and lets this phone in:",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SelectionContainer {
-                        Text(
-                            if (publicKey.isBlank()) "No key yet. Tap Regenerate." else Updates.installCommand(publicKey),
-                            fontFamily = FontFamily.Monospace,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(enabled = publicKey.isNotBlank(), onClick = {
-                            copy(context, "Install command", Updates.installCommand(publicKey))
-                        }) { Text("Copy command") }
-                        OutlinedButton(enabled = publicKey.isNotBlank(), onClick = {
-                            share(context, Updates.installCommand(publicKey))
-                        }) { Text("Share") }
-                        if (publicKey.isBlank()) TextButton(onClick = { vm.regenerateKey() }) { Text("Regenerate") }
-                    }
-                }
+            Text("Add your server", style = MaterialTheme.typography.headlineMedium)
+            Step(1, "On your Linux server, open a terminal as the user Claude should run as.")
+            Step(2, "Run this one command. It installs the cLaudeRC scripts and session auto-restore (asks for sudo once) and lets this phone in.")
+            SelectionContainer {
+                Text(
+                    if (publicKey.isBlank()) "No key yet. Tap Regenerate." else "$ " + Updates.installCommand(publicKey),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = Term.Fg,
+                    modifier = Modifier.fillMaxWidth().background(Term.Field, RoundedCornerShape(14.dp))
+                        .border(1.dp, Color(0xFF1F3A24), RoundedCornerShape(14.dp)).padding(14.dp),
+                )
             }
-            Text(
-                "3. When it finishes it prints the Host, Port and Username. Enter them below " +
-                    "and tap Connect.\n" +
-                    "4. Check the fingerprint the app shows is one of those it printed, then tap Trust.\n" +
-                    "The server needs curl, jq, tmux, git and flock.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(enabled = publicKey.isNotBlank(), onClick = {
+                    copy(context, "Install command", Updates.installCommand(publicKey))
+                }, modifier = Modifier.weight(1f)) { Text("Copy command") }
+                OutlinedButton(enabled = publicKey.isNotBlank(), onClick = {
+                    share(context, Updates.installCommand(publicKey))
+                }, modifier = Modifier.weight(1f)) { Text("Share") }
+                if (publicKey.isBlank()) TextButton(onClick = { vm.regenerateKey() }) { Text("Regenerate") }
+            }
+            Step(3, "When it finishes it prints the Host, Port and Username. Enter them below and tap Connect, then check the fingerprint matches one it printed and tap Trust.")
+            Text("The server needs curl, jq, tmux, git and flock.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
         // On first run the setup card above already carries the key.
@@ -214,21 +219,24 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
         }
 
         if (!firstRun) {
-            HorizontalDivider()
             Section("Servers")
-            s.servers.filter { it.isConfigured }.forEach { srv ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("${srv.user}@${srv.host}:${srv.port}", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
-                        if (srv.id == s.activeId) Text("Current", style = MaterialTheme.typography.labelSmall)
+            CardBox {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    s.servers.filter { it.isConfigured }.forEach { srv ->
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            StatusDot(if (srv.id == s.activeId) Health.OK else Health.OFF)
+                            Column(Modifier.weight(1f)) {
+                                Text(srv.host, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                Text(if (srv.id == s.activeId) "current" else "port ${srv.port}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            if (srv.id != s.activeId) TextButton(onClick = { vm.switchServer(srv.id) }) { Text("Use") }
+                            TextButton(onClick = { confirmRemove = srv }) { Text("Remove") }
+                        }
                     }
-                    if (srv.id != s.activeId) TextButton(onClick = { vm.switchServer(srv.id) }) { Text("Use") }
-                    TextButton(onClick = { confirmRemove = srv }) { Text("Remove") }
+                    OutlinedButton(onClick = { vm.addServer() }, modifier = Modifier.fillMaxWidth()) { Text("+ Add server") }
                 }
             }
-            OutlinedButton(onClick = { vm.addServer() }) { Text("Add server") }
 
-            HorizontalDivider()
             Section("App")
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -317,8 +325,17 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
 }
 
 @Composable
-internal fun Section(title: String) {
-    Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+internal fun Section(title: String) = SectionLabel(title)
+
+/** A numbered step on the first-run screen. */
+@Composable
+private fun Step(n: Int, text: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(Modifier.size(28.dp).background(MaterialTheme.colorScheme.primary, CircleShape), contentAlignment = Alignment.Center) {
+            Text("$n", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
+        }
+        Text(text, style = MaterialTheme.typography.bodyLarge)
+    }
 }
 
 @Composable
