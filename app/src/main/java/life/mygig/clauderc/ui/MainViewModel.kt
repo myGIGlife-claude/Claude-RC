@@ -140,7 +140,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _publicKey = MutableStateFlow("")
     val publicKey = _publicKey.asStateFlow()
 
-    private val _tab = MutableStateFlow(Tab.STATUS)
+    private val _tab = MutableStateFlow(Tab.SESSIONS)
     val tab = _tab.asStateFlow()
     private val _showSettings = MutableStateFlow(false)
     val showSettings = _showSettings.asStateFlow()

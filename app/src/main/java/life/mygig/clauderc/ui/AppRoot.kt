@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
@@ -30,6 +31,8 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -69,6 +72,8 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import life.mygig.clauderc.BuildConfig
+import life.mygig.clauderc.api.Updates
 import life.mygig.clauderc.data.ThemeMode
 import life.mygig.clauderc.api.Catalog
 import life.mygig.clauderc.ui.screens.AddServiceDialog
@@ -148,6 +153,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             val tab by vm.tab.collectAsState()
             val showSettings by vm.showSettings.collectAsState()
             val status by vm.status.collectAsState()
+            val latest by vm.latest.collectAsState()
             val login by vm.login.collectAsState()
             val setup by vm.setup.collectAsState()
             val showAdd by vm.showAdd.collectAsState()
@@ -277,11 +283,17 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                         NavigationBar {
                             // Narrow screens (e.g. a foldable's cover display) get the short label.
                             val narrow = LocalConfiguration.current.screenWidthDp < 400
-                            TabItem(tab, Tab.STATUS, if (narrow) "Connect" else "Connections", Icons.Filled.Hub, vm)
-                            TabItem(tab, Tab.NEW, "New", Icons.Filled.AddCircle, vm)
-                            TabItem(tab, Tab.PROJECTS, "Projects", Icons.AutoMirrored.Filled.List, vm)
+                            // A dot on Connections when an app or server update is waiting there.
+                            val lt = latest
+                            val st = status
+                            val updateWaiting = (lt?.appVersionCode ?: 0) > BuildConfig.VERSION_CODE ||
+                                (st != null && (st.scriptApi < Updates.MIN_SCRIPT_API || (lt?.serverCommit != null && lt.serverCommit != st.commit)))
+                            // Most used first; New in the middle; setup last.
                             TabItem(tab, Tab.SESSIONS, "Sessions", Icons.Filled.Terminal, vm)
+                            TabItem(tab, Tab.PROJECTS, "Projects", Icons.Filled.Folder, vm)
+                            TabItem(tab, Tab.NEW, "New", Icons.Filled.AddCircle, vm)
                             TabItem(tab, Tab.COMMAND, "Claude", Icons.Filled.AutoAwesome, vm)
+                            TabItem(tab, Tab.STATUS, if (narrow) "Connect" else "Connections", Icons.Filled.Hub, vm, dot = updateWaiting)
                         }
                     }
                 },
@@ -341,11 +353,14 @@ private fun androidx.compose.foundation.layout.RowScope.TabItem(
     label: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     vm: MainViewModel,
+    dot: Boolean = false,
 ) {
     NavigationBarItem(
         selected = current == tab,
         onClick = { vm.openDetail(null); vm.selectTab(tab) },
-        icon = { Icon(icon, contentDescription = null) },
+        icon = {
+            BadgedBox(badge = { if (dot) Badge() }) { Icon(icon, contentDescription = if (dot) "$label, update available" else null) }
+        },
         label = { Text(label, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip) },
     )
 }
