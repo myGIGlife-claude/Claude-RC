@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility.
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start.
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=19
+SCRIPT_API=20
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -1945,6 +1945,25 @@ do_mcp_refresh() {
 # address bar (that page fails to load on a phone, but the URL is all Claude
 # needs). Only user and plugin servers: /mcp here doesn't list project ones.
 MCP_AUTH_SESSION="mcp-auth"
+DOCTOR_SESSION="claude-doctor"
+
+# doctor-start: a fresh session of its own running /doctor (Claude's full
+# checkup, which can also fix things), so it doesn't land in a project's chat.
+# The app opens it in the chat.
+do_doctor_start() {
+  [[ $# -eq 0 ]] || bad_args "doctor-start takes no arguments"
+  need tmux
+  command -v claude >/dev/null 2>&1 || api_err internal "'claude' is not installed on the server."
+  local dir="$CACHE_DIR/doctor"
+  mkdir -p "$dir"
+  trust_folder "$dir"
+  tmux kill-session -t "=$DOCTOR_SESSION" 2>/dev/null
+  # Only this run's conversation, so the chat shows the new one.
+  rm -f "$HOME/.claude/projects/${dir//[\/.]/-}/"*.jsonl
+  tmux new-session -d -s "$DOCTOR_SESSION" -c "$dir" "env -u ANTHROPIC_API_KEY claude /doctor; exec bash" ||
+    api_err internal "tmux could not start the checkup."
+  api_ok "$(jq -cn --arg s "$DOCTOR_SESSION" '{session:$s}')"
+}
 mcp_auth_screen() { tmux capture-pane -p -t "=$MCP_AUTH_SESSION:" 2>/dev/null; }
 mcp_auth_key() { tmux send-keys -t "=$MCP_AUTH_SESSION:" "$1"; sleep 0.4; }
 
@@ -2331,6 +2350,7 @@ api_main() {
     youtube-login-start) do_youtube_login_start "$@" ;;
     youtube-login-poll)  do_youtube_login_poll "$@" ;;
     repo-edit)           do_repo_edit "$@" ;;
+    doctor-start)        do_doctor_start "$@" ;;
     mcp)                 do_mcp "$@" ;;
     mcp-refresh)         do_mcp_refresh "$@" ;;
     mcp-auth-start)      [[ $# -eq 0 ]] || bad_args "mcp-auth-start reads the name on stdin"; do_mcp_auth_start ;;

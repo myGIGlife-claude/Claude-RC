@@ -271,19 +271,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val chatPending = _chatPending.asStateFlow()
     private var chatPoller: Job? = null
 
-    /** Sent once the chat is unlocked, e.g. /doctor from the Claude tab. */
-    private var chatQueued: String? = null
-
-    fun openChatWith(session: String, text: String) { chatQueued = text; openChat(session) }
-
-    private fun sendQueued() { chatQueued?.let { t -> chatQueued = null; sendChat(t) {} } }
+    /** Claude's full checkup in a session of its own, opened in the chat. */
+    fun startCheckup() = action("Starting the checkup…") {
+        val s = api.doctorStart().session
+        refreshSessions()
+        openChat(s)
+    }
 
     fun openChat(session: String) {
         _chatSession.value = session
         _chat.value = null
         _chatError.value = null
         if (chatPin == null) chatPin = pinVault.load()
-        if (chatPin != null) { startChatPolling(); sendQueued(); return }
+        if (chatPin != null) { startChatPolling(); return }
         viewModelScope.launch {
             _chatPinNeeded.value = runCatching { api.chatPinStatus() }.getOrElse { e ->
                 _chatError.value = (e as? ApiException)?.let { friendly(it).first } ?: e.message
@@ -293,7 +293,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun closeChat() {
-        chatQueued = null
         chatPoller?.cancel()
         _chatPending.value = emptyList()
         _chatSession.value = null
@@ -332,7 +331,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (keepMinutes > 0) pinVault.save(pin, keepMinutes) else pinVault.clear()
             _chatPinNeeded.value = null
             startChatPolling()
-            sendQueued()
         } catch (e: ApiException) { _chatError.value = friendly(e).first }
     }
 
