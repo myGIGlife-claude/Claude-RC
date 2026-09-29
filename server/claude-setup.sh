@@ -2063,8 +2063,12 @@ do_chat_history() {
   grep -q "esc to interrupt" <<<"$screen" && busy=true
   tmp="$(mktemp)"
   { [[ -n "$f" ]] && tail -n 1500 "$f"; } 2>/dev/null | jq -c '
-    select(.type == "user" or .type == "assistant") | . as $l |
-    if .type == "user" then
+    select(.type == "user" or .type == "assistant" or (.type == "attachment" and .attachment.type == "queued_command")) | . as $l |
+    if .type == "attachment" then
+      # A message you sent while Claude was working.
+      (.attachment.prompt // "") | tostring | select(length > 0 and (startswith("<") | not))
+      | {id:$l.uuid, role:"user", text:.[0:8000], ts:$l.timestamp}
+    elif .type == "user" then
       (.message.content | if type == "string" then [.] else [.[]? | select(.type == "text") | .text] end)[]
       | select(length > 0 and (startswith("<") | not))
       | {id:$l.uuid, role:"user", text:.[0:8000], ts:$l.timestamp}
@@ -2075,7 +2079,9 @@ do_chat_history() {
         {id:($l.uuid + "-" + (.id // "")), role:"tool", ts:$l.timestamp,
          text:(.name + ": " + ((.input.description // .input.command // .input.file_path // .input.path // .input.pattern // .input.url // .input.query // "") | tostring | .[0:160]))}
       else empty end
-    end' 2>/dev/null | tail -n 80 | jq -sc . >"$tmp"
+    end' 2>/dev/null | jq -sc '
+      # The last 60 of your messages and Claude replies, with the tool steps between them.
+      ([to_entries[] | select(.value.role != "tool") | .key] | .[-60] // 0) as $from | .[$from:]' >"$tmp"
   jq -e . "$tmp" >/dev/null 2>&1 || echo '[]' >"$tmp"
   jq -c --arg s "$sess" --argjson w "$waiting" --argjson b "$busy" --arg sc "$screen" \
     '{session:$s, messages:., waiting:$w, busy:$b, screen:(if $w then $sc else null end)}' "$tmp" >"$tmp.out"

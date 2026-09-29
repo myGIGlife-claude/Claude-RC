@@ -255,6 +255,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _chat = MutableStateFlow<ChatData?>(null)
     val chat = _chat.asStateFlow()
     private var chatPin: String? = null
+    /** Messages you sent that the conversation file doesn't show yet (Claude queues them while it works). */
+    private val _chatPending = MutableStateFlow<List<String>>(emptyList())
+    val chatPending = _chatPending.asStateFlow()
     private var chatPoller: Job? = null
 
     fun openChat(session: String) {
@@ -272,6 +275,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun closeChat() {
         chatPoller?.cancel()
+        _chatPending.value = emptyList()
         _chatSession.value = null
         _chat.value = null
         _chatPinNeeded.value = null
@@ -310,7 +314,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val session = _chatSession.value ?: break
                 val pin = chatPin ?: break
                 try {
-                    _chat.value = api.chatHistory(session, pin)
+                    setChat(api.chatHistory(session, pin))
                     _chatError.value = null
                 } catch (e: ApiException) {
                     if (e.code in setOf("wrong_pin", "chat_locked", "pin_not_set")) { lockChat(); _chatError.value = friendly(e).first; break }
@@ -327,9 +331,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         action("Sending…") {
             api.chatSend(session, pin, text)
             onSent()
+            _chatPending.value = _chatPending.value + text.trim()
             delay(800)
-            _chat.value = api.chatHistory(session, pin)
+            setChat(api.chatHistory(session, pin))
         }
+    }
+
+    /** New history; drop pending messages the conversation now shows. */
+    private fun setChat(c: ChatData) {
+        _chat.value = c
+        val shown = c.messages.filter { it.role == "user" }.map { it.text.trim() }.toSet()
+        _chatPending.value = _chatPending.value.filterNot { it in shown }
     }
 
     fun interruptChat() {

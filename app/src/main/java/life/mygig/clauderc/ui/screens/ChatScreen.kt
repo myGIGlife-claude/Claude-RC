@@ -1,6 +1,8 @@
 package life.mygig.clauderc.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,6 +71,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
     val chat by vm.chat.collectAsState()
     val error by vm.chatError.collectAsState()
     val busy by vm.busy.collectAsState()
+    val pending by vm.chatPending.collectAsState()
     Dialog(onDismissRequest = { vm.closeChat() }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
@@ -94,7 +97,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                 if (need != null) {
                     PinGate(vm, need, error)
                 } else {
-                    Messages(chat?.messages.orEmpty(), Modifier.weight(1f))
+                    Messages(chat?.messages.orEmpty(), pending, Modifier.weight(1f))
                     chat?.takeIf { it.waiting }?.let { c -> PromptCard(vm, c.screen.orEmpty(), busy == null) }
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp)) }
                     Composer(vm, working = chat?.busy == true, enabled = busy == null && chat != null)
@@ -104,25 +107,59 @@ fun ChatScreen(vm: MainViewModel, session: String) {
     }
 }
 
+/** What the list shows: a message, or a run of tool steps folded into one line. */
+private sealed interface Row0 {
+    data class Msg(val m: ChatMessage, val pending: Boolean = false) : Row0
+    data class Steps(val key: String, val items: List<ChatMessage>) : Row0
+}
+
+private fun rows(messages: List<ChatMessage>, pending: List<String>): List<Row0> {
+    val out = mutableListOf<Row0>()
+    val run = mutableListOf<ChatMessage>()
+    fun flush() { if (run.isNotEmpty()) { out += Row0.Steps(run.first().id, run.toList()); run.clear() } }
+    messages.forEach { m -> if (m.role == "tool") run += m else { flush(); out += Row0.Msg(m) } }
+    flush()
+    pending.forEachIndexed { i, t -> out += Row0.Msg(ChatMessage(id = "pending-$i", role = "user", text = t), pending = true) }
+    return out
+}
+
 @Composable
-private fun Messages(messages: List<ChatMessage>, modifier: Modifier) {
+private fun Messages(messages: List<ChatMessage>, pending: List<String>, modifier: Modifier) {
     val state = rememberLazyListState()
-    LaunchedEffect(messages.size) { if (messages.isNotEmpty()) state.animateScrollToItem(messages.size - 1) }
+    val list = remember(messages, pending) { rows(messages, pending) }
+    var open by remember { mutableStateOf(setOf<String>()) }
+    LaunchedEffect(list.size) { if (list.isNotEmpty()) state.animateScrollToItem(list.size - 1) }
     LazyColumn(modifier.fillMaxWidth(), state = state, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (messages.isEmpty()) item { Text("No messages yet in this conversation.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        items(messages, key = { it.id + it.role + it.text.hashCode() }) { m ->
-            when (m.role) {
-                "user" -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    Surface(shape = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp), color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.widthIn(max = 320.dp)) {
-                        SelectionContainer { Text(m.text, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium) }
+        if (list.isEmpty()) item { Text("No messages yet in this conversation.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        items(list, key = { r -> when (r) { is Row0.Msg -> "m-" + r.m.id + r.m.text.hashCode(); is Row0.Steps -> "s-" + r.key } }) { r ->
+            when (r) {
+                is Row0.Steps -> {
+                    val expanded = r.key in open
+                    val names = r.items.map { it.text.substringBefore(":").substringAfterLast("__") }.distinct().take(4).joinToString(", ")
+                    Column(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { open = if (expanded) open - r.key else open + r.key }.padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            (if (expanded) "▾ " else "› ") + "${r.items.size} step" + (if (r.items.size == 1) "" else "s") + ": $names",
+                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                        )
+                        if (expanded) r.items.forEach { t ->
+                            Text(t.text, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, modifier = Modifier.padding(start = 12.dp))
+                        }
                     }
                 }
-                "tool" -> Text(
-                    "› " + m.text, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 6.dp), maxLines = 2,
-                )
-                else -> Surface(shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.widthIn(max = 340.dp)) {
-                    SelectionContainer { Text(m.text, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium) }
+                is Row0.Msg -> if (r.m.role == "user") {
+                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+                        Surface(shape = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp), color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.widthIn(max = 320.dp)) {
+                            SelectionContainer { Text(r.m.text, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium) }
+                        }
+                        if (r.pending) Text("queued · Claude reads it at its next pause", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    Surface(shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.widthIn(max = 340.dp)) {
+                        SelectionContainer { Text(r.m.text, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium) }
+                    }
                 }
             }
         }
@@ -161,7 +198,7 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
             FilledIconButton(onClick = { vm.interruptChat() }, modifier = Modifier.height(52.dp)) { Icon(Icons.Filled.Stop, contentDescription = "Stop Claude") }
         }
         FilledIconButton(
-            onClick = { val t = text; guard.run("Send to Claude") { vm.sendChat(t) { text = "" } } },
+            onClick = { val t = text; vm.sendChat(t) { text = "" } },
             enabled = enabled && text.isNotBlank(), modifier = Modifier.height(52.dp),
         ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
     }
