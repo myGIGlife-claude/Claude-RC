@@ -388,7 +388,7 @@ api "chat-history demo-app2" "482913"
 check "chat history: your text, Claude's text, tool lines; system lines left out" "$(jqt '.ok and ([.data.messages[] | .role] == ["user","assistant","tool"]) and .data.messages[0].text=="Add a forecast screen" and .data.messages[2].text=="Bash: npm test"')"
 api "chat-send demo-app2" $'482913\nline one\nline two'; check "chat send" "$(jqt '.ok and .data.sent')"
 api "chat-send demo-app2" $'000000\nhi'; check "chat send with a wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
-for i in 1 2 3 4; do api "chat-open demo-app2" "000000"; done
+for _ in 1 2 3 4; do api "chat-open demo-app2" "000000"; done
 check "5 wrong PINs lock chat" "$(jqt '.error.code=="chat_locked"')"
 api "chat-open demo-app2" "482913"; check "locked even with the right PIN" "$(jqt '.error.code=="chat_locked"')"
 rm -f "$HOME/.config/claude-launcher/chat-locked"
