@@ -16,9 +16,10 @@ set -uo pipefail
 # more CLIs, 8 = keys, 9 = safe restart (resume + busy check), 10 = MXroute
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
-# session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log.
+# session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
+# 18 = MCP sign-in.
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=17
+SCRIPT_API=18
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -1909,6 +1910,86 @@ do_mcp_refresh() {
   api_ok "$(jq -cn --argjson s "$(mcp_json)" '{servers:$s, checked_seconds_ago:0, refreshing:false}')"
 }
 
+# MCP sign-in, driven through `claude /mcp` in a hidden session: the phone
+# opens the sign-in link, then sends back the localhost callback URL from its
+# address bar (that page fails to load on a phone, but the URL is all Claude
+# needs). Only user and plugin servers: /mcp here doesn't list project ones.
+MCP_AUTH_SESSION="mcp-auth"
+mcp_auth_screen() { tmux capture-pane -p -t "=$MCP_AUTH_SESSION:" 2>/dev/null; }
+mcp_auth_key() { tmux send-keys -t "=$MCP_AUTH_SESSION:" "$1"; sleep 0.4; }
+
+# mcp-auth-start (server name on stdin): the sign-in URL.
+do_mcp_auth_start() {
+  local name i text sel url="" moves=0
+  name="$(read_secret_line)"
+  exec 0</dev/null
+  [[ "$name" =~ ^[A-Za-z0-9_.:@-]{1,100}$ ]] || api_err invalid_name "That isn't an MCP server name."
+  need tmux
+  command -v claude >/dev/null 2>&1 || api_err internal "'claude' is not installed on the server."
+  mkdir -p "$CACHE_DIR/mcp-auth"
+  (cd "$CACHE_DIR/mcp-auth" && start_login_session "$MCP_AUTH_SESSION" "$(command -v claude)" /mcp) ||
+    api_err internal "Could not start Claude."
+  for ((i = 0; i < 120; i++)); do
+    sleep 0.5
+    text="$(mcp_auth_screen)"
+    url="$(grep -A1 'copy this URL manually' <<<"$text" | grep -oE 'https://[^[:space:]]+' | head -n 1)"
+    [[ -n "$url" ]] && break
+    sel="$(grep -m1 '❯' <<<"$text")"
+    if grep -q 'Yes, I trust this folder' <<<"$text"; then
+      [[ "$sel" == *"Yes, I trust"* ]] && mcp_auth_key Enter || mcp_auth_key Down
+    elif grep -qE '[0-9]\. (Re-?a|A)uthenticate' <<<"$text"; then
+      [[ "$sel" == *uthenticate* ]] && mcp_auth_key Enter || mcp_auth_key Down
+    elif grep -q 'Manage MCP servers' <<<"$text"; then
+      ((moves++ < 40)) || break
+      [[ " $sel " == *" $name "* ]] && mcp_auth_key Enter || mcp_auth_key Down
+    fi
+  done
+  if [[ -z "$url" ]]; then
+    end_login "$MCP_AUTH_SESSION"
+    api_err internal "Claude didn't offer a sign-in for $name." "$(jq -cn --arg t "$(grep -v '^\s*$' <<<"$text" | tail -n 12)" '{pane:$t}')"
+  fi
+  api_ok "$(jq -cn --arg u "$url" '{url:$u}')"
+}
+
+# mcp-auth-finish (callback URL on stdin): the MCP list, checked again.
+do_mcp_auth_finish() {
+  local cb i text msg=""
+  cb="$(read_secret_line)"
+  exec 0</dev/null
+  cb="${cb//[[:space:]]/}"
+  [[ "$cb" =~ ^http://(localhost|127\.0\.0\.1):[0-9]{1,5}/ && ${#cb} -le 4000 ]] ||
+    api_err invalid_name "Paste the whole address from the browser: it starts with http://localhost:"
+  tmux has-session -t "=$MCP_AUTH_SESSION" 2>/dev/null || api_err internal "The sign-in expired. Start it again."
+  tmux send-keys -t "=$MCP_AUTH_SESSION:" -l -- "$cb"
+  tmux send-keys -t "=$MCP_AUTH_SESSION:" Enter
+  for ((i = 0; i < 45; i++)); do
+    sleep 1
+    text="$(mcp_auth_screen)"
+    # Back on the server's page: signed in, or the reason it failed.
+    if grep -q 'Config location' <<<"$text"; then
+      if grep -qE '(Status|Auth): +✔' <<<"$text"; then
+        end_login "$MCP_AUTH_SESSION"
+        need claude
+        mcp_refresh_now
+        api_ok "$(jq -cn --argjson s "$(mcp_json)" '{servers:$s, checked_seconds_ago:0, refreshing:false}')"
+      fi
+      msg="$(awk '/Config location/{f=1; next} /❯/{f=0} f' <<<"$text" | sed 's/^ *//; s/ *$//' | grep -v '^$' | head -n 2)"
+      end_login "$MCP_AUTH_SESSION"
+      api_err internal "Sign-in failed${msg:+: $msg}. Start it again."
+    fi
+    # A URL from another sign-in: this one is still waiting for the right one.
+    if ((i >= 3)) && msg="$(grep -m1 "isn't this sign-in" <<<"$text")"; then
+      api_err invalid_name "$(sed 's/^ *//; s/ *$//' <<<"$msg")"
+    fi
+  done
+  api_err internal "Claude didn't finish the sign-in in 45 s." "$(jq -cn --arg t "$(grep -v '^\s*$' <<<"$text" | tail -n 12)" '{pane:$t}')"
+}
+
+do_mcp_auth_cancel() {
+  end_login "$MCP_AUTH_SESSION"
+  api_ok '{"cancelled":true}'
+}
+
 # plugins: installed + available (from your marketplaces) + marketplaces + Claude's version.
 do_plugins() {
   [[ $# -eq 0 ]] || bad_args "plugins takes no arguments"
@@ -2164,7 +2245,7 @@ api_main() {
   shift || true
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | youtube-login-start | \
-      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | upload) ;;  # these read stdin
+      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | upload | mcp-auth-start | mcp-auth-finish) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -2201,6 +2282,9 @@ api_main() {
     youtube-login-poll)  do_youtube_login_poll "$@" ;;
     mcp)                 do_mcp "$@" ;;
     mcp-refresh)         do_mcp_refresh "$@" ;;
+    mcp-auth-start)      [[ $# -eq 0 ]] || bad_args "mcp-auth-start reads the name on stdin"; do_mcp_auth_start ;;
+    mcp-auth-finish)     [[ $# -eq 0 ]] || bad_args "mcp-auth-finish reads the URL on stdin"; do_mcp_auth_finish ;;
+    mcp-auth-cancel)     do_mcp_auth_cancel ;;
     plugins)             do_plugins "$@" ;;
     disconnect)          do_disconnect "$@" ;;
     chat-pin-status)     do_chat_pin_status "$@" ;;

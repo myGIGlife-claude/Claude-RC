@@ -74,7 +74,7 @@ done
 
 nargs=${#args[@]}
 case "$sub" in
-  status | owners | sessions | mcp | mcp-refresh | plugins | chat-pin-status | chat-pin-set | chat-log | login-claude-start | login-claude-code | login-claude-cancel | \
+  status | owners | sessions | mcp | mcp-refresh | mcp-auth-start | mcp-auth-finish | mcp-auth-cancel | plugins | chat-pin-status | chat-pin-set | chat-log | login-claude-start | login-claude-code | login-claude-cancel | \
     login-github | login-aws-keys | login-aws-sso-start | login-gitlab | login-docker | run | claude-cmd | \
     youtube-login-start | youtube-login-poll)
     ((nargs == 0)) || deny "$sub"

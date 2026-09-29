@@ -16,6 +16,9 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -60,6 +63,7 @@ private class Page(
     val remove: Pair<String, () -> Unit>? = null,
     val removeConfirm: String? = null,
     val link: Pair<String, String>? = null,
+    val extra: (@Composable () -> Unit)? = null,
 )
 
 /** A Connections tile, opened: status, public info, the variable names sessions get, and actions. */
@@ -68,6 +72,7 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
     val status by vm.status.collectAsState()
     val mcp by vm.mcp.collectAsState()
     val busy by vm.busy.collectAsState()
+    val mcpAuth by vm.mcpAuth.collectAsState()
     val context = LocalContext.current
     var confirm by remember { mutableStateOf(false) }
     BackHandler { vm.openDetail(null) }
@@ -124,6 +129,7 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
         }
         is Detail.Mcp -> {
             val m = mcp?.servers?.firstOrNull { it.name == d.server.name } ?: d.server
+            val signIn = m.health == "needs_auth" && (m.scope == "user" || m.scope == "plugin")
             Page(
                 title = m.label,
                 health = mcpHealth(m),
@@ -142,7 +148,8 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
                 rows = listOf("Scope" to m.scope, "Type" to (if (m.kind == "http") "remote (HTTP)" else "local program"), (if (m.kind == "http") "URL" else "Runs") to m.target) +
                     (if (m.health != "connected" && m.detail.isNotBlank()) listOf("Last error" to m.detail) else emptyList()),
                 note = when {
-                    m.health == "needs_auth" -> "Sign in from a Claude session: run /mcp there and pick ${m.label}."
+                    m.health == "needs_auth" && m.scope == "project" -> "Sign in from a Claude session in that project: run /mcp there and pick ${m.label}."
+                    m.health == "needs_auth" && m.scope != "claude.ai" -> null
                     m.scope == "claude.ai" -> "Added and removed in claude.ai › Settings › Connectors."
                     else -> null
                 },
@@ -153,7 +160,12 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
                     "claude.ai" -> "Open claude.ai connectors" to "https://claude.ai/settings/connectors"
                     else -> null
                 },
-                edit = if (m.scope == "plugin") ("Open the Claude tab" to { vm.openDetail(null); vm.selectTab(Tab.COMMAND) }) else null,
+                edit = when {
+                    signIn -> "Sign in" to { vm.mcpAuthStart(m.name) }
+                    m.scope == "plugin" -> "Open the Claude tab" to { vm.openDetail(null); vm.selectTab(Tab.COMMAND) }
+                    else -> null
+                },
+                extra = mcpAuth?.takeIf { signIn && it.first == m.name }?.let { (_, url) -> @Composable { McpSignIn(vm, url, busy == null) } },
             )
         }
         is Detail.Keystore -> Page(
@@ -200,6 +212,7 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
             }
         }
         page.note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        page.extra?.invoke()
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             page.edit?.let { (label, go) -> Button(onClick = go, enabled = busy == null, modifier = Modifier.weight(1f).height(48.dp)) { OneLine(label) } }
             page.test?.let { (label, go) -> OutlinedButton(onClick = go, enabled = busy == null, modifier = Modifier.weight(1f).height(48.dp)) { OneLine(label) } }
@@ -222,6 +235,34 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
             confirmButton = { TextButton(onClick = { confirm = false; go() }) { Text("Yes") } },
             dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
         )
+    }
+}
+
+/** The two sign-in steps: open the link, then paste back where the browser ended up. */
+@Composable
+private fun McpSignIn(vm: MainViewModel, url: String, enabled: Boolean) {
+    val context = LocalContext.current
+    var callback by remember { mutableStateOf("") }
+    CardBox {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SectionLabel("Sign in")
+            Text("1. Open the link and approve access.", style = MaterialTheme.typography.bodyMedium)
+            Button(onClick = { openUrl(context, url) }, modifier = Modifier.fillMaxWidth()) { Text("Open sign-in link") }
+            Text(
+                "2. The browser then lands on a page that doesn't load (http://localhost…). Copy that page's whole address and paste it here.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            OutlinedTextField(
+                value = callback, onValueChange = { callback = it.trim() },
+                label = { Text("Address from the browser") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
+            )
+            Button(
+                onClick = { vm.mcpAuthFinish(callback) },
+                enabled = enabled && (callback.startsWith("http://localhost") || callback.startsWith("http://127.0.0.1")),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Finish sign-in") }
+        }
     }
 }
 
