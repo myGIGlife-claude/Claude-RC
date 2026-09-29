@@ -156,6 +156,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val latest = _latest.asStateFlow()
 
     init {
+        // An update's APK is only needed until it's installed (which restarts the app).
+        viewModelScope.launch(Dispatchers.IO) { deleteApks() }
         viewModelScope.launch {
             _publicKey.value = try {
                 withContext(Dispatchers.Default) { keys.publicKey() }
@@ -580,13 +582,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * installer. (The file lands in the app's own folder, not Downloads, so
      * the user would never find it by hand.)
      */
+    private fun deleteApks() = getApplication<Application>().getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+        ?.listFiles { f -> f.name.endsWith(".apk") }?.forEach { it.delete() }
+
     fun downloadAndInstall(url: String): Job = viewModelScope.launch {
         val ctx = getApplication<Application>()
         val dm = ctx.getSystemService(DownloadManager::class.java)
         val name = url.substringAfterLast('/')
         // Only ever keep the build being downloaded.
-        ctx.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-            ?.listFiles { f -> f.name.endsWith(".apk") }?.forEach { it.delete() }
+        deleteApks()
         val id = try {
             dm.enqueue(
                 DownloadManager.Request(Uri.parse(url))

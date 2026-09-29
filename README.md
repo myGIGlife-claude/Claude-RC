@@ -80,7 +80,7 @@ see Security). There is no web server, open port or cloud service.
 
 ## Screens
 
-Five tabs, the same tile style throughout: **Sessions · Projects · New · Claude · Connections** (the app opens on Sessions; a dot on Connections means an app or server update is waiting).
+Five tabs, the same tile style throughout: **Sessions · Projects · New · Claude · Connections** (the app opens on Sessions; an update bar appears on top when a new build or server scripts are waiting).
 
 | Tab | Shows | Actions |
 | --- | --- | --- |
@@ -88,7 +88,7 @@ Five tabs, the same tile style throughout: **Sessions · Projects · New · Clau
 | **Projects** | Your repos as tiles, newest first: running / on server / GitHub only, private/public, org | Chips: **Running** (default), **On server**, **All**, **Archived** (repos archived on GitHub, kept out of All); search; tap for Open in Claude, clone/pull + start, stop, log, GitHub; long-press a running one for its log |
 | **Sessions** | Each running Claude session with its last lines in green, busy/idle, and an amber **needs an answer** card when it's waiting on a question (e.g. approving a new MCP server) | **Chat** right in the app (behind a chat PIN: messages from Claude's own conversation, tool steps as short lines, a card with answer keys when Claude asks something, **Stop** while it works, 📎 to send a file or photo into the project's `uploads/` folder; the same conversation as in the Claude app), **Open in Claude app** (menu), **Log** (a full-screen green-on-black terminal with A−/A+, live refresh and answer keys 1/2/3, ↑/↓, y/n, Esc, Enter), safe **Restart** / **Restart all** (reopens the same conversation, waits if Claude is busy), Stop; with App lock on, **Run a command** (terminal-style, type or paste, optional sudo password, keeps a scrollback of runs) |
 | **Claude** | Claude Code's version, installed plugins as tiles (on / disabled), your marketplaces | **Doctor**, **Update Claude**; tap a plugin to enable, disable, update or uninstall it; **+ Install** searches every plugin across your marketplaces (with **Add marketplace** at the bottom for anything not listed); other allowed `claude` commands |
-| **Connections** | Everything Claude on your server is connected to, as tiles in groups: **Core** (Claude, GitHub), **Services** (AWS, GitLab, Docker/GHCR, YouTube, Cloudflare, Vercel, MXroute, …), **MCP servers** (found automatically: your own, plugin ones and claude.ai connectors, with a live health dot, refreshed every 5 min) and **Keys** (signing keys, custom API keys). Update cards on top. | Tap a tile for its details: status, public info, the variable names sessions get (never values), **Edit** (new key), **Test now**, **Disconnect/Remove**. **+** (top right) connects a new service from a searchable A–Z list: AWS, GitLab, Docker/GHCR, Cloudflare, Vercel, Netlify, Fly.io, Railway, Supabase, Neon, npm, Stripe, Hugging Face, Backblaze B2, Google Cloud, Firebase, MXroute, Google Play Console, YouTube (with a `youtube-upload` command for every session), an **Android signing key**, or any **Custom API key**; it installs the CLI if needed, then asks for credentials. |
+| **Connections** | Everything Claude on your server is connected to, as tiles in groups: **Core** (Claude, GitHub), **Services** (AWS, GitLab, Docker/GHCR, YouTube, Cloudflare, Vercel, MXroute, …), **MCP servers** (found automatically: your own, plugin ones and claude.ai connectors, with a live health dot, refreshed every 5 min) and **Keys** (signing keys, custom API keys). Server update card on top. | Tap a tile for its details: status, public info, the variable names sessions get (never values), **Edit** (new key), **Test now**, **Disconnect/Remove**. **+** (top right) connects a new service from a searchable A–Z list: AWS, GitLab, Docker/GHCR, Cloudflare, Vercel, Netlify, Fly.io, Railway, Supabase, Neon, npm, Stripe, Hugging Face, Backblaze B2, Google Cloud, Firebase, MXroute, Google Play Console, YouTube (with a `youtube-upload` command for every session), an **Android signing key**, or any **Custom API key**; it installs the CLI if needed, then asks for credentials. |
 
 **Servers**: add as many as you like; tap the server name under the title to
 switch. All of them use this phone's one key.
@@ -120,12 +120,15 @@ same key.
 
 ## Updates
 
-The app checks GitHub when it opens and every hour while it's open. Status
-shows **App update available** (tap to download the new APK) and **Server
-scripts update available** with **Update now** (the server runs that
-commit's `install.sh`, after you confirm) or **Copy command** to paste on the
-server yourself. `install.sh` records the commit it installed so the app can
-compare.
+The app checks GitHub when it opens and every hour while it's open. A new
+app build shows a bar across the top of every tab with **Install** (it
+downloads the APK and opens Android's installer; the APK is deleted once the
+new build starts, so none pile up on the phone). With notifications on, you
+also get one notification per new build. Newer server scripts show the same
+bar (**View**) and a card on Connections with **Update now** (the server runs
+that commit's `install.sh`, after you confirm) or **Copy command** to paste on
+the server yourself. `install.sh` records the commit it installed so the app
+can compare. The app needs server scripts API 17 or newer.
 
 ## Security
 

@@ -22,15 +22,15 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Hub
+import life.mygig.clauderc.ui.components.AutoAwesome
+import life.mygig.clauderc.ui.components.Folder
+import life.mygig.clauderc.ui.components.Hub
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Terminal
+import life.mygig.clauderc.ui.components.Terminal
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
@@ -65,6 +65,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
+import life.mygig.clauderc.api.StatusData
+import life.mygig.clauderc.api.Latest
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -299,7 +303,9 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             ) { padding ->
                 // imePadding keeps focused fields above the keyboard (edge-to-edge
                 // windows don't resize for it on their own).
-                Box(Modifier.padding(padding).consumeWindowInsets(padding).imePadding().fillMaxSize()) {
+                Column(Modifier.padding(padding).consumeWindowInsets(padding).imePadding().fillMaxSize()) {
+                  if (!showSettings && !setupNeeded && detail == null) UpdateBar(vm, latest, status, tab)
+                  Box(Modifier.weight(1f).fillMaxWidth()) {
                     when {
                         showSettings || setupNeeded -> SettingsScreen(vm, s, firstRun = setupNeeded)
                         detail != null -> DetailScreen(vm, detail!!)
@@ -309,6 +315,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                         tab == Tab.SESSIONS -> SessionsScreen(vm)
                         tab == Tab.COMMAND -> ClaudeScreen(vm)
                     }
+                  }
                 }
             }
 
@@ -322,6 +329,36 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             if (showRun) RunScreen(vm)
             chatSession?.let { ChatScreen(vm, it) }
             pendingKey?.let { HostKeyDialog(vm, it, s.hostKeyFingerprint.ifEmpty { s.previousFingerprint }) }
+        }
+    }
+}
+
+/** A bar across the top of every tab while a new app build or server scripts are waiting. */
+@Composable
+private fun UpdateBar(vm: MainViewModel, lt: Latest?, st: StatusData?, tab: Tab) {
+    val busy by vm.busy.collectAsState()
+    val newApp = lt?.appVersionCode?.takeIf { it > BuildConfig.VERSION_CODE }
+    val apk = lt?.apkUrl
+    val server = st != null && (st.scriptApi < Updates.MIN_SCRIPT_API || (lt?.serverCommit != null && lt.serverCommit != st.commit))
+    val text: String
+    val label: String
+    val go: () -> Unit
+    when {
+        newApp != null && apk != null -> {
+            text = "Update: build ${newApp - 100} is ready"; label = "Install"; go = { vm.downloadAndInstall(apk) }
+        }
+        server && tab != Tab.STATUS -> {
+            text = "Server scripts update ready"; label = "View"; go = { vm.selectTab(Tab.STATUS) }
+        }
+        else -> return
+    }
+    Surface(color = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary) {
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(text, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Button(
+                onClick = go, enabled = busy == null,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.onPrimary, contentColor = MaterialTheme.colorScheme.primary),
+            ) { Text(label, fontWeight = FontWeight.SemiBold) }
         }
     }
 }

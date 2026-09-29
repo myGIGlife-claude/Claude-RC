@@ -33,7 +33,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import life.mygig.clauderc.BuildConfig
 import life.mygig.clauderc.api.Catalog
 import life.mygig.clauderc.api.McpServer
 import life.mygig.clauderc.api.Updates
@@ -85,15 +84,6 @@ fun ConnectionsScreen(vm: MainViewModel) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             val l = latest
-            val newApp = l?.appVersionCode?.takeIf { it > BuildConfig.VERSION_CODE }
-            val apkUrl = l?.apkUrl
-            if (newApp != null && apkUrl != null) {
-                full {
-                    Banner("App update available", "Build ${newApp - 100} is ready (you have ${BuildConfig.VERSION_CODE - 100}). Tap to install.") {
-                        vm.downloadAndInstall(apkUrl)
-                    }
-                }
-            }
             val s = status
             if (s == null) {
                 full { Text(if (refreshing) "Checking the server…" else "Pull down to check the server.", style = MaterialTheme.typography.bodyLarge) }
@@ -168,22 +158,6 @@ private fun LazyGridScope.section(title: String, tiles: List<Tile>) {
     if (tiles.isEmpty()) return
     full { SectionLabel(title) }
     tiles.forEach { t -> item { InfoTile(t.title, t.subtitle, t.health, t.onClick) } }
-}
-
-@Composable
-private fun Banner(title: String, text: String, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = Color(0xFF2A2418),
-        border = BorderStroke(1.dp, Color(0xFF5C4A24)),
-    ) {
-        Column(Modifier.padding(14.dp)) {
-            Text(title, color = WarnAmber, fontWeight = FontWeight.SemiBold)
-            Text(text, style = MaterialTheme.typography.bodyMedium)
-        }
-    }
 }
 
 /** Newer server scripts on GitHub: update from here ([commit] non-null) or copy the command. */
