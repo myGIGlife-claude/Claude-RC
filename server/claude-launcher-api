@@ -19,7 +19,7 @@ CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/claude-launcher/config"
 PROJECT_RE='^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$'
 REPO_RE='^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._][A-Za-z0-9._-]*$'
 OWNER_RE='^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'
-KNOWN="status owners repos sessions new open clone-status start stop tail login-claude-start login-claude-code login-claude-cancel login-github login-aws-keys login-aws-sso-start login-gitlab login-docker login-cloudflare self-update install-cli run claude-cmd restart login-token keys set-secret remove-secret login-keystore remove-keystore youtube-login-start youtube-login-poll mcp mcp-refresh plugins disconnect"
+KNOWN="status owners repos sessions new open clone-status start stop tail login-claude-start login-claude-code login-claude-cancel login-github login-aws-keys login-aws-sso-start login-gitlab login-docker login-cloudflare self-update install-cli run claude-cmd restart login-token keys set-secret remove-secret login-keystore remove-keystore youtube-login-start youtube-login-poll mcp mcp-refresh plugins disconnect chat-pin-status chat-pin-set chat-open chat-history chat-send chat-interrupt"
 TOKEN_RE='^[A-Za-z0-9._/=-]{1,200}$'
 
 mkdir -p "$STATE_DIR" 2>/dev/null
@@ -74,7 +74,7 @@ done
 
 nargs=${#args[@]}
 case "$sub" in
-  status | owners | sessions | mcp | mcp-refresh | plugins | login-claude-start | login-claude-code | login-claude-cancel | \
+  status | owners | sessions | mcp | mcp-refresh | plugins | chat-pin-status | chat-pin-set | login-claude-start | login-claude-code | login-claude-cancel | \
     login-github | login-aws-keys | login-aws-sso-start | login-gitlab | login-docker | login-cloudflare | run | claude-cmd | \
     youtube-login-start | youtube-login-poll)
     ((nargs == 0)) || deny "$sub"
@@ -82,7 +82,7 @@ case "$sub" in
   repos)
     ((nargs == 0)) || { ((nargs == 1)) && [[ "${args[0]}" == --refresh ]]; } || deny "$sub"
     ;;
-  start | stop)
+  start | stop | chat-open | chat-history | chat-send | chat-interrupt)
     ((nargs == 1)) && [[ "${args[0]}" =~ $PROJECT_RE ]] || deny "$sub"
     ;;
   restart)

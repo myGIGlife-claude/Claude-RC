@@ -43,6 +43,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
@@ -78,6 +79,7 @@ import life.mygig.clauderc.data.ThemeMode
 import life.mygig.clauderc.api.Catalog
 import life.mygig.clauderc.ui.screens.AddServiceDialog
 import life.mygig.clauderc.ui.screens.TokenServiceDialog
+import life.mygig.clauderc.ui.screens.ChatScreen
 import life.mygig.clauderc.ui.screens.ClaudeScreen
 import life.mygig.clauderc.ui.screens.ConnectionsScreen
 import life.mygig.clauderc.ui.screens.DetailScreen
@@ -128,6 +130,14 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
         }
     }
 
+    // App lock is required: turn it on first (or set a screen lock on the phone).
+    if (!s.appLock) {
+        ClaudeRcTheme(s.theme) {
+            RequireLockScreen(lock) { scope.launch { if (lock.unlock("Turn on App lock")) { vm.markUnlocked(); vm.setAppLock(true) } } }
+        }
+        return
+    }
+
     if (s.appLock && !unlocked) {
         ClaudeRcTheme(s.theme) {
             LockScreen { scope.launch { if (lock.unlock("Open cLaudeRC")) vm.markUnlocked() } }
@@ -159,6 +169,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             val showAdd by vm.showAdd.collectAsState()
             val detail by vm.detail.collectAsState()
             val showRun by vm.showRun.collectAsState()
+            val chatSession by vm.chatSession.collectAsState()
             val showCustom by vm.showCustom.collectAsState()
             val showKeystores by vm.showKeystores.collectAsState()
             val tokenService by vm.tokenService.collectAsState()
@@ -322,7 +333,40 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             tokenService?.let { id -> Catalog.byId(id)?.let { TokenServiceDialog(vm, it) } }
             tail?.let { TailScreen(vm, it) }
             if (showRun) RunScreen(vm)
+            chatSession?.let { ChatScreen(vm, it) }
             pendingKey?.let { HostKeyDialog(vm, it, s.hostKeyFingerprint.ifEmpty { s.previousFingerprint }) }
+        }
+    }
+}
+
+/** App lock is required. Shown until it's on; a phone without a screen lock is sent to set one up. */
+@Composable
+private fun RequireLockScreen(lock: AppLock, onEnable: () -> Unit) {
+    val context = LocalContext.current
+    var recheck by remember { mutableStateOf(0) }
+    val can = remember(recheck) { lock.canAuthenticate() }
+    Surface(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.fillMaxSize().padding(32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(56.dp))
+            Text("Turn on App lock", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                "cLaudeRC can create repos, run commands and chat with Claude on your server, so it always asks for your " +
+                    "fingerprint, face or screen lock to open, and again after 30 seconds away.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (can) {
+                Button(onClick = onEnable, modifier = Modifier.fillMaxWidth()) { Text("Turn on App lock") }
+            } else {
+                Text("This phone has no screen lock yet. Set one up (PIN, pattern, fingerprint or face), then come back.", style = MaterialTheme.typography.bodyMedium)
+                Button(onClick = {
+                    context.startActivity(android.content.Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                }, modifier = Modifier.fillMaxWidth()) { Text("Open security settings") }
+                OutlinedButton(onClick = { recheck++ }, modifier = Modifier.fillMaxWidth()) { Text("I've set one up") }
+            }
         }
     }
 }

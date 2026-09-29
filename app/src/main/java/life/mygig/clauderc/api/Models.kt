@@ -211,3 +211,19 @@ data class PluginsData(
     val available: List<AvailablePlugin> = emptyList(),
     val marketplaces: List<Marketplace> = emptyList(),
 )
+
+@Serializable
+data class ChatMessage(val id: String = "", val role: String = "assistant", val text: String = "", val ts: String? = null)
+
+@Serializable
+data class ChatData(
+    val session: String = "",
+    val messages: List<ChatMessage> = emptyList(),
+    val waiting: Boolean = false,
+    val busy: Boolean = false,
+    /** The question on screen when [waiting]. */
+    val screen: String? = null,
+)
+
+@Serializable
+data class PinStatus(val set: Boolean = false, @SerialName("locked_until") val lockedUntil: Long? = null)

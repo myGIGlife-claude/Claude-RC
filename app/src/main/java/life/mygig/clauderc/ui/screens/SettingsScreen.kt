@@ -242,26 +242,12 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 Column(Modifier.weight(1f)) {
                     Text("App lock")
                     Text(
-                        "Fingerprint or PIN to open the app, and before creating, stopping, " +
-                            "logging in or showing your key and username",
+                        "Required: fingerprint, face or screen lock to open the app and before creating, stopping, " +
+                            "logging in or showing your key. Chat also needs its own PIN.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                Switch(checked = s.appLock, onCheckedChange = { on ->
-                    val lock = appLock ?: return@Switch
-                    if (on && !lock.canAuthenticate()) {
-                        vm.say("Set up a screen lock or fingerprint on this phone first.")
-                        return@Switch
-                    }
-                    // Both directions need the fingerprint/PIN, so it can't be
-                    // switched off by someone else, or on without a working unlock.
-                    scope.launch {
-                        if (lock.unlock(if (on) "Turn on app lock" else "Turn off app lock")) {
-                            vm.markUnlocked()
-                            vm.setAppLock(on)
-                        }
-                    }
-                })
+                Text("Always on", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
             }
             Text("Theme")
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {

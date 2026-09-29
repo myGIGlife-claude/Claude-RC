@@ -113,12 +113,18 @@ Exit code 0 = success, 1 = handled error, 2 = bad arguments.
 | `mcp-refresh` | — | Same, checked now (~10 s). |
 | `plugins` | — | `claude_version`, `installed[{id,name,marketplace,version,enabled,scope}]`, `available[{id,name,marketplace,description,installs,installed}]`, `marketplaces[{name,source}]` (from `claude plugin list --json --available`). |
 | `disconnect` | `<service>` | `disconnected`. Deletes a token service's (or YouTube's) credentials and key file; sessions lose them on restart. |
+| `chat-pin-status` | — | `set`, `locked_until`. |
+| `chat-pin-set` | stdin: new PIN (6–12 digits), then the current one if set | `set`. Written to `~/.config/claude-launcher/chat-pin` (mode 600); never returned by any action. |
+| `chat-open` | `<session>`; stdin: PIN | `session`. Checks the PIN (5 wrong → `chat_locked` for 30 min; `wrong_pin`, `pin_not_set`). |
+| `chat-history` | `<session>`; stdin: PIN | `messages[{id,role,text,ts}]` (role user/assistant/tool, from Claude's transcript), `waiting`, `busy`, `screen` (the question when waiting). |
+| `chat-send` | `<session>`; stdin: PIN, then the message | `sent`. Pasted into the session (bracketed paste, multi-line ok), then Enter. |
+| `chat-interrupt` | `<session>`; stdin: PIN | `interrupted` (Esc). |
 | `login-gitlab` | token, host (default gitlab.com) on stdin | `user` (uses `glab auth login --stdin`) |
 | `login-docker` | registry (default docker.io), username, token on stdin | `registry`, `user` (uses `docker login --password-stdin`) |
 | `login-cloudflare` | API token on stdin | `logged_in`. Verified with Cloudflare, then saved as `CLOUDFLARE_API_TOKEN` in `~/.config/claude-launcher/env` (mode 600); one line in `~/.bashrc` loads it so Claude's sessions (and `wrangler`) see it. |
 
 Error codes: `not_logged_in_claude`, `not_logged_in_github`, `missing_scopes`,
-`not_logged_in_aws`, `not_logged_in` (GitLab / registry / Cloudflare), `repo_exists`, `folder_dirty`, `invalid_name`, `run_disabled`, `session_busy`, `busy`,
+`not_logged_in_aws`, `not_logged_in` (GitLab / registry / Cloudflare), `repo_exists`, `folder_dirty`, `invalid_name`, `run_disabled`, `session_busy`, `wrong_pin`, `chat_locked`, `pin_not_set`, `busy`,
 `internal`, `bad_args`, and `forbidden` from the runner.
 
 `open` returns `action: "not_updated"` with a `note` when `git pull --ff-only`

@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import life.mygig.clauderc.api.Session
+import life.mygig.clauderc.api.Updates
 import life.mygig.clauderc.ui.LocalGuard
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.components.Health
@@ -72,6 +73,8 @@ fun SessionsScreen(vm: MainViewModel) {
     var confirmRestartAll by remember { mutableStateOf(false) }
     val busyRestart by vm.busyRestart.collectAsState()
     val narrow = isNarrow()
+    val status by vm.status.collectAsState()
+    val chatOk = (status?.scriptApi ?: 0) >= Updates.CHAT_API
 
     // Previews and "needs an answer" stay current while the tab is open.
     LaunchedEffect(Unit) {
@@ -103,6 +106,7 @@ fun SessionsScreen(vm: MainViewModel) {
             items(sessions.sortedByDescending { it.waiting }, key = { it.name }) { s ->
                 SessionCard(
                     s,
+                    chat = if (chatOk) ({ vm.openChat(s.name) }) else null,
                     onOpen = { openInClaude(context) },
                     onLog = { vm.loadTail(s.name) },
                     onRestart = { confirmRestart = s },
@@ -151,7 +155,7 @@ fun SessionsScreen(vm: MainViewModel) {
 }
 
 @Composable
-private fun SessionCard(s: Session, onOpen: () -> Unit, onLog: () -> Unit, onRestart: () -> Unit, onStop: () -> Unit) {
+private fun SessionCard(s: Session, chat: (() -> Unit)?, onOpen: () -> Unit, onLog: () -> Unit, onRestart: () -> Unit, onStop: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     val narrow = isNarrow()
     Surface(
@@ -187,14 +191,18 @@ private fun SessionCard(s: Session, onOpen: () -> Unit, onLog: () -> Unit, onRes
                         colors = ButtonDefaults.buttonColors(containerColor = WarnAmber, contentColor = Color(0xFF1A1305)),
                     ) { OneLine("Answer") }
                 } else {
-                    Button(onClick = onOpen, modifier = Modifier.weight(1f).height(40.dp)) { OneLine(if (narrow) "Open" else "Open in Claude") }
+                    if (chat != null) {
+                        Button(onClick = chat, modifier = Modifier.weight(1f).height(40.dp)) { OneLine("Chat") }
+                    } else {
+                        Button(onClick = onOpen, modifier = Modifier.weight(1f).height(40.dp)) { OneLine(if (narrow) "Open" else "Open in Claude") }
+                    }
                     OutlinedButton(onClick = onLog, modifier = Modifier.height(40.dp)) { OneLine("Log") }
                 }
                 TextButton(onClick = onRestart) { OneLine("Restart") }
                 Box {
                     IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More for ${s.project}") }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        if (s.waiting) DropdownMenuItem(text = { Text("Open in Claude") }, onClick = { menu = false; onOpen() })
+                        if (s.waiting || chat != null) DropdownMenuItem(text = { Text("Open in Claude app") }, onClick = { menu = false; onOpen() })
                         DropdownMenuItem(text = { Text("Stop session") }, onClick = { menu = false; onStop() })
                     }
                 }

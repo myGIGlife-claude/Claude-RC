@@ -37,6 +37,8 @@ import life.mygig.clauderc.api.OwnersData
 import life.mygig.clauderc.api.McpData
 import life.mygig.clauderc.api.McpServer
 import life.mygig.clauderc.api.PluginsData
+import life.mygig.clauderc.api.ChatData
+import life.mygig.clauderc.api.PinStatus
 import life.mygig.clauderc.api.Repo
 import life.mygig.clauderc.api.ServiceDef
 import life.mygig.clauderc.api.RunResult
@@ -238,6 +240,108 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _pluginsLoading.value = true
             try { _plugins.value = api.plugins() } catch (e: ApiException) { report(e) } finally { _pluginsLoading.value = false }
         }
+    }
+
+    // ---- In-app chat ------------------------------------------------------------------
+    // The PIN is kept only in memory while the chat is unlocked, and forgotten the
+    // moment the app goes to the background (lockChat, from MainActivity.onStop).
+
+    private val _chatSession = MutableStateFlow<String?>(null)
+    val chatSession = _chatSession.asStateFlow()
+    private val _chatPinNeeded = MutableStateFlow<PinStatus?>(null)
+    val chatPinNeeded = _chatPinNeeded.asStateFlow()
+    private val _chatError = MutableStateFlow<String?>(null)
+    val chatError = _chatError.asStateFlow()
+    private val _chat = MutableStateFlow<ChatData?>(null)
+    val chat = _chat.asStateFlow()
+    private var chatPin: String? = null
+    private var chatPoller: Job? = null
+
+    fun openChat(session: String) {
+        _chatSession.value = session
+        _chat.value = null
+        _chatError.value = null
+        if (chatPin != null) { startChatPolling(); return }
+        viewModelScope.launch {
+            _chatPinNeeded.value = runCatching { api.chatPinStatus() }.getOrElse { e ->
+                _chatError.value = (e as? ApiException)?.let { friendly(it).first } ?: e.message
+                PinStatus(set = true)
+            }
+        }
+    }
+
+    fun closeChat() {
+        chatPoller?.cancel()
+        _chatSession.value = null
+        _chat.value = null
+        _chatPinNeeded.value = null
+    }
+
+    /** App went to the background: forget the PIN; the chat asks again on return. */
+    fun lockChat() {
+        chatPin = null
+        chatPoller?.cancel()
+        if (_chatSession.value != null) { _chat.value = null; _chatPinNeeded.value = PinStatus(set = true) }
+    }
+
+    fun setChatPin(newPin: String) = viewModelScope.launch {
+        _chatError.value = null
+        try {
+            api.chatPinSet(newPin)
+            unlockChat(newPin)
+        } catch (e: ApiException) { _chatError.value = friendly(e).first }
+    }
+
+    fun unlockChat(pin: String) = viewModelScope.launch {
+        val session = _chatSession.value ?: return@launch
+        _chatError.value = null
+        try {
+            api.chatOpen(session, pin)
+            chatPin = pin
+            _chatPinNeeded.value = null
+            startChatPolling()
+        } catch (e: ApiException) { _chatError.value = friendly(e).first }
+    }
+
+    private fun startChatPolling() {
+        chatPoller?.cancel()
+        chatPoller = viewModelScope.launch {
+            while (true) {
+                val session = _chatSession.value ?: break
+                val pin = chatPin ?: break
+                try {
+                    _chat.value = api.chatHistory(session, pin)
+                    _chatError.value = null
+                } catch (e: ApiException) {
+                    if (e.code in setOf("wrong_pin", "chat_locked", "pin_not_set")) { lockChat(); _chatError.value = friendly(e).first; break }
+                    _chatError.value = friendly(e).first
+                }
+                delay(if (_chat.value?.busy == true) 2_000 else 4_000)
+            }
+        }
+    }
+
+    fun sendChat(text: String, onSent: () -> Unit) {
+        val session = _chatSession.value ?: return
+        val pin = chatPin ?: return
+        action("Sending…") {
+            api.chatSend(session, pin, text)
+            onSent()
+            delay(800)
+            _chat.value = api.chatHistory(session, pin)
+        }
+    }
+
+    fun interruptChat() {
+        val session = _chatSession.value ?: return
+        val pin = chatPin ?: return
+        action("Stopping…") { api.chatInterrupt(session, pin) }
+    }
+
+    /** Answer a question in the chat's session (keys, like the log's). */
+    fun chatKey(key: String) {
+        val session = _chatSession.value ?: return
+        action("Sending $key…") { api.keys(session, key); chatPin?.let { _chat.value = api.chatHistory(session, it) } }
     }
 
     /** The tile detail page that's open, if any. */

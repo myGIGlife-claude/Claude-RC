@@ -125,6 +125,17 @@ class LauncherApi(
     suspend fun mcpRefresh(): McpData = call("mcp-refresh", timeoutMs = 150_000)
     suspend fun plugins(): PluginsData = call("plugins", timeoutMs = 120_000)
     suspend fun disconnect(service: String): JsonObject = call("disconnect $service")
+
+    // In-app chat: every call carries the PIN on stdin; the server checks it.
+    suspend fun chatPinStatus(): PinStatus = call("chat-pin-status")
+    suspend fun chatPinSet(newPin: String, oldPin: String = ""): JsonObject = call("chat-pin-set", stdin = newPin + "\n" + oldPin)
+    suspend fun chatOpen(session: String, pin: String): JsonObject { requireName(session); return call("chat-open $session", stdin = pin) }
+    suspend fun chatHistory(session: String, pin: String): ChatData { requireName(session); return call("chat-history $session", stdin = pin) }
+    suspend fun chatSend(session: String, pin: String, text: String): JsonObject {
+        requireName(session)
+        return call("chat-send $session", stdin = pin + "\n" + text)
+    }
+    suspend fun chatInterrupt(session: String, pin: String): JsonObject { requireName(session); return call("chat-interrupt $session", stdin = pin) }
     suspend fun loginKeystore(name: String, alias: String, storePassword: String, keyPassword: String, fileBase64: String): JsonObject =
         call("login-keystore $name", stdin = listOf(alias.trim(), storePassword, keyPassword, fileBase64).joinToString("\n"))
     suspend fun removeKeystore(name: String): JsonObject = call("remove-keystore $name")

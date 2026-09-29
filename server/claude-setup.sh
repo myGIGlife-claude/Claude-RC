@@ -17,8 +17,9 @@ SCRIPT_VERSION="2.0.0"
 # more CLIs, 8 = keys, 9 = safe restart (resume + busy check), 10 = MXroute
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
-# session previews. Bump when the app starts needing a new server feature.
-SCRIPT_API=15
+# session previews, 16 = in-app chat (PIN). Bump when the app starts needing a
+# new server feature.
+SCRIPT_API=16
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -1956,6 +1957,163 @@ do_disconnect() {
   api_ok "$(jq -cn --arg id "$1" '{disconnected:$id}')"
 }
 
+# ---- In-app chat ----------------------------------------------------------------
+# Chat needs a PIN on top of the phone's key. It lives only in this file on the
+# server (mode 600), so you can read it here if you forget it; no action ever
+# returns it. 5 wrong PINs lock chat for 30 minutes (or until you delete
+# chat-locked on the server).
+CHAT_PIN_FILE="$LAUNCHER_CONFIG_DIR/chat-pin"
+CHAT_LOCK="$LAUNCHER_CONFIG_DIR/chat-locked"
+CHAT_FAILS="$API_STATE_DIR/chat-pin-fails"
+CHAT_LOG="$API_STATE_DIR/chat.log"
+
+chat_pin() { sed -n 's/^PIN=\([0-9]\{6,12\}\)$/\1/p' "$CHAT_PIN_FILE" 2>/dev/null | head -n 1; }
+
+chat_locked_until() {
+  local t
+  [[ -f "$CHAT_LOCK" ]] || return 1
+  t=$(($(stat -c %Y "$CHAT_LOCK") + 1800))
+  if (($(date +%s) >= t)); then rm -f "$CHAT_LOCK"; return 1; fi
+  echo "$t"
+}
+
+# check_pin <pin>: returns, or ends the call with an error (counting failures).
+check_pin() {
+  local want n until
+  want="$(chat_pin)"
+  [[ -n "$want" ]] || api_err pin_not_set "Set a chat PIN in the app first."
+  if until="$(chat_locked_until)"; then
+    api_err chat_locked "Too many wrong PINs. Chat is locked until $(date -d "@$until" +%H:%M), or delete ~/.config/claude-launcher/chat-locked on the server."
+  fi
+  if [[ "$1" == "$want" ]]; then rm -f "$CHAT_FAILS"; return 0; fi
+  n=$(($(cat "$CHAT_FAILS" 2>/dev/null || echo 0) + 1))
+  echo "$n" >"$CHAT_FAILS"
+  if ((n >= 5)); then
+    rm -f "$CHAT_FAILS"; touch "$CHAT_LOCK"
+    api_err chat_locked "Too many wrong PINs. Chat is locked for 30 minutes (or delete ~/.config/claude-launcher/chat-locked on the server)."
+  fi
+  api_err wrong_pin "Wrong PIN ($((5 - n)) tries left). Forgot it? It's in ~/.config/claude-launcher/chat-pin on the server."
+}
+
+chat_log() { printf '%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" >>"$CHAT_LOG" 2>/dev/null; }
+
+# chat-pin-status: whether a PIN is set and whether chat is locked.
+do_chat_pin_status() {
+  [[ $# -eq 0 ]] || bad_args "chat-pin-status takes no arguments"
+  local set=false until
+  [[ -n "$(chat_pin)" ]] && set=true
+  until="$(chat_locked_until)" || until=""
+  api_ok "$(jq -cn --argjson s "$set" --arg u "$until" '{set:$s, locked_until:(if $u == "" then null else ($u|tonumber) end)}')"
+}
+
+# chat-pin-set: stdin = new PIN, then the current PIN when one is set.
+do_chat_pin_set() {
+  [[ $# -eq 0 ]] || bad_args "chat-pin-set takes no arguments"
+  local new old tmp
+  new="$(read_secret_line)"; old="$(read_secret_line)"
+  exec 0</dev/null
+  [[ "$new" =~ ^[0-9]{6,12}$ ]] || api_err invalid_name "The PIN must be 6 to 12 digits."
+  [[ -z "$(chat_pin)" ]] || check_pin "$old"
+  mkdir -p "$LAUNCHER_CONFIG_DIR"
+  tmp="$(mktemp "$CHAT_PIN_FILE.XXXXXX")"; chmod 600 "$tmp"
+  printf '# cLaudeRC chat PIN. The app never shows it; this file is how you get it back.\n# Delete this file to remove the PIN (then set a new one in the app).\nPIN=%s\n' "$new" >"$tmp"
+  mv "$tmp" "$CHAT_PIN_FILE"
+  chat_log - pin-set
+  api_ok '{"set":true}'
+}
+
+# The session's live conversation file (newest transcript in its project folder).
+chat_transcript() {
+  local sess="$1" dir
+  dir="$(awk -F'\t' -v s="$sess" '$1 == s {print $2; exit}' "$AUTOSTART_LIST" 2>/dev/null)"
+  [[ -n "$dir" ]] || dir="$(tmux display-message -p -t "=$sess:" '#{pane_current_path}' 2>/dev/null)"
+  ls -t "$HOME/.claude/projects/${dir//[\/.]/-}/"*.jsonl 2>/dev/null | head -n 1
+}
+
+# chat_session <arg>: validated, running session name (or the call ends).
+chat_session() {
+  valid_project "$1" || api_err invalid_name "Invalid project name."
+  local s; s="$(resolve_session "$1")"
+  tmux has-session -t "=$s" 2>/dev/null || api_err invalid_name "No running session named '$1'."
+  echo "$s"
+}
+
+# chat-open <session>: stdin = PIN. Just checks it (the app's gate).
+do_chat_open() {
+  [[ $# -eq 1 ]] || bad_args "usage: chat-open <session>"
+  local pin sess; pin="$(read_secret_line)"; exec 0</dev/null
+  sess="$(chat_session "$1")"
+  check_pin "$pin"
+  chat_log "$sess" open
+  api_ok "$(jq -cn --arg s "$sess" '{session:$s}')"
+}
+
+# chat-history <session>: stdin = PIN. The last messages of the conversation:
+# your text, Claude's text, and one-line summaries of its tool calls; plus
+# whether it's working or waiting on a question (with that screen).
+do_chat_history() {
+  [[ $# -eq 1 ]] || bad_args "usage: chat-history <session>"
+  local pin sess f screen waiting=false busy=false tmp
+  pin="$(read_secret_line)"; exec 0</dev/null
+  sess="$(chat_session "$1")"
+  check_pin "$pin"
+  f="$(chat_transcript "$sess")"
+  screen="$(tmux capture-pane -p -J -t "=$sess:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15)"
+  grep -qE "Enter to confirm|\(y/n\)" <<<"$screen" && waiting=true
+  grep -q "esc to interrupt" <<<"$screen" && busy=true
+  tmp="$(mktemp)"
+  { [[ -n "$f" ]] && tail -n 1500 "$f"; } 2>/dev/null | jq -c '
+    select(.type == "user" or .type == "assistant") | . as $l |
+    if .type == "user" then
+      (.message.content | if type == "string" then [.] else [.[]? | select(.type == "text") | .text] end)[]
+      | select(length > 0 and (startswith("<") | not))
+      | {id:$l.uuid, role:"user", text:.[0:8000], ts:$l.timestamp}
+    else
+      (.message.content // [])[] |
+      if .type == "text" then {id:$l.uuid, role:"assistant", text:(.text[0:12000]), ts:$l.timestamp}
+      elif .type == "tool_use" then
+        {id:($l.uuid + "-" + (.id // "")), role:"tool", ts:$l.timestamp,
+         text:(.name + ": " + ((.input.description // .input.command // .input.file_path // .input.path // .input.pattern // .input.url // .input.query // "") | tostring | .[0:160]))}
+      else empty end
+    end' 2>/dev/null | tail -n 80 | jq -sc . >"$tmp"
+  jq -e . "$tmp" >/dev/null 2>&1 || echo '[]' >"$tmp"
+  jq -c --arg s "$sess" --argjson w "$waiting" --argjson b "$busy" --arg sc "$screen" \
+    '{session:$s, messages:., waiting:$w, busy:$b, screen:(if $w then $sc else null end)}' "$tmp" >"$tmp.out"
+  rm -f "$tmp"
+  api_ok_file "$tmp.out"
+}
+
+# chat-send <session>: stdin = PIN, then the message (multi-line is fine: it
+# goes in as a bracketed paste, then Enter).
+do_chat_send() {
+  [[ $# -eq 1 ]] || bad_args "usage: chat-send <session>"
+  local pin sess msg
+  pin="$(read_secret_line)"
+  msg="$(head -c 20000)"
+  exec 0</dev/null
+  sess="$(chat_session "$1")"
+  check_pin "$pin"
+  [[ -n "${msg//[[:space:]]/}" ]] || bad_args "empty message"
+  printf '%s' "$msg" | tmux load-buffer -b clauderc-chat - || api_err internal "Couldn't hand the message to tmux."
+  tmux paste-buffer -p -d -b clauderc-chat -t "=$sess:"
+  sleep 0.3
+  tmux send-keys -t "=$sess:" Enter
+  unset msg
+  chat_log "$sess" send
+  api_ok "$(jq -cn --arg s "$sess" '{sent:true, session:$s}')"
+}
+
+# chat-interrupt <session>: stdin = PIN. Stops what Claude is doing (Esc).
+do_chat_interrupt() {
+  [[ $# -eq 1 ]] || bad_args "usage: chat-interrupt <session>"
+  local pin sess; pin="$(read_secret_line)"; exec 0</dev/null
+  sess="$(chat_session "$1")"
+  check_pin "$pin"
+  tmux send-keys -t "=$sess:" Escape
+  chat_log "$sess" interrupt
+  api_ok '{"interrupted":true}'
+}
+
 api_main() {
   # fd 3 = the one JSON object; everything else goes to stderr.
   exec 3>&1 1>&2
@@ -1968,7 +2126,8 @@ api_main() {
   local cmd="${1:-}"
   shift || true
   case "$cmd" in
-    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | login-cloudflare | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | youtube-login-start) ;;  # these read stdin
+    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | login-cloudflare | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | youtube-login-start | \
+      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -2008,6 +2167,12 @@ api_main() {
     mcp-refresh)         do_mcp_refresh "$@" ;;
     plugins)             do_plugins "$@" ;;
     disconnect)          do_disconnect "$@" ;;
+    chat-pin-status)     do_chat_pin_status "$@" ;;
+    chat-pin-set)        do_chat_pin_set "$@" ;;
+    chat-open)           do_chat_open "$@" ;;
+    chat-history)        do_chat_history "$@" ;;
+    chat-send)           do_chat_send "$@" ;;
+    chat-interrupt)      do_chat_interrupt "$@" ;;
     remove-keystore)     do_remove_keystore "$@" ;;
     "")                  bad_args "missing subcommand" ;;
     *)                   bad_args "unknown subcommand '$cmd'" ;;

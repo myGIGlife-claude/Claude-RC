@@ -368,6 +368,36 @@ api "disconnect github"; check "disconnect only takes token services" "$(jqt '.e
 api "login-token youtube" "x"; check "youtube can't be set with login-token" "$(jqt '.ok==false')"
 rm -f "$HOME/.config/claude-launcher/env" "$HOME/.claude.json"
 
+echo "in-app chat"
+api "chat-pin-status"; check "chat PIN not set yet" "$(jqt '.ok and (.data.set|not)')"
+api "chat-open demo-app2" "123456"; check "chat needs a PIN first" "$(jqt '.error.code=="pin_not_set"')"
+api "chat-pin-set" "12ab"; check "PIN must be 6-12 digits" "$(jqt '.error.code=="invalid_name"')"
+api "chat-pin-set" "482913"; check "PIN set" "$(jqt '.ok and .data.set')"
+[[ "$(stat -c %a "$HOME/.config/claude-launcher/chat-pin")" == 600 ]] && grep -q '^PIN=482913$' "$HOME/.config/claude-launcher/chat-pin"; check "PIN file readable only on the server (600)" $?
+api "chat-pin-set" $'111111\n000000'; check "changing the PIN needs the current one" "$(jqt '.error.code=="wrong_pin"')"
+rm -f "$HOME/.local/state/claude-launcher/chat-pin-fails"
+D2="$(tmux display-message -p -t "=demo-app2:" '#{pane_current_path}')"; TD="$HOME/.claude/projects/${D2//[\/.]/-}"; mkdir -p "$TD"
+cat >"$TD/99999999-0000-0000-0000-000000000000.jsonl" <<'JL'
+{"type":"user","uuid":"u1","timestamp":"2026-09-29T10:00:00Z","message":{"role":"user","content":"Add a forecast screen"}}
+{"type":"user","uuid":"u0","timestamp":"2026-09-29T10:00:01Z","message":{"role":"user","content":"<command-name>/clear</command-name>"}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-09-29T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"On it."},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"npm test"}}]}}
+{"type":"user","uuid":"u2","timestamp":"2026-09-29T10:00:09Z","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}
+JL
+touch "$TD/99999999-0000-0000-0000-000000000000.jsonl"
+api "chat-history demo-app2" "482913"
+check "chat history: your text, Claude's text, tool lines; system lines left out" "$(jqt '.ok and ([.data.messages[] | .role] == ["user","assistant","tool"]) and .data.messages[0].text=="Add a forecast screen" and .data.messages[2].text=="Bash: npm test"')"
+api "chat-send demo-app2" $'482913\nline one\nline two'; check "chat send" "$(jqt '.ok and .data.sent')"
+api "chat-send demo-app2" $'000000\nhi'; check "chat send with a wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
+for _ in 1 2 3 4; do api "chat-open demo-app2" "000000"; done
+check "5 wrong PINs lock chat" "$(jqt '.error.code=="chat_locked"')"
+api "chat-open demo-app2" "482913"; check "locked even with the right PIN" "$(jqt '.error.code=="chat_locked"')"
+rm -f "$HOME/.config/claude-launcher/chat-locked"
+api "chat-open demo-app2" "482913"; check "deleting the lock file on the server unlocks" "$(jqt '.ok')"
+grep -q "482913\|line one" "$HOME/.local/state/claude-launcher/api.log" "$HOME/.local/state/claude-launcher/chat.log"; [[ $? -ne 0 ]]; check "PIN and message text never logged" $?
+grep -q "send" "$HOME/.local/state/claude-launcher/chat.log"; check "chat access log records opens and sends" $?
+api "chat-history demo-app2 extra"; check "chat-history takes one session" "$(jqt '.error.code=="forbidden"')"
+rm -f "$HOME/.config/claude-launcher/chat-pin"
+
 echo "token services"
 api "status"
 check "status lists token services" "$(jqt '.data.services | (.vercel and .b2 and .gcp and .firebase and .cloudflare) and (.vercel.logged_in|not)')"

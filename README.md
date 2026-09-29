@@ -86,7 +86,7 @@ Five tabs, the same tile style throughout: **Sessions · Projects · New · Clau
 | --- | --- | --- |
 | **New** | Name (validated live), owner and visibility chips, “Start Claude now” | Create → repo link + **Open in Claude** |
 | **Projects** | Your repos as tiles, newest first: running / on server / GitHub only, private/public, org | Chips: **Running** (default), **On server**, **All**, **Archived** (repos archived on GitHub, kept out of All); search; tap for Open in Claude, clone/pull + start, stop, log, GitHub; long-press a running one for its log |
-| **Sessions** | Each running Claude session with its last lines in green, busy/idle, and an amber **needs an answer** card when it's waiting on a question (e.g. approving a new MCP server) | **Open in Claude**, **Log** (a full-screen green-on-black terminal with A−/A+, live refresh and answer keys 1/2/3, ↑/↓, y/n, Esc, Enter), safe **Restart** / **Restart all** (reopens the same conversation, waits if Claude is busy), Stop; with App lock on, **Run a command** (terminal-style, type or paste, optional sudo password, keeps a scrollback of runs) |
+| **Sessions** | Each running Claude session with its last lines in green, busy/idle, and an amber **needs an answer** card when it's waiting on a question (e.g. approving a new MCP server) | **Chat** right in the app (behind a chat PIN: messages from Claude's own conversation, tool steps as short lines, a card with answer keys when Claude asks something, **Stop** while it works; the same conversation as in the Claude app), **Open in Claude app** (menu), **Log** (a full-screen green-on-black terminal with A−/A+, live refresh and answer keys 1/2/3, ↑/↓, y/n, Esc, Enter), safe **Restart** / **Restart all** (reopens the same conversation, waits if Claude is busy), Stop; with App lock on, **Run a command** (terminal-style, type or paste, optional sudo password, keeps a scrollback of runs) |
 | **Claude** | Claude Code's version, installed plugins as tiles (on / disabled), your marketplaces | **Doctor**, **Update Claude**; tap a plugin to enable, disable, update or uninstall it; **+ Install** searches every plugin across your marketplaces (with **Add marketplace** at the bottom for anything not listed); other allowed `claude` commands |
 | **Connections** | Everything Claude on your server is connected to, as tiles in groups: **Core** (Claude, GitHub), **Services** (AWS, GitLab, Docker/GHCR, YouTube, Cloudflare, Vercel, MXroute, …), **MCP servers** (found automatically: your own, plugin ones and claude.ai connectors, with a live health dot, refreshed every 5 min) and **Keys** (signing keys, custom API keys). Update cards on top. | Tap a tile for its details: status, public info, the variable names sessions get (never values), **Edit** (new key), **Test now**, **Disconnect/Remove**. **+** (top right) connects a new service from a searchable A–Z list: AWS, GitLab, Docker/GHCR, Cloudflare, Vercel, Netlify, Fly.io, Railway, Supabase, Neon, npm, Stripe, Hugging Face, Backblaze B2, Google Cloud, Firebase, MXroute, Google Play Console, YouTube (with a `youtube-upload` command for every session), an **Android signing key**, or any **Custom API key**; it installs the CLI if needed, then asks for credentials. |
 
@@ -138,9 +138,17 @@ compare.
   in the app **and** the server's config has `ALLOW_RUN=1`, so a lost phone
   can't enable it. Each run asks for your fingerprint/PIN. The sudo password
   reaches sudo through a private askpass file, never a command line or log.
-- App lock (optional) asks for fingerprint/PIN to open the app, after 30 s in
-  the background, and before creating, stopping, logging in or showing the key
-  and username; it also hides the app from the Recents screen.
+- App lock is required: fingerprint, face or screen lock to open the app,
+  again after 30 s in the background, and before creating, stopping, logging in
+  or showing the key; it also hides the app from the Recents screen.
+- In-app chat needs a second secret, a chat PIN (6–12 digits), asked every time
+  a chat opens and again after any trip away from the app. It exists only in
+  `~/.config/claude-launcher/chat-pin` (mode 600) on the server, which is how
+  you recover it; no action returns it and the app never stores it. Every chat
+  call carries it and the server checks it; 5 wrong PINs lock chat for 30
+  minutes (or until you delete `~/.config/claude-launcher/chat-locked`). Chat
+  opens and sends are logged (without contents) in
+  `~/.local/state/claude-launcher/chat.log`.
 - The runner never uses `eval` or a shell on the request string; it only
   accepts known subcommands with validated arguments.
 - Host key is pinned on first connect after you compare the fingerprint; a
