@@ -437,6 +437,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         refreshStatus()
     }
 
+    /** A plugin's MCP server goes away with the plugin: turn the plugin off. */
+    fun disablePlugin(id: String) = action("Disabling $id…") {
+        val r = api.claudeCmd("plugin disable $id")
+        if (r.exitCode != 0) throw ApiException(Codes.INTERNAL, r.output.ifBlank { "claude plugin disable failed" })
+        _detail.value = null
+        say("$id disabled. Restart sessions to drop it; turn it back on in the Claude tab.")
+        runCatching { api.plugins() }.getOrNull()?.let { _plugins.value = it }
+        _mcp.value = api.mcpRefresh()
+    }
+
     fun removeMcp(name: String) = action("Removing $name…") {
         val r = api.claudeCmd("mcp remove $name -s user")
         if (r.exitCode != 0) throw ApiException(Codes.INTERNAL, r.output.ifBlank { "claude mcp remove failed" })
