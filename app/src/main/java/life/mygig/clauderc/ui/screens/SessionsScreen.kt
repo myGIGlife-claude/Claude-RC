@@ -49,7 +49,10 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import life.mygig.clauderc.api.Session
 import life.mygig.clauderc.api.Updates
+import life.mygig.clauderc.ui.LocalAppLock
 import life.mygig.clauderc.ui.LocalGuard
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.OneLine
@@ -73,6 +76,8 @@ fun SessionsScreen(vm: MainViewModel) {
     var confirmRestartAll by remember { mutableStateOf(false) }
     val busyRestart by vm.busyRestart.collectAsState()
     val narrow = isNarrow()
+    val appLock = LocalAppLock.current
+    val scope = rememberCoroutineScope()
     val status by vm.status.collectAsState()
     val chatOk = (status?.scriptApi ?: 0) >= Updates.CHAT_API
 
@@ -97,7 +102,7 @@ fun SessionsScreen(vm: MainViewModel) {
                     }
                     // A shell on the server: only offered when App lock guards the app.
                     if (settings?.appLock == true) {
-                        OutlinedButton(onClick = { vm.showRun(true) }, modifier = Modifier.weight(1f)) { OneLine(if (narrow) ">_ Run" else ">_ Run a command") }
+                        OutlinedButton(onClick = { scope.launch { if (appLock?.unlock("Run a command on the server") != false) vm.showRun(true) } }, modifier = Modifier.weight(1f)) { OneLine(if (narrow) ">_ Run" else ">_ Run a command") }
                     }
                 }
             }
