@@ -19,15 +19,18 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import java.util.concurrent.TimeUnit
+import life.mygig.clauderc.BuildConfig
 import life.mygig.clauderc.MainActivity
 import life.mygig.clauderc.R
 import life.mygig.clauderc.api.LauncherApi
+import life.mygig.clauderc.api.Updates
 import life.mygig.clauderc.data.SettingsStore
 import life.mygig.clauderc.ssh.SshKeyManager
 
 /**
  * Every ~15 minutes (Android's minimum for background work) checks the sessions
- * and notifies when one starts waiting on a question or finishes working.
+ * and notifies when one starts waiting on a question or finishes working, and
+ * once per new app build.
  * Only runs when the user turned notifications on and Android allowed them.
  */
 class SessionWatcher(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
@@ -37,13 +40,20 @@ class SessionWatcher(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         val store = SettingsStore(ctx)
         val s = store.current()
         if (!s.notify || !s.isConfigured || !allowed(ctx)) return Result.success()
+        channel(ctx)
+        // A new app build: say so once per build.
+        val prefs = ctx.getSharedPreferences("session_watch", Context.MODE_PRIVATE)
+        runCatching { Updates.fetch().appVersionCode }.getOrNull()
+            ?.takeIf { it > BuildConfig.VERSION_CODE && it != prefs.getInt("told_build", 0) }
+            ?.let { code ->
+                notify(ctx, "app-update", "cLaudeRC build ${code - 100} is ready", "Open cLaudeRC and tap Install.")
+                prefs.edit().putInt("told_build", code).apply()
+            }
         val keys = SshKeyManager(ctx)
         val api = LauncherApi(config = { store.current().toServerConfig() }, identity = { keys.identity() })
         // Offline, or the phone is locked (the key can't be used then): try next time.
         val sessions = runCatching { api.sessions().sessions }.getOrNull() ?: return Result.success()
-        val prefs = ctx.getSharedPreferences("session_watch", Context.MODE_PRIVATE)
         val before = prefs.getStringSet("state", emptySet()).orEmpty().associate { it.substringBefore('|') to it.substringAfter('|') }
-        channel(ctx)
         sessions.forEach { x ->
             val was = before[x.name].orEmpty()
             when {
