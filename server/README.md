@@ -86,7 +86,7 @@ Exit code 0 = success, 1 = handled error, 2 = bad arguments.
 | `status` | — | `claude.logged_in`, `github.{logged_in,user,missing_scopes}`, `aws.{logged_in,identity,profile,sso_configured}`, `services.{gitlab,docker,cloudflare}.{installed,logged_in,detail}`, `commit` (last commit that changed `server/`, recorded by `install.sh`), `script_api`, `hostname`, `version` |
 | `owners` | — | `user`, `orgs[{login}]`, `default_owner` |
 | `repos` | `[--refresh]` | `repos[{full_name,name,owner,owner_type,private,pushed_at,local,running,cloning}]` (cached for `REPOS_CACHE_TTL`). `local` means the folder's `origin` is this repo. |
-| `sessions` | — | `sessions[{name,project,dir,started_at,attached,uptime_seconds}]` |
+| `sessions` | — | `sessions[{name,project,dir,started_at,attached,uptime_seconds,preview,waiting,busy}]`: `preview` is the last lines (Claude's input box and status bar left out), `waiting` a question on screen, `busy` Claude working. |
 | `new` | `<name> --owner <owner> --visibility private\|public [--start]` | `repo`, `url`, `path`, `visibility`, `session` |
 | `open` | `<owner/repo> [--start]` | `repo`, `path`, `action` (`cloned`, `pulled`, `not_updated`, `cloning`), `pending`, `note`, `session` |
 | `clone-status` | `<owner/repo>` | `state` (`running`, `done`, `failed`, `none`), `message`, `session`. A finished result is reported once. |
@@ -109,6 +109,10 @@ Exit code 0 = success, 1 = handled error, 2 = bad arguments.
 | `login-keystore` / `remove-keystore` | `<NAME>` (upper case); stdin: alias, keystore password, key password, then the keystore base64 | `saved`, `alias`. Checked with `keytool` (or `openssl` for PKCS12), stored as `keystores/<NAME>.jks` (mode 600); sessions get `<NAME>_KEYSTORE_FILE`, `<NAME>_KEYSTORE_PASSWORD`, `<NAME>_KEY_ALIAS`, `<NAME>_KEY_PASSWORD`. `status` lists names as `keystores`. |
 | `youtube-login-start` / `youtube-login-poll` | start: client ID and secret on stdin | start: `url`, `code`, `interval`; poll: `pending` until approved, then `user` (channel). Google's device flow (client type "TVs and Limited Input devices", scope `youtube`); saves `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN`. `install.sh` puts `youtube-upload` (resumable uploader) in `~/.local/bin`. |
 | `set-secret` / `remove-secret` | `<NAME>` (upper case, ending in `_KEY`, `_TOKEN`, `_SECRET`, …; never `CLAUDE_*`/`ANTHROPIC_*`); stdin: the value | `saved` / `removed`. Custom API keys, saved and mirrored like the services above; `status` lists their names as `custom`. |
+| `mcp` | — | `servers[{name,label,scope,plugin,kind,target,health,detail}]`, `checked_seconds_ago`, `refreshing`. From `claude mcp list`, cached and refreshed in the background at most every 5 minutes (it starts every server). `scope`: user, project, plugin or claude.ai; `target` is a URL or just the program (arguments can hold secrets); `health`: connected, failed, needs_auth, unknown. |
+| `mcp-refresh` | — | Same, checked now (~10 s). |
+| `plugins` | — | `claude_version`, `installed[{id,name,marketplace,version,enabled,scope}]`, `available[{id,name,marketplace,description,installs,installed}]`, `marketplaces[{name,source}]` (from `claude plugin list --json --available`). |
+| `disconnect` | `<service>` | `disconnected`. Deletes a token service's (or YouTube's) credentials and key file; sessions lose them on restart. |
 | `login-gitlab` | token, host (default gitlab.com) on stdin | `user` (uses `glab auth login --stdin`) |
 | `login-docker` | registry (default docker.io), username, token on stdin | `registry`, `user` (uses `docker login --password-stdin`) |
 | `login-cloudflare` | API token on stdin | `logged_in`. Verified with Cloudflare, then saved as `CLOUDFLARE_API_TOKEN` in `~/.config/claude-launcher/env` (mode 600); one line in `~/.bashrc` loads it so Claude's sessions (and `wrangler`) see it. |
