@@ -83,7 +83,8 @@ install() {
   command -v tmux >/dev/null || { echo "tmux isn't installed — run claude-setup.sh first."; exit 1; }
 
   mkdir -p "$HOME/.local/bin" "$STATE_DIR"
-  cp "$(readlink -f "$0")" "$BIN"
+  # Run as the installed copy itself: nothing to copy.
+  [[ "$(readlink -f "$0")" == "$(readlink -f "$BIN" 2>/dev/null)" ]] || cp "$(readlink -f "$0")" "$BIN"
   chmod +x "$BIN"
 
   local user="$USER" home="$HOME"
