@@ -127,6 +127,7 @@ class LauncherApi(
         call("youtube-login-start", stdin = clientId.trim() + "\n" + clientSecret.trim())
     suspend fun youtubePoll(): JsonObject = call("youtube-login-poll")
     suspend fun mcp(): McpData = call("mcp")
+    suspend fun doctorStart(): StartResult = call("doctor-start")
     suspend fun mcpRefresh(): McpData = call("mcp-refresh", timeoutMs = 150_000)
     suspend fun mcpAuthStart(name: String): LoginUrl = call("mcp-auth-start", stdin = name, timeoutMs = 120_000)
     suspend fun mcpAuthFinish(callbackUrl: String): McpData = call("mcp-auth-finish", stdin = callbackUrl.trim(), timeoutMs = 180_000)

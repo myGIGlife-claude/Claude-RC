@@ -369,6 +369,9 @@ touch "$STUB_STATE/gh_no_delete"
 api "repo-edit delete demo-user/demo-app"; check "repo delete without delete_repo -> missing_scopes" "$(jqt '.error.code=="missing_scopes" and .error.missing==["delete_repo"]')"
 rm -f "$STUB_STATE/gh_no_delete"
 api "repo-edit delete demo-user/demo-app"; check "repo delete" "$(jqt '.ok and .data.done=="delete"')"
+api "doctor-start"; check "doctor-start runs /doctor in its own session" "$(jqt '.ok and .data.session=="claude-doctor"')"
+tmux list-panes -t "=claude-doctor" -F "#{pane_start_command}" | grep -q "claude /doctor"; check "doctor session command" $?
+tmux kill-session -t "=claude-doctor" 2>/dev/null
 api "plugins"
 check "plugins: installed, available, marketplaces, version" "$(jqt '.ok and .data.installed[0].name=="demo" and .data.installed[0].enabled and (.data.available|length)==2 and .data.available[0].installed and (.data.available[1].installed|not) and .data.marketplaces[0].name=="market" and .data.claude_version=="2.1.999"')"
 api "sessions"; check "sessions carry preview/waiting/busy" "$(jqt '.ok and (.data.sessions|length) > 0 and (.data.sessions[0]|has("preview") and has("waiting") and has("busy"))')"
