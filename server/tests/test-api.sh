@@ -382,10 +382,11 @@ cat >"$TD/99999999-0000-0000-0000-000000000000.jsonl" <<'JL'
 {"type":"user","uuid":"u0","timestamp":"2026-09-29T10:00:01Z","message":{"role":"user","content":"<command-name>/clear</command-name>"}}
 {"type":"assistant","uuid":"a1","timestamp":"2026-09-29T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"On it."},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"npm test"}}]}}
 {"type":"user","uuid":"u2","timestamp":"2026-09-29T10:00:09Z","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}
+{"type":"attachment","uuid":"q1","timestamp":"2026-09-29T10:00:10Z","attachment":{"type":"queued_command","prompt":"also add tests"}}
 JL
 touch "$TD/99999999-0000-0000-0000-000000000000.jsonl"
 api "chat-history demo-app2" "482913"
-check "chat history: your text, Claude's text, tool lines; system lines left out" "$(jqt '.ok and ([.data.messages[] | .role] == ["user","assistant","tool"]) and .data.messages[0].text=="Add a forecast screen" and .data.messages[2].text=="Bash: npm test"')"
+check "chat history: your text, Claude's text, tool lines, messages sent mid-turn; system lines left out" "$(jqt '.ok and ([.data.messages[] | .role] == ["user","assistant","tool","user"]) and .data.messages[0].text=="Add a forecast screen" and .data.messages[2].text=="Bash: npm test" and .data.messages[3].text=="also add tests"')"
 api "chat-send demo-app2" $'482913\nline one\nline two'; check "chat send" "$(jqt '.ok and .data.sent')"
 api "chat-send demo-app2" $'000000\nhi'; check "chat send with a wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
 for _ in 1 2 3 4; do api "chat-open demo-app2" "000000"; done
