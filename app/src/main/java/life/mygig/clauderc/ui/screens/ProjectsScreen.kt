@@ -1,5 +1,7 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -56,7 +58,7 @@ import life.mygig.clauderc.ui.LocalGuard
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.openUrl
 
-private enum class Filter(val label: String) { ALL("All"), LOCAL("On server"), RUNNING("Running") }
+private enum class Filter(val label: String) { RUNNING("Running"), LOCAL("On server"), ALL("All"), ARCHIVED("Archived") }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -64,7 +66,7 @@ fun ProjectsScreen(vm: MainViewModel) {
     val repos by vm.repos.collectAsState()
     val refreshing by vm.reposRefreshing.collectAsState()
     var query by rememberSaveable { mutableStateOf("") }
-    var filter by rememberSaveable { mutableStateOf(Filter.ALL) }
+    var filter by rememberSaveable { mutableStateOf(Filter.RUNNING) }
     var selected by remember { mutableStateOf<Repo?>(null) }
 
     // Cached list shows instantly; refresh in the background.
@@ -75,9 +77,10 @@ fun ProjectsScreen(vm: MainViewModel) {
             .filter { query.isBlank() || it.fullName.contains(query.trim(), ignoreCase = true) }
             .filter {
                 when (filter) {
-                    Filter.ALL -> true
-                    Filter.LOCAL -> it.local
                     Filter.RUNNING -> it.running
+                    Filter.LOCAL -> it.local && !it.archived
+                    Filter.ALL -> !it.archived
+                    Filter.ARCHIVED -> it.archived
                 }
             }
             .sortedByDescending { it.pushedAt ?: "" }
@@ -93,7 +96,7 @@ fun ProjectsScreen(vm: MainViewModel) {
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         )
-        Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Filter.entries.forEach { f ->
                 FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.label) })
             }
@@ -107,7 +110,13 @@ fun ProjectsScreen(vm: MainViewModel) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (shown.isEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) { Text(if (refreshing) "Loading repos…" else "No repos match.") }
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Text(when {
+                            refreshing -> "Loading repos…"
+                            filter == Filter.RUNNING && query.isBlank() -> "No projects running. Start one from All, or from Sessions."
+                            else -> "No repos match."
+                        })
+                    }
                 }
                 items(shown, key = { it.fullName }) { repo ->
                     RepoTile(
@@ -147,6 +156,7 @@ private fun RepoTile(repo: Repo, onClick: () -> Unit, onLongClick: () -> Unit) {
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Badge(if (repo.private) "Private" else "Public")
+                if (repo.archived) Badge("Archived")
                 if (repo.isOrg) Badge(repo.owner)
             }
         }
