@@ -409,6 +409,14 @@ api "keys demo-app2 BTab"; check "Shift+Tab is an allowed key" "$(jqt '.ok')"
 tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "❯ 1. Yes, enable auto mode"; sleep 0.3
 api "chat-history demo-app2" "482913"; check "a numbered menu on screen counts as a question" "$(jqt '.data.waiting==true')"
 tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "clear"; tmux send-keys -t "=demo-app2:" Enter; sleep 0.3
+TF="$TD/99999999-0000-0000-0000-000000000000.jsonl"
+echo '{"type":"assistant","uuid":"q9","timestamp":"2026-09-29T10:02:00Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_ask","name":"AskUserQuestion","input":{"questions":[{"question":"Colour?","header":"Colour","multiSelect":false,"options":[{"label":"Red","description":"warm"},{"label":"Blue","description":"cool"}]}]}}]}}' >>"$TF"
+tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "❯ 1. Red"; sleep 0.3
+api "chat-history demo-app2" "482913"
+check "a pending AskUserQuestion comes back as data" "$(jqt '.data.waiting and (.data.ask|length)==1 and .data.ask[0].question=="Colour?" and (.data.ask[0].options|length)==2 and .data.ask[0].options[1].label=="Blue"')"
+echo '{"type":"user","uuid":"q10","timestamp":"2026-09-29T10:02:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ask","content":"ok"}]}}' >>"$TF"
+api "chat-history demo-app2" "482913"; check "an answered question is gone" "$(jqt '.data.ask == null')"
+tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "clear"; tmux send-keys -t "=demo-app2:" Enter; sleep 0.3
 api "chat-send demo-app2" $'000000\nhi'; check "chat send with a wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
 for _ in 1 2 3 4; do api "chat-open demo-app2" "000000"; done
 check "5 wrong PINs lock chat" "$(jqt '.error.code=="chat_locked"')"

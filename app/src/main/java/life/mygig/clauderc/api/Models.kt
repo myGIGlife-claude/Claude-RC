@@ -219,6 +219,17 @@ data class ChatMessage(
 )
 
 @Serializable
+data class AskOption(val label: String = "", val description: String = "")
+
+@Serializable
+data class AskQuestion(
+    val question: String = "",
+    val header: String = "",
+    val multiSelect: Boolean = false,
+    val options: List<AskOption> = emptyList(),
+)
+
+@Serializable
 data class ChatFile(val name: String, val bytes: Long = 0, val data: String = "")
 
 @Serializable
@@ -231,6 +242,8 @@ data class ChatData(
     val mode: String = "default",
     /** The model of Claude's latest reply, e.g. claude-opus-5-5 (empty before its first reply). */
     val model: String = "",
+    /** Claude's multiple-choice question waiting for an answer (AskUserQuestion), if that's what's on screen. */
+    val ask: List<AskQuestion>? = null,
     /** The question on screen when [waiting]. */
     val screen: String? = null,
 )
