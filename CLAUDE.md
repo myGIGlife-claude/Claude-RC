@@ -58,3 +58,19 @@ and PATH. Changes apply when a session restarts. Tools install into
 No personal values in code, docs or commits: usernames, home paths,
 hostnames, IPs, emails, org names, keys. They live in
 `~/.config/claude-launcher/config` on the server and in the app's settings.
+
+## Project notes
+
+- Workflow: branch, PR, merge right away; then watch only the main build
+  (`gh run list -b main -w build`). The owner updates through the app's
+  **Update now**; server-only changes reach the server the same way.
+- Server tests: `server/tests/stubs/` fake the CLIs (state in `$STUB_STATE`).
+  They take ~1.5 min; run them after any server change.
+- `api_err` exits the script: never call it inside `$(…)`.
+- `claude-autostart.sh` runs with `set -euo pipefail`: end pipelines that may
+  find nothing with `|| true`.
+- Driving Claude's TUI in tmux: use a wide pane (`-x 1000`) so URLs don't
+  wrap; `claude /mcp` and `claude /doctor` open those directly; a new folder
+  shows the trust prompt first (`trust_folder` avoids it).
+- A session's live conversation is the newest `*.jsonl` in
+  `~/.claude/projects/<dir with / and . as ->/`.
