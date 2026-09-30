@@ -2209,7 +2209,7 @@ do_chat_open() {
 # whether it's working or waiting on a question (with that screen).
 do_chat_history() {
   [[ $# -eq 1 ]] || bad_args "usage: chat-history <session>"
-  local pin sess f screen waiting=false busy=false tmp mode model= ask=null
+  local pin sess f screen waiting=false busy=false tmp mode model="" ask=null
   pin="$(read_secret_line)"; exec 0</dev/null
   sess="$(chat_session "$1")"
   check_pin "$pin"
