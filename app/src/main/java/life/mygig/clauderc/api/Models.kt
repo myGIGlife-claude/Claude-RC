@@ -227,6 +227,8 @@ data class ChatData(
     val messages: List<ChatMessage> = emptyList(),
     val waiting: Boolean = false,
     val busy: Boolean = false,
+    /** Claude's permission mode: auto, plan, edits, bypass or default. */
+    val mode: String = "default",
     /** The question on screen when [waiting]. */
     val screen: String? = null,
 )
