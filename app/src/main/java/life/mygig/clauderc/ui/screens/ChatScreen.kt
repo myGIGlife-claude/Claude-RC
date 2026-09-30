@@ -184,7 +184,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                     PinGate(vm, need, error)
                 } else {
                     Messages(vm, chat?.messages.orEmpty(), pending, Modifier.weight(1f))
-                    chat?.takeIf { it.waiting }?.let { c -> PromptCard(vm, c.screen.orEmpty(), busy == null) }
+                    chat?.takeIf { it.waiting }?.let { c -> c.ask?.takeIf { it.isNotEmpty() }?.let { AskCard(vm, it, busy == null) } ?: PromptCard(vm, c.screen.orEmpty(), busy == null) }
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp)) }
                     Composer(vm, working = chat?.busy == true, enabled = busy == null && chat != null)
                 }

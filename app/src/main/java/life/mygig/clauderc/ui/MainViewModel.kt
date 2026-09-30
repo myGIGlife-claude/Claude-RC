@@ -27,6 +27,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import life.mygig.clauderc.api.ApiException
+import life.mygig.clauderc.api.AskQuestion
 import life.mygig.clauderc.api.Codes
 import life.mygig.clauderc.api.LauncherApi
 import life.mygig.clauderc.api.Latest
@@ -363,6 +364,50 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 delay(if (_chat.value?.busy == true) 2_000 else 4_000)
             }
+        }
+    }
+
+    /**
+     * Answers Claude's question screen key by key: a number picks (and moves on), a multi-choice
+     * list is toggled then Down to its Submit row, "something else" types the text.
+     */
+    fun answerAsk(qs: List<AskQuestion>, picks: List<Set<Int>>, others: List<String>) {
+        val session = _chatSession.value ?: return
+        val pin = chatPin ?: return
+        action("Sending your answers…") {
+            val keys = mutableListOf<String>()
+            suspend fun flush() {
+                keys.chunked(5).forEach { api.keys(session, *it.toTypedArray()) }
+                keys.clear()
+            }
+            qs.forEachIndexed { qi, q ->
+                val n = q.options.size
+                val other = others[qi].trim()
+                when {
+                    q.multiSelect -> {
+                        picks[qi].sorted().forEach { keys += (it + 1).toString() }
+                        repeat(n + 1) { keys += "Down" }
+                        keys += "Enter"
+                    }
+                    other.isNotEmpty() -> {
+                        keys += (n + 1).toString()
+                        flush()
+                        api.chatSend(session, pin, other)
+                        delay(800)
+                    }
+                    else -> keys += ((picks[qi].firstOrNull() ?: 0) + 1).toString()
+                }
+            }
+            flush()
+            delay(800)
+            var h = api.chatHistory(session, pin)
+            // A "Review your answers" screen after several questions: the first entry is Submit.
+            if (h.screen?.contains("Submit answers") == true) {
+                api.keys(session, "Enter")
+                delay(500)
+                h = api.chatHistory(session, pin)
+            }
+            setChat(h)
         }
     }
 
