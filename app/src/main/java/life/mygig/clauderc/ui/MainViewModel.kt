@@ -366,6 +366,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** A slash command like /model: it never shows as a message, so it isn't tracked as pending. */
+    fun chatCommand(text: String) {
+        val session = _chatSession.value ?: return
+        val pin = chatPin ?: return
+        action("Sending $text…") {
+            api.chatSend(session, pin, text)
+            delay(1500)
+            setChat(api.chatHistory(session, pin))
+        }
+    }
+
     fun sendChat(text: String, onSent: () -> Unit) {
         val session = _chatSession.value ?: return
         val pin = chatPin ?: return

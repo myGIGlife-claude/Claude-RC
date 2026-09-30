@@ -53,6 +53,8 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -95,6 +97,7 @@ import life.mygig.clauderc.ui.theme.Term
 import life.mygig.clauderc.ui.theme.WarnAmber
 
 /** Chat with a Claude session inside the app. Behind App lock and the chat PIN. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ChatScreen(vm: MainViewModel, session: String) {
     val pinNeeded by vm.chatPinNeeded.collectAsState()
@@ -133,7 +136,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                     Column(Modifier.weight(1f)) {
                         Text(session, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
                         val c = chat
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FlowRow(itemVerticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             val health = claudeHealth(c?.busy == true, c?.waiting == true)
                             StatusDot(if (c == null) Health.OFF else health)
                             Text(
@@ -141,6 +144,24 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             if (c != null && pinNeeded == null) {
+                                // Claude's model; tap to pick another (/model).
+                                var pickModel by remember { mutableStateOf(false) }
+                                Box {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = busy == null) { pickModel = true },
+                                    ) {
+                                        Text(
+                                            modelName(c.model) + " ▾", style = MaterialTheme.typography.labelSmall,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), maxLines = 1,
+                                        )
+                                    }
+                                    DropdownMenu(expanded = pickModel, onDismissRequest = { pickModel = false }) {
+                                        listOf("opus" to "Opus", "sonnet" to "Sonnet", "haiku" to "Haiku", "opusplan" to "Opus plans, Sonnet builds").forEach { (alias, label) ->
+                                            DropdownMenuItem(text = { Text(label) }, onClick = { pickModel = false; vm.chatCommand("/model $alias") })
+                                        }
+                                    }
+                                }
                                 // Claude's permission mode; tap to cycle it (Shift+Tab).
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
@@ -231,6 +252,14 @@ private fun Messages(vm: MainViewModel, messages: List<ChatMessage>, pending: Li
             }
         }
     }
+}
+
+/** claude-opus-5-5 -> Opus 5.5; empty until Claude has replied. */
+private fun modelName(id: String): String {
+    val parts = id.removePrefix("claude-").split("-").filter { it.isNotEmpty() && !(it.length >= 8 && it.all(Char::isDigit)) }
+    val name = parts.firstOrNull { it.all(Char::isLetter) } ?: return "Model"
+    val version = parts.filter { it.all(Char::isDigit) }.joinToString(".")
+    return name.replaceFirstChar { it.uppercase() } + if (version.isEmpty()) "" else " $version"
 }
 
 /** Reply text made listenable: no code blocks, links or markdown marks. */

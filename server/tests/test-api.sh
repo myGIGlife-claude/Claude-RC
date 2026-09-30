@@ -406,6 +406,9 @@ api "chat-history demo-app2" "482913"; check "chat history carries Claude's perm
 tmux send-keys -t "=demo-app2:" -l "⏸ plan mode on (shift+tab to cycle)"; sleep 0.3
 api "chat-history demo-app2" "482913"; check "mode read from the status line" "$(jqt '.data.mode=="plan"')"
 api "keys demo-app2 BTab"; check "Shift+Tab is an allowed key" "$(jqt '.ok')"
+tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "❯ 1. Yes, enable auto mode"; sleep 0.3
+api "chat-history demo-app2" "482913"; check "a numbered menu on screen counts as a question" "$(jqt '.data.waiting==true')"
+tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "clear"; tmux send-keys -t "=demo-app2:" Enter; sleep 0.3
 api "chat-send demo-app2" $'000000\nhi'; check "chat send with a wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
 for _ in 1 2 3 4; do api "chat-open demo-app2" "000000"; done
 check "5 wrong PINs lock chat" "$(jqt '.error.code=="chat_locked"')"
