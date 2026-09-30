@@ -292,7 +292,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Files Claude sent, kept in memory while the chat is open (about 24 MB). */
+    private val fileCache = object : android.util.LruCache<String, ByteArray>(24 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: ByteArray) = value.size
+    }
+
+    suspend fun chatFileBytes(path: String): ByteArray {
+        fileCache.get(path)?.let { return it }
+        val session = _chatSession.value ?: throw IllegalStateException("The chat is closed")
+        val pin = chatPin ?: throw IllegalStateException("The chat is locked")
+        val f = try { api.chatFile(session, pin, path) } catch (e: ApiException) { throw IllegalStateException(friendly(e).first) }
+        return android.util.Base64.decode(f.data, android.util.Base64.DEFAULT).also { fileCache.put(path, it) }
+    }
+
     fun closeChat() {
+        fileCache.evictAll()
         chatPoller?.cancel()
         _chatPending.value = emptyList()
         _chatSession.value = null

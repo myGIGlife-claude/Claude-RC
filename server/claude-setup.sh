@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start.
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file.
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=20
+SCRIPT_API=21
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -2229,6 +2229,10 @@ do_chat_history() {
     else
       (.message.content // [])[] |
       if .type == "text" then {id:$l.uuid, role:"assistant", text:(.text[0:12000]), ts:$l.timestamp}
+      elif .type == "tool_use" and .name == "SendUserFile" then
+        # A file Claude sent to the Claude app: shown as a card, fetched with chat-file.
+        {id:($l.uuid + "-" + (.id // "")), role:"file", ts:$l.timestamp,
+         text:((.input.caption // "") | tostring | .[0:2000]), files:((.input.files // []) | map(tostring) | .[0:10])}
       elif .type == "tool_use" then
         {id:($l.uuid + "-" + (.id // "")), role:"tool", ts:$l.timestamp,
          text:(.name + ": " + ((.input.description // .input.command // .input.file_path // .input.path // .input.pattern // .input.url // .input.query // "") | tostring | .[0:160]))}
@@ -2302,6 +2306,29 @@ do_upload() {
   api_ok "$(jq -cn --arg p "uploads/$name" --argjson n "$size" '{path:$p, bytes:$n}')"
 }
 
+# chat-file <session>: stdin = PIN, then a file path. A file Claude sent (or
+# made) in this session: only from the project's folder or Claude's temp folder
+# for it, up to 10 MB, base64 in `data`.
+do_chat_file() {
+  [[ $# -eq 1 ]] || bad_args "usage: chat-file <session>"
+  local pin path sess dir real size
+  pin="$(read_secret_line)"; path="$(read_secret_line)"; exec 0</dev/null
+  sess="$(chat_session "$1")"
+  check_pin "$pin"
+  dir="$(awk -F'\t' -v s="$sess" '$1 == s {print $2; exit}' "$AUTOSTART_LIST" 2>/dev/null)"
+  [[ -n "$dir" ]] || dir="$(tmux display-message -p -t "=$sess:" '#{pane_current_path}' 2>/dev/null)"
+  [[ -d "$dir" ]] || api_err internal "Couldn't find the session's folder."
+  real="$(realpath -e -- "$path" 2>/dev/null)" && [[ -f "$real" ]] || api_err invalid_name "That file isn't on the server any more."
+  case "$real" in
+    "$(realpath "$dir")"/* | "/tmp/claude-$(id -u)/${dir//[\/.]/-}"/*) ;;
+    *) api_err forbidden "That file is outside this project." ;;
+  esac
+  size=$(stat -c %s "$real")
+  ((size <= 10485760)) || api_err invalid_name "That file is bigger than 10 MB."
+  chat_log "$sess" file
+  api_ok "$(jq -cn --arg n "$(basename -- "$real")" --argjson b "$size" --rawfile d <(base64 -w0 -- "$real") '{name:$n, bytes:$b, data:$d}')"
+}
+
 # chat-log: the last chat opens/sends/uploads (no contents), newest first.
 do_chat_log() {
   [[ $# -eq 0 ]] || bad_args "chat-log takes no arguments"
@@ -2322,7 +2349,7 @@ api_main() {
   shift || true
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | youtube-login-start | \
-      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | upload | mcp-auth-start | mcp-auth-finish) ;;  # these read stdin
+      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-file | upload | mcp-auth-start | mcp-auth-finish) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -2373,6 +2400,7 @@ api_main() {
     chat-send)           do_chat_send "$@" ;;
     chat-interrupt)      do_chat_interrupt "$@" ;;
     upload)              do_upload "$@" ;;
+    chat-file)           do_chat_file "$@" ;;
     chat-log)            do_chat_log "$@" ;;
     remove-keystore)     do_remove_keystore "$@" ;;
     "")                  bad_args "missing subcommand" ;;
