@@ -43,6 +43,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -160,16 +167,37 @@ private fun Messages(messages: List<ChatMessage>, pending: List<String>, modifie
                 is Row0.Msg -> if (r.m.role == "user") {
                     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
                         Surface(shape = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp), color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.widthIn(max = 320.dp)) {
-                            SelectionContainer { Text(r.m.text, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium) }
+                            SelectionContainer { Text(linkify(r.m.text), modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium) }
                         }
                         if (r.pending) Text("queued · Claude reads it at its next pause", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
                     Surface(shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.widthIn(max = 340.dp)) {
-                        SelectionContainer { Text(r.m.text, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium) }
+                        SelectionContainer { Text(linkify(r.m.text), modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium) }
                     }
                 }
             }
+        }
+    }
+}
+
+private val URL_RE = Regex("""https?://[^\s<>"')\]]+""")
+
+/** The text with its web addresses tappable (opens the browser). */
+@Composable
+private fun linkify(text: String): AnnotatedString {
+    val style = TextLinkStyles(SpanStyle(color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline))
+    return remember(text, style) {
+        buildAnnotatedString {
+            var at = 0
+            for (m in URL_RE.findAll(text)) {
+                // Sentence punctuation right after a link isn't part of it.
+                val url = m.value.trimEnd('.', ',', ';', ':', '!', '?')
+                append(text.substring(at, m.range.first))
+                withLink(LinkAnnotation.Url(url, style)) { append(url) }
+                at = m.range.first + url.length
+            }
+            append(text.substring(at))
         }
     }
 }
