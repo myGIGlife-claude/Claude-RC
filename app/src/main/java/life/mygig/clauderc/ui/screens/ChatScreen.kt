@@ -5,6 +5,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import life.mygig.clauderc.ui.components.AttachFile
+import life.mygig.clauderc.ui.components.Mic
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.speech.RecognizerIntent
+import android.speech.tts.TextToSpeech
+import androidx.compose.runtime.DisposableEffect
+import java.util.Locale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
@@ -37,6 +45,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -86,6 +95,26 @@ fun ChatScreen(vm: MainViewModel, session: String) {
     val error by vm.chatError.collectAsState()
     val busy by vm.busy.collectAsState()
     val pending by vm.chatPending.collectAsState()
+    val context = LocalContext.current
+    var speak by rememberSaveable { mutableStateOf(false) }
+    val voice = remember { mutableStateOf<TextToSpeech?>(null) }
+    DisposableEffect(speak) {
+        var engine: TextToSpeech? = null
+        if (speak) engine = TextToSpeech(context) { st ->
+            if (st == TextToSpeech.SUCCESS) { engine?.language = Locale.getDefault(); voice.value = engine }
+            else { speak = false; vm.say("No text-to-speech voice on this phone.") }
+        }
+        onDispose { engine?.stop(); engine?.shutdown(); voice.value = null }
+    }
+    // Read Claude's new replies aloud (not the ones already there when it was turned on).
+    val spoken = remember(speak) { mutableSetOf<String>() }
+    var primed by remember(speak) { mutableStateOf(false) }
+    LaunchedEffect(chat?.messages, voice.value) {
+        val e = voice.value ?: return@LaunchedEffect
+        val replies = chat?.messages.orEmpty().filter { it.role == "assistant" }.map { (it.id + it.text.hashCode()) to it.text }
+        if (!primed) { spoken += replies.map { it.first }; primed = true; return@LaunchedEffect }
+        replies.filter { it.first !in spoken }.forEach { (k, t) -> spoken += k; e.speak(forSpeech(t), TextToSpeech.QUEUE_ADD, null, k) }
+    }
     Dialog(onDismissRequest = { vm.closeChat() }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
@@ -104,8 +133,22 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                                 when { pinNeeded != null -> "locked"; c == null -> "loading…"; c.waiting -> "needs an answer"; c.busy -> "working…"; else -> "idle" },
                                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            if (c != null && pinNeeded == null) {
+                                // Claude's permission mode; tap to cycle it (Shift+Tab).
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (c.mode == "bypass") MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = busy == null) { vm.chatKey("BTab") },
+                                ) {
+                                    Text(
+                                        when (c.mode) { "auto" -> "Auto"; "plan" -> "Plan"; "edits" -> "Accept edits"; "bypass" -> "Bypass"; else -> "Ask first" } + " ⇄",
+                                        style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), maxLines = 1,
+                                    )
+                                }
+                            }
                         }
                     }
+                    TextButton(onClick = { speak = !speak }) { Text(if (speak) "🔊" else "🔈", fontSize = 20.sp) }
                     Icon(Icons.Filled.Lock, contentDescription = "PIN-protected", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 val need = pinNeeded
@@ -183,6 +226,13 @@ private fun Messages(vm: MainViewModel, messages: List<ChatMessage>, pending: Li
     }
 }
 
+/** Reply text made listenable: no code blocks, links or markdown marks. */
+private fun forSpeech(t: String) = t
+    .replace(Regex("```[\\s\\S]*?```"), " (code) ")
+    .replace(URL_RE, " link ")
+    .replace(Regex("[*#_`>|]"), "")
+    .take(1500)
+
 private val URL_RE = Regex("""https?://[^\s<>"')\]]+""")
 
 /** The text with its web addresses tappable (opens the browser). */
@@ -240,10 +290,28 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
             vm.uploadToChat(name, bytes) { path -> text = (text.trimEnd() + " [attached: $path]").trim() }
         }
     }
+    val dictate = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        val said = r.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+        if (r.resultCode == Activity.RESULT_OK && !said.isNullOrBlank()) text = (text.trimEnd() + " " + said).trim()
+    }
     Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         IconButton(onClick = { pick.launch(arrayOf("*/*")) }, enabled = enabled, modifier = Modifier.height(52.dp)) {
             Icon(Icons.Filled.AttachFile, contentDescription = "Attach a file or photo")
         }
+        IconButton(
+            onClick = {
+                try {
+                    dictate.launch(
+                        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Say your message"),
+                    )
+                } catch (e: ActivityNotFoundException) {
+                    vm.say("This phone has no speech recognizer. Turn on Google voice typing in the phone's settings.")
+                }
+            },
+            enabled = enabled, modifier = Modifier.height(52.dp),
+        ) { Icon(Icons.Filled.Mic, contentDescription = "Speak your message") }
         OutlinedTextField(
             value = text, onValueChange = { text = it }, placeholder = { Text("Message Claude") },
             modifier = Modifier.weight(1f), maxLines = 6, shape = RoundedCornerShape(22.dp),

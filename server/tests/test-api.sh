@@ -402,6 +402,10 @@ touch "$TD/99999999-0000-0000-0000-000000000000.jsonl"
 api "chat-history demo-app2" "482913"
 check "chat history: your text, Claude's text, tool lines, messages sent mid-turn; system lines left out" "$(jqt '.ok and ([.data.messages[] | .role] == ["user","assistant","tool","user"]) and .data.messages[0].text=="Add a forecast screen" and .data.messages[2].text=="Bash: npm test" and .data.messages[3].text=="also add tests"')"
 api "chat-send demo-app2" $'482913\nline one\nline two'; check "chat send" "$(jqt '.ok and .data.sent')"
+api "chat-history demo-app2" "482913"; check "chat history carries Claude's permission mode" "$(jqt '.ok and (.data.mode | IN("default","auto","plan","edits","bypass"))')"
+tmux send-keys -t "=demo-app2:" -l "⏸ plan mode on (shift+tab to cycle)"; sleep 0.3
+api "chat-history demo-app2" "482913"; check "mode read from the status line" "$(jqt '.data.mode=="plan"')"
+api "keys demo-app2 BTab"; check "Shift+Tab is an allowed key" "$(jqt '.ok')"
 api "chat-send demo-app2" $'000000\nhi'; check "chat send with a wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
 for _ in 1 2 3 4; do api "chat-open demo-app2" "000000"; done
 check "5 wrong PINs lock chat" "$(jqt '.error.code=="chat_locked"')"

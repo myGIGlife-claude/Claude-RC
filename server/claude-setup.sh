@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file.
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode.
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=21
+SCRIPT_API=22
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -941,7 +941,7 @@ do_tail() {
 
 # keys <session> <key>…: answer a prompt in a session (e.g. Claude asking to
 # approve a new MCP server after a restart). Only these keys, never text.
-KEYS_ALLOWED="1 2 3 4 5 6 7 8 9 Enter Escape Up Down Tab Space y n"
+KEYS_ALLOWED="1 2 3 4 5 6 7 8 9 Enter Escape Up Down Tab BTab Space y n"
 do_keys() {
   (($# >= 2 && $# <= 6)) || bad_args "usage: keys <session> <key>… (up to 5)"
   valid_project "$1" || api_err invalid_name "Invalid project name."
@@ -2207,12 +2207,15 @@ do_chat_open() {
 # whether it's working or waiting on a question (with that screen).
 do_chat_history() {
   [[ $# -eq 1 ]] || bad_args "usage: chat-history <session>"
-  local pin sess f screen waiting=false busy=false tmp
+  local pin sess f screen waiting=false busy=false tmp mode
   pin="$(read_secret_line)"; exec 0</dev/null
   sess="$(chat_session "$1")"
   check_pin "$pin"
   f="$(chat_transcript "$sess")"
   screen="$(tmux capture-pane -p -J -t "=$sess:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15)"
+  # The permission mode Claude's status line shows (none shown = default).
+  mode="$(grep -oE '(auto mode|plan mode|accept edits|bypass permissions) on' <<<"$screen" | tail -n 1)"
+  case "$mode" in "auto mode"*) mode=auto ;; "plan mode"*) mode=plan ;; "accept edits"*) mode=edits ;; "bypass"*) mode=bypass ;; *) mode=default ;; esac
   grep -qE "Enter to confirm|\(y/n\)" <<<"$screen" && waiting=true
   grep -q "esc to interrupt" <<<"$screen" && busy=true
   tmp="$(mktemp)"
@@ -2241,8 +2244,8 @@ do_chat_history() {
       # The last 60 of your messages and Claude replies, with the tool steps between them.
       ([to_entries[] | select(.value.role != "tool") | .key] | .[-60] // 0) as $from | .[$from:]' >"$tmp"
   jq -e . "$tmp" >/dev/null 2>&1 || echo '[]' >"$tmp"
-  jq -c --arg s "$sess" --argjson w "$waiting" --argjson b "$busy" --arg sc "$screen" \
-    '{session:$s, messages:., waiting:$w, busy:$b, screen:(if $w then $sc else null end)}' "$tmp" >"$tmp.out"
+  jq -c --arg s "$sess" --argjson w "$waiting" --argjson b "$busy" --arg sc "$screen" --arg mo "$mode" \
+    '{session:$s, messages:., waiting:$w, busy:$b, mode:$mo, screen:(if $w then $sc else null end)}' "$tmp" >"$tmp.out"
   rm -f "$tmp"
   api_ok_file "$tmp.out"
 }
