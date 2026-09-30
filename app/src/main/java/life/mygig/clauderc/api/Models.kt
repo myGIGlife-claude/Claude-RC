@@ -229,6 +229,8 @@ data class ChatData(
     val busy: Boolean = false,
     /** Claude's permission mode: auto, plan, edits, bypass or default. */
     val mode: String = "default",
+    /** The model of Claude's latest reply, e.g. claude-opus-5-5 (empty before its first reply). */
+    val model: String = "",
     /** The question on screen when [waiting]. */
     val screen: String? = null,
 )

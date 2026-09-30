@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode.
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model.
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=22
+SCRIPT_API=23
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -42,6 +42,8 @@ CUSTOM_NAMES="$LAUNCHER_CONFIG_DIR/custom-names"   # names added with set-secret
 CUSTOM_NAME_RE='^[A-Z][A-Z0-9_]{0,55}_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT)$'
 TOKEN_SERVICES="cloudflare vercel netlify fly railway supabase neon npm stripe huggingface b2 gcp firebase mxroute googleplay youtube"
 
+# A question on Claude's screen: a confirm footer, a y/n, a numbered menu with the cursor on it, or the auto-mode opt-in.
+WAIT_RE='Enter to confirm|\(y/n\)|^ *❯ [0-9]+\. |Auto mode lets Claude'
 CLAUDE_LOGIN_SESSION="claude-login"
 AWS_LOGIN_SESSION="aws-sso-login"
 
@@ -829,7 +831,7 @@ do_sessions() {
     tail4="$(grep -v '^[[:space:]]*$' <<<"$screen" | grep -vE '^[─━╭╰│ ]+$|^ *❯|⏵⏵|shift\+tab|for shortcuts|← for agents|esc to interrupt|^ *⎿? *Tip:|/clear to save|Restart to update' |
       sed -e 's/[[:space:]]*$//' -e 's/^[[:space:]]\{8,\}//' | tail -n 3 | cut -c1-120)"
     waiting=false busy=false
-    grep -qE "Enter to confirm|\(y/n\)" <<<"$screen" && waiting=true
+    grep -qE "$WAIT_RE" <<<"$screen" && waiting=true
     grep -q "esc to interrupt" <<<"$screen" && busy=true
     out="$(jq -c --argjson r "$row" --arg p "$tail4" --argjson w "$waiting" --argjson b "$busy" \
       '. + [$r + {preview:$p, waiting:$w, busy:$b}]' <<<"$out")"
@@ -912,7 +914,7 @@ do_restart() {
   local screen waiting=false
   sleep 2
   screen="$(tmux capture-pane -p -J -t "=$STARTED_SESSION:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 120)"
-  grep -qE "Enter to confirm|\(y/n\)" <<<"$(tail -n 15 <<<"$screen")" && waiting=true
+  grep -qE "$WAIT_RE" <<<"$(tail -n 15 <<<"$screen")" && waiting=true
   api_ok "$(jq -cn --arg s "$STARTED_SESSION" --arg p "$dir" --argjson r "$resumed" --arg id "$sid" \
     --argjson w "$waiting" --arg t "$screen" \
     '{session:$s, path:$p, restarted:true, resumed:$r, conversation:(if $r then $id else null end),
@@ -2207,7 +2209,7 @@ do_chat_open() {
 # whether it's working or waiting on a question (with that screen).
 do_chat_history() {
   [[ $# -eq 1 ]] || bad_args "usage: chat-history <session>"
-  local pin sess f screen waiting=false busy=false tmp mode
+  local pin sess f screen waiting=false busy=false tmp mode model=
   pin="$(read_secret_line)"; exec 0</dev/null
   sess="$(chat_session "$1")"
   check_pin "$pin"
@@ -2216,8 +2218,10 @@ do_chat_history() {
   # The permission mode Claude's status line shows (none shown = default).
   mode="$(grep -oE '(auto mode|plan mode|accept edits|bypass permissions) on' <<<"$screen" | tail -n 1)"
   case "$mode" in "auto mode"*) mode=auto ;; "plan mode"*) mode=plan ;; "accept edits"*) mode=edits ;; "bypass"*) mode=bypass ;; *) mode=default ;; esac
-  grep -qE "Enter to confirm|\(y/n\)" <<<"$screen" && waiting=true
+  grep -qE "$WAIT_RE" <<<"$screen" && waiting=true
   grep -q "esc to interrupt" <<<"$screen" && busy=true
+  # The model of Claude's latest reply.
+  [[ -n "$f" ]] && model="$(tail -n 300 "$f" 2>/dev/null | jq -r 'select(.type == "assistant") | .message.model // empty' 2>/dev/null | grep -v '^<' | tail -n 1)"
   tmp="$(mktemp)"
   { [[ -n "$f" ]] && tail -n 1500 "$f"; } 2>/dev/null | jq -c '
     select(.type == "user" or .type == "assistant" or (.type == "attachment" and .attachment.type == "queued_command")) | . as $l |
@@ -2244,8 +2248,8 @@ do_chat_history() {
       # The last 60 of your messages and Claude replies, with the tool steps between them.
       ([to_entries[] | select(.value.role != "tool") | .key] | .[-60] // 0) as $from | .[$from:]' >"$tmp"
   jq -e . "$tmp" >/dev/null 2>&1 || echo '[]' >"$tmp"
-  jq -c --arg s "$sess" --argjson w "$waiting" --argjson b "$busy" --arg sc "$screen" --arg mo "$mode" \
-    '{session:$s, messages:., waiting:$w, busy:$b, mode:$mo, screen:(if $w then $sc else null end)}' "$tmp" >"$tmp.out"
+  jq -c --arg s "$sess" --argjson w "$waiting" --argjson b "$busy" --arg sc "$screen" --arg mo "$mode" --arg md "$model" \
+    '{session:$s, messages:., waiting:$w, busy:$b, mode:$mo, model:$md, screen:(if $w then $sc else null end)}' "$tmp" >"$tmp.out"
   rm -f "$tmp"
   api_ok_file "$tmp.out"
 }
