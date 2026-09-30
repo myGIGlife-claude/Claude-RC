@@ -113,7 +113,7 @@ case "$sub" in
     done
     ;;
   install-cli)
-    ((nargs == 1)) && [[ " glab docker supabase flyctl stripe railway neon b2 vercel netlify firebase hf gcloud " == *" ${args[0]} "* ]] || deny "$sub"
+    ((nargs == 1)) && [[ " glab docker supabase flyctl stripe railway neon b2 vercel netlify firebase hf gcloud bun " == *" ${args[0]} "* ]] || deny "$sub"
     ;;
   login-token)
     ((nargs == 1)) && [[ " cloudflare vercel netlify fly railway supabase neon npm stripe huggingface b2 gcp firebase mxroute googleplay " == *" ${args[0]} "* ]] || deny "$sub"
