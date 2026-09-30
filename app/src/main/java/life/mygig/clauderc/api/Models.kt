@@ -212,7 +212,14 @@ data class PluginsData(
 )
 
 @Serializable
-data class ChatMessage(val id: String = "", val role: String = "assistant", val text: String = "", val ts: String? = null)
+data class ChatMessage(
+    val id: String = "", val role: String = "assistant", val text: String = "", val ts: String? = null,
+    /** role "file": paths of files Claude sent. */
+    val files: List<String> = emptyList(),
+)
+
+@Serializable
+data class ChatFile(val name: String, val bytes: Long = 0, val data: String = "")
 
 @Serializable
 data class ChatData(

@@ -82,7 +82,7 @@ case "$sub" in
   repos)
     ((nargs == 0)) || { ((nargs == 1)) && [[ "${args[0]}" == --refresh ]]; } || deny "$sub"
     ;;
-  start | stop | chat-open | chat-history | chat-send | chat-interrupt | upload)
+  start | stop | chat-open | chat-history | chat-send | chat-interrupt | chat-file | upload)
     ((nargs == 1)) && [[ "${args[0]}" =~ $PROJECT_RE ]] || deny "$sub"
     ;;
   restart)

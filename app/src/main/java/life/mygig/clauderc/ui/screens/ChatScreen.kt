@@ -112,7 +112,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                 if (need != null) {
                     PinGate(vm, need, error)
                 } else {
-                    Messages(chat?.messages.orEmpty(), pending, Modifier.weight(1f))
+                    Messages(vm, chat?.messages.orEmpty(), pending, Modifier.weight(1f))
                     chat?.takeIf { it.waiting }?.let { c -> PromptCard(vm, c.screen.orEmpty(), busy == null) }
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp)) }
                     Composer(vm, working = chat?.busy == true, enabled = busy == null && chat != null)
@@ -139,7 +139,7 @@ private fun rows(messages: List<ChatMessage>, pending: List<String>): List<Row0>
 }
 
 @Composable
-private fun Messages(messages: List<ChatMessage>, pending: List<String>, modifier: Modifier) {
+private fun Messages(vm: MainViewModel, messages: List<ChatMessage>, pending: List<String>, modifier: Modifier) {
     val state = rememberLazyListState()
     val list = remember(messages, pending) { rows(messages, pending) }
     var open by remember { mutableStateOf(setOf<String>()) }
@@ -164,7 +164,9 @@ private fun Messages(messages: List<ChatMessage>, pending: List<String>, modifie
                         }
                     }
                 }
-                is Row0.Msg -> if (r.m.role == "user") {
+                is Row0.Msg -> if (r.m.role == "file") {
+                    FileCard(vm, r.m)
+                } else if (r.m.role == "user") {
                     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
                         Surface(shape = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp), color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.widthIn(max = 320.dp)) {
                             SelectionContainer { Text(linkify(r.m.text), modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium) }
@@ -185,7 +187,7 @@ private val URL_RE = Regex("""https?://[^\s<>"')\]]+""")
 
 /** The text with its web addresses tappable (opens the browser). */
 @Composable
-private fun linkify(text: String): AnnotatedString {
+fun linkify(text: String): AnnotatedString {
     val style = TextLinkStyles(SpanStyle(color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline))
     return remember(text, style) {
         buildAnnotatedString {

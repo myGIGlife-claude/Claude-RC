@@ -149,6 +149,10 @@ class LauncherApi(
         requireName(session)
         return call("upload $session", stdin = pin + "\n" + name + "\n" + base64, timeoutMs = 240_000)
     }
+    suspend fun chatFile(session: String, pin: String, path: String): ChatFile {
+        requireName(session)
+        return call("chat-file $session", stdin = pin + "\n" + path, timeoutMs = 120_000)
+    }
     suspend fun chatLog(): List<ChatLogEntry> = call("chat-log")
     suspend fun chatInterrupt(session: String, pin: String): JsonObject { requireName(session); return call("chat-interrupt $session", stdin = pin) }
     suspend fun loginKeystore(name: String, alias: String, storePassword: String, keyPassword: String, fileBase64: String): JsonObject =
