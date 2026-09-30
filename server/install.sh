@@ -59,6 +59,12 @@ main() {
   # First run writes ~/.config/claude-launcher/config.
   "$HOME/claude-setup.sh" --api status </dev/null >/dev/null 2>&1 || true
 
+  # Bun: some Claude Code plugins' hooks run on it.
+  if ! command -v bun >/dev/null && [[ ! -x "$HOME/.local/bin/bun" ]]; then
+    echo "Installing Bun into ~/.local/bin (plugin hooks need it)..."
+    "$HOME/claude-setup.sh" --api install-cli bun </dev/null >/dev/null 2>&1 || echo "Note: Bun wasn't installed." >&2
+  fi
+
   if command -v claude-autostart >/dev/null || [[ -x "$HOME/.local/bin/claude-autostart" ]]; then
     # Update the script itself (no sudo); the systemd units stay as they are.
     install -m 755 "$tmp/claude-autostart.sh" "$HOME/.local/bin/claude-autostart"

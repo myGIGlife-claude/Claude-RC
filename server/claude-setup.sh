@@ -1732,7 +1732,7 @@ from_tar() {
   [[ -n "$FOUND" ]] || api_err internal "$2 wasn't in $(basename "$1")."
 }
 
-INSTALLABLE="glab docker supabase flyctl stripe railway neon b2 vercel netlify firebase hf gcloud"
+INSTALLABLE="glab docker supabase flyctl stripe railway neon b2 vercel netlify firebase hf gcloud bun"
 
 # Install a CLI the phone can't otherwise get onto the server: into ~/.local/bin,
 # no sudo, checksum-verified where the vendor publishes checksums. Docker is
@@ -1775,6 +1775,14 @@ do_install_cli() {
       gh_ver railwayapp/cli; f="railway-$tag-$($a64 && echo aarch64 || echo x86_64)-unknown-linux-musl.tar.gz"
       fetch "https://github.com/railwayapp/cli/releases/download/$tag/$f" "$dir/$f"
       from_tar "$dir/$f" railway "$dir"; put_bin "$FOUND" railway ;;
+    bun)  # JavaScript runtime some plugins' hooks need (e.g. claude-mem); x64 CPUs without AVX2 get the baseline build
+      need unzip
+      f="bun-linux-$($a64 && echo aarch64 || { grep -qw avx2 /proc/cpuinfo && echo x64 || echo x64-baseline; })"
+      fetch "https://github.com/oven-sh/bun/releases/latest/download/$f.zip" "$dir/$f.zip" \
+        "https://github.com/oven-sh/bun/releases/latest/download/SHASUMS256.txt"
+      unzip -q "$dir/$f.zip" -d "$dir/x" 2>/dev/null && [[ -f "$dir/x/$f/bun" ]] || api_err internal "$f.zip isn't a valid archive."
+      put_bin "$dir/x/$f/bun" bun; ln -sf bun "$HOME/.local/bin/bunx"
+      ver="$("$HOME/.local/bin/bun" --version 2>/dev/null)" ;;
     neon)  # standalone binary, no checksums published
       f="neon-linux-$($a64 && echo arm64 || echo x64)"
       fetch "https://github.com/neondatabase/neon-pkgs/releases/latest/download/$f" "$dir/$f"
