@@ -1,0 +1,14 @@
+{
+  "model": "opusplan",
+  "permissions": {
+    "allow": [
+      "Edit(./PLAN.md)",
+      "Edit(./CLAUDE.md)",
+      "Write(./PLAN.md)",
+      "Write(./CLAUDE.md)",
+      "Bash(date)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}
