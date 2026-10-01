@@ -1,4 +1,4 @@
-Last updated: 2026-10-01 19:25 UTC
+Last updated: 2026-10-01 19:45 UTC
 
 ## Goal
 cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage Claude Code sessions on your own server from a phone.
@@ -42,6 +42,8 @@ Waiting on the owner: the notification bug needs the phone's Notification histor
 - 2026-10-01: Team renamed cLaudeCluster: `cluster` action (SCRIPT_API 26) = main + workers with email (`.claude.json`) and usage; expired tokens are never refreshed by us. Other servers' accounts are usage-only (workers run on one machine). `Server.inCluster` null/true/false; email compare on add-server.
 
 - 2026-10-01: Workers are attached per chat (👥 button in the chat header → `cluster-session/-attach/-assign`, SCRIPT_API 27). State in `~/.config/claude-launcher/attach/<project folder slug>.json`, read live by clauderc-team: only attached workers are visible, role/mode can override per chat. In a git project each task runs in its own worktree on branch `cluster/<worker>/<id>` (server commits the worker's changes); the main Claude uses `review` then `merge`/`discard`. Usage bars now fill with what's USED (owner found "left" confusing).
+
+- 2026-10-01: Cluster accounts also show tokens used on THIS server (5 h / 7 days, summed from Claude's session logs, one row per message id); an estimate, not the plan's own window, and blind to claude.ai/other devices.
 
 ## Known issues
 - Not fixed from the scan: draft lost after >30 s in a file picker (app re-locks); env/credentials files have no cross-process lock (writes are atomic); login-claude-code can report success when a running session refreshes its token.
