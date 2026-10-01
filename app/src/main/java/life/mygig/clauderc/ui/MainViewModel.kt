@@ -458,9 +458,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val pin = chatPin ?: return
         val t = text.trim()
         onSent()
-        _chatPending.value = _chatPending.value + t
+        // Slash and ! commands never show as messages in the history, so they'd stay "queued" forever.
+        val track = !t.startsWith("/") && !t.startsWith("!")
+        if (track) _chatPending.value = _chatPending.value + t
         action("Sending…", onError = { e ->
-            _chatPending.value = _chatPending.value.toMutableList().also { it.remove(t) }
+            if (track) _chatPending.value = _chatPending.value.toMutableList().also { it.remove(t) }
             onFail()
             report(e)
         }) {
