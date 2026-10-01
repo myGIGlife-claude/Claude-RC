@@ -49,6 +49,8 @@ import life.mygig.clauderc.api.RunResult
 import life.mygig.clauderc.api.Session
 import life.mygig.clauderc.api.StatusData
 import life.mygig.clauderc.api.TailResult
+import life.mygig.clauderc.api.Worker
+import life.mygig.clauderc.api.WorkerRun
 import life.mygig.clauderc.data.AppSettings
 import life.mygig.clauderc.data.ChatPinVault
 import life.mygig.clauderc.data.SettingsStore
@@ -503,6 +505,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _mcpAuth.value = null
         say("Signed in. Restart sessions to use it.")
     }
+
+    // ---- Team (extra Claude accounts) ---------------------------------------------
+
+    private val _workers = MutableStateFlow<List<Worker>?>(null)
+    val workers = _workers.asStateFlow()
+    private val _workerLogin = MutableStateFlow<Pair<String, LoginUrl>?>(null)
+    val workerLogin = _workerLogin.asStateFlow()
+    private val _workerRuns = MutableStateFlow<Pair<String, List<WorkerRun>>?>(null)
+    val workerRuns = _workerRuns.asStateFlow()
+
+    fun loadWorkers() = action("Loading team…") { _workers.value = api.workers().workers }
+    fun addWorker(name: String, role: String) = action("Adding $name…") {
+        api.workerAdd(name, role)
+        _workers.value = api.workers().workers
+    }
+    fun setWorker(name: String, field: String, value: String) = action("Saving…") {
+        api.workerSet(name, field, value)
+        _workers.value = api.workers().workers
+    }
+    fun removeWorker(name: String) = action("Removing $name…") {
+        api.workerRemove(name)
+        _workers.value = api.workers().workers
+    }
+    fun workerLoginStart(name: String) = action("Starting sign-in for $name…") {
+        _workerLogin.value = name to api.workerLoginStart(name)
+    }
+    fun workerLoginCode(name: String, code: String) = action("Checking code…") {
+        api.workerLoginCode(name, code)
+        _workerLogin.value = null
+        _workers.value = api.workers().workers
+    }
+    // ponytail: the server's login helper session just times out; add a cancel action if stale ones annoy.
+    fun closeWorkerLogin() { _workerLogin.value = null }
+    fun showWorkerRuns(name: String) = action("Loading runs…") { _workerRuns.value = name to api.workerRuns(name).runs }
+    fun closeWorkerRuns() { _workerRuns.value = null }
 
 
     fun disconnect(id: String, name: String) = action("Disconnecting $name…") {

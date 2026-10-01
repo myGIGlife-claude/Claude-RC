@@ -32,7 +32,7 @@ save() {
   tmp="$(mktemp)"
   # (tmux turns tabs into "_", so fields are split on a marker instead)
   tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}' |
-    awk -F'@@' '($3 ~ /claude/ || $4 == "claude") && $1 !~ /^(claude-login|aws-sso-login|mcp-auth|claude-doctor)$/ && !seen[$1]++ { print $1 "\t" $2 }' >"$tmp"
+    awk -F'@@' '($3 ~ /claude/ || $4 == "claude") && $1 !~ /^(claude-login|aws-sso-login|mcp-auth|claude-doctor|worker-login-.*)$/ && !seen[$1]++ { print $1 "\t" $2 }' >"$tmp"
   mv "$tmp" "$LIST"
   log "saved $(wc -l <"$LIST") session(s)"
 }

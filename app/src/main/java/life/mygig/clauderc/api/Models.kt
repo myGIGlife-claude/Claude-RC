@@ -256,3 +256,27 @@ data class ChatLogEntry(val ts: String = "", val session: String = "", val actio
 
 @Serializable
 data class UploadResult(val path: String = "", val bytes: Long = 0)
+
+@Serializable
+data class Worker(
+    val name: String,
+    val role: String = "",
+    val mode: String = "acceptEdits",
+    @SerialName("signed_in") val signedIn: Boolean = false,
+)
+
+@Serializable
+data class WorkersData(val workers: List<Worker> = emptyList())
+
+@Serializable
+data class WorkerRun(
+    val id: String,
+    val task: String = "",
+    val status: String = "",
+    val reply: String? = null,
+    val error: String? = null,
+    val started: Double = 0.0,
+)
+
+@Serializable
+data class WorkerRunsData(val runs: List<WorkerRun> = emptyList())

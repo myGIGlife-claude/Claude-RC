@@ -53,6 +53,9 @@ object Codes {
 /** Same rule as the server: no leading '-', so a name is never read as an option. */
 val PROJECT_NAME_RE = Regex("^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$")
 
+/** Same rule as the server's worker names (Team). */
+val WORKER_NAME_RE = Regex("^[A-Za-z][A-Za-z0-9_-]{0,29}$")
+
 /** Typed calls to `claude-launcher-api` on the server. */
 class LauncherApi(
     private val config: suspend () -> ServerConfig,
@@ -132,6 +135,26 @@ class LauncherApi(
     suspend fun mcpAuthStart(name: String): LoginUrl = call("mcp-auth-start", stdin = name, timeoutMs = 240_000)
     suspend fun mcpAuthFinish(callbackUrl: String): McpData = call("mcp-auth-finish", stdin = callbackUrl.trim(), timeoutMs = 180_000)
     suspend fun mcpAuthCancel(): JsonObject = call("mcp-auth-cancel")
+
+    // Team: extra Claude accounts the main Claude can delegate to.
+    suspend fun workers(): WorkersData = call("worker-list")
+    suspend fun workerAdd(name: String, role: String): JsonObject {
+        requireWorker(name)
+        return call("worker-add $name", stdin = role.trim().replace('\n', ' '))
+    }
+    suspend fun workerSet(name: String, field: String, value: String): JsonObject {
+        requireWorker(name)
+        require(field == "role" || field == "mode")
+        return call("worker-set $name $field", stdin = value.trim().replace('\n', ' '))
+    }
+    suspend fun workerRemove(name: String): JsonObject { requireWorker(name); return call("worker-remove $name") }
+    suspend fun workerLoginStart(name: String): LoginUrl { requireWorker(name); return call("worker-login-start $name", timeoutMs = 60_000) }
+    suspend fun workerLoginCode(name: String, code: String): LoginDone {
+        requireWorker(name)
+        return call("worker-login-code $name", stdin = code.trim(), timeoutMs = 120_000)
+    }
+    suspend fun workerRuns(name: String): WorkerRunsData { requireWorker(name); return call("worker-runs $name") }
+    private fun requireWorker(name: String) = require(WORKER_NAME_RE.matches(name)) { "Bad worker name" }
     suspend fun plugins(): PluginsData = call("plugins", timeoutMs = 120_000)
     suspend fun disconnect(service: String): JsonObject = call("disconnect $service")
 

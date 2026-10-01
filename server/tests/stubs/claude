@@ -12,7 +12,7 @@ case "$1 ${2:-}" in
     printf 'Paste code here if prompted > '
     read -r code
     if [[ "$code" == good* ]]; then
-      mkdir -p "$HOME/.claude" && echo '{"claudeAiOauth":{}}' >"$HOME/.claude/.credentials.json"
+      d="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; mkdir -p "$d" && echo '{"claudeAiOauth":{}}' >"$d/.credentials.json"
       echo "Login successful."
     else
       echo "OAuth error: invalid code"; exit 1
@@ -32,5 +32,11 @@ case "$1 ${2:-}" in
   "plugin marketplace") echo '[{"name":"market","source":"github","repo":"demo/market"}]' ;;
   "--version ") echo "2.1.999 (Claude Code)" ;;
   "plugin install") echo "Installed $3" ;;
+  "-p --output-format")
+    prompt="$(cat)"
+    sid="sess-1"; [[ " $* " == *" --resume "* ]] && sid="$(sed 's/.*--resume \([^ ]*\).*/\1/' <<<"$*")"
+    if [[ "$prompt" == *FAIL* ]]; then echo '{"is_error":true,"result":"stub failure","session_id":"'"$sid"'"}'; exit 1; fi
+    jq -cn --arg r "cfg=${CLAUDE_CONFIG_DIR:-none} key=${ANTHROPIC_API_KEY:-unset} tok=${CLAUDE_CODE_OAUTH_TOKEN:-unset}${CLAUDECODE:-} cwd=$PWD resume=${sid} prompt=$prompt" --arg s "$sid" \
+      '{is_error:false,result:$r,session_id:$s}' ;;
   *) echo "claude stub: $*" >&2; exit 1 ;;
 esac

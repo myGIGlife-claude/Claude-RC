@@ -32,7 +32,7 @@ main() {
   for f in jq tmux git flock curl; do command -v "$f" >/dev/null || missing+=("$f"); done
   ((${#missing[@]} == 0)) || echo "Note: install these first: ${missing[*]} (e.g. sudo apt install ${missing[*]})" >&2
 
-  for f in claude-setup.sh claude-launcher-api install-launcher-key.sh claude-autostart.sh youtube-upload; do
+  for f in claude-setup.sh claude-launcher-api install-launcher-key.sh claude-autostart.sh youtube-upload clauderc-team; do
     curl -fsSL "$base/$f" -o "$tmp/$f"
   done
 
@@ -51,6 +51,7 @@ main() {
   # Tools every Claude session can run (~/.local/bin is on their PATH).
   mkdir -p "$HOME/.local/bin"
   put "$tmp/youtube-upload" "$HOME/.local/bin/youtube-upload"
+  put "$tmp/clauderc-team" "$HOME/.local/bin/clauderc-team"
   if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
     printf '%s\n' "$sha" >"$HOME/.config/claude-launcher/installed-commit"
   fi
@@ -63,6 +64,13 @@ main() {
   if ! command -v bun >/dev/null && [[ ! -x "$HOME/.local/bin/bun" ]]; then
     echo "Installing Bun into ~/.local/bin (plugin hooks need it)..."
     timeout 90 "$HOME/claude-setup.sh" --api install-cli bun </dev/null >/dev/null 2>&1 || echo "Note: Bun wasn't installed." >&2
+  fi
+
+  # Team: the MCP server the main Claude uses to hand work to other accounts (user scope, absolute path).
+  if command -v claude >/dev/null && command -v python3 >/dev/null; then
+    claude mcp get clauderc-team >/dev/null 2>&1 ||
+      claude mcp add -s user clauderc-team -- "$HOME/.local/bin/clauderc-team" mcp >/dev/null 2>&1 ||
+      echo "Note: the Team MCP server wasn't registered (claude mcp add failed)." >&2
   fi
 
   if command -v claude-autostart >/dev/null || [[ -x "$HOME/.local/bin/claude-autostart" ]]; then

@@ -19,7 +19,7 @@ set -uo pipefail
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
 # 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions.
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=24
+SCRIPT_API=25
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -46,6 +46,9 @@ TOKEN_SERVICES="cloudflare vercel netlify fly railway supabase neon npm stripe h
 WAIT_RE='Enter to confirm|\(y/n\)|^ *❯ [0-9]+\. |Auto mode lets Claude'
 CLAUDE_LOGIN_SESSION="claude-login"
 AWS_LOGIN_SESSION="aws-sso-login"
+WORKERS_DIR="$LAUNCHER_CONFIG_DIR/workers"   # Team: one folder per extra Claude account
+WORKER_RE='^[A-Za-z][A-Za-z0-9_-]{0,29}$'
+WORKER_MODES=" acceptEdits plan bypassPermissions "
 
 # Names never start with '-', so they can't be read as options by git, gh,
 # tmux or claude.
@@ -122,7 +125,7 @@ session_dir() {
   printf '%s' "$d"
 }
 
-claude_logged_in() { [[ -s "$HOME/.claude/.credentials.json" ]]; }
+claude_logged_in() { [[ -s "${LOGIN_CONFIG_DIR:-$HOME/.claude}/.credentials.json" ]]; }
 
 # Prints missing scopes, space separated. admin:org / write:org cover read:org.
 missing_scopes() {
@@ -829,7 +832,7 @@ do_sessions() {
   # Same detection as claude-autostart: any session whose pane started claude.
   s="$({ tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}@@#{session_created}@@#{session_attached}' 2>/dev/null || true; } |
     awk -F'@@' -v l1="$CLAUDE_LOGIN_SESSION" -v l2="$AWS_LOGIN_SESSION" \
-      '($3 ~ /claude/ || $4 == "claude") && $1 != l1 && $1 != l2 && $1 != "mcp-auth" && !seen[$1]++' |
+      '($3 ~ /claude/ || $4 == "claude") && $1 != l1 && $1 != l2 && $1 != "mcp-auth" && $1 !~ /^worker-login-/ && !seen[$1]++' |
     jq -Rc 'split("@@") | {name:.[0], dir:.[1], project:(.[1] | split("/") | last),
       started_at:(.[4] | tonumber), attached:((.[5] | tonumber) > 0)}' |
     jq -sc --argjson now "$(date +%s)" 'map(. + {uptime_seconds:($now - .started_at)}) | sort_by(.started_at)')"
@@ -1157,7 +1160,10 @@ pane_text() { tmux capture-pane -p -J -t "=$1:" -S -200 2>/dev/null; }
 start_login_session() {
   local name="$1" bin="$2"; shift 2
   end_login "$name"
-  tmux new-session -d -s "$name" -x 1000 -y 60 -e "LOGIN_BIN=$bin" \
+  local envs=(-e "LOGIN_BIN=$bin")
+  # Team: sign a worker account in to its own config dir.
+  [[ -n "${LOGIN_CONFIG_DIR:-}" ]] && envs+=(-e "CLAUDE_CONFIG_DIR=$LOGIN_CONFIG_DIR")
+  tmux new-session -d -s "$name" -x 1000 -y 60 "${envs[@]}" \
     bash -c 'env -u ANTHROPIC_API_KEY "$LOGIN_BIN" "$@"; echo "[exit $?]"; sleep 900' login "$@" >/dev/null 2>&1
 }
 
@@ -1170,7 +1176,7 @@ end_login() {
 read_secret_line() { local v=""; IFS= read -r -t 15 v || true; v="${v//$'\r'/}"; printf '%s' "$v"; }
 
 # Changes whenever claude writes new credentials.
-claude_creds_sig() { stat -c '%Y:%s' "$HOME/.claude/.credentials.json" 2>/dev/null || echo none; }
+claude_creds_sig() { stat -c '%Y:%s' "${LOGIN_CONFIG_DIR:-$HOME/.claude}/.credentials.json" 2>/dev/null || echo none; }
 
 do_login_claude_start() {
   need tmux
@@ -1244,6 +1250,72 @@ do_login_claude_cancel() {
   end_login "$CLAUDE_LOGIN_SESSION"
   api_ok '{"cancelled":true}'
 }
+
+# ---------------- Team: extra Claude accounts the main Claude can delegate to ----------------
+
+worker_check() { [[ "$1" =~ $WORKER_RE ]] || api_err invalid_name "Worker names are letters, digits, - and _ (start with a letter)."; }
+worker_exists() { worker_check "$1"; [[ -f "$WORKERS_DIR/$1/meta.json" ]] || api_err invalid_name "No worker named '$1'."; }
+
+do_worker_list() {
+  local d n signed out=""
+  for d in "$WORKERS_DIR"/*/; do
+    [[ -f "$d/meta.json" ]] || continue
+    n="$(basename "$d")"; signed=false
+    [[ -s "$d/home/.credentials.json" ]] && signed=true
+    out+="$(jq -c --arg n "$n" --argjson s "$signed" '{name:$n, role:(.role // ""), mode:(.mode // "acceptEdits"), signed_in:$s}' "$d/meta.json")"$'\n'
+  done
+  api_ok "$(printf '%s' "$out" | jq -sc '{workers:.}')"
+}
+
+do_worker_add() {
+  local name="${1:-}" role
+  role="$(read_secret_line)"
+  exec 0</dev/null
+  worker_check "$name"
+  [[ ! -e "$WORKERS_DIR/$name" ]] || api_err invalid_name "A worker named '$name' already exists."
+  mkdir -p "$WORKERS_DIR/$name/home" "$WORKERS_DIR/$name/tasks"
+  jq -cn --arg r "${role:0:200}" '{role:$r, mode:"acceptEdits"}' >"$WORKERS_DIR/$name/meta.json"
+  api_ok "$(jq -cn --arg n "$name" '{added:$n}')"
+}
+
+do_worker_set() {
+  local name="${1:-}" field="${2:-}" val tmp
+  val="$(read_secret_line)"
+  exec 0</dev/null
+  worker_exists "$name"
+  case "$field" in
+    role) ;;
+    mode) [[ "$WORKER_MODES" == *" $val "* ]] || api_err invalid_name "Mode must be acceptEdits, plan or bypassPermissions." ;;
+    *) bad_args "usage: worker-set <name> role|mode" ;;
+  esac
+  tmp="$(mktemp "$WORKERS_DIR/$name/meta.XXXXXX")"
+  jq -c --arg f "$field" --arg v "${val:0:200}" '.[$f] = $v' "$WORKERS_DIR/$name/meta.json" >"$tmp" &&
+    mv -f "$tmp" "$WORKERS_DIR/$name/meta.json" || { rm -f "$tmp"; api_err internal "Couldn't save the worker."; }
+  api_ok "$(jq -cn --arg n "$name" '{saved:$n}')"
+}
+
+do_worker_remove() {
+  worker_exists "${1:-}"
+  end_login "worker-login-$1"
+  rm -rf -- "${WORKERS_DIR:?}/$1"
+  api_ok "$(jq -cn --arg n "$1" '{removed:$n}')"
+}
+
+do_worker_runs() {
+  worker_exists "${1:-}"
+  local f
+  api_ok "$( { for f in "$WORKERS_DIR/$1"/tasks/*.json; do [[ -f "$f" ]] && cat "$f" && echo; done; } 2>/dev/null |
+    jq -sc '{runs: (map({id, task:(.task // "" | .[0:300]), status, reply:(.reply // null | if . then .[0:4000] else . end), error:(.error // null), started:(.started // 0)}) | sort_by(-.started) | .[0:20])}')"
+}
+
+# Worker sign-in = the main account's login flow, aimed at the worker's folder and its own tmux session.
+worker_login_target() {
+  worker_exists "${1:-}"
+  CLAUDE_LOGIN_SESSION="worker-login-$1"
+  LOGIN_CONFIG_DIR="$WORKERS_DIR/$1/home"
+}
+do_worker_login_start() { worker_login_target "${1:-}"; do_login_claude_start; }
+do_worker_login_code() { worker_login_target "${1:-}"; do_login_claude_code; }
 
 do_login_github() {
   local token err user need_scopes
@@ -2204,7 +2276,7 @@ chat_session() {
   local s; s="$(resolve_session "$1")"
   tmux has-session -t "=$s" 2>/dev/null || api_err invalid_name "No running session named '$1'."
   # Login and sign-in helpers aren't project chats (their folder would be $HOME).
-  [[ " $CLAUDE_LOGIN_SESSION $AWS_LOGIN_SESSION mcp-auth " != *" $s "* ]] || api_err invalid_name "No running session named '$1'."
+  [[ " $CLAUDE_LOGIN_SESSION $AWS_LOGIN_SESSION mcp-auth " != *" $s "* && "$s" != worker-login-* ]] || api_err invalid_name "No running session named '$1'."
   echo "$s"
 }
 
@@ -2388,7 +2460,7 @@ api_main() {
   shift || true
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | youtube-login-start | \
-      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-file | upload | mcp-auth-start | mcp-auth-finish) ;;  # these read stdin
+      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-file | upload | mcp-auth-start | mcp-auth-finish | worker-add | worker-set | worker-login-code) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -2425,6 +2497,13 @@ api_main() {
     youtube-login-poll)  do_youtube_login_poll "$@" ;;
     repo-edit)           do_repo_edit "$@" ;;
     doctor-start)        do_doctor_start "$@" ;;
+    worker-list)         [[ $# -eq 0 ]] || bad_args "worker-list takes no arguments"; do_worker_list ;;
+    worker-add)          do_worker_add "$@" ;;
+    worker-set)          do_worker_set "$@" ;;
+    worker-remove)       do_worker_remove "$@" ;;
+    worker-runs)         do_worker_runs "$@" ;;
+    worker-login-start)  do_worker_login_start "$@" ;;
+    worker-login-code)   do_worker_login_code "$@" ;;
     mcp)                 do_mcp "$@" ;;
     mcp-refresh)         do_mcp_refresh "$@" ;;
     mcp-auth-start)      [[ $# -eq 0 ]] || bad_args "mcp-auth-start reads the name on stdin"; do_mcp_auth_start ;;
