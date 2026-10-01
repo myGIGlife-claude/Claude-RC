@@ -156,6 +156,17 @@ class LauncherApi(
         return call("worker-login-code $name", stdin = code.trim(), timeoutMs = 120_000)
     }
     suspend fun workerRuns(name: String): WorkerRunsData { requireWorker(name); return call("worker-runs $name") }
+    // Which workers one chat's project hands work to.
+    suspend fun clusterSession(session: String): ChatWorkersData { requireName(session); return call("cluster-session $session") }
+    suspend fun clusterAttach(session: String, worker: String, on: Boolean): JsonObject {
+        requireName(session); requireWorker(worker)
+        return call("cluster-attach $session $worker ${if (on) "on" else "off"}")
+    }
+    suspend fun clusterAssign(session: String, worker: String, field: String, value: String): JsonObject {
+        requireName(session); requireWorker(worker)
+        require(field == "role" || field == "mode")
+        return call("cluster-assign $session $worker $field", stdin = value.trim().replace('\n', ' '))
+    }
     private fun requireWorker(name: String) {
         if (!WORKER_NAME_RE.matches(name)) throw ApiException(Codes.INVALID_NAME, "Bad worker name")
     }

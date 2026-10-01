@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """clauderc-team: MCP server (stdio) that lets the main Claude hand tasks to the
-owner's other Claude accounts ("workers") set up in the cLaudeRC app's Team screen.
+owner's other Claude accounts ("workers") set up in the cLaudeRC app (Claude tab, cLaudeCluster).
 
-A task is a headless `claude -p` run in the caller's project folder under the
-worker's own CLAUDE_CONFIG_DIR. State lives in <workers>/<name>/tasks/<id>.json.
+Only workers the owner attached to this project (Cluster button in the chat) are visible.
+A task is a headless `claude -p` run under the worker's own CLAUDE_CONFIG_DIR. In a git
+project it runs in its own worktree on its own branch (cluster/<worker>/<task>); the main
+Claude reviews the diff and merges or discards. Elsewhere it runs in the project folder.
+State lives in <workers>/<name>/tasks/<id>.json.
 """
 import json, os, re, signal, subprocess, sys, threading, time, uuid
 from pathlib import Path
 
-WORKERS = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "claude-launcher" / "workers"
+CFG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "claude-launcher"
+WORKERS = CFG / "workers"
+MODES = ("acceptEdits", "plan", "bypassPermissions")
+git_lock = threading.Lock()   # one worktree is created at a time
 CLAUDE = os.environ.get("CLAUDERC_CLAUDE", "claude")
 RUN_TIMEOUT = 1800        # seconds one worker run may take
 NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,29}$")
@@ -20,12 +26,13 @@ WAIT_SLICE = 60           # one wait call returns after this long so the request
 INSTRUCTIONS = (
     "Hand work to the owner's other Claude accounts. Call list_workers first, then follow the owner's routing "
     "rules from this chat. Start every independent piece with delegate, then collect each with wait. "
-    "Workers cannot ask questions and share this project folder: give each a complete, self-contained task "
-    "and avoid sending two workers to edit the same files. Use reply to continue a worker's conversation."
+    "Workers cannot ask questions: give each a complete, self-contained task. In a git project each task runs on its own "
+    "branch (from your last commit, so commit first if it needs your edits). When wait returns, read the diff with review, "
+    "check it, then merge it or discard it; nothing reaches your branch until you merge. Use reply to continue a worker's conversation."
 )
 
 TOOLS = [
-    {"name": "list_workers", "description": "List the worker accounts: name, role, permission mode, signed_in.",
+    {"name": "list_workers", "description": "List the workers attached to this chat: name, role, permission mode, signed_in.",
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "delegate", "description": "Start a task on a worker. Returns a task_id; collect the answer with wait.",
      "inputSchema": {"type": "object", "required": ["worker", "task"], "properties": {
@@ -36,6 +43,12 @@ TOOLS = [
     {"name": "reply", "description": "Send a follow-up to a finished task's worker (same conversation). Returns a new task_id.",
      "inputSchema": {"type": "object", "required": ["task_id", "message"], "properties": {
          "task_id": {"type": "string"}, "message": {"type": "string"}}}},
+    {"name": "review", "description": "Show what a finished task changed on its branch (diffstat and diff). Read it before merging.",
+     "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}}},
+    {"name": "merge", "description": "Merge a task's branch into the project's current branch and clean it up. On conflicts nothing changes.",
+     "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}}},
+    {"name": "discard", "description": "Throw away a task's branch and workspace without merging.",
+     "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}}},
 ]
 
 
@@ -49,13 +62,80 @@ def worker_dir(name):
     return WORKERS / name
 
 
+def attached():
+    """Workers the owner attached to this project (the app writes this file); read each call so changes apply live."""
+    try:
+        d = json.loads((CFG / "attach" / (re.sub(r"[^A-Za-z0-9]", "-", os.getcwd()) + ".json")).read_text())
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def settings(name, att=None):
+    """(role, mode) for a worker here: this project's override, else the worker's own."""
+    m = json.loads((WORKERS / name / "meta.json").read_text())
+    o = (att if att is not None else attached()).get(name)
+    o = o if isinstance(o, dict) else {}
+    mode = o.get("mode") or m.get("mode") or "acceptEdits"
+    return str(o.get("role") or m.get("role") or ""), mode if mode in MODES else "acceptEdits"
+
+
 def list_workers():
-    out = []
+    att, out = attached(), []
     for meta in sorted(WORKERS.glob("*/meta.json")):
-        m = json.loads(meta.read_text())
-        out.append({"name": meta.parent.name, "role": m.get("role", ""), "mode": m.get("mode", "acceptEdits"),
-                    "signed_in": (meta.parent / "home" / ".credentials.json").is_file()})
+        name = meta.parent.name
+        if name in att:
+            role, mode = settings(name, att)
+            out.append({"name": name, "role": role, "mode": mode, "signed_in": (meta.parent / "home" / ".credentials.json").is_file()})
     return out
+
+
+def git(*a, cwd):
+    return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True, timeout=120)
+
+
+def workspace(worker, tid, cwd):
+    """Its own worktree + branch for a task, or None when cwd isn't a git project with a commit."""
+    try:
+        top = git("rev-parse", "--show-toplevel", cwd=cwd)
+        base = git("rev-parse", "HEAD", cwd=cwd)
+        if top.returncode or base.returncode:
+            return None
+        top = top.stdout.strip()
+        wt, branch = WORKERS / worker / "trees" / tid, f"cluster/{worker}/{tid}"
+        with git_lock:
+            r = git("worktree", "add", "-q", "-b", branch, str(wt), "HEAD", cwd=top)
+        if r.returncode:
+            return None
+        rel = os.path.relpath(cwd, top)
+        return {"top": top, "base": base.stdout.strip(), "wt": str(wt), "branch": branch, "cwd": str(wt if rel == "." else wt / rel)}
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def seal(t):
+    """Commit whatever the worker left in its worktree; returns the diffstat against where it branched."""
+    if git("status", "--porcelain", cwd=t["wt"]).stdout.strip():
+        git("add", "-A", cwd=t["wt"])
+        git("-c", f"user.name=cluster-{t['worker']}", "-c", "user.email=cluster@localhost", "-c", "commit.gpgsign=false",
+            "commit", "-q", "--no-verify", "-m", f"{t['worker']}: {t['task'][:70]}", cwd=t["wt"])
+    return git("diff", "--stat", f"{t['base']}..{t['branch']}", cwd=t["top"]).stdout.strip()
+
+
+def branch_task(tid):
+    t = find_task(tid)
+    if not t.get("branch") or t.get("closed"):
+        raise ToolError("This task has no open branch (it ran in the project folder, or was already merged or discarded).")
+    if t["status"] != "done":
+        raise ToolError("The task isn't finished.")
+    return t
+
+
+def close(t, how, delete_flag):
+    git("worktree", "remove", "--force", t["wt"], cwd=t["top"])
+    git("branch", delete_flag, t["branch"], cwd=t["top"])
+    t["closed"] = how
+    save(t)
 
 
 def task_path(worker, tid):
@@ -87,7 +167,7 @@ def find_task(tid):
 def run_task(t, resume):
     w = WORKERS / t["worker"]
     try:
-        mode = json.loads((w / "meta.json").read_text()).get("mode", "acceptEdits")
+        mode = t.get("mode") if t.get("mode") in MODES else "acceptEdits"
         cmd = [CLAUDE, "-p", "--output-format", "json", "--permission-mode", mode] + (["--resume", resume] if resume else [])
         # The worker must run as its own account: drop the main session's credentials and Claude Code markers.
         env = {k: v for k, v in os.environ.items()
@@ -113,6 +193,10 @@ def run_task(t, resume):
             t.update(status="failed", error=(out.get("result") or stderr or stdout or f"claude exited {proc.returncode}")[-2000:])
         else:
             t.update(status="done", reply=out.get("result", ""))
+            if t.get("branch"):
+                stat = seal(t)
+                t["reply"] += (f"\n\n[cluster] Work is on branch {t['branch']}. Changed:\n{stat}\nUse review, then merge or discard."
+                               if stat else f"\n\n[cluster] No files changed on branch {t['branch']}; discard it.")
     except subprocess.TimeoutExpired:
         t.update(status="failed", error=f"Timed out after {RUN_TIMEOUT // 60} minutes.")
     except Exception as e:  # e.g. claude not installed, worker removed mid-run
@@ -125,18 +209,34 @@ def run_task(t, resume):
     live.pop(t["id"], None)
 
 
-def start(worker, prompt, resume=None, cwd=None):
+def start(worker, prompt, resume=None, parent=None):
     w = worker_dir(worker)
+    att = attached()
+    if worker not in att:
+        raise ToolError(f"Worker {worker!r} isn't attached to this chat. Call list_workers; the owner adds workers with the Cluster button in the chat.")
     if not (w / "home" / ".credentials.json").is_file():
-        raise ToolError(f"Worker {worker} isn't signed in. Sign it in from the Team screen in the cLaudeRC app.")
+        raise ToolError(f"Worker {worker} isn't signed in. Sign it in from the Claude tab in the cLaudeRC app.")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ToolError("The task is empty.")
-    t = {"id": uuid.uuid4().hex[:8], "worker": worker, "task": prompt[:300], "prompt": prompt,
-         "cwd": cwd or os.getcwd(), "status": "running", "started": time.time()}
+    role, mode = settings(worker, att)
+    tid, text = uuid.uuid4().hex[:8], prompt
+    if parent:
+        ws, cwd = {k: parent.get(k) for k in ("top", "base", "wt", "branch")}, parent["cwd"]
+    else:
+        cwd = os.getcwd()
+        ws = workspace(worker, tid, cwd)
+        if ws:
+            cwd = ws.pop("cwd")
+            text = (f"You are working on branch {ws['branch']} in your own copy of the project ({cwd}). Edit files there only. "
+                    "Don't run git commit, merge or push: your changes are committed for you when you finish.\n\n") + text
+        if role:
+            text = f"Your role in this project: {role}\n\n" + text
+    t = {"id": tid, "worker": worker, "task": prompt[:300], "prompt": text, "cwd": cwd, "mode": mode,
+         "status": "running", "started": time.time(), **{k: v for k, v in (ws or {}).items() if v}}
     save(t)
-    live[t["id"]] = None
+    live[tid] = None
     threading.Thread(target=run_task, args=(t, resume), daemon=True).start()
-    return t["id"]
+    return tid
 
 
 def wait(tid, timeout_s=600):
@@ -166,7 +266,25 @@ def call_tool(name, a):
         t = find_task(a.get("task_id"))
         if t["status"] != "done" or not t.get("session_id"):
             raise ToolError("Only a finished task can be replied to.")
-        return start(t["worker"], a.get("message"), resume=t["session_id"], cwd=t["cwd"])
+        if t.get("closed"):
+            raise ToolError("That task's branch was already merged or discarded; delegate a new task.")
+        return start(t["worker"], a.get("message"), resume=t["session_id"], parent=t)
+    if name == "review":
+        t = branch_task(a.get("task_id"))
+        d = git("diff", f"{t['base']}..{t['branch']}", cwd=t["top"]).stdout
+        return git("diff", "--stat", f"{t['base']}..{t['branch']}", cwd=t["top"]).stdout + "\n" + (d[:20000] + ("\n[diff cut at 20000 characters]" if len(d) > 20000 else ""))
+    if name == "merge":
+        t = branch_task(a.get("task_id"))
+        r = git("merge", "--no-ff", "-m", f"Merge {t['branch']}", t["branch"], cwd=t["top"])
+        if r.returncode:
+            git("merge", "--abort", cwd=t["top"])
+            raise ToolError("Merge failed, nothing changed:\n" + (r.stdout + r.stderr)[-1500:])
+        close(t, "merged", "-d")
+        return f"Merged {t['branch']}."
+    if name == "discard":
+        t = branch_task(a.get("task_id"))
+        close(t, "discarded", "-D")
+        return f"Discarded {t['branch']}."
     raise ToolError(f"Unknown tool {name}.")
 
 

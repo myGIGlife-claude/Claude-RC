@@ -288,6 +288,19 @@ data class ClusterAccount(
 @Serializable
 data class ClusterData(val accounts: List<ClusterAccount> = emptyList())
 
+/** A worker as one chat sees it: attached or not, with this chat's role and mode. */
+@Serializable
+data class ChatWorker(
+    val name: String,
+    @SerialName("signed_in") val signedIn: Boolean = false,
+    val attached: Boolean = false,
+    val role: String = "",
+    val mode: String = "acceptEdits",
+)
+
+@Serializable
+data class ChatWorkersData(val workers: List<ChatWorker> = emptyList())
+
 @Serializable
 data class WorkersData(val workers: List<Worker> = emptyList())
 

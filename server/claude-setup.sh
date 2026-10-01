@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage).
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers.
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=26
+SCRIPT_API=27
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -46,6 +46,7 @@ TOKEN_SERVICES="cloudflare vercel netlify fly railway supabase neon npm stripe h
 WAIT_RE='Enter to confirm|\(y/n\)|^ *❯ [0-9]+\. |Auto mode lets Claude'
 CLAUDE_LOGIN_SESSION="claude-login"
 AWS_LOGIN_SESSION="aws-sso-login"
+ATTACH_DIR="$LAUNCHER_CONFIG_DIR/attach"     # which workers each project's chat may hand work to (read by clauderc-team)
 WORKERS_DIR="$LAUNCHER_CONFIG_DIR/workers"   # Team: one folder per extra Claude account
 WORKER_RE='^[A-Za-z][A-Za-z0-9_-]{0,29}$'
 WORKER_MODES=" acceptEdits plan bypassPermissions "
@@ -1357,6 +1358,68 @@ do_worker_runs() {
     jq -sc '{runs: (map({id, task:(.task // "" | .[0:300]), status, reply:(.reply // null | if . then .[0:4000] else . end), error:(.error // null), started:(.started // 0)}) | sort_by(-.started) | .[0:20])}')"
 }
 
+# Which workers a chat's project hands work to. clauderc-team reads <attach>/<project folder slug>.json:
+# {"<worker>": {"role": "…", "mode": "…"}}  (present = attached; role/mode override the worker's own).
+# attach_session <project>: sets ATTACH_FILE (not echoed: api_err must not run inside $(…)).
+attach_session() {
+  chat_session "$1"
+  local d; d="$(session_dir "$CHAT_SESS")"
+  [[ -n "$d" ]] || api_err invalid_name "Couldn't find that session's folder."
+  ATTACH_FILE="$ATTACH_DIR/$(claude_proj_slug "$d").json"
+}
+attach_read() { { [[ -s "$ATTACH_FILE" ]] && jq -c 'if type == "object" then . else {} end' "$ATTACH_FILE" 2>/dev/null; } || echo '{}'; }
+attach_write() {  # $1 = jq filter, rest = jq args
+  local f="$1" tmp; shift
+  mkdir -p "$ATTACH_DIR" && chmod 700 "$ATTACH_DIR"
+  tmp="$(mktemp "$ATTACH_DIR/a.XXXXXX")"
+  attach_read | jq -c "$@" "$f" >"$tmp" && mv -f "$tmp" "$ATTACH_FILE" || { rm -f "$tmp"; api_err internal "Couldn't save."; }
+}
+
+do_cluster_session() {
+  [[ $# -eq 1 ]] || bad_args "usage: cluster-session <project>"
+  attach_session "$1"
+  local att d n signed out=""
+  att="$(attach_read)"
+  for d in "$WORKERS_DIR"/*/; do
+    [[ -f "$d/meta.json" ]] || continue
+    n="$(basename "$d")"; signed=false
+    [[ -s "$d/home/.credentials.json" ]] && signed=true
+    out+="$(jq -c --arg n "$n" --argjson s "$signed" --argjson a "$att" \
+      '{name:$n, signed_in:$s, attached:($a | has($n)), role:((try $a[$n].role catch null) // .role // ""), mode:((try $a[$n].mode catch null) // .mode // "acceptEdits")}' "$d/meta.json")"$'\n'
+  done
+  api_ok "$(printf '%s' "$out" | jq -sc '{workers:.}')"
+}
+
+do_cluster_attach() {
+  [[ $# -eq 3 ]] || bad_args "usage: cluster-attach <project> <worker> on|off"
+  worker_exists "$2"
+  attach_session "$1"
+  case "$3" in
+    on) attach_write '.[$n] //= {}' --arg n "$2" ;;
+    off) attach_write 'del(.[$n])' --arg n "$2" ;;
+    *) bad_args "usage: cluster-attach <project> <worker> on|off" ;;
+  esac
+  api_ok "$(jq -cn --arg n "$2" --arg v "$3" '{worker:$n, state:$v}')"
+}
+
+# cluster-assign <project> <worker> role|mode, stdin = value (empty = back to the worker's own).
+do_cluster_assign() {
+  local val
+  val="$(read_secret_line)"
+  exec 0</dev/null
+  [[ $# -eq 3 ]] || bad_args "usage: cluster-assign <project> <worker> role|mode"
+  worker_exists "$2"
+  case "$3" in
+    role) ;;
+    mode) [[ -z "$val" || "$WORKER_MODES" == *" $val "* ]] || api_err invalid_name "Mode must be acceptEdits, plan or bypassPermissions." ;;
+    *) bad_args "usage: cluster-assign <project> <worker> role|mode" ;;
+  esac
+  attach_session "$1"
+  if [[ -z "$val" ]]; then attach_write 'if has($n) then .[$n] |= del(.[$f]) else . end' --arg n "$2" --arg f "$3"
+  else attach_write '.[$n] = ((.[$n] // {}) + {($f): $v})' --arg n "$2" --arg f "$3" --arg v "${val:0:200}"; fi
+  api_ok "$(jq -cn --arg n "$2" '{saved:$n}')"
+}
+
 # Worker sign-in = the main account's login flow, aimed at the worker's folder and its own tmux session.
 worker_login_target() {
   worker_exists "${1:-}"
@@ -2513,7 +2576,7 @@ api_main() {
   shift || true
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | youtube-login-start | \
-      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-file | upload | mcp-auth-start | mcp-auth-finish | worker-add | worker-set | worker-login-code) ;;  # these read stdin
+      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-file | upload | mcp-auth-start | mcp-auth-finish | worker-add | worker-set | worker-login-code | cluster-assign) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -2556,6 +2619,9 @@ api_main() {
     worker-set)          do_worker_set "$@" ;;
     worker-remove)       do_worker_remove "$@" ;;
     worker-runs)         do_worker_runs "$@" ;;
+    cluster-session)     do_cluster_session "$@" ;;
+    cluster-attach)      do_cluster_attach "$@" ;;
+    cluster-assign)      do_cluster_assign "$@" ;;
     worker-login-start)  do_worker_login_start "$@" ;;
     worker-login-code)   do_worker_login_code "$@" ;;
     mcp)                 do_mcp "$@" ;;

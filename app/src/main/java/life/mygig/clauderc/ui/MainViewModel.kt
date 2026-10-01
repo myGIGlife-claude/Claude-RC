@@ -31,6 +31,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import life.mygig.clauderc.api.ApiException
+import life.mygig.clauderc.api.ChatWorker
 import life.mygig.clauderc.api.ClusterAccount
 import life.mygig.clauderc.data.Server
 import life.mygig.clauderc.api.AskQuestion
@@ -326,6 +327,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _chatSession.value = null
         _chat.value = null
         _chatPinNeeded.value = null
+        _chatWorkers.value = null
     }
 
     /** App went to the background: forget the PIN; the chat asks again on return. */
@@ -581,6 +583,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (mine in known) store.setInCluster(me.id, false)   // same account: nothing to add
         else _clusterOffer.value = ClusterOffer(me.id, me.host, mine)
+    }
+
+    /** The open chat's workers (attached or not); null until loaded. */
+    private val _chatWorkers = MutableStateFlow<List<ChatWorker>?>(null)
+    val chatWorkers = _chatWorkers.asStateFlow()
+    fun loadChatWorkers() {
+        val s = _chatSession.value ?: return
+        action("Loading workers…") { _chatWorkers.value = api.clusterSession(s).workers }
+    }
+    fun attachWorker(name: String, on: Boolean) {
+        val s = _chatSession.value ?: return
+        action("Saving…") { api.clusterAttach(s, name, on); _chatWorkers.value = api.clusterSession(s).workers }
+    }
+    /** Role or mode for this chat only; blank goes back to the worker's own. */
+    fun assignWorker(name: String, field: String, value: String) {
+        val s = _chatSession.value ?: return
+        action("Saving…") { api.clusterAssign(s, name, field, value); _chatWorkers.value = api.clusterSession(s).workers }
     }
 
     private val _workerLogin = MutableStateFlow<Pair<String, LoginUrl>?>(null)

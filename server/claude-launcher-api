@@ -20,7 +20,7 @@ PROJECT_RE='^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$'
 REPO_RE='^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._][A-Za-z0-9._-]*$'
 OWNER_RE='^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'
 WORKER_RE='^[A-Za-z][A-Za-z0-9_-]{0,29}$'
-KNOWN="status owners repos sessions new open clone-status start stop tail login-claude-start login-claude-code login-claude-cancel login-github login-aws-keys login-aws-sso-start login-gitlab login-docker self-update install-cli run claude-cmd restart login-token keys set-secret remove-secret login-keystore remove-keystore youtube-login-start youtube-login-poll mcp mcp-refresh plugins disconnect chat-pin-status chat-pin-set chat-open chat-history chat-send chat-interrupt upload chat-log doctor-start mcp-auth-start mcp-auth-finish mcp-auth-cancel repo-edit chat-file cluster worker-list worker-add worker-set worker-remove worker-runs worker-login-start worker-login-code"
+KNOWN="status owners repos sessions new open clone-status start stop tail login-claude-start login-claude-code login-claude-cancel login-github login-aws-keys login-aws-sso-start login-gitlab login-docker self-update install-cli run claude-cmd restart login-token keys set-secret remove-secret login-keystore remove-keystore youtube-login-start youtube-login-poll mcp mcp-refresh plugins disconnect chat-pin-status chat-pin-set chat-open chat-history chat-send chat-interrupt upload chat-log doctor-start mcp-auth-start mcp-auth-finish mcp-auth-cancel repo-edit chat-file cluster worker-list worker-add worker-set worker-remove worker-runs worker-login-start worker-login-code cluster-session cluster-attach cluster-assign"
 TOKEN_RE='^[A-Za-z0-9._/=-]{1,200}$'
 
 mkdir -p "$STATE_DIR" 2>/dev/null
@@ -162,6 +162,15 @@ case "$sub" in
     ;;
   worker-set)
     ((nargs == 2)) && [[ "${args[0]}" =~ $WORKER_RE && ( "${args[1]}" == role || "${args[1]}" == mode ) ]] || deny "$sub"
+    ;;
+  cluster-session)
+    ((nargs == 1)) && [[ "${args[0]}" =~ $PROJECT_RE ]] || deny "$sub"
+    ;;
+  cluster-attach)
+    ((nargs == 3)) && [[ "${args[0]}" =~ $PROJECT_RE && "${args[1]}" =~ $WORKER_RE && ( "${args[2]}" == on || "${args[2]}" == off ) ]] || deny "$sub"
+    ;;
+  cluster-assign)
+    ((nargs == 3)) && [[ "${args[0]}" =~ $PROJECT_RE && "${args[1]}" =~ $WORKER_RE && ( "${args[2]}" == role || "${args[2]}" == mode ) ]] || deny "$sub"
     ;;
   *)
     deny "$sub"

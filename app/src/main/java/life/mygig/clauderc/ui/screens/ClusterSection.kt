@@ -31,12 +31,16 @@ import life.mygig.clauderc.api.UsageWindow
 import life.mygig.clauderc.api.Updates
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.foundation.layout.padding
 import java.time.Duration
 import java.time.Instant
 import kotlin.math.roundToInt
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.components.CardBox
 import life.mygig.clauderc.ui.openUrl
+import life.mygig.clauderc.ui.theme.BadRed
+import life.mygig.clauderc.ui.theme.WarnAmber
 
 private val MODES = listOf("acceptEdits", "plan", "bypassPermissions")
 private fun modeHint(m: String) = when (m) {
@@ -209,15 +213,74 @@ private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean
 
 @Composable
 private fun UsageBar(label: String, w: UsageWindow) {
-    val used = w.pct ?: return
-    val left = (100 - used).coerceIn(0.0, 100.0)
+    val used = (w.pct ?: return).coerceIn(0.0, 100.0)
+    // The bar fills as usage is spent, so a full bar means nothing is left.
     Column {
-        Text("$label: ${left.roundToInt()}% left" + (resetsIn(w.resetsAt)?.let { " · resets in $it" } ?: ""), style = MaterialTheme.typography.labelMedium)
-        LinearProgressIndicator(progress = { (left / 100).toFloat() }, modifier = Modifier.fillMaxWidth())
+        Text("$label: ${used.roundToInt()}% used" + (resetsIn(w.resetsAt)?.let { " · resets in $it" } ?: ""), style = MaterialTheme.typography.labelMedium)
+        LinearProgressIndicator(
+            progress = { (used / 100).toFloat() }, modifier = Modifier.fillMaxWidth(),
+            color = when { used >= 90 -> BadRed; used >= 75 -> WarnAmber; else -> MaterialTheme.colorScheme.primary },
+        )
     }
 }
 
 private fun resetsIn(iso: String?): String? {
     val mins = try { Duration.between(Instant.now(), Instant.parse(iso ?: return null)).toMinutes() } catch (_: Exception) { return null }
     return when { mins <= 0 -> "now"; mins < 90 -> "$mins min"; mins < 48 * 60 -> "${(mins + 30) / 60} h"; else -> "${(mins + 720) / 1440} days" }
+}
+
+private val MODE_LABELS = listOf("acceptEdits" to "Edit files", "plan" to "Read-only", "bypassPermissions" to "Full access")
+
+/** The chat's Cluster button: which accounts this chat can hand work to, and what each is for here. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun ChatClusterSheet(vm: MainViewModel, onClose: () -> Unit) {
+    val workers by vm.chatWorkers.collectAsState()
+    val busy by vm.busy.collectAsState()
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onClose,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("cLaudeCluster", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "Pick the accounts this chat can hand work to. Each task runs on its own branch; the main Claude reviews it and merges it.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            val ws = workers
+            if (ws == null) Text("Loading…", style = MaterialTheme.typography.bodySmall)
+            else if (ws.isEmpty()) Text("No other accounts yet. Add one in the Claude tab › Accounts.", style = MaterialTheme.typography.bodySmall)
+            ws?.forEach { w ->
+                CardBox {
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(w.name, style = MaterialTheme.typography.titleSmall)
+                                if (!w.signedIn) Text("Not signed in (Claude tab › Accounts)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                            }
+                            androidx.compose.material3.Switch(
+                                checked = w.attached, onCheckedChange = { vm.attachWorker(w.name, it) },
+                                enabled = busy == null && (w.signedIn || w.attached),
+                            )
+                        }
+                        if (w.attached) {
+                            var role by remember(w.role) { mutableStateOf(w.role) }
+                            OutlinedTextField(
+                                value = role, onValueChange = { role = it }, label = { Text("What it does here") }, singleLine = true,
+                                modifier = Modifier.fillMaxWidth().onFocusChanged { if (!it.isFocused && role != w.role) vm.assignWorker(w.name, "role", role) },
+                                keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { if (role != w.role) vm.assignWorker(w.name, "role", role) }),
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                MODE_LABELS.forEach { (m, label) ->
+                                    androidx.compose.material3.FilterChip(selected = w.mode == m, onClick = { vm.assignWorker(w.name, "mode", m) }, label = { Text(label) }, enabled = busy == null)
+                                }
+                            }
+                            Text(modeHint(w.mode), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
