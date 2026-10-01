@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""clauderc-team: MCP server (stdio) that lets the main Claude hand tasks to the
+owner's other Claude accounts ("workers") set up in the cLaudeRC app's Team screen.
+
+A task is a headless `claude -p` run in the caller's project folder under the
+worker's own CLAUDE_CONFIG_DIR. State lives in <workers>/<name>/tasks/<id>.json.
+"""
+import json, os, re, subprocess, sys, threading, time, uuid
+from pathlib import Path
+
+WORKERS = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "claude-launcher" / "workers"
+CLAUDE = os.environ.get("CLAUDERC_CLAUDE", "claude")
+RUN_TIMEOUT = 1800        # seconds one worker run may take
+NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,29}$")
+ID_RE = re.compile(r"^[0-9a-f]{8}$")
+live = set()              # task ids run by this process; anything else 'running' on disk is lost
+# ponytail: tasks die with this process (one MCP server per Claude session); persist/detach if long runs must survive restarts.
+
+INSTRUCTIONS = (
+    "Hand work to the owner's other Claude accounts. Call list_workers first, then follow the owner's routing "
+    "rules from this chat. Start every independent piece with delegate, then collect each with wait. "
+    "Workers cannot ask questions and share this project folder: give each a complete, self-contained task "
+    "and avoid sending two workers to edit the same files. Use reply to continue a worker's conversation."
+)
+
+TOOLS = [
+    {"name": "list_workers", "description": "List the worker accounts: name, role, permission mode, signed_in.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "delegate", "description": "Start a task on a worker. Returns a task_id; collect the answer with wait.",
+     "inputSchema": {"type": "object", "required": ["worker", "task"], "properties": {
+         "worker": {"type": "string"}, "task": {"type": "string", "description": "Complete, self-contained instructions."}}}},
+    {"name": "wait", "description": "Wait for a task and return the worker's final reply.",
+     "inputSchema": {"type": "object", "required": ["task_id"], "properties": {
+         "task_id": {"type": "string"}, "timeout_s": {"type": "integer", "description": "Default 600, max 900."}}}},
+    {"name": "reply", "description": "Send a follow-up to a finished task's worker (same conversation). Returns a new task_id.",
+     "inputSchema": {"type": "object", "required": ["task_id", "message"], "properties": {
+         "task_id": {"type": "string"}, "message": {"type": "string"}}}},
+]
+
+
+class ToolError(Exception):
+    pass
+
+
+def worker_dir(name):
+    if not isinstance(name, str) or not NAME_RE.match(name) or not (WORKERS / name / "meta.json").is_file():
+        raise ToolError(f"No worker named {name!r}. Call list_workers.")
+    return WORKERS / name
+
+
+def list_workers():
+    out = []
+    for meta in sorted(WORKERS.glob("*/meta.json")):
+        m = json.loads(meta.read_text())
+        out.append({"name": meta.parent.name, "role": m.get("role", ""), "mode": m.get("mode", "acceptEdits"),
+                    "signed_in": (meta.parent / "home" / ".credentials.json").is_file()})
+    return out
+
+
+def task_path(worker, tid):
+    return WORKERS / worker / "tasks" / f"{tid}.json"
+
+
+def save(t):
+    p = task_path(t["worker"], t["id"])
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(t))
+    tmp.replace(p)
+
+
+def find_task(tid):
+    if not isinstance(tid, str) or not ID_RE.match(tid):
+        raise ToolError(f"Bad task_id {tid!r}.")
+    for p in WORKERS.glob(f"*/tasks/{tid}.json"):
+        return json.loads(p.read_text())
+    raise ToolError(f"No task {tid}.")
+
+
+def run_task(t, resume):
+    w = WORKERS / t["worker"]
+    try:
+        mode = json.loads((w / "meta.json").read_text()).get("mode", "acceptEdits")
+        cmd = [CLAUDE, "-p", "--output-format", "json", "--permission-mode", mode] + (["--resume", resume] if resume else [])
+        env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+        env["CLAUDE_CONFIG_DIR"] = str(w / "home")
+        p = subprocess.run(cmd, input=t["prompt"], cwd=t["cwd"], env=env, capture_output=True, text=True, timeout=RUN_TIMEOUT)
+        try:
+            out = json.loads(p.stdout)
+        except ValueError:
+            out = {}
+        t["session_id"] = out.get("session_id") or resume
+        if p.returncode or out.get("is_error"):
+            t.update(status="failed", error=(out.get("result") or p.stderr or f"claude exited {p.returncode}")[-2000:])
+        else:
+            t.update(status="done", reply=out.get("result", ""))
+    except subprocess.TimeoutExpired:
+        t.update(status="failed", error=f"Timed out after {RUN_TIMEOUT // 60} minutes.")
+    except Exception as e:  # e.g. claude not installed, worker removed mid-run
+        t.update(status="failed", error=str(e))
+    t["finished"] = time.time()
+    try:
+        save(t)
+    except OSError:
+        pass  # worker folder removed while the task ran
+    live.discard(t["id"])
+
+
+def start(worker, prompt, resume=None):
+    w = worker_dir(worker)
+    if not (w / "home" / ".credentials.json").is_file():
+        raise ToolError(f"Worker {worker} isn't signed in. Sign it in from the Team screen in the cLaudeRC app.")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ToolError("The task is empty.")
+    t = {"id": uuid.uuid4().hex[:8], "worker": worker, "task": prompt[:300], "prompt": prompt,
+         "cwd": os.getcwd(), "status": "running", "started": time.time()}
+    save(t)
+    live.add(t["id"])
+    threading.Thread(target=run_task, args=(t, resume), daemon=True).start()
+    return t["id"]
+
+
+def wait(tid, timeout_s=600):
+    deadline = time.time() + min(int(timeout_s or 600), 900)
+    while True:
+        t = find_task(tid)
+        if t["status"] == "done":
+            return t.get("reply", "")
+        if t["status"] == "failed":
+            raise ToolError(t.get("error", "The worker failed."))
+        if tid not in live:
+            raise ToolError("This task was lost (the Team server restarted while it ran). Delegate it again.")
+        if time.time() >= deadline:
+            return f"Still running. Call wait again with task_id {tid}."
+        time.sleep(1)
+
+
+def call_tool(name, a):
+    if name == "list_workers":
+        return json.dumps(list_workers())
+    if name == "delegate":
+        return start(a.get("worker"), a.get("task"))
+    if name == "wait":
+        return wait(a.get("task_id"), a.get("timeout_s"))
+    if name == "reply":
+        t = find_task(a.get("task_id"))
+        if t["status"] != "done" or not t.get("session_id"):
+            raise ToolError("Only a finished task can be replied to.")
+        return start(t["worker"], a.get("message"), resume=t["session_id"])
+    raise ToolError(f"Unknown tool {name}.")
+
+
+def handle(msg):
+    method, mid, params = msg.get("method"), msg.get("id"), msg.get("params") or {}
+    if mid is None:
+        return None  # notification
+    if method == "initialize":
+        res = {"protocolVersion": params.get("protocolVersion", "2025-03-26"), "capabilities": {"tools": {}},
+               "serverInfo": {"name": "clauderc-team", "version": "1"}, "instructions": INSTRUCTIONS}
+    elif method == "tools/list":
+        res = {"tools": TOOLS}
+    elif method == "tools/call":
+        try:
+            res = {"content": [{"type": "text", "text": str(call_tool(params.get("name"), params.get("arguments") or {}))}]}
+        except ToolError as e:
+            res = {"isError": True, "content": [{"type": "text", "text": str(e)}]}
+    elif method == "ping":
+        res = {}
+    else:
+        return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"Unknown method {method}"}}
+    return {"jsonrpc": "2.0", "id": mid, "result": res}
+
+
+def main():
+    if sys.argv[1:] != ["mcp"]:
+        sys.exit("usage: clauderc-team mcp")
+    for line in sys.stdin:
+        if line.strip():
+            out = handle(json.loads(line))
+            if out:
+                print(json.dumps(out), flush=True)
+
+
+if __name__ == "__main__":
+    main()

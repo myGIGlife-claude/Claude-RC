@@ -584,6 +584,9 @@ check "remove signed-in worker" "$(jqt '.ok')"
 api "worker-list"
 check "worker gone" "$(jqt '.data.workers | length == 0')"
 
+echo "team MCP server"
+OUT="$(python3 "$HERE/test-team.py" 2>&1)"; check "clauderc-team MCP self-check" $?
+
 echo
 echo "$pass passed, $failn failed"
 ((failn == 0))
