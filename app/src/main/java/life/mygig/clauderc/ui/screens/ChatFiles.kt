@@ -72,12 +72,15 @@ private fun FileItem(vm: MainViewModel, path: String) {
     val name = path.substringAfterLast('/')
     val mime = mimeOf(name)
     var pending by remember { mutableStateOf<ByteArray?>(null) }
+    // Shown right under the button: messages from the app root would sit behind the full-screen chat.
+    var working by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
     val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(mime)) { uri ->
         val bytes = pending; pending = null
         if (uri != null && bytes != null) {
             scope.launch {
-                withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } }
-                vm.say("Saved $name")
+                note = runCatching { withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: error("no output") } }
+                    .fold({ "Saved." }, { "Couldn't save: ${it.message}" })
             }
         }
     }
@@ -106,13 +109,17 @@ private fun FileItem(vm: MainViewModel, path: String) {
         OutlinedButton(
             onClick = {
                 scope.launch {
+                    working = true; note = null
                     runCatching { vm.chatFileBytes(path) }
                         .onSuccess { pending = it; save.launch(name) }
-                        .onFailure { vm.say("Couldn't get $name: ${it.message}") }
+                        .onFailure { note = "Couldn't get it: ${it.message}" }
+                    working = false
                 }
             },
+            enabled = !working,
             modifier = Modifier.fillMaxWidth(),
-        ) { Text("Save $name", maxLines = 1) }
+        ) { Text(if (working) "Getting $name…" else "Save $name", maxLines = 1) }
+        note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = if (it.startsWith("Saved")) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error) }
     }
     if (big) ImageViewer(vm, path) { big = false }
 }

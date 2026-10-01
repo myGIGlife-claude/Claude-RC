@@ -755,9 +755,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun selectTab(t: Tab) { _tab.value = t }
     fun openSettings(show: Boolean) { _showSettings.value = show }
 
+    /** What the open chat shows as a banner: the app's snackbar sits behind the full-screen chat. */
+    private val _chatNotice = MutableStateFlow<String?>(null)
+    val chatNotice = _chatNotice.asStateFlow()
+    private var noticeJob: Job? = null
+
     fun say(text: String, label: String? = null, fix: Fix? = null) {
-        _messages.trySend(UiMessage(text, label, fix))
+        if (_chatSession.value != null) {
+            _chatNotice.value = text
+            noticeJob?.cancel()
+            noticeJob = viewModelScope.launch { delay(7_000); _chatNotice.value = null }
+        } else {
+            _messages.trySend(UiMessage(text, label, fix))
+        }
     }
+
+    fun clearChatNotice() { _chatNotice.value = null }
 
     /** Runs a server call with the spinner on and maps any failure to a friendly message. */
     private fun action(label: String, onError: ((ApiException) -> Unit)? = null, block: suspend () -> Unit) {

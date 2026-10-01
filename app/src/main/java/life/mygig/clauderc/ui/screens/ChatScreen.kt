@@ -179,6 +179,12 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                     TextButton(onClick = { speak = !speak }) { Text(if (speak) "🔊" else "🔈", fontSize = 20.sp) }
                     Icon(Icons.Filled.Lock, contentDescription = "PIN-protected", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                val notice by vm.chatNotice.collectAsState()
+                notice?.let { n ->
+                    Surface(color = MaterialTheme.colorScheme.inverseSurface, modifier = Modifier.fillMaxWidth().clickable { vm.clearChatNotice() }) {
+                        Text(n, color = MaterialTheme.colorScheme.inverseOnSurface, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+                    }
+                }
                 val need = pinNeeded
                 if (need != null) {
                     PinGate(vm, need, error)

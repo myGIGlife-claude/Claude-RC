@@ -2324,12 +2324,13 @@ do_upload() {
   api_ok "$(jq -cn --arg p "uploads/$name" --argjson n "$size" '{path:$p, bytes:$n}')"
 }
 
-# chat-file <session>: stdin = PIN, then a file path. A file Claude sent (or
-# made) in this session: only from the project's folder or Claude's temp folder
-# for it, up to 10 MB, base64 in `data`.
+# chat-file <session>: stdin = PIN, then a file path. A file from this session's
+# project folder or Claude's temp folder for it, or one Claude itself sent to
+# you in this conversation (SendUserFile), wherever it is; up to 10 MB, base64
+# in `data`.
 do_chat_file() {
   [[ $# -eq 1 ]] || bad_args "usage: chat-file <session>"
-  local pin path sess dir real size
+  local pin path sess dir real size ok=false tf p
   pin="$(read_secret_line)"; path="$(read_secret_line)"; exec 0</dev/null
   sess="$(chat_session "$1")"
   check_pin "$pin"
@@ -2338,9 +2339,17 @@ do_chat_file() {
   [[ -d "$dir" ]] || api_err internal "Couldn't find the session's folder."
   real="$(realpath -e -- "$path" 2>/dev/null)" && [[ -f "$real" ]] || api_err invalid_name "That file isn't on the server any more."
   case "$real" in
-    "$(realpath "$dir")"/* | "/tmp/claude-$(id -u)/${dir//[\/.]/-}"/*) ;;
-    *) api_err forbidden "That file is outside this project." ;;
+    "$(realpath "$dir")"/* | "/tmp/claude-$(id -u)/${dir//[\/.]/-}"/*) ok=true ;;
   esac
+  if ! $ok; then   # a file Claude sent in this conversation counts, wherever it is
+    tf="$(chat_transcript "$sess")"
+    if [[ -n "$tf" ]]; then
+      while IFS= read -r p; do
+        [[ "$(realpath -e -- "$p" 2>/dev/null)" == "$real" ]] && { ok=true; break; }
+      done < <(tail -n 3000 "$tf" 2>/dev/null | jq -r 'select(.message.content | type == "array") | .message.content[] | select(.type == "tool_use" and .name == "SendUserFile") | .input.files[]? | strings' 2>/dev/null)
+    fi
+  fi
+  $ok || api_err forbidden "That file isn't in this project and wasn't sent in this conversation."
   size=$(stat -c %s "$real")
   ((size <= 10485760)) || api_err invalid_name "That file is bigger than 10 MB."
   chat_log "$sess" file
