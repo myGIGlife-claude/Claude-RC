@@ -23,7 +23,7 @@ if [[ "${1:-}" == "--remove" ]]; then remove=1; shift; fi
 
 if [[ $# -ge 1 ]]; then key="$*"; else
   [[ -t 0 ]] && echo "Paste the public key from the app, then press Enter:" >&2
-  IFS= read -r key
+  IFS= read -r key || [[ -n "$key" ]]
 fi
 key="$(printf '%s' "$key" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 

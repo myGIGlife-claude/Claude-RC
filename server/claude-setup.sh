@@ -907,11 +907,13 @@ do_restart() {
   STARTED_SESSION="$(session_name "$name")"
   if [[ -n "$sid" ]]; then
     trust_folder "$dir"
-    tmux new-session -d -s "$STARTED_SESSION" -c "$dir" \
-      "env -u ANTHROPIC_API_KEY claude --remote-control $(printf %q "$name") --resume $sid; exec bash" &&
+    pp=""
+    if tmux new-session -d -s "$STARTED_SESSION" -c "$dir" \
+      "env -u ANTHROPIC_API_KEY claude --remote-control $(printf %q "$name") --resume $sid; exec bash"; then
       autostart_save
-    sleep 4
-    pp="$(tmux display-message -p -t "=$STARTED_SESSION:" '#{pane_pid}' 2>/dev/null)"
+      sleep 4
+      pp="$(tmux display-message -p -t "=$STARTED_SESSION:" '#{pane_pid}' 2>/dev/null)"
+    fi   # (a name already taken leaves pp empty: never judge another session's Claude)
     # Claude runs as a child of the pane's shell; once it exits the shell becomes bash with no child.
     if [[ -n "$pp" ]] && pgrep -P "$pp" >/dev/null 2>&1; then
       resumed=true
@@ -1272,8 +1274,8 @@ do_worker_add() {
   role="$(read_secret_line)"
   exec 0</dev/null
   worker_check "$name"
-  [[ ! -e "$WORKERS_DIR/$name" ]] || api_err invalid_name "A worker named '$name' already exists."
-  mkdir -p "$WORKERS_DIR/$name/home" "$WORKERS_DIR/$name/tasks"
+  [[ ! -f "$WORKERS_DIR/$name/meta.json" ]] || api_err invalid_name "A worker named '$name' already exists."
+  mkdir -p -m 700 "$WORKERS_DIR" "$WORKERS_DIR/$name/home" "$WORKERS_DIR/$name/tasks"
   jq -cn --arg r "${role:0:200}" '{role:$r, mode:"acceptEdits"}' >"$WORKERS_DIR/$name/meta.json"
   api_ok "$(jq -cn --arg n "$name" '{added:$n}')"
 }
@@ -1356,7 +1358,7 @@ do_login_aws_keys() {
   # in the process list the way `aws configure set <secret>` would.
   profile="${AWS_PROFILE_NAME:-default}"
   csv="$(mktemp "$API_STATE_DIR/awskeys.XXXXXX")"
-  trap 'rm -f "$csv"; on_exit' EXIT
+  trap 'rc=$?; rm -f "$csv"; (exit $rc); on_exit' EXIT
   chmod 600 "$csv"
   printf 'User Name,Access key ID,Secret access key\n%s,%s,%s\n' "$profile" "$key_id" "$secret" >"$csv"
   unset secret
@@ -1533,7 +1535,7 @@ ensure_env_hook() {
   [[ -f "$managed" ]] && old="$(jq -Rsc 'split("\n") | map(select(. != ""))' "$managed")"
   jq --argjson v "$vars" --argjson old "$old" '
     .env = (((.env // {}) | with_entries(select((.key as $k | $old | index($k)) | not))) + $v)' "$f" >"$tmp" &&
-    { chmod 600 "$f"; cat "$tmp" >"$f"; jq -r 'keys[]' <<<"$vars" >"$managed"; }
+    { cmp -s "$tmp" "$f" || { chmod 600 "$tmp"; mv "$tmp" "$f"; }; jq -r 'keys[]' <<<"$vars" >"$managed"; }   # rewrite (atomically) only on change
   rm -f "$tmp"
 }
 
@@ -1659,7 +1661,7 @@ do_login_keystore() {
   local n="$1" alias sp kp dir kt f out
   alias="$(read_secret_line)"; sp="$(read_secret_line)"; kp="$(read_secret_line)"
   dir="$(mktemp -d)" && chmod 700 "$dir"
-  trap 'rm -rf "$dir"; on_exit' EXIT
+  trap 'rc=$?; rm -rf "$dir"; (exit $rc); on_exit' EXIT
   head -c 200000 | tr -d '[:space:]' | base64 -d >"$dir/ks" 2>/dev/null || api_err invalid_name "The keystore file didn't come through."
   exec 0</dev/null
   [[ -s "$dir/ks" ]] || api_err invalid_name "The keystore file is empty."
@@ -1767,7 +1769,7 @@ do_self_update() {
   [[ $# -eq 1 && "$sha" =~ ^[0-9a-f]{40}$ ]] || bad_args "usage: self-update <commit>"
   need curl
   dir="$(mktemp -d)"
-  trap 'rm -rf "$dir"; on_exit' EXIT
+  trap 'rc=$?; rm -rf "$dir"; (exit $rc); on_exit' EXIT
   curl -fsSL --max-time 30 "$CLAUDERC_RAW/$CLAUDERC_REPO/$sha/server/install.sh" -o "$dir/install.sh" 2>/dev/null ||
     api_err internal "Couldn't download install.sh for commit ${sha:0:7}."
   out="$(CLAUDERC_COMMIT="$sha" t 180 bash "$dir/install.sh" </dev/null 2>&1)" ||
@@ -1830,7 +1832,7 @@ do_install_cli() {
   need curl; need tar; need sha256sum
   case "$(uname -m)" in x86_64) a64=false ;; aarch64 | arm64) a64=true ;; *) api_err internal "No $name build for this CPU ($(uname -m))." ;; esac
   dir="$(mktemp -d)"
-  trap 'rm -rf "$dir"; on_exit' EXIT
+  trap 'rc=$?; rm -rf "$dir"; (exit $rc); on_exit' EXIT
   gh_ver() { tag="$(gh_latest_tag "$1")"; ver="${tag#v}"; [[ -n "$tag" ]] || api_err internal "Couldn't find the latest $name release."; }
   case "$name" in
     glab) install_glab "$dir" "$a64"; return ;;
@@ -1934,7 +1936,7 @@ do_run() {
   [[ "$secs" =~ ^[0-9]{1,3}$ ]] && ((secs >= 1 && secs <= 600)) || secs=120
   [[ -n "${cmd//[[:space:]]/}" ]] || bad_args "empty command"
   dir="$(mktemp -d)"
-  trap 'rm -rf "$dir"; on_exit' EXIT
+  trap 'rc=$?; rm -rf "$dir"; (exit $rc); on_exit' EXIT
   sudo_askpass "$dir" "$pw"
   unset pw
   out="$(cd "$HOME" && timeout --kill-after=5 "$secs" bash -c "$cmd" </dev/null 2>&1)"
@@ -2270,21 +2272,23 @@ chat_transcript() {
   ls -t "$HOME/.claude/projects/$(claude_proj_slug "$dir")/"*.jsonl 2>/dev/null | head -n 1
 }
 
-# chat_session <arg>: validated, running session name (or the call ends).
+# chat_session <arg>: validated, running session name in CHAT_SESS (or the call ends).
+# Not echoed: api_err inside $(…) would only end the subshell and leave an empty name,
+# which tmux reads as "any session".
 chat_session() {
   valid_project "$1" || api_err invalid_name "Invalid project name."
   local s; s="$(resolve_session "$1")"
   tmux has-session -t "=$s" 2>/dev/null || api_err invalid_name "No running session named '$1'."
   # Login and sign-in helpers aren't project chats (their folder would be $HOME).
   [[ " $CLAUDE_LOGIN_SESSION $AWS_LOGIN_SESSION mcp-auth " != *" $s "* && "$s" != worker-login-* ]] || api_err invalid_name "No running session named '$1'."
-  echo "$s"
+  CHAT_SESS="$s"
 }
 
 # chat-open <session>: stdin = PIN. Just checks it (the app's gate).
 do_chat_open() {
   [[ $# -eq 1 ]] || bad_args "usage: chat-open <session>"
   local pin sess; pin="$(read_secret_line)"; exec 0</dev/null
-  sess="$(chat_session "$1")"
+  chat_session "$1"; sess="$CHAT_SESS"
   check_pin "$pin"
   chat_log "$sess" open
   api_ok "$(jq -cn --arg s "$sess" '{session:$s}')"
@@ -2297,7 +2301,7 @@ do_chat_history() {
   [[ $# -eq 1 ]] || bad_args "usage: chat-history <session>"
   local pin sess f screen waiting=false busy=false tmp mode model="" ask=null
   pin="$(read_secret_line)"; exec 0</dev/null
-  sess="$(chat_session "$1")"
+  chat_session "$1"; sess="$CHAT_SESS"
   check_pin "$pin"
   f="$(chat_transcript "$sess")"
   screen="$(tmux capture-pane -p -J -t "=$sess:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15)"
@@ -2359,11 +2363,11 @@ do_chat_send() {
   pin="$(read_secret_line)"
   msg="$(head -c 20000)"
   exec 0</dev/null
-  sess="$(chat_session "$1")"
+  chat_session "$1"; sess="$CHAT_SESS"
   check_pin "$pin"
   [[ -n "${msg//[[:space:]]/}" ]] || bad_args "empty message"
-  printf '%s' "$msg" | tmux load-buffer -b clauderc-chat - || api_err internal "Couldn't hand the message to tmux."
-  tmux paste-buffer -p -d -b clauderc-chat -t "=$sess:"
+  printf '%s' "$msg" | tmux load-buffer -b "clauderc-chat-$$" - || api_err internal "Couldn't hand the message to tmux."
+  tmux paste-buffer -p -d -b "clauderc-chat-$$" -t "=$sess:" || api_err internal "Couldn't paste the message."
   sleep 0.3
   tmux send-keys -t "=$sess:" Enter
   unset msg
@@ -2375,7 +2379,7 @@ do_chat_send() {
 do_chat_interrupt() {
   [[ $# -eq 1 ]] || bad_args "usage: chat-interrupt <session>"
   local pin sess; pin="$(read_secret_line)"; exec 0</dev/null
-  sess="$(chat_session "$1")"
+  chat_session "$1"; sess="$CHAT_SESS"
   check_pin "$pin"
   tmux send-keys -t "=$sess:" Escape
   chat_log "$sess" interrupt
@@ -2390,9 +2394,10 @@ do_upload() {
   local pin name sess dir d tmp size
   pin="$(read_secret_line)"; name="$(read_secret_line)"
   tmp="$(mktemp)"
+  trap 'rc=$?; rm -f "$tmp"; (exit $rc); on_exit' EXIT
   head -c 21000000 | tr -d '[:space:]' | base64 -d >"$tmp" 2>/dev/null || { rm -f "$tmp"; api_err invalid_name "The file didn't come through."; }
   exec 0</dev/null
-  sess="$(chat_session "$1")"
+  chat_session "$1"; sess="$CHAT_SESS"
   check_pin "$pin"
   # A plain file name: no folders, no leading dot or dash.
   name="$(basename -- "$name")"
@@ -2403,8 +2408,9 @@ do_upload() {
   dir="$(session_dir "$sess")"
   [[ -d "$dir" ]] || { rm -f "$tmp"; api_err internal "Couldn't find the session's folder."; }
   d="$dir/uploads"; mkdir -p "$d"
-  [[ -e "$d/$name" ]] && name="$(date +%H%M%S)-$name"
-  install -m 644 "$tmp" "$d/$name"; rm -f "$tmp"
+  [[ -e "$d/.gitignore" ]] || printf '*\n' >"$d/.gitignore"   # private files: keep them out of `git add -A`
+  [[ -e "$d/$name" ]] && name="$(date +%H%M%S)-$$-$name"
+  install -m 600 "$tmp" "$d/$name"; rm -f "$tmp"
   chat_log "$sess" upload
   api_ok "$(jq -cn --arg p "uploads/$name" --argjson n "$size" '{path:$p, bytes:$n}')"
 }
@@ -2417,7 +2423,7 @@ do_chat_file() {
   [[ $# -eq 1 ]] || bad_args "usage: chat-file <session>"
   local pin path sess dir real size ok=false tf p
   pin="$(read_secret_line)"; path="$(read_secret_line)"; exec 0</dev/null
-  sess="$(chat_session "$1")"
+  chat_session "$1"; sess="$CHAT_SESS"
   check_pin "$pin"
   dir="$(session_dir "$sess")"
   [[ -d "$dir" ]] || api_err internal "Couldn't find the session's folder."

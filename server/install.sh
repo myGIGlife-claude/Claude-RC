@@ -73,7 +73,7 @@ main() {
       echo "Note: the Team MCP server wasn't registered (claude mcp add failed)." >&2
   fi
 
-  if command -v claude-autostart >/dev/null || [[ -x "$HOME/.local/bin/claude-autostart" ]]; then
+  if systemctl is-enabled claude-sessions.service >/dev/null 2>&1; then   # not just "the script exists": a failed sudo step must be retried
     # Update the script itself (no sudo); the systemd units stay as they are.
     install -m 755 "$tmp/claude-autostart.sh" "$HOME/.local/bin/claude-autostart"
     echo "claude-autostart is already set up (script updated)."
