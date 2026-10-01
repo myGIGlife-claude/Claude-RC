@@ -565,6 +565,22 @@ api "worker-runs nope"
 check "runs of unknown worker refused" "$(jqt '.ok == false')"
 api "worker-remove research"
 check "remove worker" "$(jqt '.ok')"
+api "worker-add ops" "Ops"
+api "worker-login-start ops"
+check "worker login gives a URL" "$(jqt '.ok and (.data.url | startswith("https://"))')"
+grep -q "^worker-login-ops	" "$LIST"; [[ $? -ne 0 ]]; check "worker login not saved by autostart" $?
+api "worker-login-code ops" "bad-code-789"
+check "bad worker code refused" "$(jqt '.ok == false')"
+api "worker-login-start ops"
+api "worker-login-code ops" "good-code-789"
+check "worker login succeeds" "$(jqt '.ok and .data.logged_in')"
+[[ -s "$HOME/.config/claude-launcher/workers/ops/home/.credentials.json" ]]; check "creds landed in the worker's own dir" $?
+api "worker-list"
+check "worker shows signed in" "$(jqt '.data.workers[] | select(.name=="ops") | .signed_in')"
+api "sessions"
+grep -q "worker-login-ops" <<<"$OUT"; [[ $? -ne 0 ]]; check "login helper not listed as a session" $?
+api "worker-remove ops"
+check "remove signed-in worker" "$(jqt '.ok')"
 api "worker-list"
 check "worker gone" "$(jqt '.data.workers | length == 0')"
 

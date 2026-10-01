@@ -125,7 +125,7 @@ session_dir() {
   printf '%s' "$d"
 }
 
-claude_logged_in() { [[ -s "$HOME/.claude/.credentials.json" ]]; }
+claude_logged_in() { [[ -s "${LOGIN_CONFIG_DIR:-$HOME/.claude}/.credentials.json" ]]; }
 
 # Prints missing scopes, space separated. admin:org / write:org cover read:org.
 missing_scopes() {
@@ -1160,7 +1160,10 @@ pane_text() { tmux capture-pane -p -J -t "=$1:" -S -200 2>/dev/null; }
 start_login_session() {
   local name="$1" bin="$2"; shift 2
   end_login "$name"
-  tmux new-session -d -s "$name" -x 1000 -y 60 -e "LOGIN_BIN=$bin" \
+  local envs=(-e "LOGIN_BIN=$bin")
+  # Team: sign a worker account in to its own config dir.
+  [[ -n "${LOGIN_CONFIG_DIR:-}" ]] && envs+=(-e "CLAUDE_CONFIG_DIR=$LOGIN_CONFIG_DIR")
+  tmux new-session -d -s "$name" -x 1000 -y 60 "${envs[@]}" \
     bash -c 'env -u ANTHROPIC_API_KEY "$LOGIN_BIN" "$@"; echo "[exit $?]"; sleep 900' login "$@" >/dev/null 2>&1
 }
 
@@ -1173,7 +1176,7 @@ end_login() {
 read_secret_line() { local v=""; IFS= read -r -t 15 v || true; v="${v//$'\r'/}"; printf '%s' "$v"; }
 
 # Changes whenever claude writes new credentials.
-claude_creds_sig() { stat -c '%Y:%s' "$HOME/.claude/.credentials.json" 2>/dev/null || echo none; }
+claude_creds_sig() { stat -c '%Y:%s' "${LOGIN_CONFIG_DIR:-$HOME/.claude}/.credentials.json" 2>/dev/null || echo none; }
 
 do_login_claude_start() {
   need tmux
@@ -1304,6 +1307,15 @@ do_worker_runs() {
   api_ok "$( { for f in "$WORKERS_DIR/$1"/tasks/*.json; do [[ -f "$f" ]] && cat "$f" && echo; done; } 2>/dev/null |
     jq -sc '{runs: (map({id, task:(.task // "" | .[0:300]), status, reply:(.reply // null | if . then .[0:4000] else . end), error:(.error // null), started:(.started // 0)}) | sort_by(-.started) | .[0:20])}')"
 }
+
+# Worker sign-in = the main account's login flow, aimed at the worker's folder and its own tmux session.
+worker_login_target() {
+  worker_exists "${1:-}"
+  CLAUDE_LOGIN_SESSION="worker-login-$1"
+  LOGIN_CONFIG_DIR="$WORKERS_DIR/$1/home"
+}
+do_worker_login_start() { worker_login_target "${1:-}"; do_login_claude_start; }
+do_worker_login_code() { worker_login_target "${1:-}"; do_login_claude_code; }
 
 do_login_github() {
   local token err user need_scopes
@@ -2448,7 +2460,7 @@ api_main() {
   shift || true
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | youtube-login-start | \
-      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-file | upload | mcp-auth-start | mcp-auth-finish | worker-add | worker-set) ;;  # these read stdin
+      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-file | upload | mcp-auth-start | mcp-auth-finish | worker-add | worker-set | worker-login-code) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -2490,6 +2502,8 @@ api_main() {
     worker-set)          do_worker_set "$@" ;;
     worker-remove)       do_worker_remove "$@" ;;
     worker-runs)         do_worker_runs "$@" ;;
+    worker-login-start)  do_worker_login_start "$@" ;;
+    worker-login-code)   do_worker_login_code "$@" ;;
     mcp)                 do_mcp "$@" ;;
     mcp-refresh)         do_mcp_refresh "$@" ;;
     mcp-auth-start)      [[ $# -eq 0 ]] || bad_args "mcp-auth-start reads the name on stdin"; do_mcp_auth_start ;;
