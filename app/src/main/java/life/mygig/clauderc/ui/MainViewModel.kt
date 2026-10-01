@@ -457,10 +457,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val session = _chatSession.value ?: return
         val pin = chatPin ?: return
         val t = text.trim()
+        val tracked = !t.startsWith("/")   // a slash command never shows up as a message, so it would stay "queued" for good
         onSent()
-        _chatPending.value = _chatPending.value + t
+        if (tracked) _chatPending.value = _chatPending.value + t
         action("Sending…", onError = { e ->
-            _chatPending.value = _chatPending.value.toMutableList().also { it.remove(t) }
+            if (tracked) _chatPending.value = _chatPending.value.toMutableList().also { it.remove(t) }
             onFail()
             report(e)
         }) {
