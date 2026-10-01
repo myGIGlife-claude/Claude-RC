@@ -1,0 +1,154 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=412">
+<title>cLaudeRC mock-up</title>
+<!-- Illustrative mock-up of the app's dark theme (ui/theme/Theme.kt) with example data.
+     ?s=<screen>[&scroll=px]  renders one still;  ?t=<seconds>  renders a frame of the demo. See README.md here. -->
+<style>
+:root{--bg:#0E0E10;--c:#1B1C20;--cl:#16171B;--ch:#1F2025;--chh:#26272D;--on:#F1EFE9;--var:#B9B6AD;--ol:#5D5A54;--olv:#45433F;
+--p:#D97757;--onp:#1A0F0A;--sc:#5A3A2E;--pc:#6E2A14;--ok:#4CC38A;--bad:#E5484D;--warn:#F2C46D;--off:#6B6862}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#000;font-family:Roboto,"Noto Sans","DejaVu Sans",sans-serif;color:var(--on);width:412px;overflow:hidden}
+#cap{height:56px;background:#000;display:none;align-items:center;justify-content:space-between;padding:0 14px;font-size:14px;line-height:1.2;border-bottom:1px solid var(--olv)}
+#cap b{color:var(--p)} #cap i{font-style:normal;font-size:10px;color:var(--warn);border:1px solid var(--warn);border-radius:6px;padding:2px 5px;white-space:nowrap;margin-left:8px}
+#app{position:relative;width:412px;height:844px;background:var(--bg);overflow:hidden;display:flex;flex-direction:column}
+.top{padding:14px 16px 10px;flex:none}
+.top h1{font-size:22px;font-weight:600}.top small{font-size:13px;color:var(--var)}
+.body{flex:1;overflow:hidden;position:relative}
+.in{padding:8px 16px 16px;display:flex;flex-direction:column;gap:10px}
+.nav{flex:none;height:76px;background:var(--cl);display:flex;justify-content:space-around;padding-top:10px}
+.nav div{width:78px;text-align:center;font-size:11px;color:var(--var)}
+.nav div span{display:block;width:56px;height:30px;margin:0 auto 4px;border-radius:15px;padding-top:3px}
+.nav div.on{color:var(--on)}.nav div.on span{background:var(--sc)}
+svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.t1{font-size:16px;font-weight:500}.t2{font-size:14px;font-weight:500}.sm{font-size:12.5px;color:var(--var)}.lm{font-size:12px;font-weight:500}
+.pills{display:flex;background:var(--c);border-radius:24px;padding:3px;gap:2px}
+.pills div{flex:1;text-align:center;padding:9px 0;border-radius:21px;font-size:14px;font-weight:500;color:var(--var)}
+.pills div.on{background:var(--p);color:var(--onp)}
+.card{background:var(--c);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:5px}
+.btn{display:inline-block;border:1px solid var(--ol);border-radius:20px;padding:7px 14px;font-size:13.5px;font-weight:500;color:var(--p)}
+.btn.f{background:var(--p);color:var(--onp);border:0}.txt{display:inline-block;padding:7px 8px;font-size:13.5px;font-weight:500;color:var(--p)}
+.row{display:flex;align-items:center;gap:8px}.sp{flex:1}
+.bar{height:5px;border-radius:3px;background:var(--sc);overflow:hidden;margin-top:3px}.bar i{display:block;height:100%;background:var(--p);border-radius:3px}
+.lab{font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;color:var(--var);padding-top:6px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tile{background:var(--c);border-radius:14px;padding:13px 14px;border:1px solid transparent}
+.tile.w{border-color:#5a4a22;background:#25200f}
+.tile .t{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:600;line-height:1.15}
+.dot{width:9px;height:9px;border-radius:50%;flex:none;background:var(--ok)}.dot.w{background:var(--warn)}.dot.o{background:var(--off)}.dot.b{background:var(--bad)}
+.tile .s{font-size:12.5px;color:var(--var);margin-top:7px}
+.fld{border:1px solid var(--ol);border-radius:6px;padding:8px 14px;position:relative;margin-top:8px}
+.fld u{position:absolute;top:-8px;left:10px;background:var(--bg);padding:0 4px;font-size:11px;color:var(--var);text-decoration:none}
+.card .fld u{background:var(--c)}
+.sw{width:50px;height:30px;border-radius:15px;background:var(--chh);border:2px solid var(--ol);position:relative;flex:none}
+.sw::after{content:"";position:absolute;top:5px;left:5px;width:16px;height:16px;border-radius:50%;background:var(--ol)}
+.sw.on{background:var(--p);border-color:var(--p)}.sw.on::after{background:var(--onp);width:22px;height:22px;left:21px;top:2px}
+.chip{display:inline-block;border:1px solid var(--olv);border-radius:9px;padding:6px 11px;font-size:13px}.chip.on{background:var(--sc);border-color:var(--sc)}
+.seg{display:flex}.seg div{flex:1;text-align:center;padding:9px;border:1px solid var(--ol);font-size:14px}.seg div.on{background:var(--sc)}
+.seg div:first-child{border-radius:20px 0 0 20px}.seg div:last-child{border-radius:0 20px 20px 0}
+.ch{display:flex;align-items:center;gap:10px;padding:12px 12px 8px;background:var(--cl);flex:none}
+.ch .ti{flex:1}.ch .ti b{font-size:19px;display:block}.ch .ti span{font-size:12.5px;color:var(--var)}
+.chips{display:flex;gap:6px;margin-top:3px}.chips em{font-style:normal;font-size:11px;background:var(--chh);border-radius:8px;padding:2px 8px}
+.msgs{flex:1;overflow:hidden;padding:12px;display:flex;flex-direction:column;gap:10px;justify-content:flex-end}
+.u{align-self:flex-end;max-width:84%;background:var(--sc);border-radius:18px 18px 4px 18px;padding:12px 15px;font-size:15px;line-height:1.35}
+.a{align-self:flex-start;max-width:90%;background:var(--ch);border-radius:18px 18px 18px 4px;padding:12px 15px;font-size:15px;line-height:1.5}
+.a code,.u code{font-family:"DejaVu Sans Mono",monospace;font-size:12px;background:#0E0E10;border-radius:4px;padding:1px 4px}
+.steps{font-size:12.5px;color:var(--var);padding-left:4px}
+.comp{flex:none;display:flex;align-items:center;gap:10px;padding:10px 12px 14px}
+.comp .in2{flex:1;border:1px solid var(--ol);border-radius:26px;padding:15px 18px;color:var(--var);font-size:15px}
+.comp .rb{width:50px;height:50px;border-radius:50%;background:var(--p);color:var(--onp);display:flex;align-items:center;justify-content:center}
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.62)}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--cl);border-radius:28px 28px 0 0;padding:12px 20px 22px;display:flex;flex-direction:column;gap:12px}
+.sheet .h{width:32px;height:4px;border-radius:2px;background:var(--ol);margin:0 auto 6px}
+.tap{position:absolute;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;background:rgba(242,196,109,.35);border:2px solid var(--warn);z-index:9}
+</style></head><body>
+<div id="cap"></div><div id="app"></div>
+<script>
+const I={ses:'<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 10l3 2-3 2M12 15h4"/></svg>',
+pro:'<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>',
+new:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>',
+cla:'<svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6L5.6 18.4"/></svg>',
+con:'<svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6h7M6 8.5v7M18 8.5v7M8.5 18h7"/></svg>',
+back:'<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>',lock:'<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>',
+send:'<svg viewBox="0 0 24 24" style="stroke:#1A0F0A"><path d="M4 12l16-8-6 16-2-7z"/></svg>',clip:'<svg viewBox="0 0 24 24"><path d="M20 11l-8 8a5 5 0 01-7-7l9-9a3.5 3.5 0 015 5l-9 9a2 2 0 01-3-3l8-8"/></svg>'};
+const $=id=>document.getElementById(id);
+const nav=on=>'<div class="nav">'+[['ses','Sessions'],['pro','Projects'],['new','New'],['cla','Claude'],['con','Connections']].map(([k,l])=>`<div class="${k==on?'on':''}"><span>${I[k]}</span>${l}</div>`).join('')+'</div>';
+const topbar=(t,s)=>`<div class="top"><h1>${t}</h1>${s?`<small>${s}</small>`:''}</div>`;
+const pills=(l,i)=>'<div class="pills">'+l.map((x,j)=>`<div class="${i==j?'on':''}">${x}</div>`).join('')+'</div>';
+const lab=t=>`<div class="lab">${t}</div>`;
+const tile=(t,s,d='')=>`<div class="tile ${d=='w'?'w':''}"><div class="t"><i class="dot ${d}"></i>${t}</div><div class="s">${s}</div></div>`;
+const bar=(l,p,r,k=1)=>{const c=p>=90?'var(--bad)':p>=75?'var(--warn)':'var(--p)';return `<div><div class="lm">${l}: ${Math.round(p*k)}% used${r?' · resets in '+r:''}</div><div class="bar"><i style="width:${p*k}%;background:${c}"></i></div></div>`};
+const MODE={acceptEdits:"edits files, can't run commands",plan:'read-only: research and plans',bypassPermissions:'runs anything without asking'};
+const ACC=[
+ {n:'Main account',plan:'Max',e:'owner@example.com',r:'',f:[38,'3 h'],w:[52,'4 days'],t:['1.2M in, 48k out, 6.3M cached','9.8M in, 410k out, 52M cached']},
+ {n:'research',plan:'Pro',e:'research@example.com',r:'Reads docs and APIs, writes notes',f:[22,'4 h'],w:[31,'5 days'],m:'plan',t:['310k in, 21k out, 1.4M cached','2.6M in, 160k out, 11M cached']},
+ {n:'coding',plan:'Max',e:'coding@example.com',r:'Implements features and fixes bugs',f:[81,'1 h'],w:[64,'3 days'],m:'acceptEdits',t:['2.4M in, 96k out, 14M cached','15M in, 720k out, 88M cached']},
+ {n:'ui',plan:'Pro',e:'ui@example.com',r:'Layouts, Compose screens, polish',f:[93,'20 min'],w:[77,'2 days'],m:'acceptEdits',t:['1.1M in, 52k out, 6.8M cached','7.9M in, 340k out, 41M cached']}];
+const acct=(a,k)=>`<div class="card"><div class="t2">${a.n} · ${a.plan}</div><div class="sm">${a.e}</div>${a.r?`<div class="sm" style="color:var(--on)">${a.r}</div>`:''}
+ ${bar('5-hour',a.f[0],a.f[1],k)}${bar('Weekly',a.w[0],a.w[1],k)}
+ <div class="sm">Tokens on this server · 5 h: ${a.t[0]} · 7 days: ${a.t[1]}</div>
+ ${a.m?`<div class="sm" style="color:var(--on)">Mode: ${a.m} (${MODE[a.m]})</div><div class="row"><span class="btn">Re-sign in</span><span class="btn">Mode</span></div><div><span class="txt">Tasks</span><span class="txt">Remove</span></div>`:''}</div>`;
+const head=`<div class="t1" style="padding:2px 0 0">Claude Code 2.1.283</div>`;
+const SCR={
+accounts:(o={})=>[topbar('cLaudeRC','home-server ▾'),`<div class="body"><div class="in" style="margin-top:${-(o.scroll||0)}px">${head}${pills(['Accounts','Plugins','Tools'],0)}
+ <div class="row"><div class="sp"><div class="t1">cLaudeCluster</div><div class="sm">Usage per account. Tell the main chat which work goes to which worker.</div></div><div><span class="btn">+ Add account</span><br><span class="txt" style="float:right">Refresh</span></div></div>
+ ${ACC.map(a=>acct(a,o.k??1)).join('')}</div></div>`,nav('cla')],
+plugins:()=>[topbar('cLaudeRC','home-server ▾'),`<div class="body"><div class="in">${head}${pills(['Accounts','Plugins','Tools'],1)}
+ <div class="row"><div class="lab sp">Installed · 5</div><span class="btn f">+ Install</span></div>
+ <div class="grid">${tile('cloudflare','skills + MCP · on')}${tile('superpowers','skills · on')}${tile('community-skills','skills · on')}${tile('playwright','disabled','o')}${tile('sentry','update available','w')}</div>
+ <div class="sm">Tap a plugin to enable, disable, update or remove it.</div></div></div>`,nav('cla')],
+tools:()=>[topbar('cLaudeRC','home-server ▾'),`<div class="body"><div class="in">${head}${pills(['Accounts','Plugins','Tools'],2)}
+ <div class="card" style="gap:14px">${[['Doctor','Checks the install','Run'],['Full checkup','/doctor in a chat of its own; Claude can fix what it finds','Start'],['Update Claude','Installs the newest version','Update'],['Other command','claude … (doctor, plugin, mcp list)','Run…']].map(([a,b,c])=>`<div class="row"><div class="sp"><div class="t2">${a}</div><div class="sm">${b}</div></div><span class="btn">${c}</span></div>`).join('')}</div>
+ ${lab('Marketplaces')}<div class="card" style="gap:8px"><div class="row"><span class="sp">claude-plugins-official</span><span class="sm">42 plugins</span></div><div class="row"><span class="sp">community-skills</span><span class="sm">1 plugin</span></div><div><span class="txt">+ Add marketplace</span><span class="txt">Update all</span></div></div></div></div>`,nav('cla')],
+'conn-logins':()=>[topbar('cLaudeRC','home-server ▾'),`<div class="body"><div class="in">${pills(['Logins','MCP','Keys'],0)}${lab('Core')}<div class="grid">${tile('Claude','claude.ai subscription')}${tile('GitHub','example-user')}</div>
+ ${lab('Services')}<div class="grid">${tile('AWS','profile default')}${tile('Cloudflare','token ok')}${tile('Docker / GHCR','example-user')}${tile('YouTube','Example Channel')}</div>
+ <div class="sm">Tap a tile for details. + (top right) connects a new service.</div></div></div>`,nav('con')],
+'conn-mcp':()=>[topbar('cLaudeRC','home-server ▾'),`<div class="body"><div class="in">${pills(['Logins','MCP','Keys'],1)}${lab('MCP servers')}<div class="grid">${tile('clauderc-team','2 workers attached')}${tile('context7','connected')}${tile('playwright','connected')}${tile('example-docs','needs sign-in','w')}</div></div></div>`,nav('con')],
+'conn-keys':()=>[topbar('cLaudeRC','home-server ▾'),`<div class="body"><div class="in">${pills(['Logins','MCP','Keys'],2)}${lab('Keys')}<div class="grid">${tile('Signing: example-upload','Android upload key')}${tile('Custom keys','3 keys')}</div></div></div>`,nav('con')],
+};
+const sethead=`<div class="top row"><span style="width:24px">${I.back}</span><h1 style="font-size:20px">Settings</h1></div>`;
+const server=`<div class="lab">Server</div><div class="fld"><u>Host</u>home-server.example.com</div><div class="row"><div class="fld sp"><u>Port</u>22</div><div class="fld" style="flex:2"><u>Username</u>••••••</div></div>
+ <div class="btn f" style="text-align:center;border-radius:20px;padding:11px">Save &amp; re-check host key</div><div class="lm" style="margin-top:6px">Pinned host key (ssh-ed25519)</div><div class="sm" style="font-family:'DejaVu Sans Mono',monospace;word-break:break-all">SHA256:EXAMPLEexampleEXAMPLEexampleEXAMPLE0123456</div>
+ <div class="row"><span class="btn">Test connection</span><span class="txt">Forget host key</span></div>${lab('Servers')}<div class="card" style="gap:10px"><div class="row"><i class="dot"></i><div class="sp"><div class="t2">home-server.example.com</div><div class="sm">current</div></div><span class="txt">Remove</span></div><div class="row"><i class="dot o"></i><div class="sp"><div class="t2">build-box.example.com</div><div class="sm">port 22</div></div><span class="txt">Use</span><span class="txt">Remove</span></div><div class="btn" style="text-align:center">+ Add server</div></div>`;
+const sec=`${lab("This phone's key")}<div class="card"><div class="sm" style="color:var(--on)">The private key never leaves this phone. It is encrypted with the Android Keystore.</div><div><span class="txt" style="color:var(--bad)">Regenerate</span></div></div>
+ ${lab('Chat')}<div class="card"><div class="row"><div class="sp"><div>Chat access log</div><div class="sm">Every chat open, message and upload, with time (never the contents).</div></div><span class="btn">Show</span></div></div>
+ ${lab('Access')}<div class="row"><div class="sp"><div>App lock</div><div class="sm">Required: to open the app, Settings and Run a command. Chat also needs its own PIN.</div></div><span class="sm">Always on</span></div>`;
+const appt=`${lab('Notifications')}<div class="card"><div class="row"><div class="sp"><div>Session notifications</div><div class="sm">When a session needs an answer or finishes. Checked about every 15 minutes while the phone is unlocked.</div></div><div class="sw on"></div></div><div><span class="btn">Send a test notification</span></div></div>
+ ${lab('Theme')}<div class="seg"><div>System</div><div>Light</div><div class="on">Dark</div></div>`;
+[['settings-connection',server,0],['settings-security',sec,1],['settings-app',appt,2]].forEach(([k,b,i])=>SCR[k]=()=>[sethead,`<div class="body"><div class="in">${pills(['Connection','Security','App'],i)}${b}</div></div>`,'']);
+
+const hdr=(att)=>`<div class="ch"><span>${I.back}</span><div class="ti"><b>weather-app</b><span><i class="dot" style="display:inline-block"></i> working…</span><div class="chips"><em>Opus ▾</em><em>Accept edits ⇄</em></div></div><span style="font-size:20px">👥${att?`<sup style="font-size:11px;color:var(--p)">${att}</sup>`:''}</span><span style="font-size:20px">🔊</span><span style="color:var(--var)">${I.lock}</span></div>`;
+const comp=`<div class="comp"><span style="color:var(--var)">${I.clip}</span><div class="in2">Message Claude</div><div class="rb">${I.send}</div></div>`;
+const chat=(m,att,extra='')=>[hdr(att),`<div class="msgs">${m}</div>${comp}`+extra,''];
+const M={
+ u1:`<div class="u">Add a dark mode. Research how Compose handles it, build it, and polish the layouts.</div>`,
+ a0:`<div class="a">On it. I'll hand this to my workers.</div><div class="steps">› 1 step: list_workers</div>`,
+ d:`<div class="steps">› 3 steps: delegate, delegate, delegate</div>`,
+ w:`<div class="a">Delegated, each on its own branch:<br><code>cluster/research/3f9a</code> notes<br><code>cluster/coding/7c2e</code> theme code<br><code>cluster/ui/b41d</code> layouts</div>`,
+ w2:`<div class="steps">› 3 steps: wait, wait, wait</div><div class="a">All three finished. Reviewing the diffs…</div>`,
+ rv:`<div class="a">Reviewed the diffs.<br><code>research/3f9a</code> notes only: kept.<br><code>coding/7c2e</code> 4 files, +112 −18, tests pass: <b>merged</b>.<br><code>ui/b41d</code> same screen, one conflict: <b>merged</b>.<br>Branches deleted.</div>`};
+const sheetRow=(n,on,role,mode)=>`<div class="card"><div class="row"><div class="sp t2">${n}</div><div class="sw ${on?'on':''}"></div></div>${on?`<div class="fld"><u>What it does here</u>${role}</div><div class="row" style="margin-top:6px">${[['acceptEdits','Edit files'],['plan','Read-only'],['bypassPermissions','Full access']].map(([k,l])=>`<span class="chip ${mode==k?'on':''}">${l}</span>`).join('')}</div><div class="sm">${MODE[mode]}</div>`:''}</div>`;
+const sheet=(a)=>`<div class="scrim"></div><div class="sheet"><div class="h"></div><div style="font-size:22px">cLaudeCluster</div><div class="sm">Pick the accounts this chat can hand work to. Each task runs on its own branch; the main Claude reviews it and merges it.</div>
+ ${sheetRow('research',a.r,'Reads docs and APIs, writes notes','plan')}${sheetRow('coding',a.c,'Implements features and fixes bugs','acceptEdits')}${sheetRow('ui',a.u,'Layouts and polish','acceptEdits')}</div>`;
+SCR['chat']=()=>chat(`<div class="u">Add a 7-day forecast screen with the hourly chart, and keep the current colors.</div><div class="a">On it. I'll add a <b>ForecastScreen</b>, reuse the chart component, and wire it to the existing weather API client.</div><div class="steps">› 9 steps: Read, Edit, Bash</div><div class="a">Done: the forecast screen shows 7 days with an hourly chart. Tests pass (24/24). Want me to add pull-to-refresh too?</div>`,0);
+SCR['chat-cluster']=()=>chat(M.u1+M.a0,2,sheet({r:1,c:1,u:0}));
+
+const CAPS=[[0,'Claude tab › Accounts: usage per account'],[4,'Pill tabs: Plugins'],[6,'Pill tabs: Tools'],[8,'Back to Accounts: workers, roles, modes'],[12,'Open a chat'],[14.5,'👥 attach workers to this chat'],[21,'A role and mode per worker'],[24,'The main Claude delegates: one branch per task'],[29,'Review the diffs, merge or discard'],[34,'accounts › attach › branch › merge']];
+function demo(t){
+ let r,tap=null,att=0;
+ if(t<4){r=SCR.accounts({k:Math.min(1,t/1.5)});}
+ else if(t<6){r=SCR.plugins();if(t<4.6)tap=[137,176];}
+ else if(t<8){r=SCR.tools();if(t<6.6)tap=[300,176];}
+ else if(t<12){const s=t<9?0:Math.min(330,(t-9)*140);r=SCR.accounts({scroll:s});if(t<8.6)tap=[100,176];}
+ else if(t<14.5){r=t<12.8?chat('',0):chat(M.u1,0);if(t<12.8)tap=[206,810];}
+ else if(t<24){const a={r:t>16,c:t>18,u:0};att=(a.r?1:0)+(a.c?1:0);r=chat(M.u1+M.a0,att,sheet(a));if(t<15.3)tap=[300,38];if(t>15.7&&t<16.3)tap=[362,250];if(t>17.7&&t<18.3)tap=[362,470];}
+ else if(t<29){r=chat(t<26?M.u1+M.a0+M.d:M.u1+M.a0+M.d+M.w,2);}
+ else if(t<34){r=chat(M.w+M.w2+(t<31?'':M.rv),2);}
+ else r=chat(M.w+M.w2+M.rv,2,`<div class="scrim" style="background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px;font-size:22px;line-height:1.7">accounts<br>↓ attach per chat<br>↓ a branch per task<br>↓ review and merge<span class="sm" style="margin-top:24px">Illustrative mock-up with example data</span></div>`);
+ let c='';CAPS.forEach(([s,x])=>{if(t>=s)c=x});
+ return{r,tap,c};
+}
+function paint(r,tap){$('app').innerHTML=r[0]+r[1]+(r[2]||'')+(tap?`<div class="tap" style="left:${tap[0]}px;top:${tap[1]}px"></div>`:'');}
+const q=new URLSearchParams(location.search);
+if(q.has('t')){const d=demo(+q.get('t'));$('cap').style.display='flex';$('cap').innerHTML=`<span><b>cLaudeCluster</b> · ${d.c}</span><i>illustrative mock-up</i>`;paint(d.r,d.tap);}
+else{paint(SCR[q.get('s')||'accounts']({scroll:+q.get('scroll')||0}),null);}
+</script></body></html>
