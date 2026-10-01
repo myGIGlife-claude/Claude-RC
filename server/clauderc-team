@@ -221,6 +221,25 @@ def find_task(tid):
     raise ToolError(f"No task {tid}.")
 
 
+def mirrored_names():
+    """Variables cLaudeRC mirrors into the main session's environment (service tokens, key paths): a worker gets none of them."""
+    try:
+        return set(re.findall(r"^export ([A-Za-z_][A-Za-z0-9_]*)=", (CFG / "env").read_text(errors="replace"), re.M))
+    except OSError:
+        return set()
+
+
+def allowed_tools(t):
+    """Commands an edit-only worker may run, as the owner listed them in the project's .cluster-allowed-tools (one
+    pattern per line, e.g. Bash(npm test:*)). Read from the main project, never from the worker's editable copy."""
+    try:
+        lines = (Path(t.get("top") or t["project"]) / ".cluster-allowed-tools").read_text(errors="replace").splitlines()
+    except OSError:
+        return []
+    ok = [l.strip() for l in lines if re.fullmatch(r"[A-Za-z]+(\([^(),]*\))?", l.strip())]
+    return ok[:20]
+
+
 def launch(t):
     """Start the worker detached: it queues behind other runs of the same worker (they share one login), is capped by
     `timeout`, and writes to tasks/<id>.out, so it outlives this process."""
@@ -228,11 +247,12 @@ def launch(t):
     d, tid = w / "tasks", t["id"]
     (d / f"{tid}.in").write_text(t["prompt"])
     mode = t.get("mode") if t.get("mode") in MODES else "acceptEdits"
+    tools = allowed_tools(t) if mode == "acceptEdits" else []
     cmd = ["flock", str(w / "run.lock"), "timeout", "--kill-after=10", str(RUN_TIMEOUT), CLAUDE, "-p", "--output-format", "json",
-           "--permission-mode", mode] + (["--resume", t["resume"]] if t.get("resume") else [])
-    # The worker must run as its own account: drop the main session's credentials and Claude Code markers.
-    env = {k: v for k, v in os.environ.items()
-           if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDECODE") and not k.startswith("CLAUDE_CODE_")}
+           "--permission-mode", mode] + (["--allowed-tools", ",".join(tools)] if tools else []) + (["--resume", t["resume"]] if t.get("resume") else [])
+    # The worker must run as its own account: drop the main session's credentials, Claude Code markers and the service tokens.
+    drop = mirrored_names() | {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDECODE"}
+    env = {k: v for k, v in os.environ.items() if k not in drop and not k.startswith("CLAUDE_CODE_")}
     env["CLAUDE_CONFIG_DIR"] = str(w / "home")
     with open(d / f"{tid}.in") as fin, open(d / f"{tid}.out", "wb") as fo, open(d / f"{tid}.err", "wb") as fe:
         proc = subprocess.Popen(cmd, stdin=fin, stdout=fo, stderr=fe, cwd=t["cwd"], env=env, start_new_session=True)
