@@ -450,13 +450,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun sendChat(text: String, onSent: () -> Unit) {
+    /** Clears the box and shows the message as pending at once; the SSH round trip takes seconds. A failure puts the text back. */
+    fun sendChat(text: String, onSent: () -> Unit, onFail: () -> Unit = {}) {
         val session = _chatSession.value ?: return
         val pin = chatPin ?: return
-        action("Sending…") {
+        val t = text.trim()
+        onSent()
+        _chatPending.value = _chatPending.value + t
+        action("Sending…", onError = { e ->
+            _chatPending.value = _chatPending.value.toMutableList().also { it.remove(t) }
+            onFail()
+            report(e)
+        }) {
             api.chatSend(session, pin, text)
-            onSent()
-            _chatPending.value = _chatPending.value + text.trim()
             delay(800)
             setChat(api.chatHistory(session, pin))
         }

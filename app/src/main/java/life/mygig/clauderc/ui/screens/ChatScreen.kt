@@ -357,7 +357,7 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
             FilledIconButton(onClick = { vm.interruptChat() }, modifier = Modifier.height(52.dp)) { Icon(Icons.Filled.Stop, contentDescription = "Stop Claude") }
         }
         FilledIconButton(
-            onClick = { val t = text; vm.sendChat(t) { text = "" } },
+            onClick = { val t = text; vm.sendChat(t, onSent = { text = "" }, onFail = { if (text.isBlank()) text = t }) },
             enabled = enabled && text.isNotBlank(), modifier = Modifier.height(52.dp),
         ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
     }
