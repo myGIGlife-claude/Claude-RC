@@ -1,4 +1,4 @@
-Last updated: 2026-10-01 19:10 UTC
+Last updated: 2026-10-01 19:25 UTC
 
 ## Goal
 cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage Claude Code sessions on your own server from a phone.
@@ -7,6 +7,7 @@ cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage
 Waiting on the owner: the notification bug needs the phone's Notification history (which app posts the vibrating notification). Next step: once known, fix how the app posts it.
 
 ## Tasks
+- [ ] Try on the phone: 👥 in a chat (attach a worker, set role/mode), ask main to delegate and merge; usage bars fill with used.
 - [ ] cLaudeCluster (#81, replaces Team): try on the phone. Claude tab › cLaudeCluster shows usage left per account (undocumented OAuth usage endpoint; verify real numbers show), + Add account (worker + sign in), add a 2nd server signed in to another account → join prompt. Also check #80 (keyboard no longer opens over the chat box) and queued messages surviving leaving the chat.
 - [ ] Notifications: phone vibrates but nothing shows in the shade. #79 added a clearer icon, a pop-up channel (`alerts`) and Settings › Send a test notification: try it on the phone; if the test shows, the old one was the faint icon/low importance. Session alerts only fire while the phone is unlocked (SSH key needs it; owner chose to keep that).
 - [ ] Try on a phone (all untested on a device): chat links (tap a URL), speaker switch + per-reply Play/Pause, files Claude sends (thumbnail, zoom, Save; big files were slow, fixed in #75), Full checkup (own `claude-doctor` session), repo rename/visibility/delete, chat PIN "don't ask again" after swiping the app away, "Disable the <plugin> plugin" on MCP pages.
@@ -39,6 +40,8 @@ Waiting on the owner: the notification bug needs the phone's Notification histor
 - 2026-10-01: Team = other Claude accounts as "workers" (own `CLAUDE_CONFIG_DIR` under `~/.config/claude-launcher/workers/`); main Claude delegates via the `clauderc-team` MCP server (headless `claude -p`, main waits). Same project folder; mode per worker (acceptEdits default).
 
 - 2026-10-01: Team renamed cLaudeCluster: `cluster` action (SCRIPT_API 26) = main + workers with email (`.claude.json`) and usage; expired tokens are never refreshed by us. Other servers' accounts are usage-only (workers run on one machine). `Server.inCluster` null/true/false; email compare on add-server.
+
+- 2026-10-01: Workers are attached per chat (👥 button in the chat header → `cluster-session/-attach/-assign`, SCRIPT_API 27). State in `~/.config/claude-launcher/attach/<project folder slug>.json`, read live by clauderc-team: only attached workers are visible, role/mode can override per chat. In a git project each task runs in its own worktree on branch `cluster/<worker>/<id>` (server commits the worker's changes); the main Claude uses `review` then `merge`/`discard`. Usage bars now fill with what's USED (owner found "left" confusing).
 
 ## Known issues
 - Not fixed from the scan: draft lost after >30 s in a file picker (app re-locks); env/credentials files have no cross-process lock (writes are atomic); login-claude-code can report success when a running session refreshes its token.
