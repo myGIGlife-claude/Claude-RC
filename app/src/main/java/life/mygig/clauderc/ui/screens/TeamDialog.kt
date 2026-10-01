@@ -35,7 +35,8 @@ private val MODES = listOf("acceptEdits", "plan", "bypassPermissions")
 private fun modeHint(m: String) = when (m) {
     "acceptEdits" -> "edits files, can't run commands"
     "plan" -> "read-only: research and plans"
-    else -> "runs anything without asking"
+    "bypassPermissions" -> "runs anything without asking"
+    else -> m
 }
 
 /** Extra Claude accounts ("workers") the main Claude can hand work to through the clauderc-team MCP server. */
@@ -77,7 +78,7 @@ fun TeamDialog(vm: MainViewModel, onDismiss: () -> Unit) {
                 )
                 Button(
                     onClick = { vm.addWorker(name, role); name = ""; role = "" },
-                    enabled = WORKER_NAME_RE.matches(name), modifier = Modifier.fillMaxWidth(),
+                    enabled = WORKER_NAME_RE.matches(name) && vm.busy.collectAsState().value == null, modifier = Modifier.fillMaxWidth(),
                 ) { Text("Add worker") }
             }
         },
@@ -138,18 +139,19 @@ fun TeamDialog(vm: MainViewModel, onDismiss: () -> Unit) {
 
 @Composable
 private fun WorkerCard(vm: MainViewModel, w: Worker, onRemove: () -> Unit) {
+    val idle = vm.busy.collectAsState().value == null   // a double tap would repeat the action (Mode would skip a step)
     CardBox {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(w.name + if (w.signedIn) "" else " · not signed in", style = MaterialTheme.typography.titleSmall)
             if (w.role.isNotBlank()) Text(w.role, style = MaterialTheme.typography.bodySmall)
             Text("Mode: ${w.mode} (${modeHint(w.mode)})", style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                OutlinedButton(onClick = { vm.workerLoginStart(w.name) }) { Text(if (w.signedIn) "Re-sign in" else "Sign in") }
-                OutlinedButton(onClick = { vm.setWorker(w.name, "mode", MODES[(MODES.indexOf(w.mode) + 1) % MODES.size]) }) { Text("Mode") }
+                OutlinedButton(onClick = { vm.workerLoginStart(w.name) }, enabled = idle) { Text(if (w.signedIn) "Re-sign in" else "Sign in") }
+                OutlinedButton(onClick = { vm.setWorker(w.name, "mode", MODES[(MODES.indexOf(w.mode) + 1) % MODES.size]) }, enabled = idle) { Text("Mode") }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { vm.showWorkerRuns(w.name) }) { Text("Tasks") }
-                TextButton(onClick = onRemove) { Text("Remove") }
+                TextButton(onClick = onRemove, enabled = idle) { Text("Remove") }
             }
         }
     }

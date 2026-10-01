@@ -332,8 +332,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (_chatSession.value != null) { _chat.value = null; _chatPinNeeded.value = PinStatus(set = true) }
     }
 
+    /** The server refused the PIN: drop it and ask again, even inside the picker grace window. */
+    private fun forgetChatPin() {
+        pinVault.clear()
+        chatPin = null
+        if (_chatSession.value != null) { _chat.value = null; _chatPinNeeded.value = PinStatus(set = true) }
+    }
+
     /** Back in front while still unlocked: carry on polling. */
     fun resumeChat() {
+        externalUntil = 0L   // the grace window covers one trip out (picker, Save), not later ones
         if (chatPin != null && _chatSession.value != null && _chatPinNeeded.value == null) startChatPolling()
     }
 
@@ -368,7 +376,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     setChat(api.chatHistory(session, pin))
                     _chatError.value = null
                 } catch (e: ApiException) {
-                    if (e.code in setOf("wrong_pin", "chat_locked", "pin_not_set")) { pinVault.clear(); lockChat(); _chatError.value = friendly(e).first; break }
+                    if (e.code in setOf("wrong_pin", "chat_locked", "pin_not_set")) { forgetChatPin(); _chatError.value = friendly(e).first; break }
                     _chatError.value = friendly(e).first
                 }
                 delay(if (_chat.value?.busy == true) 2_000 else 4_000)
@@ -747,7 +755,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun deleteApks() = getApplication<Application>().getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
         ?.listFiles { f -> f.name.endsWith(".apk") }?.forEach { it.delete() }
 
-    fun downloadAndInstall(url: String): Job = viewModelScope.launch {
+    private var downloadJob: Job? = null
+
+    /** One download at a time: a second tap would delete the file the first is writing. */
+    fun downloadAndInstall(url: String): Job {
+        downloadJob?.takeIf { it.isActive }?.let { return it }
+        return downloadApk(url).also { downloadJob = it }
+    }
+
+    private fun downloadApk(url: String): Job = viewModelScope.launch {
         val ctx = getApplication<Application>()
         val dm = ctx.getSystemService(DownloadManager::class.java)
         val name = url.substringAfterLast('/')
@@ -842,9 +858,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- Status ---------------------------------------------------------------
 
+    /** False while the app is in the background: screens pause their refresh loops (battery, data). */
+    private val _foreground = MutableStateFlow(true)
+    val foreground = _foreground.asStateFlow()
+    fun setForeground(on: Boolean) { _foreground.value = on }
+
+    private var statusJob: Job? = null
+
     fun refreshStatus() {
         if (_statusRefreshing.value) return
-        viewModelScope.launch {
+        statusJob = viewModelScope.launch {
             _statusRefreshing.value = true
             try {
                 _status.value = api.status()
@@ -1221,6 +1244,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Forget everything shown from the previous server. */
     private fun clearServerState() {
+        statusJob?.cancel(); _statusRefreshing.value = false   // an in-flight call must not land on the new server
+        ssoPoller?.cancel()
+        tailJob?.cancel()
+        _runHistory.value = emptyList()
+        _ccResult.value = null
+        _chatLog.value = null
+        _workers.value = null
+        _workerLogin.value = null
+        _workerRuns.value = null
         _status.value = null
         _repos.value = emptyList()
         _owners.value = null

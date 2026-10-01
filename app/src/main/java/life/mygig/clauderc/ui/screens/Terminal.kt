@@ -122,8 +122,9 @@ fun TailScreen(vm: MainViewModel, tail: TailResult) {
     var size by rememberSaveable { mutableIntStateOf(13) }
     val vScroll = rememberScrollState()
     LaunchedEffect(tail.text) { vScroll.scrollTo(vScroll.maxValue) }
-    LaunchedEffect(live) {
-        while (live) {
+    val foreground by vm.foreground.collectAsState()
+    LaunchedEffect(live, foreground) {
+        while (live && foreground) {
             delay(5_000)
             vm.refreshTail(manual = false)
         }

@@ -67,10 +67,11 @@ class SessionWatcher(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
 
     companion object {
         private const val WORK = "session-watch"
-        private const val CHANNEL = "sessions"
+        // A channel's importance can't be raised once created, so the pop-up version has a new id.
+        private const val CHANNEL = "alerts"
 
-        fun allowed(ctx: Context) = Build.VERSION.SDK_INT < 33 ||
-            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        fun allowed(ctx: Context) = NotificationManagerCompat.from(ctx).areNotificationsEnabled() &&
+            (Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
 
         fun schedule(ctx: Context) {
             val req = PeriodicWorkRequestBuilder<SessionWatcher>(15, TimeUnit.MINUTES)
@@ -83,17 +84,21 @@ class SessionWatcher(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
 
         private fun channel(ctx: Context) {
             ctx.getSystemService(NotificationManager::class.java)
-                .createNotificationChannel(NotificationChannel(CHANNEL, "Claude sessions", NotificationManager.IMPORTANCE_DEFAULT))
+                .createNotificationChannel(NotificationChannel(CHANNEL, "Claude sessions", NotificationManager.IMPORTANCE_HIGH))
         }
+
+        fun test(ctx: Context) = notify(ctx, "test", "cLaudeRC test", "If you can read this, session notifications work.")
 
         private fun notify(ctx: Context, id: String, title: String, text: String) {
             if (!allowed(ctx)) return
+            channel(ctx)
             val open = PendingIntent.getActivity(
                 ctx, 0, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
             val n = NotificationCompat.Builder(ctx, CHANNEL)
-                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setSmallIcon(R.drawable.ic_stat_clauderc)
+                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setContentTitle(title)
                 .setContentText(text)
                 .setContentIntent(open)

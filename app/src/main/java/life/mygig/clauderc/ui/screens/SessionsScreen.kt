@@ -78,8 +78,9 @@ fun SessionsScreen(vm: MainViewModel) {
     val scope = rememberCoroutineScope()
 
     // Previews and "needs an answer" stay current while the tab is open.
-    LaunchedEffect(Unit) {
-        while (true) {
+    val foreground by vm.foreground.collectAsState()
+    LaunchedEffect(foreground) {
+        while (foreground) {
             vm.refreshSessions()
             delay(15_000)
         }

@@ -104,7 +104,7 @@ class LauncherApi(
     suspend fun loginDocker(registry: String, user: String, token: String): LoginDone =
         call("login-docker", stdin = listOf(registry.trim(), user.trim(), token.trim()).joinToString("\n"))
     suspend fun selfUpdate(commit: String): JsonObject {
-        require(Regex("^[0-9a-f]{40}$").matches(commit))
+        if (!Regex("^[0-9a-f]{40}$").matches(commit)) throw ApiException(Codes.INVALID_NAME, "Bad commit")
         return call("self-update $commit", timeoutMs = 240_000)
     }
     /** Runs [command] on the server; the sudo password and command go on stdin only. */
@@ -144,7 +144,7 @@ class LauncherApi(
     }
     suspend fun workerSet(name: String, field: String, value: String): JsonObject {
         requireWorker(name)
-        require(field == "role" || field == "mode")
+        if (field != "role" && field != "mode") throw ApiException(Codes.INVALID_NAME, "Bad field")
         return call("worker-set $name $field", stdin = value.trim().replace('\n', ' '))
     }
     suspend fun workerRemove(name: String): JsonObject { requireWorker(name); return call("worker-remove $name") }
@@ -154,7 +154,9 @@ class LauncherApi(
         return call("worker-login-code $name", stdin = code.trim(), timeoutMs = 120_000)
     }
     suspend fun workerRuns(name: String): WorkerRunsData { requireWorker(name); return call("worker-runs $name") }
-    private fun requireWorker(name: String) = require(WORKER_NAME_RE.matches(name)) { "Bad worker name" }
+    private fun requireWorker(name: String) {
+        if (!WORKER_NAME_RE.matches(name)) throw ApiException(Codes.INVALID_NAME, "Bad worker name")
+    }
     suspend fun plugins(): PluginsData = call("plugins", timeoutMs = 120_000)
     suspend fun disconnect(service: String): JsonObject = call("disconnect $service")
 
@@ -242,6 +244,8 @@ class LauncherApi(
                 throw e
             } catch (e: InterruptedException) {
                 throw e
+            } catch (e: java.io.InterruptedIOException) {
+                throw InterruptedException()   // a cancelled call, not a network failure
             } catch (e: Exception) {
                 throw ApiException(Codes.NETWORK, e.message ?: e.javaClass.simpleName)
             }
