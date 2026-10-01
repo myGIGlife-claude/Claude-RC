@@ -11,6 +11,9 @@ import androidx.lifecycle.viewModelScope
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +31,8 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import life.mygig.clauderc.api.ApiException
+import life.mygig.clauderc.api.ClusterAccount
+import life.mygig.clauderc.data.Server
 import life.mygig.clauderc.api.AskQuestion
 import life.mygig.clauderc.api.Codes
 import life.mygig.clauderc.api.LauncherApi
@@ -273,6 +278,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Messages you sent that the conversation file doesn't show yet (Claude queues them while it works). */
     private val _chatPending = MutableStateFlow<List<String>>(emptyList())
     val chatPending = _chatPending.asStateFlow()
+    /** Pending messages of chats you left: they come back when you reopen that chat (until the conversation shows them). */
+    private val queuedBySession = mutableMapOf<String, List<String>>()
     private var chatPoller: Job? = null
 
     /** Claude's full checkup in a session of its own, opened in the chat. */
@@ -284,6 +291,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openChat(session: String) {
         _chatSession.value = session
+        _chatPending.value = queuedBySession[session].orEmpty()
         _chat.value = null
         _chatError.value = null
         if (chatPin == null) chatPin = pinVault.load()
@@ -313,6 +321,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun closeChat() {
         fileCache.evictAll()
         chatPoller?.cancel()
+        _chatSession.value?.let { queuedBySession[it] = _chatPending.value }
         _chatPending.value = emptyList()
         _chatSession.value = null
         _chat.value = null
@@ -516,25 +525,81 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- Team (extra Claude accounts) ---------------------------------------------
 
-    private val _workers = MutableStateFlow<List<Worker>?>(null)
-    val workers = _workers.asStateFlow()
+    /** One server's accounts in the cluster view; [accounts] is null when it couldn't be reached ([error] says why). */
+    data class ClusterGroup(val serverId: String, val host: String, val active: Boolean, val accounts: List<ClusterAccount>?, val error: String = "")
+    /** A just-added server signed in to another Claude account: ask whether it joins the cluster. */
+    data class ClusterOffer(val serverId: String, val host: String, val email: String)
+
+    private val _cluster = MutableStateFlow<List<ClusterGroup>?>(null)
+    val cluster = _cluster.asStateFlow()
+    private val _clusterOffer = MutableStateFlow<ClusterOffer?>(null)
+    val clusterOffer = _clusterOffer.asStateFlow()
+
+    private fun apiFor(s: Server) = LauncherApi(config = { s.toServerConfig() }, identity = { keys.identity() })
+
+    private suspend fun clusterOf(s: Server, active: Boolean): ClusterGroup = try {
+        ClusterGroup(s.id, s.host, active, (if (active) api else apiFor(s)).cluster().accounts)
+    } catch (e: ApiException) {
+        ClusterGroup(s.id, s.host, active, null, if (e.code == Codes.FORBIDDEN) "Server scripts need an update" else e.message.orEmpty())
+    }
+
+    /** The active server's accounts plus those of the servers already in the cluster, looked up together. */
+    fun loadCluster() = action("Loading accounts…") { _cluster.value = clusterGroups() }
+
+    private suspend fun clusterGroups(): List<ClusterGroup> = coroutineScope {
+        val cur = store.current()
+        val others = cur.servers.filter { it.id != cur.activeId && it.isConfigured && it.inCluster == true }
+        val first = async { clusterOf(cur.servers.first { it.id == cur.activeId }, true) }
+        (listOf(first) + others.map { s -> async { clusterOf(s, false) } }).awaitAll()
+    }
+
+    fun removeFromCluster(serverId: String) = viewModelScope.launch {
+        store.setInCluster(serverId, false)
+        _cluster.value = _cluster.value?.filter { it.serverId != serverId }
+    }
+
+    fun answerClusterOffer(join: Boolean) {
+        val o = _clusterOffer.value ?: return
+        _clusterOffer.value = null
+        viewModelScope.launch { store.setInCluster(o.serverId, join, alsoOthers = join) }
+    }
+
+    /**
+     * After a new server is trusted: if it's signed in to a different Claude account than the servers
+     * we already have, offer the cluster. Same account, or nothing to compare: ask nothing.
+     */
+    private suspend fun detectNewAccount() {
+        val cur = store.current()
+        val me = cur.servers.firstOrNull { it.id == cur.activeId } ?: return
+        if (me.inCluster != null) return
+        val others = cur.servers.filter { it.id != me.id && it.isConfigured }
+        if (others.isEmpty()) return
+        val mine = try { api.cluster().accounts.firstOrNull { it.name == "main" }?.email } catch (_: ApiException) { null }
+        if (mine == null) return
+        val known = coroutineScope {
+            others.map { s -> async { try { apiFor(s).cluster().accounts.mapNotNull { it.email } } catch (_: ApiException) { emptyList() } } }.awaitAll().flatten()
+        }
+        if (mine in known) store.setInCluster(me.id, false)   // same account: nothing to add
+        else _clusterOffer.value = ClusterOffer(me.id, me.host, mine)
+    }
+
     private val _workerLogin = MutableStateFlow<Pair<String, LoginUrl>?>(null)
     val workerLogin = _workerLogin.asStateFlow()
     private val _workerRuns = MutableStateFlow<Pair<String, List<WorkerRun>>?>(null)
     val workerRuns = _workerRuns.asStateFlow()
 
-    fun loadWorkers() = action("Loading team…") { _workers.value = api.workers().workers }
     fun addWorker(name: String, role: String) = action("Adding $name…") {
         api.workerAdd(name, role)
-        _workers.value = api.workers().workers
+        _cluster.value = clusterGroups()
+        _workerLogin.value = name to api.workerLoginStart(name)   // straight on to signing in
     }
     fun setWorker(name: String, field: String, value: String) = action("Saving…") {
         api.workerSet(name, field, value)
-        _workers.value = api.workers().workers
+        _cluster.value = clusterGroups()
     }
     fun removeWorker(name: String) = action("Removing $name…") {
         api.workerRemove(name)
-        _workers.value = api.workers().workers
+        _cluster.value = clusterGroups()
     }
     fun workerLoginStart(name: String) = action("Starting sign-in for $name…") {
         _workerLogin.value = name to api.workerLoginStart(name)
@@ -542,7 +607,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun workerLoginCode(name: String, code: String) = action("Checking code…") {
         api.workerLoginCode(name, code)
         _workerLogin.value = null
-        _workers.value = api.workers().workers
+        _cluster.value = clusterGroups()
     }
     // ponytail: the server's login helper session just times out; add a cancel action if stale ones annoy.
     fun closeWorkerLogin() { _workerLogin.value = null }
@@ -1250,7 +1315,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _runHistory.value = emptyList()
         _ccResult.value = null
         _chatLog.value = null
-        _workers.value = null
+        _cluster.value = null
+        _clusterOffer.value = null
         _workerLogin.value = null
         _workerRuns.value = null
         _status.value = null
@@ -1269,6 +1335,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _mcpAuth.value = null
         _detail.value = null
         closeChat()
+        queuedBySession.clear()   // session names repeat across servers
         chatPin = null
         pinVault.clear()
     }
@@ -1281,6 +1348,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             store.pinHostKey(info.type, info.blob, info.fingerprint)
             say("Server trusted. Checking connection…")
             refreshStatus()
+            detectNewAccount()
         }
     }
 

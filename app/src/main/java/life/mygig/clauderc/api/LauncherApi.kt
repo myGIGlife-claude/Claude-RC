@@ -136,6 +136,8 @@ class LauncherApi(
     suspend fun mcpAuthFinish(callbackUrl: String): McpData = call("mcp-auth-finish", stdin = callbackUrl.trim(), timeoutMs = 180_000)
     suspend fun mcpAuthCancel(): JsonObject = call("mcp-auth-cancel")
 
+    suspend fun cluster(): ClusterData = call("cluster", timeoutMs = 30_000)
+
     // Team: extra Claude accounts the main Claude can delegate to.
     suspend fun workers(): WorkersData = call("worker-list")
     suspend fun workerAdd(name: String, role: String): JsonObject {

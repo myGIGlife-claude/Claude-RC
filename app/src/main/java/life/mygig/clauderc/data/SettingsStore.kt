@@ -31,9 +31,13 @@ data class Server(
     val hostKeyFingerprint: String = "",
     /** Fingerprint pinned before "Forget host key", so a changed key still gets flagged. */
     val previousFingerprint: String = "",
+    /** In cLaudeCluster: true yes, false no, null not asked yet. */
+    val inCluster: Boolean? = null,
 ) {
     val isConfigured: Boolean
         get() = host.isNotBlank() && user.isNotBlank() && hostKeyBlob.isNotBlank()
+
+    fun toServerConfig() = ServerConfig(host, port, user, hostKeyType, hostKeyBlob)
 }
 
 /** The active server's fields, plus the full list and the app-wide settings. */
@@ -157,6 +161,12 @@ class SettingsStore(private val context: Context) {
 
     /** Adds a blank server and makes it active, so the setup screen shows. */
     suspend fun addServer() = editServers { list, _ -> Server(newId()).also { list += it }.id }
+
+    /** Puts one server in or out of the cluster; [alsoOthers] puts every configured server in too. */
+    suspend fun setInCluster(id: String, on: Boolean, alsoOthers: Boolean = false) = editServers { list, cur ->
+        list.replaceAll { if (it.id == id || (alsoOthers && it.isConfigured)) it.copy(inCluster = on) else it }
+        cur
+    }
 
     suspend fun switchServer(id: String) = editServers { list, cur -> if (list.any { it.id == id }) id else cur }
 

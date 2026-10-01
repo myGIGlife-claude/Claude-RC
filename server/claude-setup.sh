@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions.
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage).
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=25
+SCRIPT_API=26
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -1269,6 +1269,52 @@ do_worker_list() {
   api_ok "$(printf '%s' "$out" | jq -sc '{workers:.}')"
 }
 
+# One account for the cluster view as a JSON line: who it is and how much usage is left.
+# $1 name, $2 config dir (holds .credentials.json), $3 .claude.json, $4 role, $5 mode
+cluster_account() {
+  local name="$1" dir="$2" cj="$3" role="$4" mode="$5" cred="$2/.credentials.json"
+  local email="" plan="" exp=0 tok="" raw="" usage=null uerr=null signed=false
+  if [[ -s "$cred" ]]; then
+    signed=true
+    plan="$(jq -r '.claudeAiOauth.subscriptionType // empty' "$cred" 2>/dev/null || true)"
+    exp="$(jq -r '.claudeAiOauth.expiresAt // 0' "$cred" 2>/dev/null || echo 0)"
+    tok="$(jq -r '.claudeAiOauth.accessToken // empty' "$cred" 2>/dev/null || true)"
+  fi
+  [[ -s "$cj" ]] && email="$(jq -r '.oauthAccount.emailAddress // empty' "$cj" 2>/dev/null || true)"
+  if [[ -z "$tok" ]]; then
+    [[ "$signed" == true ]] && uerr='"unavailable"'
+  elif [[ "$exp" =~ ^[0-9]+$ ]] && ((exp > 0 && exp / 1000 < $(date +%s))); then
+    # Claude refreshes its own token when it next runs; refreshing here would rotate it under a running session.
+    uerr='"expired"'
+  else
+    # ponytail: undocumented endpoint (what Claude Code's /usage reads); if it changes the tile just says "unavailable".
+    # The token goes through curl's config on stdin so it never shows in `ps`.
+    raw="$(printf 'header = "Authorization: Bearer %s"\nheader = "anthropic-beta: oauth-2025-04-20"\n' "$tok" |
+      curl -sf --max-time 8 --config - https://api.anthropic.com/api/oauth/usage 2>/dev/null || true)"
+    usage="$(jq -c '{five_hour:{pct:(.five_hour.utilization // null), resets_at:(.five_hour.resets_at // null)}, seven_day:{pct:(.seven_day.utilization // null), resets_at:(.seven_day.resets_at // null)}}' <<<"$raw" 2>/dev/null || true)"
+    [[ -n "$usage" ]] || { usage=null; uerr='"unavailable"'; }
+  fi
+  jq -nc --arg n "$name" --arg e "$email" --arg p "$plan" --arg r "$role" --arg m "$mode" \
+    --argjson s "$signed" --argjson u "$usage" --argjson ue "$uerr" \
+    '{name:$n, email:(if $e=="" then null else $e end), plan:(if $p=="" then null else $p end), signed_in:$s, role:$r, mode:$m, usage:$u, usage_error:$ue}'
+}
+
+# The main account and every worker, looked up in parallel (one slow request doesn't hold up the rest).
+do_cluster() {
+  local tmp d n i=0 f
+  tmp="$(mktemp -d)"
+  cluster_account main "$HOME/.claude" "$HOME/.claude.json" "" "" >"$tmp/00" &
+  for d in "$WORKERS_DIR"/*/; do
+    [[ -f "$d/meta.json" ]] || continue
+    n="$(basename "$d")"; i=$((i + 1))
+    cluster_account "$n" "$d/home" "$d/home/.claude.json" "$(jq -r '.role // ""' "$d/meta.json")" "$(jq -r '.mode // "acceptEdits"' "$d/meta.json")" >"$tmp/$(printf %02d "$i")" &
+  done
+  wait
+  f="$(cat "$tmp"/* | jq -sc '{accounts:.}')"
+  rm -rf "$tmp"
+  api_ok "$f"
+}
+
 do_worker_add() {
   local name="${1:-}" role
   role="$(read_secret_line)"
@@ -2504,6 +2550,7 @@ api_main() {
     youtube-login-poll)  do_youtube_login_poll "$@" ;;
     repo-edit)           do_repo_edit "$@" ;;
     doctor-start)        do_doctor_start "$@" ;;
+    cluster)             [[ $# -eq 0 ]] || bad_args "cluster takes no arguments"; do_cluster ;;
     worker-list)         [[ $# -eq 0 ]] || bad_args "worker-list takes no arguments"; do_worker_list ;;
     worker-add)          do_worker_add "$@" ;;
     worker-set)          do_worker_set "$@" ;;

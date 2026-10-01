@@ -2,4 +2,12 @@
 # Test stub: claude-autostart waits for the internet with curl; say it's up.
 # Local file:// downloads (install.sh / self-update tests) use the real curl.
 for a; do [[ "$a" == file://* ]] && exec /usr/bin/curl "$@"; done
+# cluster: Anthropic's usage endpoint. Keep what curl was given on stdin (the token) for the test to inspect.
+for a; do
+  if [[ "$a" == */api/oauth/usage ]]; then
+    cat >>"${STUB_STATE:-/tmp}/usage-config"; echo "$*" >>"${STUB_STATE:-/tmp}/usage-argv"
+    echo '{"five_hour":{"utilization":42.0,"resets_at":"2026-10-01T22:00:00Z"},"seven_day":{"utilization":7.5,"resets_at":"2026-10-07T00:00:00Z"}}'
+    exit 0
+  fi
+done
 exit 0
