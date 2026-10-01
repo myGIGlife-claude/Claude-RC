@@ -111,6 +111,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
         replies.filter { it.first !in spoken }.forEach { (k, t) -> spoken += k; voice.speak(k, forSpeech(t), flush = false) }
     }
     Dialog(onDismissRequest = { vm.closeChat() }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        DialogKeyboardFix()
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
                 Row(
