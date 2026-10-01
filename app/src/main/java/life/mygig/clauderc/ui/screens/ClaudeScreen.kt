@@ -81,6 +81,7 @@ fun ClaudeScreen(vm: MainViewModel) {
     var open by remember { mutableStateOf<InstalledPlugin?>(null) }
     var addMarket by remember { mutableStateOf(false) }
     var custom by remember { mutableStateOf(false) }
+    var team by remember { mutableStateOf(false) }
     val change = { args: String -> vm.claudeCommand(args) }
 
     LaunchedEffect(status?.scriptApi) { vm.loadPlugins() }
@@ -106,6 +107,17 @@ fun ClaudeScreen(vm: MainViewModel) {
                             OutlinedButton(onClick = { vm.claudeCommand("doctor") }, enabled = busy == null) { Text("Doctor") }
                             TextButton(onClick = { vm.startCheckup() }, enabled = busy == null) { Text("Full checkup") }
                         }
+                    }
+                }
+            }
+            fullItem {
+                CardBox {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Team", fontWeight = FontWeight.SemiBold)
+                            Text("Sign in other Claude accounts and let the main Claude hand them work.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        OutlinedButton(onClick = { team = true }) { Text("Open") }
                     }
                 }
             }
@@ -145,6 +157,7 @@ fun ClaudeScreen(vm: MainViewModel) {
     }
 
     if (install && p != null) InstallPluginSheet(vm, p, onClose = { install = false }, onAddMarketplace = { install = false; addMarket = true })
+    if (team) TeamDialog(vm) { team = false }
     open?.let { pl -> PluginSheet(vm, pl, p, onClose = { open = null }) }
     if (addMarket) {
         var source by remember { mutableStateOf("") }
