@@ -181,7 +181,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                 if (need != null) {
                     PinGate(vm, need, error)
                 } else {
-                    Messages(vm, voice, chat?.messages.orEmpty(), pending, Modifier.weight(1f))
+                    androidx.compose.runtime.key(vm.chatSession.collectAsState().value) { Messages(vm, voice, chat?.messages.orEmpty(), pending, Modifier.weight(1f)) }
                     chat?.takeIf { it.waiting }?.let { c -> c.ask?.takeIf { it.isNotEmpty() }?.let { AskCard(vm, it, busy == null) } ?: PromptCard(vm, c.screen.orEmpty(), busy == null) }
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp)) }
                     Composer(vm, working = chat?.busy == true, enabled = busy == null && chat != null)
@@ -212,7 +212,11 @@ private fun Messages(vm: MainViewModel, voice: ChatVoice, messages: List<ChatMes
     val state = rememberLazyListState()
     val list = remember(messages, pending) { rows(messages, pending) }
     var open by remember { mutableStateOf(setOf<String>()) }
-    LaunchedEffect(list.size) { if (list.isNotEmpty()) state.animateScrollToItem(list.size - 1) }
+    var landed by remember { mutableStateOf(false) }   // first load jumps to the bottom; later messages scroll
+    LaunchedEffect(list.size) {
+        if (list.isEmpty()) return@LaunchedEffect
+        if (landed) state.animateScrollToItem(list.size - 1) else { state.scrollToItem(list.size - 1); landed = true }
+    }
     LazyColumn(modifier.fillMaxWidth(), state = state, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (list.isEmpty()) item { Text("No messages yet in this conversation.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         items(list, key = { r -> when (r) { is Row0.Msg -> "m-" + r.m.id + r.m.text.hashCode(); is Row0.Steps -> "s-" + r.key } }) { r ->
