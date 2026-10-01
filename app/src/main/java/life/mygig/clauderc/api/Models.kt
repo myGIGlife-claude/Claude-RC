@@ -271,6 +271,13 @@ data class UsageWindow(val pct: Double? = null, @SerialName("resets_at") val res
 @Serializable
 data class Usage(@SerialName("five_hour") val fiveHour: UsageWindow = UsageWindow(), @SerialName("seven_day") val sevenDay: UsageWindow = UsageWindow())
 
+/** Tokens one account used on this server in a window: fresh input (with cache writes), output, cache reads. */
+@Serializable
+data class TokenWindow(@SerialName("in") val input: Long = 0, val out: Long = 0, val cached: Long = 0)
+
+@Serializable
+data class Tokens(@SerialName("five_hour") val fiveHour: TokenWindow = TokenWindow(), @SerialName("seven_day") val sevenDay: TokenWindow = TokenWindow())
+
 /** One Claude account on a server: its main login ("main") or a worker. */
 @Serializable
 data class ClusterAccount(
@@ -283,6 +290,7 @@ data class ClusterAccount(
     val usage: Usage? = null,
     /** "expired" (Claude renews it next time it runs) or "unavailable". */
     @SerialName("usage_error") val usageError: String? = null,
+    val tokens: Tokens? = null,
 )
 
 @Serializable

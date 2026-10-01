@@ -1270,6 +1270,25 @@ do_worker_list() {
   api_ok "$(printf '%s' "$out" | jq -sc '{workers:.}')"
 }
 
+# Tokens this account used on THIS server in the last 5 h / 7 days, from Claude's own session logs ($1 = config dir).
+# (in = input + cache writes; cached = cache reads.) Rolling windows, so only an estimate of the plan's own windows.
+token_usage() {
+  local dir="$1/projects" c5 c7
+  [[ -d "$dir" ]] || { echo null; return; }
+  c5="$(date -u -d '5 hours ago' +%Y-%m-%dT%H:%M:%S)"; c7="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%S)"
+  { find "$dir" -name '*.jsonl' -mtime -8 -print0 | xargs -0 -r grep -h '"output_tokens"' 2>/dev/null || true; } |
+    jq -rR 'fromjson? | select(.type == "assistant" and .message.usage != null) | [(.message.id // .uuid), .timestamp, (.message.usage.input_tokens // 0), (.message.usage.output_tokens // 0), (.message.usage.cache_creation_input_tokens // 0), (.message.usage.cache_read_input_tokens // 0)] | @tsv' 2>/dev/null |
+    awk -F'\t' -v c5="$c5" -v c7="$c7" '
+      { ts[$1] = $2; i[$1] = $3 + $5; o[$1] = $4; r[$1] = $6 }   # one row per message: the last chunk has the final counts
+      END {
+        for (k in ts) {
+          if (ts[k] >= c7) { ai += i[k]; ao += o[k]; ar += r[k] }
+          if (ts[k] >= c5) { bi += i[k]; bo += o[k]; br += r[k] }
+        }
+        printf "{\"five_hour\":{\"in\":%.0f,\"out\":%.0f,\"cached\":%.0f},\"seven_day\":{\"in\":%.0f,\"out\":%.0f,\"cached\":%.0f}}\n", bi, bo, br, ai, ao, ar
+      }' || echo null
+}
+
 # One account for the cluster view as a JSON line: who it is and how much usage is left.
 # $1 name, $2 config dir (holds .credentials.json), $3 .claude.json, $4 role, $5 mode
 cluster_account() {
@@ -1295,9 +1314,10 @@ cluster_account() {
     usage="$(jq -c '{five_hour:{pct:(.five_hour.utilization // null), resets_at:(.five_hour.resets_at // null)}, seven_day:{pct:(.seven_day.utilization // null), resets_at:(.seven_day.resets_at // null)}}' <<<"$raw" 2>/dev/null || true)"
     [[ -n "$usage" ]] || { usage=null; uerr='"unavailable"'; }
   fi
+  local tokens; tokens="$(token_usage "$dir")"
   jq -nc --arg n "$name" --arg e "$email" --arg p "$plan" --arg r "$role" --arg m "$mode" \
-    --argjson s "$signed" --argjson u "$usage" --argjson ue "$uerr" \
-    '{name:$n, email:(if $e=="" then null else $e end), plan:(if $p=="" then null else $p end), signed_in:$s, role:$r, mode:$m, usage:$u, usage_error:$ue}'
+    --argjson s "$signed" --argjson u "$usage" --argjson ue "$uerr" --argjson tk "${tokens:-null}" \
+    '{name:$n, email:(if $e=="" then null else $e end), plan:(if $p=="" then null else $p end), signed_in:$s, role:$r, mode:$m, usage:$u, usage_error:$ue, tokens:$tk}'
 }
 
 # The main account and every worker, looked up in parallel (one slow request doesn't hold up the rest).

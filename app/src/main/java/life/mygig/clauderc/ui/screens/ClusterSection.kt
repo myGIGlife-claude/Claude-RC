@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import life.mygig.clauderc.api.WORKER_NAME_RE
 import life.mygig.clauderc.api.ClusterAccount
+import life.mygig.clauderc.api.TokenWindow
 import life.mygig.clauderc.api.UsageWindow
 import life.mygig.clauderc.api.Updates
 import androidx.compose.material3.LinearProgressIndicator
@@ -72,7 +73,7 @@ fun ClusterSection(vm: MainViewModel) {
             Column(Modifier.weight(1f)) {
                 Text("cLaudeCluster", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Usage left per account. Tell the main chat which work goes to which worker.",
+                    "Usage per account. Tell the main chat which work goes to which worker.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -195,6 +196,12 @@ private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean
                     UsageBar("5-hour", u.fiveHour)
                     UsageBar("Weekly", u.sevenDay)
                 }
+                a.tokens?.let { t ->
+                    Text(
+                        "Tokens on this server · 5 h: ${tokenText(t.fiveHour)} · 7 days: ${tokenText(t.sevenDay)}",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             if (worker && canManage) {
                 Text("Mode: ${a.mode} (${modeHint(a.mode)})", style = MaterialTheme.typography.bodySmall)
@@ -223,6 +230,9 @@ private fun UsageBar(label: String, w: UsageWindow) {
         )
     }
 }
+
+private fun short(n: Long) = when { n >= 1_000_000_000 -> "%.1fB".format(n / 1e9); n >= 1_000_000 -> "%.1fM".format(n / 1e6); n >= 1_000 -> "${n / 1000}k"; else -> "$n" }
+private fun tokenText(w: TokenWindow) = "${short(w.input)} in, ${short(w.out)} out, ${short(w.cached)} cached"
 
 private fun resetsIn(iso: String?): String? {
     val mins = try { Duration.between(Instant.now(), Instant.parse(iso ?: return null)).toMinutes() } catch (_: Exception) { return null }

@@ -631,7 +631,19 @@ echo '{"oauthAccount":{"emailAddress":"me@example.com"}}' >"$HOME/.claude.json"
 echo "{\"claudeAiOauth\":{\"accessToken\":\"sekrit-old\",\"expiresAt\":$PAST}}" >"$W/old/home/.credentials.json"
 echo '{"role":"research","mode":"plan"}' >"$W/ops/meta.json"; echo '{"role":"","mode":"acceptEdits"}' >"$W/old/meta.json"
 rm -f "$STUB_STATE/usage-config" "$STUB_STATE/usage-argv"
+mkdir -p "$W/ops/home/projects/p"
+NOW="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"; T2="$(date -u -d '2 days ago' +%Y-%m-%dT%H:%M:%S.000Z)"; D9="$(date -u -d '9 days ago' +%Y-%m-%dT%H:%M:%S.000Z)"
+{
+  echo '{"type":"assistant","timestamp":"'"$NOW"'","message":{"id":"m1","usage":{"input_tokens":10,"output_tokens":1,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000}}}'
+  echo '{"type":"assistant","timestamp":"'"$NOW"'","message":{"id":"m1","usage":{"input_tokens":10,"output_tokens":50,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000}}}'
+  echo '{"type":"assistant","timestamp":"'"$T2"'","message":{"id":"m2","usage":{"input_tokens":1,"output_tokens":2,"cache_creation_input_tokens":3,"cache_read_input_tokens":4}}}'
+  echo '{"type":"assistant","timestamp":"'"$D9"'","message":{"id":"m3","usage":{"input_tokens":999,"output_tokens":999,"cache_creation_input_tokens":999,"cache_read_input_tokens":999}}}'
+  echo '{"type":"user","timestamp":"'"$NOW"'","message":{"role":"user","content":"hi"}}'
+  echo 'not json {"output_tokens"'
+} >"$W/ops/home/projects/p/s.jsonl"
 api "cluster"
+check "token counts: one row per message, windows respected, bad lines skipped" "$(jqt '.data.accounts[2].tokens | .five_hour == {in:110,out:50,cached:1000} and .seven_day == {in:114,out:52,cached:1004}')"
+check "no transcripts: zero tokens, no folder: null" "$(jqt '.data.accounts[0].tokens.five_hour.out == 0 and .data.accounts[1].tokens == null')"
 check "cluster lists main + workers" "$(jqt '.ok and (.data.accounts | map(.name) == ["main","old","ops"])')"
 check "main: email, plan, usage" "$(jqt '.data.accounts[0] | .email == "me@example.com" and .plan == "max" and .usage.five_hour.pct == 42 and .usage.seven_day.pct == 7.5')"
 check "expired token: no usage, says so" "$(jqt '.data.accounts[1] | .usage == null and .usage_error == "expired" and .signed_in')"
