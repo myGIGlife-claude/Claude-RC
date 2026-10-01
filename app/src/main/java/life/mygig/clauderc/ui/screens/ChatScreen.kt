@@ -5,20 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import life.mygig.clauderc.ui.components.AttachFile
-import life.mygig.clauderc.ui.components.Mic
-import android.app.Activity
-import android.content.ActivityNotFoundException
-import android.content.Intent
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Bundle
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
-import androidx.compose.material3.LocalContentColor
-import androidx.core.content.ContextCompat
 import android.content.Context
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
@@ -336,72 +323,10 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
             vm.uploadToChat(name, bytes) { path -> text = (text.trimEnd() + " [attached: $path]").trim() }
         }
     }
-    val dictate = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
-        val said = r.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-        if (r.resultCode == Activity.RESULT_OK && !said.isNullOrBlank()) text = (text.trimEnd() + " " + said).trim()
-    }
     Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         IconButton(onClick = { vm.externalScreen(); pick.launch(arrayOf("*/*")) }, enabled = enabled, modifier = Modifier.height(52.dp)) {
             Icon(Icons.Filled.AttachFile, contentDescription = "Attach a file or photo")
         }
-        // Listen inside the app (no Google pop-up); the system dialog is the fallback.
-        var listening by remember { mutableStateOf(false) }
-        val recognizer = remember { if (SpeechRecognizer.isRecognitionAvailable(context)) SpeechRecognizer.createSpeechRecognizer(context) else null }
-        DisposableEffect(recognizer) { onDispose { recognizer?.destroy() } }
-        val intent = remember {
-            Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                .putExtra(RecognizerIntent.EXTRA_PROMPT, "Say your message")
-        }
-        DisposableEffect(recognizer) {
-            recognizer?.setRecognitionListener(object : RecognitionListener {
-                override fun onResults(results: Bundle?) {
-                    listening = false
-                    val said = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                    if (!said.isNullOrBlank()) text = (text.trimEnd() + " " + said).trim()
-                }
-                override fun onError(error: Int) {
-                    listening = false
-                    if (error != SpeechRecognizer.ERROR_NO_MATCH && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT && error != SpeechRecognizer.ERROR_CLIENT) {
-                        vm.say("Couldn't hear that (speech error $error).")
-                    }
-                }
-                override fun onReadyForSpeech(params: Bundle?) {}
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {}
-                override fun onPartialResults(partialResults: Bundle?) {}
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-            })
-            onDispose {}
-        }
-        val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-            if (ok && recognizer != null) { listening = true; recognizer.startListening(intent) }
-            else if (!ok) vm.say("Allow the microphone for cLaudeRC in the phone's settings to dictate.")
-        }
-        IconButton(
-            onClick = {
-                if (recognizer != null) {
-                    if (listening) { recognizer.stopListening(); return@IconButton }
-                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                        listening = true; recognizer.startListening(intent)
-                    } else micPermission.launch(Manifest.permission.RECORD_AUDIO)
-                    return@IconButton
-                }
-                try {
-                    vm.externalScreen()
-                    dictate.launch(
-                        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Say your message"),
-                    )
-                } catch (e: ActivityNotFoundException) {
-                    vm.say("This phone has no speech recognizer. Turn on Google voice typing in the phone's settings.")
-                }
-            },
-            enabled = enabled, modifier = Modifier.height(52.dp),
-        ) { Icon(Icons.Filled.Mic, contentDescription = if (listening) "Stop listening" else "Speak your message", tint = if (listening) MaterialTheme.colorScheme.error else LocalContentColor.current) }
         OutlinedTextField(
             value = text, onValueChange = { text = it }, placeholder = { Text("Message Claude") },
             modifier = Modifier.weight(1f), maxLines = 6, shape = RoundedCornerShape(22.dp),
