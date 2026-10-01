@@ -17,9 +17,8 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import androidx.compose.material3.LocalContentColor
 import androidx.core.content.ContextCompat
-import android.speech.tts.TextToSpeech
+import android.content.Context
 import androidx.compose.runtime.DisposableEffect
-import java.util.Locale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
@@ -106,25 +105,21 @@ fun ChatScreen(vm: MainViewModel, session: String) {
     val busy by vm.busy.collectAsState()
     val pending by vm.chatPending.collectAsState()
     val context = LocalContext.current
-    var speak by rememberSaveable { mutableStateOf(false) }
-    val voice = remember { mutableStateOf<TextToSpeech?>(null) }
-    DisposableEffect(speak) {
-        var engine: TextToSpeech? = null
-        if (speak) engine = TextToSpeech(context) { st ->
-            if (st == TextToSpeech.SUCCESS) { engine?.language = Locale.getDefault(); voice.value = engine }
-            else { speak = false; vm.say("No text-to-speech voice on this phone.") }
-        }
-        onDispose { engine?.stop(); engine?.shutdown(); voice.value = null }
-    }
-    // Read Claude's new replies aloud (not the ones already there when it was turned on).
-    val spoken = remember(speak) { mutableSetOf<String>() }
-    var primed by remember(speak) { mutableStateOf(false) }
-    LaunchedEffect(chat?.messages, voice.value) {
-        val e = voice.value ?: return@LaunchedEffect
-        if (chat == null) return@LaunchedEffect   // still loading: wait, so old replies aren't read out
+    // The speaker switch stays as the owner left it: across chats and app restarts, until tapped again.
+    val voicePrefs = remember { context.getSharedPreferences("chat_voice", Context.MODE_PRIVATE) }
+    var speak by remember { mutableStateOf(voicePrefs.getBoolean("speak", false)) }
+    val voice = remember { ChatVoice(context) { vm.say("No text-to-speech voice on this phone.") } }
+    DisposableEffect(voice) { onDispose { voice.shutdown() } }
+    LaunchedEffect(speak) { voicePrefs.edit().putBoolean("speak", speak).apply(); if (!speak) voice.pause() }
+    // With the speaker on, read Claude's new replies aloud (not the ones already there when the chat opened).
+    val spoken = remember { mutableSetOf<String>() }
+    var primed by remember { mutableStateOf(false) }
+    LaunchedEffect(chat?.messages, voice.ready, speak) {
+        if (!voice.ready || chat == null) return@LaunchedEffect   // still loading: wait, so old replies aren't read out
         val replies = chat?.messages.orEmpty().filter { it.role == "assistant" }.map { (it.id + it.text.hashCode()) to it.text }
         if (!primed) { spoken += replies.map { it.first }; primed = true; return@LaunchedEffect }
-        replies.filter { it.first !in spoken }.forEach { (k, t) -> spoken += k; e.speak(forSpeech(t), TextToSpeech.QUEUE_ADD, null, k) }
+        if (!speak) { spoken += replies.map { it.first }; return@LaunchedEffect }   // heard by reading; Play still works
+        replies.filter { it.first !in spoken }.forEach { (k, t) -> spoken += k; voice.speak(k, forSpeech(t), flush = false) }
     }
     Dialog(onDismissRequest = { vm.closeChat() }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -190,7 +185,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                 if (need != null) {
                     PinGate(vm, need, error)
                 } else {
-                    Messages(vm, chat?.messages.orEmpty(), pending, Modifier.weight(1f))
+                    Messages(vm, voice, chat?.messages.orEmpty(), pending, Modifier.weight(1f))
                     chat?.takeIf { it.waiting }?.let { c -> c.ask?.takeIf { it.isNotEmpty() }?.let { AskCard(vm, it, busy == null) } ?: PromptCard(vm, c.screen.orEmpty(), busy == null) }
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp)) }
                     Composer(vm, working = chat?.busy == true, enabled = busy == null && chat != null)
@@ -217,7 +212,7 @@ private fun rows(messages: List<ChatMessage>, pending: List<String>): List<Row0>
 }
 
 @Composable
-private fun Messages(vm: MainViewModel, messages: List<ChatMessage>, pending: List<String>, modifier: Modifier) {
+private fun Messages(vm: MainViewModel, voice: ChatVoice, messages: List<ChatMessage>, pending: List<String>, modifier: Modifier) {
     val state = rememberLazyListState()
     val list = remember(messages, pending) { rows(messages, pending) }
     var open by remember { mutableStateOf(setOf<String>()) }
@@ -252,8 +247,16 @@ private fun Messages(vm: MainViewModel, messages: List<ChatMessage>, pending: Li
                         if (r.pending) Text("queued · Claude reads it at its next pause", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
-                    Surface(shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.widthIn(max = 340.dp)) {
-                        SelectionContainer { Text(linkify(r.m.text), modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium) }
+                    val key = r.m.id + r.m.text.hashCode()
+                    val isPlaying = voice.playing == key
+                    Column {
+                        Surface(shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.widthIn(max = 340.dp)) {
+                            SelectionContainer { Text(linkify(r.m.text), modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium) }
+                        }
+                        // Listen to this reply (or carry on where Pause stopped it) without asking Claude again.
+                        TextButton(onClick = { if (isPlaying) voice.pause() else voice.speak(key, forSpeech(r.m.text), flush = true) }, enabled = voice.ready) {
+                            Text(if (isPlaying) "⏸ Pause" else "▶ Play", fontSize = 13.sp)
+                        }
                     }
                 }
             }
