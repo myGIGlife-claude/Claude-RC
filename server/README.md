@@ -164,9 +164,9 @@ Notes:
   subscription entry by its label, not a hard-coded number. If a future Claude
   Code version changes the prompts, the error includes the pane text.
 
-## Team
+## cLaudeCluster (Team)
 
-`clauderc-team` is an MCP server (installed to `~/.local/bin`, registered at user scope by `install.sh`) that lets the main Claude hand tasks to your other Claude accounts. Each worker is a folder under `~/.config/claude-launcher/workers/<name>/` with its own Claude config dir; the app's Claude tab › Team adds, signs in and removes them (`worker-*` API actions). A task runs as a headless `claude -p` in the project folder; tools: `list_workers`, `delegate`, `wait`, `reply`.
+`clauderc-team` is an MCP server (installed to `~/.local/bin`, registered at user scope by `install.sh`) that lets the main Claude hand tasks to your other Claude accounts. Each worker is a folder under `~/.config/claude-launcher/workers/<name>/` with its own Claude config dir; the app's Claude tab › cLaudeCluster lists the accounts with their usage (`cluster` action: email from `.claude.json`, usage from the OAuth usage endpoint, expired tokens are never refreshed by us) and adds, signs in and removes workers (`worker-*` actions). A task runs as a headless `claude -p` in the project folder; tools: `list_workers`, `delegate`, `wait`, `reply`.
 
 ## Tests
 

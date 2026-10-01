@@ -266,6 +266,29 @@ data class Worker(
 )
 
 @Serializable
+data class UsageWindow(val pct: Double? = null, @SerialName("resets_at") val resetsAt: String? = null)
+
+@Serializable
+data class Usage(@SerialName("five_hour") val fiveHour: UsageWindow = UsageWindow(), @SerialName("seven_day") val sevenDay: UsageWindow = UsageWindow())
+
+/** One Claude account on a server: its main login ("main") or a worker. */
+@Serializable
+data class ClusterAccount(
+    val name: String,
+    val email: String? = null,
+    val plan: String? = null,
+    @SerialName("signed_in") val signedIn: Boolean = false,
+    val role: String = "",
+    val mode: String = "acceptEdits",
+    val usage: Usage? = null,
+    /** "expired" (Claude renews it next time it runs) or "unavailable". */
+    @SerialName("usage_error") val usageError: String? = null,
+)
+
+@Serializable
+data class ClusterData(val accounts: List<ClusterAccount> = emptyList())
+
+@Serializable
 data class WorkersData(val workers: List<Worker> = emptyList())
 
 @Serializable

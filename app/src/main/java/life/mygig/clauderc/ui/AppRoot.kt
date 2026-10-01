@@ -40,7 +40,9 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.OutlinedButton
@@ -167,6 +169,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             val tokenService by vm.tokenService.collectAsState()
             val tail by vm.tail.collectAsState()
             val pendingKey by vm.pendingHostKey.collectAsState()
+            val clusterOffer by vm.clusterOffer.collectAsState()
 
             LaunchedEffect(Unit) {
                 vm.messages.collect { m ->
@@ -329,6 +332,15 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             tail?.let { TailScreen(vm, it) }
             if (showRun) RunScreen(vm)
             chatSession?.let { ChatScreen(vm, it) }
+            clusterOffer?.let { o ->
+                AlertDialog(
+                    onDismissRequest = { vm.answerClusterOffer(false) },
+                    confirmButton = { TextButton(onClick = { vm.answerClusterOffer(true) }) { Text("Add to cluster") } },
+                    dismissButton = { TextButton(onClick = { vm.answerClusterOffer(false) }) { Text("Not now") } },
+                    title = { Text("A different Claude account") },
+                    text = { Text("${o.host} is signed in as ${o.email}, not the account on your other servers. Add it to cLaudeCluster to see its usage next to the others?") },
+                )
+            }
             pendingKey?.let { HostKeyDialog(vm, it, s.hostKeyFingerprint.ifEmpty { s.previousFingerprint }) }
         }
     }
