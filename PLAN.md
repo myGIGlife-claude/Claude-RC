@@ -1,10 +1,10 @@
-Last updated: 2026-10-01 20:05 UTC
+Last updated: 2026-10-01 20:02 UTC
 
 ## Goal
 cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage Claude Code sessions on your own server from a phone.
 
 ## Current task
-Waiting on the owner: the notification bug needs the phone's Notification history (which app posts the vibrating notification). Next step: once known, fix how the app posts it.
+In flight: (1) main build for #85 (cluster hardening) then tell the owner to tap Update now (server scripts too); (2) a subagent (worktree, branch `claude/readme-refresh`) is refreshing README, screenshots and demo video: when it reports, check its PR (no personal values, images render) and tell the owner to merge. Next: remaining cluster review items (see Decisions 2026-10-01 "Opus review"), then the notification bug (needs phone's Notification history).
 
 ## Tasks
 - [ ] Try on the phone: 👥 in a chat (attach a worker, set role/mode), ask main to delegate and merge; usage bars fill with used.
