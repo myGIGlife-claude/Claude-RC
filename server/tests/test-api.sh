@@ -534,6 +534,40 @@ OUT="$(HOME="$IH" PATH=/usr/local/bin:/usr/bin:/bin CLAUDERC_BASE="file://$SERVE
 grep -q "^restrict,command=\"$IH/bin/claude-launcher-api\" ssh-ed25519 " "$IH/.ssh/authorized_keys"; check "install.sh authorizes the key" $?
 [[ "$OUT" == *"already set up"* && "$OUT" == *"Username: $(id -un)"* ]]; check "install.sh skips autostart and prints app details" $?
 
+echo "team workers"
+for bad in "worker-add" "worker-add ../x" "worker-add -x" "worker-add .x" "worker-add a b" "worker-set a" \
+  "worker-set a color" "worker-remove" "worker-remove a/b" "worker-list extra" "worker-runs" "worker-login-start" \
+  "worker-login-code a b"; do
+  api "$bad"
+  check "runner rejects: $bad" "$(jqt '.ok == false')"
+done
+api "worker-list"
+check "no workers yet" "$(jqt '.ok and (.data.workers | length == 0)')"
+api "worker-add research" "Reads docs & \"quotes\", finds sources"
+check "add worker" "$(jqt '.ok and .data.added == "research"')"
+api "worker-add research" "again"
+check "duplicate worker refused" "$(jqt '.ok == false')"
+api "worker-list"
+check "role stored verbatim, default mode, not signed in" "$(jqt '.data.workers[0] | .name=="research" and .role=="Reads docs & \"quotes\", finds sources" and .mode=="acceptEdits" and .signed_in==false')"
+api "worker-set research mode" "bypassPermissions"
+check "set mode" "$(jqt '.ok')"
+api "worker-set research mode" "rm -rf"
+check "bad mode refused" "$(jqt '.ok == false')"
+api "worker-set research role" "Docs"
+api "worker-list"
+check "mode and role saved" "$(jqt '.data.workers[0].mode=="bypassPermissions" and .data.workers[0].role=="Docs"')"
+mkdir -p "$HOME/.config/claude-launcher/workers/research/tasks"
+printf '{"id":"aaaa1111","task":"t1","status":"done","reply":"hello","started":100}' >"$HOME/.config/claude-launcher/workers/research/tasks/aaaa1111.json"
+printf '{"id":"bbbb2222","task":"t2","status":"failed","error":"boom","started":200}' >"$HOME/.config/claude-launcher/workers/research/tasks/bbbb2222.json"
+api "worker-runs research"
+check "runs newest first" "$(jqt '.data.runs[0].id=="bbbb2222" and .data.runs[1].reply=="hello"')"
+api "worker-runs nope"
+check "runs of unknown worker refused" "$(jqt '.ok == false')"
+api "worker-remove research"
+check "remove worker" "$(jqt '.ok')"
+api "worker-list"
+check "worker gone" "$(jqt '.data.workers | length == 0')"
+
 echo
 echo "$pass passed, $failn failed"
 ((failn == 0))
