@@ -1,4 +1,4 @@
-Last updated: 2026-10-01 18:00 UTC
+Last updated: 2026-10-01 18:10 UTC
 
 ## Goal
 cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage Claude Code sessions on your own server from a phone.
@@ -8,7 +8,7 @@ Waiting on the owner: the notification bug needs the phone's Notification histor
 
 ## Tasks
 - [ ] Team: shipped (PR #78). Owner: try it on the phone with a real second account (Claude tab › Team › Sign in; then ask the main chat to delegate). Check: login stores creds in the worker folder, headless run works, Mode button.
-- [ ] Notifications: phone vibrates but nothing shows in the shade. Get Notification history from the owner, then fix (channel/importance, or it's another app).
+- [ ] Notifications: phone vibrates but nothing shows in the shade. #79 added a clearer icon, a pop-up channel (`alerts`) and Settings › Send a test notification: try it on the phone; if the test shows, the old one was the faint icon/low importance. Session alerts only fire while the phone is unlocked (SSH key needs it; owner chose to keep that).
 - [ ] Try on a phone (all untested on a device): chat links (tap a URL), speaker switch + per-reply Play/Pause, files Claude sends (thumbnail, zoom, Save; big files were slow, fixed in #75), Full checkup (own `claude-doctor` session), repo rename/visibility/delete, chat PIN "don't ask again" after swiping the app away, "Disable the <plugin> plugin" on MCP pages.
 - [ ] MCP sign-in: finish a real sign-in end to end with the paste box (Notion still needs sign-in).
 - [ ] Repo delete: owner needs a GitHub token with `delete_repo` (the app offers New token).
@@ -17,6 +17,7 @@ Waiting on the owner: the notification bug needs the phone's Notification histor
 - [ ] Owner decisions from the 2026-10-01 audit (not changed yet): gate `plugin install`/`marketplace add` and `open --start` on others' repos (they run code with `ALLOW_RUN=0`); require the chat PIN for `tail`/`keys`/`restart`; check `self-update` sha is on main; deny behaviour-changing names in `set-secret` (AWS_ENDPOINT_URL, PIP_INDEX_URL, DOCKER_HOST…); CI publishes debug-signed builds if signing secrets go missing; rename leaves the server folder under the old name.
 
 ## Decisions
+- 2026-10-01: Mic/dictation removed from chat. Full code scan fixed in #79 (chat_session subshell bug sent messages to the wrong session; team workers killed by process group; uploads private + git-ignored; PIN grace one-shot; stale server data on switch; polling pauses in background). SSH key stays unlocked-device-only.
 - 2026-09-29: Status light: green idle, amber working, red when waiting on an answer or working 5+ min (timed from when the app first saw it busy). Shared `claudeHealth()` for chat and session tiles.
 - 2026-09-29: MCP sign-in drives `claude /mcp` in a hidden tmux session; the phone pastes back the `http://localhost…/callback` URL. Only typed while the paste box shows; success judged by a fresh `claude mcp list`. A 4xx "client_id" answer drops the saved OAuth entry and retries once.
 - 2026-09-29: Repo rename/visibility/delete via `repo-edit` (GitHub only; server folder keeps its name). Delete needs typing "delete"; rename and visibility ask "Are you sure?".
@@ -37,5 +38,6 @@ Waiting on the owner: the notification bug needs the phone's Notification histor
 - 2026-10-01: Team = other Claude accounts as "workers" (own `CLAUDE_CONFIG_DIR` under `~/.config/claude-launcher/workers/`); main Claude delegates via the `clauderc-team` MCP server (headless `claude -p`, main waits). Same project folder; mode per worker (acceptEdits default).
 
 ## Known issues
+- Not fixed from the scan: draft lost after >30 s in a file picker (app re-locks); env/credentials files have no cross-process lock (writes are atomic); login-claude-code can report success when a running session refreshes its token.
 - Notifications vibrate without showing (see Tasks).
 - Plugin-provided MCP servers can only be removed by disabling their plugin; project-scope MCP servers can't be signed in from the app (use /mcp in that project).
