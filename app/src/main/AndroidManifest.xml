@@ -11,9 +11,7 @@
     <!-- Needed on Android 11+ to find and launch the Claude app. -->
     <queries>
         <package android:name="com.anthropic.claude" />
-        <!-- Voice: dictating a message and reading replies aloud. -->
-        <intent><action android:name="android.speech.action.RECOGNIZE_SPEECH" /></intent>
-        <intent><action android:name="android.speech.RecognitionService" /></intent>
+        <!-- Voice: reading replies aloud. -->
         <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
     </queries>
 
