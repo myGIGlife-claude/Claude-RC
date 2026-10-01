@@ -10,6 +10,9 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.security.MessageDigest
 import java.util.Base64
+import java.util.Timer
+import java.util.TimerTask
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class ServerConfig(
     val host: String,
@@ -158,22 +161,29 @@ object SshRunner {
                 input.close() // EOF, so nothing on the server waits for input
             }
 
+            // Blocking reads, not available()+sleep polling: JSch's pipe writer only
+            // wakes when a reader finds it empty, else after 1 s, so polling capped
+            // answers at ~32 KB/s (a 3 MB file took over 2 minutes).
+            // On timeout the watchdog closes the channel, which ends the read.
             val buf = ByteArrayOutputStream()
-            val chunk = ByteArray(8192)
-            val deadline = System.currentTimeMillis() + timeoutMs
-            while (true) {
-                while (out.available() > 0) {
+            val chunk = ByteArray(65536)
+            val timedOut = AtomicBoolean(false)
+            val watchdog = Timer(true)
+            watchdog.schedule(object : TimerTask() {
+                override fun run() { timedOut.set(true); channel.disconnect() }
+            }, timeoutMs)
+            try {
+                while (true) {
                     val n = out.read(chunk)
                     if (n < 0) break
                     buf.write(chunk, 0, n)
                 }
-                if (channel.isClosed && out.available() <= 0) break
-                if (System.currentTimeMillis() > deadline) {
-                    channel.disconnect()
-                    throw SshFailure(SshFailure.Kind.TIMEOUT, "The server took too long to answer")
-                }
-                Thread.sleep(50)
+            } catch (e: IOException) {
+                if (!timedOut.get()) throw e
+            } finally {
+                watchdog.cancel()
             }
+            if (timedOut.get()) throw SshFailure(SshFailure.Kind.TIMEOUT, "The server took too long to answer")
             channel.disconnect()
             return buf.toString(Charsets.UTF_8.name())
         } finally {
