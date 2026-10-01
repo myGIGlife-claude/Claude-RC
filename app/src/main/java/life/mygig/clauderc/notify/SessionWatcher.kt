@@ -98,6 +98,7 @@ class SessionWatcher(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
             )
             val n = NotificationCompat.Builder(ctx, CHANNEL)
                 .setSmallIcon(R.drawable.ic_stat_clauderc)
+                .setColor(0xFFD97757.toInt())
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setContentTitle(title)
                 .setContentText(text)
