@@ -1,4 +1,4 @@
-Last updated: 2026-10-01 01:30 UTC
+Last updated: 2026-10-01 16:20 UTC
 
 ## Goal
 cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage Claude Code sessions on your own server from a phone.
@@ -8,7 +8,7 @@ Waiting on the owner: the notification bug needs the phone's Notification histor
 
 ## Tasks
 - [ ] Notifications: phone vibrates but nothing shows in the shade. Get Notification history from the owner, then fix (channel/importance, or it's another app).
-- [ ] Try on a phone (all untested on a device): chat links (tap a URL), files Claude sends (thumbnail, zoom, Save), Full checkup (own `claude-doctor` session), repo rename/visibility/delete, chat PIN "don't ask again" after swiping the app away, "Disable the <plugin> plugin" on MCP pages.
+- [ ] Try on a phone (all untested on a device): chat links (tap a URL), speaker switch + per-reply Play/Pause, files Claude sends (thumbnail, zoom, Save; big files were slow, fixed in #75), Full checkup (own `claude-doctor` session), repo rename/visibility/delete, chat PIN "don't ask again" after swiping the app away, "Disable the <plugin> plugin" on MCP pages.
 - [ ] MCP sign-in: finish a real sign-in end to end with the paste box (Notion still needs sign-in).
 - [ ] Repo delete: owner needs a GitHub token with `delete_repo` (the app offers New token).
 - [ ] Optional: claude-mem note-taking via OmniRoute (free models) through `CLAUDE_MEM_OPENROUTER_BASE_URL`. Offered, not decided.
@@ -30,6 +30,8 @@ Waiting on the owner: the notification bug needs the phone's Notification histor
 
 - 2026-10-01: A file Claude sent is served by `chat-file` from anywhere (its path is in a SendUserFile call); everything else must be in the project or Claude's temp folder. App messages show as a banner inside an open chat (the snackbar sits behind the dialog).
 - 2026-10-01: Claude's project folder name maps every non-alphanumeric to `-` (checked live); `api_ok` pipes its JSON (argv tops out at 128 KB).
+
+- 2026-10-01: Chat speaker switch is saved in prefs (`chat_voice`) so it stays on/off across chats and restarts; each Claude reply has Play/Pause (spoken by sentence, Pause resumes at that sentence). SSH read loop must block on `read()`: polling `available()` + sleep throttled JSch to ~32 KB/s.
 
 ## Known issues
 - Notifications vibrate without showing (see Tasks).
