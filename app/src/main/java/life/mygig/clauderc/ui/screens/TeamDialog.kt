@@ -56,7 +56,7 @@ fun TeamDialog(vm: MainViewModel, onDismiss: () -> Unit) {
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
         title = { Text("Team") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()).heightIn(max = 520.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     "Other Claude accounts of yours. In the main chat, tell Claude which kind of work goes to which worker " +
                         "(for example \"research goes to research, UI goes to ui\") and it hands tasks over for you.",
@@ -110,7 +110,7 @@ fun TeamDialog(vm: MainViewModel, onDismiss: () -> Unit) {
             confirmButton = { TextButton(onClick = vm::closeWorkerRuns) { Text("Close") } },
             title = { Text("$who: recent tasks") },
             text = {
-                Column(Modifier.verticalScroll(rememberScrollState()).heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (list.isEmpty()) Text("Nothing delegated yet.")
                     list.forEach { r ->
                         CardBox {

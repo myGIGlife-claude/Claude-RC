@@ -8,7 +8,7 @@ HERE = Path(__file__).resolve().parent
 tmp = Path(tempfile.mkdtemp())
 cfg = tmp / "cfg" / "claude-launcher" / "workers"
 env = {**os.environ, "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(HERE / "stubs" / "claude"),
-       "ANTHROPIC_API_KEY": "secret-should-not-leak", "STUB_STATE": str(tmp / "stub")}
+       "ANTHROPIC_API_KEY": "secret-should-not-leak", "CLAUDE_CODE_OAUTH_TOKEN": "main-token", "CLAUDECODE": "1", "STUB_STATE": str(tmp / "stub")}
 for name, signed in (("research", True), ("ui", False)):
     (cfg / name / "home").mkdir(parents=True)
     (cfg / name / "tasks").mkdir()
@@ -54,6 +54,7 @@ assert not err and len(tid) == 8, tid
 err, text = tool("wait", task_id=tid, timeout_s=30)
 assert not err and "summarise the repo" in text, text
 assert f"cfg={cfg / 'research' / 'home'}" in text, text          # the worker's own config dir
+assert "key=unset" in text and "tok=unset" in text, text    # main account's tokens never reach a worker
 assert "key=unset" in text and f"cwd={tmp.resolve()}" in text, text  # no API key; caller's folder
 
 err, tid2 = tool("reply", task_id=tid, message="and the tests")
@@ -73,6 +74,14 @@ assert err and "lost" in text.lower(), text
 
 err, text = tool("wait", task_id="nope1234")
 assert err, text
+
+# Bad input must not kill the server (and with it every running task).
+err, text = tool("wait", task_id=tid, timeout_s="soon")
+assert err, text
+proc.stdin.write("this is not json\n")
+proc.stdin.flush()
+err, text = tool("list_workers")
+assert not err and "research" in text, text
 proc.stdin.close()
 proc.wait(timeout=5)
 print("test-team: ok")

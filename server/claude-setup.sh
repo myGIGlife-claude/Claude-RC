@@ -832,7 +832,7 @@ do_sessions() {
   # Same detection as claude-autostart: any session whose pane started claude.
   s="$({ tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}@@#{session_created}@@#{session_attached}' 2>/dev/null || true; } |
     awk -F'@@' -v l1="$CLAUDE_LOGIN_SESSION" -v l2="$AWS_LOGIN_SESSION" \
-      '($3 ~ /claude/ || $4 == "claude") && $1 != l1 && $1 != l2 && $1 != "mcp-auth" && !seen[$1]++' |
+      '($3 ~ /claude/ || $4 == "claude") && $1 != l1 && $1 != l2 && $1 != "mcp-auth" && $1 !~ /^worker-login-/ && !seen[$1]++' |
     jq -Rc 'split("@@") | {name:.[0], dir:.[1], project:(.[1] | split("/") | last),
       started_at:(.[4] | tonumber), attached:((.[5] | tonumber) > 0)}' |
     jq -sc --argjson now "$(date +%s)" 'map(. + {uptime_seconds:($now - .started_at)}) | sort_by(.started_at)')"
@@ -2276,7 +2276,7 @@ chat_session() {
   local s; s="$(resolve_session "$1")"
   tmux has-session -t "=$s" 2>/dev/null || api_err invalid_name "No running session named '$1'."
   # Login and sign-in helpers aren't project chats (their folder would be $HOME).
-  [[ " $CLAUDE_LOGIN_SESSION $AWS_LOGIN_SESSION mcp-auth " != *" $s "* ]] || api_err invalid_name "No running session named '$1'."
+  [[ " $CLAUDE_LOGIN_SESSION $AWS_LOGIN_SESSION mcp-auth " != *" $s "* && "$s" != worker-login-* ]] || api_err invalid_name "No running session named '$1'."
   echo "$s"
 }
 

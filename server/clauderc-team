@@ -81,7 +81,9 @@ def run_task(t, resume):
     try:
         mode = json.loads((w / "meta.json").read_text()).get("mode", "acceptEdits")
         cmd = [CLAUDE, "-p", "--output-format", "json", "--permission-mode", mode] + (["--resume", resume] if resume else [])
-        env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+        # The worker must run as its own account: drop the main session's credentials and Claude Code markers.
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDECODE") and not k.startswith("CLAUDE_CODE_")}
         env["CLAUDE_CONFIG_DIR"] = str(w / "home")
         p = subprocess.run(cmd, input=t["prompt"], cwd=t["cwd"], env=env, capture_output=True, text=True, timeout=RUN_TIMEOUT)
         try:
@@ -161,8 +163,8 @@ def handle(msg):
     elif method == "tools/call":
         try:
             res = {"content": [{"type": "text", "text": str(call_tool(params.get("name"), params.get("arguments") or {}))}]}
-        except ToolError as e:
-            res = {"isError": True, "content": [{"type": "text", "text": str(e)}]}
+        except Exception as e:  # ToolError, or anything unexpected: never take the server (and running tasks) down
+            res = {"isError": True, "content": [{"type": "text", "text": str(e) if isinstance(e, ToolError) else f"Team server error: {e!r}"}]}
     elif method == "ping":
         res = {}
     else:
@@ -174,10 +176,12 @@ def main():
     if sys.argv[1:] != ["mcp"]:
         sys.exit("usage: clauderc-team mcp")
     for line in sys.stdin:
-        if line.strip():
-            out = handle(json.loads(line))
-            if out:
-                print(json.dumps(out), flush=True)
+        try:
+            out = handle(json.loads(line)) if line.strip() else None
+        except ValueError:
+            continue  # not JSON: skip it rather than die
+        if out:
+            print(json.dumps(out), flush=True)
 
 
 if __name__ == "__main__":

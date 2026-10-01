@@ -584,6 +584,18 @@ check "remove signed-in worker" "$(jqt '.ok')"
 api "worker-list"
 check "worker gone" "$(jqt '.data.workers | length == 0')"
 
+echo "worker-login helper sessions stay out of the lists"
+printf '#!/usr/bin/env bash\nexec sleep 300\n' >"$WORK/claude"; chmod +x "$WORK/claude"
+tmux new-session -d -s worker-login-zz "$WORK/claude 300"
+sleep 0.5
+api "sessions"
+grep -q "worker-login-zz" <<<"$OUT"; [[ $? -ne 0 ]]; check "sessions hides worker-login-*" $?
+api "chat-history worker-login-zz"
+check "chat refuses worker-login-*" "$(jqt '.ok == false')"
+"$HOME/.local/bin/claude-autostart" save >/dev/null
+grep -q "^worker-login-zz	" "$LIST"; [[ $? -ne 0 ]]; check "autostart does not save worker-login-*" $?
+tmux kill-session -t worker-login-zz 2>/dev/null
+
 echo "team MCP server"
 OUT="$(python3 "$HERE/test-team.py" 2>&1)"; check "clauderc-team MCP self-check" $?
 
