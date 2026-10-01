@@ -386,7 +386,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val session = _chatSession.value ?: break
                 val pin = chatPin ?: break
                 try {
-                    setChat(api.chatHistory(session, pin))
+                    setChat(session, api.chatHistory(session, pin))
                     _chatError.value = null
                 } catch (e: ApiException) {
                     if (e.code in setOf("wrong_pin", "chat_locked", "pin_not_set")) { forgetChatPin(); _chatError.value = friendly(e).first; break }
@@ -437,7 +437,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 delay(500)
                 h = api.chatHistory(session, pin)
             }
-            setChat(h)
+            setChat(session, h)
         }
     }
 
@@ -448,7 +448,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         action("Sending $text…") {
             api.chatSend(session, pin, text)
             delay(1500)
-            setChat(api.chatHistory(session, pin))
+            setChat(session, api.chatHistory(session, pin))
         }
     }
 
@@ -467,12 +467,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }) {
             api.chatSend(session, pin, text)
             delay(800)
-            setChat(api.chatHistory(session, pin))
+            setChat(session, api.chatHistory(session, pin))
         }
     }
 
     /** New history; drop pending messages the conversation now shows. */
-    private fun setChat(c: ChatData) {
+    private fun setChat(session: String, c: ChatData) {
+        if (session != _chatSession.value) return   // a late reply from the chat we just left
         _chat.value = c
         val shown = c.messages.filter { it.role == "user" }.map { it.text.trim() }.toSet()
         _chatPending.value = _chatPending.value.filterNot { it in shown }
