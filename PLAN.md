@@ -1,4 +1,4 @@
-Last updated: 2026-09-30 16:45 UTC
+Last updated: 2026-10-01 01:30 UTC
 
 ## Goal
 cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage Claude Code sessions on your own server from a phone.
@@ -13,6 +13,8 @@ Waiting on the owner: the notification bug needs the phone's Notification histor
 - [ ] Repo delete: owner needs a GitHub token with `delete_repo` (the app offers New token).
 - [ ] Optional: claude-mem note-taking via OmniRoute (free models) through `CLAUDE_MEM_OPENROUTER_BASE_URL`. Offered, not decided.
 
+- [ ] Owner decisions from the 2026-10-01 audit (not changed yet): gate `plugin install`/`marketplace add` and `open --start` on others' repos (they run code with `ALLOW_RUN=0`); require the chat PIN for `tail`/`keys`/`restart`; check `self-update` sha is on main; deny behaviour-changing names in `set-secret` (AWS_ENDPOINT_URL, PIP_INDEX_URL, DOCKER_HOST…); CI publishes debug-signed builds if signing secrets go missing; rename leaves the server folder under the old name.
+
 ## Decisions
 - 2026-09-29: Status light: green idle, amber working, red when waiting on an answer or working 5+ min (timed from when the app first saw it busy). Shared `claudeHealth()` for chat and session tiles.
 - 2026-09-29: MCP sign-in drives `claude /mcp` in a hidden tmux session; the phone pastes back the `http://localhost…/callback` URL. Only typed while the paste box shows; success judged by a fresh `claude mcp list`. A 4xx "client_id" answer drops the saved OAuth entry and retries once.
@@ -25,6 +27,9 @@ Waiting on the owner: the notification bug needs the phone's Notification histor
 - 2026-09-30: Workflow rules, planner subagent and `opusplan` live in the server's user-level Claude config, not in this repo.
 
 - 2026-09-30: Chat shows files Claude sends to the Claude app (SendUserFile in the transcript): `chat-file` (project folder or Claude's temp folder only, 10 MB) + cards with thumbnails and Save. URLs in chat are tappable.
+
+- 2026-10-01: A file Claude sent is served by `chat-file` from anywhere (its path is in a SendUserFile call); everything else must be in the project or Claude's temp folder. App messages show as a banner inside an open chat (the snackbar sits behind the dialog).
+- 2026-10-01: Claude's project folder name maps every non-alphanumeric to `-` (checked live); `api_ok` pipes its JSON (argv tops out at 128 KB).
 
 ## Known issues
 - Notifications vibrate without showing (see Tasks).
