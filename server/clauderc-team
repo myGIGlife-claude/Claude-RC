@@ -13,6 +13,7 @@ from pathlib import Path
 
 CFG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "claude-launcher"
 WORKERS = CFG / "workers"
+DIFF_SHOWN = 20000        # characters of a diff that review returns
 MODES = ("acceptEdits", "plan", "bypassPermissions")
 git_lock = threading.Lock()   # one worktree is created at a time
 CLAUDE = os.environ.get("CLAUDERC_CLAUDE", "claude")
@@ -28,7 +29,7 @@ INSTRUCTIONS = (
     "rules from this chat. Start every independent piece with delegate, then collect each with wait. "
     "Workers cannot ask questions: give each a complete, self-contained task. In a git project each task runs on its own "
     "branch (from your last commit, so commit first if it needs your edits). When wait returns, read the diff with review, "
-    "check it, then merge it or discard it; nothing reaches your branch until you merge. Use reply to continue a worker's conversation."
+    "check it, then merge it or discard it; nothing reaches your branch until you merge. A failed task keeps its partial work on its branch, so review or discard it too. Use reply to continue a worker's conversation."
 )
 
 TOOLS = [
@@ -45,8 +46,8 @@ TOOLS = [
          "task_id": {"type": "string"}, "message": {"type": "string"}}}},
     {"name": "review", "description": "Show what a finished task changed on its branch (diffstat and diff). Read it before merging.",
      "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}}},
-    {"name": "merge", "description": "Merge a task's branch into the project's current branch and clean it up. On conflicts nothing changes.",
-     "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}}},
+    {"name": "merge", "description": "Merge a task's branch into the project's current branch and clean it up (hooks are off). On conflicts nothing changes. A diff longer than review shows needs force=true after you read the rest.",
+     "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}, "force": {"type": "boolean"}}}},
     {"name": "discard", "description": "Throw away a task's branch and workspace without merging.",
      "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}}},
 ]
@@ -95,7 +96,8 @@ def git(*a, cwd):
 
 
 def workspace(worker, tid, cwd):
-    """Its own worktree + branch for a task, or None when cwd isn't a git project with a commit."""
+    """Its own worktree + branch for a task. None only when cwd isn't a git project with a commit (then the task
+    runs in the folder). A git project that can't get a workspace is an error: never let a worker edit the main checkout."""
     try:
         top = git("rev-parse", "--show-toplevel", cwd=cwd)
         base = git("rev-parse", "HEAD", cwd=cwd)
@@ -104,13 +106,14 @@ def workspace(worker, tid, cwd):
         top = top.stdout.strip()
         wt, branch = WORKERS / worker / "trees" / tid, f"cluster/{worker}/{tid}"
         with git_lock:
+            git("worktree", "prune", cwd=top)
             r = git("worktree", "add", "-q", "-b", branch, str(wt), "HEAD", cwd=top)
         if r.returncode:
-            return None
+            raise ToolError("Couldn't create the worker's own branch, so nothing was started: " + (r.stderr or r.stdout).strip()[-400:])
         rel = os.path.relpath(cwd, top)
         return {"top": top, "base": base.stdout.strip(), "wt": str(wt), "branch": branch, "cwd": str(wt if rel == "." else wt / rel)}
-    except (OSError, subprocess.SubprocessError):
-        return None
+    except (OSError, subprocess.SubprocessError) as e:
+        raise ToolError(f"Couldn't create the worker's own branch, so nothing was started: {e}")
 
 
 def seal(t):
@@ -126,8 +129,10 @@ def branch_task(tid):
     t = find_task(tid)
     if not t.get("branch") or t.get("closed"):
         raise ToolError("This task has no open branch (it ran in the project folder, or was already merged or discarded).")
-    if t["status"] != "done":
-        raise ToolError("The task isn't finished.")
+    if t["status"] == "running":
+        raise ToolError("The task is still running.")
+    if not Path(t["wt"]).is_dir():
+        raise ToolError("That task's workspace is gone (discard it to clean up).")
     return t
 
 
@@ -201,6 +206,13 @@ def run_task(t, resume):
         t.update(status="failed", error=f"Timed out after {RUN_TIMEOUT // 60} minutes.")
     except Exception as e:  # e.g. claude not installed, worker removed mid-run
         t.update(status="failed", error=str(e))
+    if t.get("branch") and t["status"] == "failed":
+        try:  # keep what the worker got done: it can still be reviewed, merged or discarded
+            stat = seal(t)
+            t["error"] = (t.get("error") or "") + (f"\n[cluster] Partial work is saved on branch {t['branch']}. Changed:\n{stat}\nUse review, then merge or discard."
+                                                   if stat else f"\n[cluster] Nothing was changed on branch {t['branch']}; discard it.")
+        except Exception:
+            pass
     t["finished"] = time.time()
     try:
         save(t)
@@ -272,10 +284,18 @@ def call_tool(name, a):
     if name == "review":
         t = branch_task(a.get("task_id"))
         d = git("diff", f"{t['base']}..{t['branch']}", cwd=t["top"]).stdout
-        return git("diff", "--stat", f"{t['base']}..{t['branch']}", cwd=t["top"]).stdout + "\n" + (d[:20000] + ("\n[diff cut at 20000 characters]" if len(d) > 20000 else ""))
+        return git("diff", "--stat", f"{t['base']}..{t['branch']}", cwd=t["top"]).stdout + "\n" + (d[:DIFF_SHOWN] + (f"\n[diff cut at {DIFF_SHOWN} characters: merge will need force=true]" if len(d) > DIFF_SHOWN else ""))
     if name == "merge":
         t = branch_task(a.get("task_id"))
-        r = git("merge", "--no-ff", "-m", f"Merge {t['branch']}", t["branch"], cwd=t["top"])
+        size = len(git("diff", f"{t['base']}..{t['branch']}", cwd=t["top"]).stdout)
+        if size > DIFF_SHOWN and a.get("force") is not True:
+            raise ToolError(f"The diff is {size} characters; review shows only the first {DIFF_SHOWN}. Read the rest with "
+                            f"`git diff {t['base'][:8]}..{t['branch']} -- <path>` (also check .github/ and hook files), then call merge again with force=true.")
+        try:  # hooks off: the worker's changes must not run code during the merge
+            r = git("-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "merge", "--no-ff", "--no-verify", "-m", f"Merge {t['branch']}", t["branch"], cwd=t["top"])
+        except subprocess.TimeoutExpired:
+            git("merge", "--abort", cwd=t["top"])
+            raise ToolError("The merge timed out; nothing changed.")
         if r.returncode:
             git("merge", "--abort", cwd=t["top"])
             raise ToolError("Merge failed, nothing changed:\n" + (r.stdout + r.stderr)[-1500:])

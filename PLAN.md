@@ -1,4 +1,4 @@
-Last updated: 2026-10-01 19:45 UTC
+Last updated: 2026-10-01 20:05 UTC
 
 ## Goal
 cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage Claude Code sessions on your own server from a phone.
@@ -44,6 +44,8 @@ Waiting on the owner: the notification bug needs the phone's Notification histor
 - 2026-10-01: Workers are attached per chat (👥 button in the chat header → `cluster-session/-attach/-assign`, SCRIPT_API 27). State in `~/.config/claude-launcher/attach/<project folder slug>.json`, read live by clauderc-team: only attached workers are visible, role/mode can override per chat. In a git project each task runs in its own worktree on branch `cluster/<worker>/<id>` (server commits the worker's changes); the main Claude uses `review` then `merge`/`discard`. Usage bars now fill with what's USED (owner found "left" confusing).
 
 - 2026-10-01: Cluster accounts also show tokens used on THIS server (5 h / 7 days, summed from Claude's session logs, one row per message id); an estimate, not the plan's own window, and blind to claude.ai/other devices.
+
+- 2026-10-01: Opus review of the cluster; first three fixes shipped (no silent run in main checkout when a worktree fails; failed/timed-out tasks keep partial work and can be reviewed/discarded; merge with hooks off, diffs over 20k need force=true). Still open, in order: detach worker runs so they survive MCP restarts (+ refuse merge/discard while a reply on the same branch runs); rewrite main's absolute paths to the worktree; open-branches/running-tasks list in the 👥 sheet; copy .env/.worktreeinclude + submodules into worktrees; per-worker lock (shared token refresh); usage-limit detection; wrap worker replies as untrusted; cache token_usage 60 s; realpath in attach_session; role only if attached.
 
 ## Known issues
 - Not fixed from the scan: draft lost after >30 s in a file picker (app re-locks); env/credentials files have no cross-process lock (writes are atomic); login-claude-code can report success when a running session refreshes its token.

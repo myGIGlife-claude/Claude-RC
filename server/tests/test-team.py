@@ -140,6 +140,39 @@ tool("wait", task_id=t1, timeout_s=30)
 err, text = tool("merge", task_id=t1)
 assert err and "nothing changed" in text, text
 assert g("status", "--porcelain").strip() == "", "a failed merge leaves the checkout clean"
+tool("discard", task_id=t1)
+
+# A git project that can't get its own branch must not run the worker in the main checkout.
+(cfg / "research" / "trees").rename(cfg / "research" / "trees.bak")
+(cfg / "research" / "trees").write_text("in the way")
+err, text = tool("delegate", worker="research", task="edit WRITEFILE")
+assert err and "nothing was started" in text, text
+assert not (repo / "cluster-out.txt").read_text().startswith("from sess-1\nfrom"), "the main checkout was touched"
+(cfg / "research" / "trees").unlink()
+(cfg / "research" / "trees.bak").rename(cfg / "research" / "trees")
+
+# A failed run keeps its partial work on the branch; it can be reviewed and discarded.
+err, tid = tool("delegate", worker="research", task="half done WRITEFILE FAIL")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert err and f"cluster/research/{tid}" in text and "cluster-out.txt" in text, text
+err, text = tool("review", task_id=tid)
+assert not err and "cluster-out.txt" in text, text
+err, text = tool("discard", task_id=tid)
+assert not err and not (cfg / "research" / "trees" / tid).exists() and f"cluster/research/{tid}" not in g("branch"), text
+
+# Merging never runs the repo's hooks, and a diff longer than review shows needs force.
+hook = repo / ".git" / "hooks" / "post-merge"
+hook.write_text("#!/bin/sh\ntouch " + str(tmp / "hook-ran") + "\n"); hook.chmod(0o755)
+err, tid = tool("delegate", worker="research", task="make BIGFILE")
+tool("wait", task_id=tid, timeout_s=30)
+err, text = tool("review", task_id=tid)
+assert not err and "merge will need force=true" in text, text[-200:]
+err, text = tool("merge", task_id=tid)
+assert err and "force=true" in text, text
+assert not (repo / "big.txt").exists()
+err, text = tool("merge", task_id=tid, force=True)
+assert not err and (repo / "big.txt").exists(), text
+assert not (tmp / "hook-ran").exists(), "post-merge hook must not run"
 proc.stdin.close()
 proc.wait(timeout=5)
 print("test-team: ok")

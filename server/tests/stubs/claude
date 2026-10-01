@@ -36,6 +36,7 @@ case "$1 ${2:-}" in
     prompt="$(cat)"
     sid="sess-1"; [[ " $* " == *" --resume "* ]] && sid="$(sed 's/.*--resume \([^ ]*\).*/\1/' <<<"$*")"
     [[ "$prompt" == *WRITEFILE* ]] && echo "from $sid" >cluster-out.txt
+    [[ "$prompt" == *BIGFILE* ]] && head -c 30000 /dev/zero | tr '\0' x >big.txt
     if [[ "$prompt" == *FAIL* ]]; then echo '{"is_error":true,"result":"stub failure","session_id":"'"$sid"'"}'; exit 1; fi
     jq -cn --arg r "cfg=${CLAUDE_CONFIG_DIR:-none} key=${ANTHROPIC_API_KEY:-unset} tok=${CLAUDE_CODE_OAUTH_TOKEN:-unset} cc=${CLAUDECODE:-unset} cwd=$PWD resume=${sid} prompt=$prompt" --arg s "$sid" \
       '{is_error:false,result:$r,session_id:$s}' ;;
