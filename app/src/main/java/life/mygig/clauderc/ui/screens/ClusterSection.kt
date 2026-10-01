@@ -246,6 +246,7 @@ private val MODE_LABELS = listOf("acceptEdits" to "Edit files", "plan" to "Read-
 @Composable
 fun ChatClusterSheet(vm: MainViewModel, onClose: () -> Unit) {
     val workers by vm.chatWorkers.collectAsState()
+    val tasks by vm.chatTasks.collectAsState()
     val busy by vm.busy.collectAsState()
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onClose,
@@ -257,6 +258,23 @@ fun ChatClusterSheet(vm: MainViewModel, onClose: () -> Unit) {
                 "Pick the accounts this chat can hand work to. Each task runs on its own branch; the main Claude reviews it and merges it.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (tasks.isNotEmpty()) {
+                Text("Open work", style = MaterialTheme.typography.titleSmall)
+                CardBox {
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        tasks.forEach { t ->
+                            Column {
+                                Text(t.task, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                Text(
+                                    t.worker + " · " + if (t.status == "running") "running" else "waiting for the main Claude to merge or discard" +
+                                        (t.branch?.let { " ($it)" } ?: ""),
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
             val ws = workers
             if (ws == null) Text("Loading…", style = MaterialTheme.typography.bodySmall)
             else if (ws.isEmpty()) Text("No other accounts yet. Add one in the Claude tab › Accounts.", style = MaterialTheme.typography.bodySmall)

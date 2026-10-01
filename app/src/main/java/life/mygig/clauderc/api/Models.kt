@@ -306,8 +306,12 @@ data class ChatWorker(
     val mode: String = "acceptEdits",
 )
 
+/** Work handed to a worker in this chat that is still running or waiting for the main Claude to merge or discard. */
 @Serializable
-data class ChatWorkersData(val workers: List<ChatWorker> = emptyList())
+data class ChatTask(val id: String, val worker: String = "", val task: String = "", val status: String = "", val branch: String? = null)
+
+@Serializable
+data class ChatWorkersData(val workers: List<ChatWorker> = emptyList(), val tasks: List<ChatTask> = emptyList())
 
 @Serializable
 data class WorkersData(val workers: List<Worker> = emptyList())

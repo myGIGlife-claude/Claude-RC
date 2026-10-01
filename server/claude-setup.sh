@@ -1273,10 +1273,14 @@ do_worker_list() {
 # Tokens this account used on THIS server in the last 5 h / 7 days, from Claude's own session logs ($1 = config dir).
 # (in = input + cache writes; cached = cache reads.) Rolling windows, so only an estimate of the plan's own windows.
 token_usage() {
-  local dir="$1/projects" c5 c7
+  local dir="$1/projects" c5 c7 cache
   [[ -d "$dir" ]] || { echo null; return; }
+  # A refresh reads every recent session log: reuse the answer for a minute.
+  cache="$HOME/.cache/claude-launcher/tokens-$(printf '%s' "$dir" | cksum | cut -d' ' -f1)"
+  if [[ -n "$(find "$cache" -mmin -1 2>/dev/null)" ]]; then cat "$cache"; return; fi
   c5="$(date -u -d '5 hours ago' +%Y-%m-%dT%H:%M:%S)"; c7="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%S)"
-  { find "$dir" -name '*.jsonl' -mtime -8 -print0 | xargs -0 -r grep -h '"output_tokens"' 2>/dev/null || true; } |
+  local out
+  out="$({ find "$dir" -name '*.jsonl' -mtime -8 -print0 | xargs -0 -r grep -h '"output_tokens"' 2>/dev/null || true; } |
     jq -rR 'fromjson? | select(.type == "assistant" and .message.usage != null) | [(.message.id // .uuid), .timestamp, (.message.usage.input_tokens // 0), (.message.usage.output_tokens // 0), (.message.usage.cache_creation_input_tokens // 0), (.message.usage.cache_read_input_tokens // 0)] | @tsv' 2>/dev/null |
     awk -F'\t' -v c5="$c5" -v c7="$c7" '
       { ts[$1] = $2; i[$1] = $3 + $5; o[$1] = $4; r[$1] = $6 }   # one row per message: the last chunk has the final counts
@@ -1286,7 +1290,9 @@ token_usage() {
           if (ts[k] >= c5) { bi += i[k]; bo += o[k]; br += r[k] }
         }
         printf "{\"five_hour\":{\"in\":%.0f,\"out\":%.0f,\"cached\":%.0f},\"seven_day\":{\"in\":%.0f,\"out\":%.0f,\"cached\":%.0f}}\n", bi, bo, br, ai, ao, ar
-      }' || echo null
+      }' || echo null)"
+  { mkdir -p "${cache%/*}" && chmod 700 "${cache%/*}" && printf '%s\n' "$out" >"$cache"; } 2>/dev/null || true
+  printf '%s\n' "$out"
 }
 
 # One account for the cluster view as a JSON line: who it is and how much usage is left.
@@ -1385,6 +1391,8 @@ attach_session() {
   chat_session "$1"
   local d; d="$(session_dir "$CHAT_SESS")"
   [[ -n "$d" ]] || api_err invalid_name "Couldn't find that session's folder."
+  d="$(readlink -f -- "$d" 2>/dev/null || printf '%s' "$d")"   # clauderc-team uses the physical path
+  ATTACH_DIR_OF="$d"
   ATTACH_FILE="$ATTACH_DIR/$(claude_proj_slug "$d").json"
 }
 attach_read() { { [[ -s "$ATTACH_FILE" ]] && jq -c 'if type == "object" then . else {} end' "$ATTACH_FILE" 2>/dev/null; } || echo '{}'; }
@@ -1407,7 +1415,12 @@ do_cluster_session() {
     out+="$(jq -c --arg n "$n" --argjson s "$signed" --argjson a "$att" \
       '{name:$n, signed_in:$s, attached:($a | has($n)), role:((try $a[$n].role catch null) // .role // ""), mode:((try $a[$n].mode catch null) // .mode // "acceptEdits")}' "$d/meta.json")"$'\n'
   done
-  api_ok "$(printf '%s' "$out" | jq -sc '{workers:.}')"
+  # Open work for this project: running tasks and branches waiting for the main Claude to merge or discard.
+  local tasks f
+  tasks="$({ for f in "$WORKERS_DIR"/*/tasks/*.json; do [[ -f "$f" ]] && cat "$f" && echo; done; } 2>/dev/null |
+    jq -sc --arg d "$ATTACH_DIR_OF" '[.[] | select(.project == $d and (.status == "running" or (.branch and (.closed | not))))
+      | {id, worker, task:(.task // "" | .[0:120]), status, branch:(.branch // null), started:(.started // 0)}] | sort_by(-.started) | .[0:12]' 2>/dev/null || true)"
+  api_ok "$(printf '%s' "$out" | jq -sc --argjson t "${tasks:-[]}" '{workers:., tasks:$t}')"
 }
 
 do_cluster_attach() {
@@ -1436,7 +1449,7 @@ do_cluster_assign() {
   esac
   attach_session "$1"
   if [[ -z "$val" ]]; then attach_write 'if has($n) then .[$n] |= del(.[$f]) else . end' --arg n "$2" --arg f "$3"
-  else attach_write '.[$n] = ((.[$n] // {}) + {($f): $v})' --arg n "$2" --arg f "$3" --arg v "${val:0:200}"; fi
+  else attach_write 'if has($n) then .[$n] = ((.[$n] // {}) + {($f): $v}) else . end' --arg n "$2" --arg f "$3" --arg v "${val:0:200}"; fi
   api_ok "$(jq -cn --arg n "$2" '{saved:$n}')"
 }
 

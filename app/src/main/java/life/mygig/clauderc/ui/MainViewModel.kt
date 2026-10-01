@@ -31,6 +31,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import life.mygig.clauderc.api.ApiException
+import life.mygig.clauderc.api.ChatTask
 import life.mygig.clauderc.api.ChatWorker
 import life.mygig.clauderc.api.ClusterAccount
 import life.mygig.clauderc.data.Server
@@ -328,6 +329,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _chat.value = null
         _chatPinNeeded.value = null
         _chatWorkers.value = null
+        _chatTasks.value = emptyList()
     }
 
     /** App went to the background: forget the PIN; the chat asks again on return. */
@@ -585,21 +587,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         else _clusterOffer.value = ClusterOffer(me.id, me.host, mine)
     }
 
-    /** The open chat's workers (attached or not); null until loaded. */
+    /** The open chat's workers (attached or not) and its open work; null until loaded. */
     private val _chatWorkers = MutableStateFlow<List<ChatWorker>?>(null)
     val chatWorkers = _chatWorkers.asStateFlow()
+    private val _chatTasks = MutableStateFlow<List<ChatTask>>(emptyList())
+    val chatTasks = _chatTasks.asStateFlow()
+    private suspend fun refreshChatWorkers(session: String) {
+        val d = api.clusterSession(session)
+        _chatWorkers.value = d.workers
+        _chatTasks.value = d.tasks
+    }
     fun loadChatWorkers() {
         val s = _chatSession.value ?: return
-        action("Loading workers…") { _chatWorkers.value = api.clusterSession(s).workers }
+        action("Loading workers…") { refreshChatWorkers(s) }
     }
     fun attachWorker(name: String, on: Boolean) {
         val s = _chatSession.value ?: return
-        action("Saving…") { api.clusterAttach(s, name, on); _chatWorkers.value = api.clusterSession(s).workers }
+        action("Saving…") { api.clusterAttach(s, name, on); refreshChatWorkers(s) }
     }
     /** Role or mode for this chat only; blank goes back to the worker's own. */
     fun assignWorker(name: String, field: String, value: String) {
         val s = _chatSession.value ?: return
-        action("Saving…") { api.clusterAssign(s, name, field, value); _chatWorkers.value = api.clusterSession(s).workers }
+        action("Saving…") { api.clusterAssign(s, name, field, value); refreshChatWorkers(s) }
     }
 
     private val _workerLogin = MutableStateFlow<Pair<String, LoginUrl>?>(null)
