@@ -1275,7 +1275,8 @@ do_worker_add() {
   exec 0</dev/null
   worker_check "$name"
   [[ ! -f "$WORKERS_DIR/$name/meta.json" ]] || api_err invalid_name "A worker named '$name' already exists."
-  mkdir -p -m 700 "$WORKERS_DIR" "$WORKERS_DIR/$name/home" "$WORKERS_DIR/$name/tasks"
+  mkdir -p "$WORKERS_DIR/$name/home" "$WORKERS_DIR/$name/tasks"
+  chmod 700 "$WORKERS_DIR" "$WORKERS_DIR/$name" "$WORKERS_DIR/$name/home" "$WORKERS_DIR/$name/tasks"
   jq -cn --arg r "${role:0:200}" '{role:$r, mode:"acceptEdits"}' >"$WORKERS_DIR/$name/meta.json"
   api_ok "$(jq -cn --arg n "$name" '{added:$n}')"
 }
