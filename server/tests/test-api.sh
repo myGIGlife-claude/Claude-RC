@@ -597,6 +597,27 @@ check "chat refuses worker-login-*" "$(jqt '.ok == false')"
 grep -q "^worker-login-zz	" "$LIST"; [[ $? -ne 0 ]]; check "autostart does not save worker-login-*" $?
 tmux kill-session -t worker-login-zz 2>/dev/null
 
+echo "cluster"
+W="$HOME/.config/claude-launcher/workers"
+mkdir -p "$HOME/.claude" "$W/ops/home" "$W/old/home"
+FUT=$(( ($(date +%s) + 3600) * 1000 )); PAST=$(( ($(date +%s) - 3600) * 1000 ))
+echo "{\"claudeAiOauth\":{\"accessToken\":\"sekrit-main\",\"expiresAt\":$FUT,\"subscriptionType\":\"max\"}}" >"$HOME/.claude/.credentials.json"
+echo '{"oauthAccount":{"emailAddress":"me@example.com"}}' >"$HOME/.claude.json"
+echo "{\"claudeAiOauth\":{\"accessToken\":\"sekrit-old\",\"expiresAt\":$PAST}}" >"$W/old/home/.credentials.json"
+echo '{"role":"research","mode":"plan"}' >"$W/ops/meta.json"; echo '{"role":"","mode":"acceptEdits"}' >"$W/old/meta.json"
+rm -f "$STUB_STATE/usage-config" "$STUB_STATE/usage-argv"
+api "cluster"
+check "cluster lists main + workers" "$(jqt '.ok and (.data.accounts | map(.name) == ["main","old","ops"])')"
+check "main: email, plan, usage" "$(jqt '.data.accounts[0] | .email == "me@example.com" and .plan == "max" and .usage.five_hour.pct == 42 and .usage.seven_day.pct == 7.5')"
+check "expired token: no usage, says so" "$(jqt '.data.accounts[1] | .usage == null and .usage_error == "expired" and .signed_in')"
+check "not signed in worker" "$(jqt '.data.accounts[2] | .signed_in == false and .role == "research" and .usage_error == null')"
+grep -q "sekrit-main" "$STUB_STATE/usage-config"; check "token sent on curl's stdin" $?
+grep -q "sekrit" "$STUB_STATE/usage-argv"; [[ $? -ne 0 ]]; check "token never in curl's arguments" $?
+grep -q "sekrit-old" "$STUB_STATE/usage-config"; [[ $? -ne 0 ]]; check "expired token never sent" $?
+api "cluster x"
+check "cluster takes no arguments" "$(jqt '.ok == false')"
+rm -rf "$W/ops" "$W/old" "$HOME/.claude.json"
+
 echo "team MCP server"
 OUT="$(python3 "$HERE/test-team.py" 2>&1)"; check "clauderc-team MCP self-check" $?
 
