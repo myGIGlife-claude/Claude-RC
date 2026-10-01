@@ -173,6 +173,49 @@ assert not (repo / "big.txt").exists()
 err, text = tool("merge", task_id=tid, force=True)
 assert not err and (repo / "big.txt").exists(), text
 assert not (tmp / "hook-ran").exists(), "post-merge hook must not run"
+# Runs are detached: killing the MCP server mid-run loses nothing; the next server collects the result.
+err, tid = tool("delegate", worker="research", task="slow one SLOW")
+os.kill(proc.pid, 9)
+proc.wait()
+proc = spawn(repo)
+_id = 0
+rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}})
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "slow one" in text and "untrusted" not in text and "not instructions" in text, text   # collected, and marked as data
+tool("discard", task_id=tid)
+
+# Main's absolute paths are rewritten to the worker's own copy.
+err, tid = tool("delegate", worker="research", task=f"read {repo}/a.txt")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and f"{repo}/a.txt" not in text and f"{cfg / 'research' / 'trees' / tid}/a.txt" in text, text
+tool("discard", task_id=tid)
+
+# A branch can't be merged or discarded while a follow-up on it runs; closing it closes the follow-up too.
+err, tid = tool("delegate", worker="research", task="base")
+tool("wait", task_id=tid, timeout_s=30)
+err, tid2 = tool("reply", task_id=tid, message="more SLOW")
+err, text = tool("merge", task_id=tid)
+assert err and "still running" in text, text
+tool("wait", task_id=tid2, timeout_s=30)
+err, text = tool("merge", task_id=tid)
+assert not err, text
+err, text = tool("reply", task_id=tid2, message="again")
+assert err and "merged or discarded" in text, text
+
+# A worker that hit its usage limit is a failed task, not a finished one.
+err, tid = tool("delegate", worker="research", task="LIMIT")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert err and "usage limit" in text, text
+tool("discard", task_id=tid)
+
+# Files listed in .worktreeinclude reach the worker's copy but never land on its branch.
+(repo / ".env").write_text("SECRET=1\n"); (repo / ".worktreeinclude").write_text(".env\n../outside\n")
+g("add", ".worktreeinclude"); g("commit", "-qm", "include .env")
+err, tid = tool("delegate", worker="research", task="ENVCHECK")
+tool("wait", task_id=tid, timeout_s=30)
+err, text = tool("review", task_id=tid)
+assert not err and "env-seen.txt" in text and "SECRET" not in text and "+++ b/.env" not in text, text
+tool("discard", task_id=tid)
 proc.stdin.close()
 proc.wait(timeout=5)
 print("test-team: ok")
