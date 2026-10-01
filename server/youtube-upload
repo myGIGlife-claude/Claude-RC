@@ -37,6 +37,8 @@ def access_token():
     except urllib.error.HTTPError as e:
         fail(f"Google refused the YouTube login ({e.code}: {e.read().decode(errors='replace')[:200]}). "
              "Reconnect YouTube in the cLaudeRC app.")
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+        fail(f"couldn't reach Google to sign in to YouTube ({e})")
 
 
 def main():
@@ -52,7 +54,7 @@ def main():
     if not os.path.isfile(a.file):
         fail(f"no such file: {a.file}")
     size = os.path.getsize(a.file)
-    token = access_token()
+    token, token_at = access_token(), time.time()
     meta = {
         "snippet": {"title": a.title[:100], "description": a.description[:5000], "categoryId": a.category,
                     "tags": [t.strip() for t in a.tags.split(",") if t.strip()]},
@@ -72,6 +74,8 @@ def main():
     sent, tries = 0, 0
     with open(a.file, "rb") as f:
         while True:
+            if time.time() - token_at > 2700:   # access tokens last about an hour: renew during long uploads
+                token, token_at = access_token(), time.time()
             f.seek(sent)
             chunk = f.read(CHUNK)
             end = sent + len(chunk) - 1
