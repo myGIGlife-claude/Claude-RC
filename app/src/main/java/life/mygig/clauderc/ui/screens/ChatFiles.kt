@@ -111,7 +111,7 @@ private fun FileItem(vm: MainViewModel, path: String) {
                 scope.launch {
                     working = true; note = null
                     runCatching { vm.chatFileBytes(path) }
-                        .onSuccess { pending = it; save.launch(name) }
+                        .onSuccess { pending = it; vm.externalScreen(); save.launch(name) }
                         .onFailure { note = "Couldn't get it: ${it.message}" }
                     working = false
                 }

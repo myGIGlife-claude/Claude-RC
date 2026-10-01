@@ -121,6 +121,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
     var primed by remember(speak) { mutableStateOf(false) }
     LaunchedEffect(chat?.messages, voice.value) {
         val e = voice.value ?: return@LaunchedEffect
+        if (chat == null) return@LaunchedEffect   // still loading: wait, so old replies aren't read out
         val replies = chat?.messages.orEmpty().filter { it.role == "assistant" }.map { (it.id + it.text.hashCode()) to it.text }
         if (!primed) { spoken += replies.map { it.first }; primed = true; return@LaunchedEffect }
         replies.filter { it.first !in spoken }.forEach { (k, t) -> spoken += k; e.speak(forSpeech(t), TextToSpeech.QUEUE_ADD, null, k) }
@@ -337,7 +338,7 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
         if (r.resultCode == Activity.RESULT_OK && !said.isNullOrBlank()) text = (text.trimEnd() + " " + said).trim()
     }
     Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        IconButton(onClick = { pick.launch(arrayOf("*/*")) }, enabled = enabled, modifier = Modifier.height(52.dp)) {
+        IconButton(onClick = { vm.externalScreen(); pick.launch(arrayOf("*/*")) }, enabled = enabled, modifier = Modifier.height(52.dp)) {
             Icon(Icons.Filled.AttachFile, contentDescription = "Attach a file or photo")
         }
         // Listen inside the app (no Google pop-up); the system dialog is the fallback.
@@ -386,6 +387,7 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
                     return@IconButton
                 }
                 try {
+                    vm.externalScreen()
                     dictate.launch(
                         Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
                             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)

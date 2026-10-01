@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.DownloadManager
 import android.content.Intent
 import android.net.Uri
+import android.os.SystemClock
 import android.os.Environment
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -303,7 +304,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val session = _chatSession.value ?: throw IllegalStateException("The chat is closed")
         val pin = chatPin ?: throw IllegalStateException("The chat is locked")
         val f = try { api.chatFile(session, pin, path) } catch (e: ApiException) { throw IllegalStateException(friendly(e).first) }
-        return android.util.Base64.decode(f.data, android.util.Base64.DEFAULT).also { fileCache.put(path, it) }
+        // Megabytes of text: decode off the main thread.
+        return withContext(Dispatchers.Default) { android.util.Base64.decode(f.data, android.util.Base64.DEFAULT) }.also { fileCache.put(path, it) }
     }
 
     fun closeChat() {
@@ -316,8 +318,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** App went to the background: forget the PIN; the chat asks again on return. */
+    /** A system screen the chat opened (file picker, Save, voice): leaving for it isn't "leaving the app". */
+    private var externalUntil = 0L
+    fun externalScreen() { externalUntil = SystemClock.elapsedRealtime() + 120_000 }
+
     fun lockChat() {
         chatPoller?.cancel()
+        if (SystemClock.elapsedRealtime() < externalUntil) return
         if (chatPin != null && pinVault.load() != null) return
         chatPin = null
         if (_chatSession.value != null) { _chat.value = null; _chatPinNeeded.value = PinStatus(set = true) }
@@ -491,7 +498,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _mcpAuth.value = name to api.mcpAuthStart(name).url
     }
 
-    fun mcpAuthFinish(callbackUrl: String) = action("Finishing sign-in…") {
+    fun mcpAuthFinish(callbackUrl: String) = action("Finishing sign-in…", onError = { e -> _mcpAuth.value = null; report(e) }) {
         _mcp.value = api.mcpAuthFinish(callbackUrl)
         _mcpAuth.value = null
         say("Signed in. Restart sessions to use it.")
@@ -1187,6 +1194,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         tailTarget = null
         clonePollers.values.forEach { it.cancel() }
         clonePollers.clear()
+        // Another server: nothing from the old one may stay on screen or in use.
+        _mcp.value = null
+        _plugins.value = null
+        _mcpAuth.value = null
+        _detail.value = null
+        closeChat()
+        chatPin = null
+        pinVault.clear()
     }
 
     fun acceptHostKey(accept: Boolean) {

@@ -62,7 +62,7 @@ main() {
   # Bun: some Claude Code plugins' hooks run on it.
   if ! command -v bun >/dev/null && [[ ! -x "$HOME/.local/bin/bun" ]]; then
     echo "Installing Bun into ~/.local/bin (plugin hooks need it)..."
-    "$HOME/claude-setup.sh" --api install-cli bun </dev/null >/dev/null 2>&1 || echo "Note: Bun wasn't installed." >&2
+    timeout 90 "$HOME/claude-setup.sh" --api install-cli bun </dev/null >/dev/null 2>&1 || echo "Note: Bun wasn't installed." >&2
   fi
 
   if command -v claude-autostart >/dev/null || [[ -x "$HOME/.local/bin/claude-autostart" ]]; then

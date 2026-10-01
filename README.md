@@ -128,7 +128,7 @@ also get one notification per new build. Newer server scripts show the same
 bar (**View**) and a card on Connections with **Update now** (the server runs
 that commit's `install.sh`, after you confirm) or **Copy command** to paste on
 the server yourself. `install.sh` records the commit it installed so the app
-can compare. The app needs server scripts API 17 or newer.
+can compare. The app tells you when the server scripts need an update.
 
 ## Security
 

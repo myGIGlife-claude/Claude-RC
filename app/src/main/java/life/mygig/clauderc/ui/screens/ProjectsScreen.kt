@@ -215,7 +215,7 @@ private fun RepoActions(vm: MainViewModel, repo: Repo, onDismiss: () -> Unit) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     TextButton(onClick = { ask = Ask.RENAME }) { Text("Rename") }
                     TextButton(onClick = { ask = Ask.VISIBILITY }) { Text(if (repo.private) "Make public" else "Make private") }
-                    TextButton(onClick = { ask = Ask.DELETE }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                    TextButton(onClick = { typed = ""; ask = Ask.DELETE }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
                 }
             }
         },
@@ -223,7 +223,7 @@ private fun RepoActions(vm: MainViewModel, repo: Repo, onDismiss: () -> Unit) {
         dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
 
-    val cancel = { ask = null }
+    val cancel = { ask = null; typed = "" }
     when (ask) {
         Ask.RENAME -> AlertDialog(
             onDismissRequest = cancel,
@@ -277,7 +277,7 @@ private fun RepoActions(vm: MainViewModel, repo: Repo, onDismiss: () -> Unit) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = { vm.deleteRepo(repo); ask = null; onDismiss() }, enabled = typed.trim().equals("delete", ignoreCase = true)) {
+                TextButton(onClick = { vm.deleteRepo(repo); ask = null; typed = ""; onDismiss() }, enabled = typed.trim().equals("delete", ignoreCase = true)) {
                     Text("Delete forever", color = MaterialTheme.colorScheme.error)
                 }
             },
