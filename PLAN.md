@@ -49,6 +49,8 @@ In flight: (1) main build for #85 (cluster hardening) then tell the owner to tap
 
 - 2026-10-01: Cluster round 2 shipped: runs are detached (`flock` per worker + `timeout`, output in tasks/<id>.out; the next `wait` finalizes them, MCP restarts lose nothing); merge/discard refused while a follow-up on the branch runs; main's paths rewritten to the worker's copy; `.worktreeinclude` files + submodules copied into worktrees (never committed); usage-limit replies become failed tasks; worker replies are marked as data; token scan cached 60 s; 👥 sheet lists open work. Still open from the review: strip main's mirrored secrets from worker env (workers run as the same Unix user, no real isolation), `--allowedTools` allowlist so edit-only workers can run tests, a one-time hint that workers are off by default per chat.
 
+- 2026-10-01: Cluster round 3: workers get none of the env-file variables (service tokens); edit-only workers may run the commands the OWNER lists in the project's `.cluster-allowed-tools` (read from the main project, `--allowed-tools`); Accounts help says to attach workers per chat with 👥. Only one Claude account exists so far: workers are tested with stubs only, try with a real second account when there is one. Still true: workers run as the same Unix user (no real isolation).
+
 ## Known issues
 - Not fixed from the scan: draft lost after >30 s in a file picker (app re-locks); env/credentials files have no cross-process lock (writes are atomic); login-claude-code can report success when a running session refreshes its token.
 - Notifications vibrate without showing (see Tasks).

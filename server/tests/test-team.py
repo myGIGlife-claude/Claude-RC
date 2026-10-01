@@ -8,7 +8,10 @@ HERE = Path(__file__).resolve().parent
 tmp = Path(tempfile.mkdtemp())
 cfg = tmp / "cfg" / "claude-launcher" / "workers"
 env = {**os.environ, "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(HERE / "stubs" / "claude"),
-       "ANTHROPIC_API_KEY": "secret-should-not-leak", "CLAUDE_CODE_OAUTH_TOKEN": "main-token", "CLAUDECODE": "1", "STUB_STATE": str(tmp / "stub")}
+       "ANTHROPIC_API_KEY": "secret-should-not-leak", "CLAUDE_CODE_OAUTH_TOKEN": "main-token", "CLAUDECODE": "1", "STUB_STATE": str(tmp / "stub"),
+       "CLAUDERC_TEST_SECRET": "service-token"}
+cfg.parent.mkdir(parents=True, exist_ok=True)
+(cfg.parent / "env").write_text("export CLAUDERC_TEST_SECRET='service-token'\n")
 for name, signed in (("research", True), ("ui", False)):
     (cfg / name / "home").mkdir(parents=True)
     (cfg / name / "tasks").mkdir()
@@ -215,6 +218,14 @@ err, tid = tool("delegate", worker="research", task="ENVCHECK")
 tool("wait", task_id=tid, timeout_s=30)
 err, text = tool("review", task_id=tid)
 assert not err and "env-seen.txt" in text and "SECRET" not in text and "+++ b/.env" not in text, text
+tool("discard", task_id=tid)
+# Service tokens mirrored into the main session never reach a worker; allowed tools come from the owner's file only.
+(repo / ".cluster-allowed-tools").write_text("Bash(npm test:*)\nBash(rm -rf /)\nBash(a,b)\nnot a pattern\n")
+attach(repo, {"research": {"mode": "acceptEdits"}})
+err, tid = tool("delegate", worker="research", task="check env")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "svc=unset" in text, text
+assert "--allowed-tools Bash(npm test:*),Bash(rm -rf /)" in text and "a,b" not in text.replace("Bash(npm test:*),Bash(rm -rf /)", ""), text
 tool("discard", task_id=tid)
 proc.stdin.close()
 proc.wait(timeout=5)

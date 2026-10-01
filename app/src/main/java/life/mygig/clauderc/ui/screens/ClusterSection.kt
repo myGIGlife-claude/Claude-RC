@@ -45,7 +45,7 @@ import life.mygig.clauderc.ui.theme.WarnAmber
 
 private val MODES = listOf("acceptEdits", "plan", "bypassPermissions")
 private fun modeHint(m: String) = when (m) {
-    "acceptEdits" -> "edits files, can't run commands"
+    "acceptEdits" -> "edits files; runs only commands the project lists in .cluster-allowed-tools"
     "plan" -> "read-only: research and plans"
     "bypassPermissions" -> "runs anything without asking"
     else -> m
@@ -73,7 +73,7 @@ fun ClusterSection(vm: MainViewModel) {
             Column(Modifier.weight(1f)) {
                 Text("cLaudeCluster", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Usage per account. Tell the main chat which work goes to which worker.",
+                    "Usage per account. Attach workers to a chat with 👥 in that chat; the main Claude then hands them work.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
