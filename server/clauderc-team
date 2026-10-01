@@ -5,7 +5,7 @@ owner's other Claude accounts ("workers") set up in the cLaudeRC app's Team scre
 A task is a headless `claude -p` run in the caller's project folder under the
 worker's own CLAUDE_CONFIG_DIR. State lives in <workers>/<name>/tasks/<id>.json.
 """
-import json, os, re, subprocess, sys, threading, time, uuid
+import json, os, re, signal, subprocess, sys, threading, time, uuid
 from pathlib import Path
 
 WORKERS = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "claude-launcher" / "workers"
@@ -13,7 +13,8 @@ CLAUDE = os.environ.get("CLAUDERC_CLAUDE", "claude")
 RUN_TIMEOUT = 1800        # seconds one worker run may take
 NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,29}$")
 ID_RE = re.compile(r"^[0-9a-f]{8}$")
-live = set()              # task ids run by this process; anything else 'running' on disk is lost
+live = {}                 # task id -> worker process, for runs of this process; anything else 'running' on disk is lost
+WAIT_SLICE = 60           # one wait call returns after this long so the request loop is never stuck
 # ponytail: tasks die with this process (one MCP server per Claude session); persist/detach if long runs must survive restarts.
 
 INSTRUCTIONS = (
@@ -31,7 +32,7 @@ TOOLS = [
          "worker": {"type": "string"}, "task": {"type": "string", "description": "Complete, self-contained instructions."}}}},
     {"name": "wait", "description": "Wait for a task and return the worker's final reply.",
      "inputSchema": {"type": "object", "required": ["task_id"], "properties": {
-         "task_id": {"type": "string"}, "timeout_s": {"type": "integer", "description": "Default 600, max 900."}}}},
+         "task_id": {"type": "string"}, "timeout_s": {"type": "integer", "description": "Default 600, max 900; each call returns after about a minute (call again if still running)."}}}},
     {"name": "reply", "description": "Send a follow-up to a finished task's worker (same conversation). Returns a new task_id.",
      "inputSchema": {"type": "object", "required": ["task_id", "message"], "properties": {
          "task_id": {"type": "string"}, "message": {"type": "string"}}}},
@@ -68,6 +69,13 @@ def save(t):
     tmp.replace(p)
 
 
+def kill_group(proc):
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)  # the worker and everything it started
+    except OSError:
+        pass
+
+
 def find_task(tid):
     if not isinstance(tid, str) or not ID_RE.match(tid):
         raise ToolError(f"Bad task_id {tid!r}.")
@@ -85,14 +93,24 @@ def run_task(t, resume):
         env = {k: v for k, v in os.environ.items()
                if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDECODE") and not k.startswith("CLAUDE_CODE_")}
         env["CLAUDE_CONFIG_DIR"] = str(w / "home")
-        p = subprocess.run(cmd, input=t["prompt"], cwd=t["cwd"], env=env, capture_output=True, text=True, timeout=RUN_TIMEOUT)
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=t["cwd"],
+                                env=env, text=True, start_new_session=True)
+        live[t["id"]] = proc
         try:
-            out = json.loads(p.stdout)
+            stdout, stderr = proc.communicate(t["prompt"], timeout=RUN_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            kill_group(proc)
+            proc.communicate()
+            raise
+        try:
+            out = json.loads(stdout)
         except ValueError:
+            out = None
+        if not isinstance(out, dict):
             out = {}
         t["session_id"] = out.get("session_id") or resume
-        if p.returncode or out.get("is_error"):
-            t.update(status="failed", error=(out.get("result") or p.stderr or f"claude exited {p.returncode}")[-2000:])
+        if proc.returncode or out.get("is_error") or "result" not in out:
+            t.update(status="failed", error=(out.get("result") or stderr or stdout or f"claude exited {proc.returncode}")[-2000:])
         else:
             t.update(status="done", reply=out.get("result", ""))
     except subprocess.TimeoutExpired:
@@ -104,32 +122,33 @@ def run_task(t, resume):
         save(t)
     except OSError:
         pass  # worker folder removed while the task ran
-    live.discard(t["id"])
+    live.pop(t["id"], None)
 
 
-def start(worker, prompt, resume=None):
+def start(worker, prompt, resume=None, cwd=None):
     w = worker_dir(worker)
     if not (w / "home" / ".credentials.json").is_file():
         raise ToolError(f"Worker {worker} isn't signed in. Sign it in from the Team screen in the cLaudeRC app.")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ToolError("The task is empty.")
     t = {"id": uuid.uuid4().hex[:8], "worker": worker, "task": prompt[:300], "prompt": prompt,
-         "cwd": os.getcwd(), "status": "running", "started": time.time()}
+         "cwd": cwd or os.getcwd(), "status": "running", "started": time.time()}
     save(t)
-    live.add(t["id"])
+    live[t["id"]] = None
     threading.Thread(target=run_task, args=(t, resume), daemon=True).start()
     return t["id"]
 
 
 def wait(tid, timeout_s=600):
-    deadline = time.time() + min(int(timeout_s or 600), 900)
+    deadline = time.time() + min(int(timeout_s or 600), 900, WAIT_SLICE)
     while True:
+        alive = tid in live  # read before the file: a run that just finished has saved by then
         t = find_task(tid)
         if t["status"] == "done":
             return t.get("reply", "")
         if t["status"] == "failed":
             raise ToolError(t.get("error", "The worker failed."))
-        if tid not in live:
+        if not alive:
             raise ToolError("This task was lost (the Team server restarted while it ran). Delegate it again.")
         if time.time() >= deadline:
             return f"Still running. Call wait again with task_id {tid}."
@@ -147,7 +166,7 @@ def call_tool(name, a):
         t = find_task(a.get("task_id"))
         if t["status"] != "done" or not t.get("session_id"):
             raise ToolError("Only a finished task can be replied to.")
-        return start(t["worker"], a.get("message"), resume=t["session_id"])
+        return start(t["worker"], a.get("message"), resume=t["session_id"], cwd=t["cwd"])
     raise ToolError(f"Unknown tool {name}.")
 
 
@@ -175,13 +194,27 @@ def handle(msg):
 def main():
     if sys.argv[1:] != ["mcp"]:
         sys.exit("usage: clauderc-team mcp")
+    os.umask(0o077)  # task files hold prompts and replies
+    def stop(*_):
+        for tid, proc in list(live.items()):
+            if proc:
+                kill_group(proc)
+                try:
+                    t = find_task(tid)
+                    t.update(status="failed", error="Cancelled: the Team server stopped.", finished=time.time())
+                    save(t)
+                except Exception:
+                    pass
+        os._exit(0)
+    signal.signal(signal.SIGTERM, stop)
     for line in sys.stdin:
         try:
             out = handle(json.loads(line)) if line.strip() else None
-        except ValueError:
-            continue  # not JSON: skip it rather than die
+        except Exception:
+            continue  # not JSON, or not a request object: skip it rather than die
         if out:
             print(json.dumps(out), flush=True)
+    stop()  # stdin closed: the Claude session ended, so don't leave workers running unattended
 
 
 if __name__ == "__main__":

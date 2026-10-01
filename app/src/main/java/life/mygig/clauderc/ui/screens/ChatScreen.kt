@@ -98,6 +98,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
     var speak by remember { mutableStateOf(voicePrefs.getBoolean("speak", false)) }
     val voice = remember { ChatVoice(context) { vm.say("No text-to-speech voice on this phone.") } }
     DisposableEffect(voice) { onDispose { voice.shutdown() } }
+    LaunchedEffect(pinNeeded) { if (pinNeeded != null) voice.pause() }   // locked: stop reading aloud
     LaunchedEffect(speak) { voicePrefs.edit().putBoolean("speak", speak).apply(); if (!speak) voice.pause() }
     // With the speaker on, read Claude's new replies aloud (not the ones already there when the chat opened).
     val spoken = remember { mutableSetOf<String>() }
@@ -317,7 +318,20 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
         val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
             if (c.moveToFirst()) c.getString(0) else null
         } ?: "file"
-        val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+        // Read at most 15 MB + 1 byte, so a huge file is refused without being loaded whole.
+        val bytes = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { s ->
+                val out = java.io.ByteArrayOutputStream()
+                val buf = ByteArray(64 * 1024)
+                while (true) {
+                    val n = s.read(buf)
+                    if (n < 0) break
+                    if (out.size() + n > 15 * 1024 * 1024) return@use null
+                    out.write(buf, 0, n)
+                }
+                out.toByteArray()
+            }
+        }.getOrNull()
         if (bytes == null || bytes.isEmpty() || bytes.size > 15 * 1024 * 1024) {
             vm.say("That file couldn't be read, or it's bigger than 15 MB.")
         } else {

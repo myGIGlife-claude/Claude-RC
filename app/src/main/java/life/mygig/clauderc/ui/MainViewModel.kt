@@ -334,6 +334,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Back in front while still unlocked: carry on polling. */
     fun resumeChat() {
+        externalUntil = 0L   // the grace window covers one trip out (picker, Save), not later ones
         if (chatPin != null && _chatSession.value != null && _chatPinNeeded.value == null) startChatPolling()
     }
 
