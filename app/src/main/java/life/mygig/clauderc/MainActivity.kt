@@ -32,6 +32,7 @@ class MainActivity : FragmentActivity(), AppLock {
 
     override fun onStart() {
         super.onStart()
+        vm.setForeground(true)
         vm.resumeChat()
         // Lock again after a while in the background. The short grace period
         // covers the PIN screen (its own activity) and quick trips to the
@@ -43,6 +44,7 @@ class MainActivity : FragmentActivity(), AppLock {
 
     override fun onStop() {
         super.onStop()
+        vm.setForeground(false)
         if (!isChangingConfigurations) {
             backgroundedAt = SystemClock.elapsedRealtime()
             vm.lockChat()   // chat needs the PIN again after any trip away from the app

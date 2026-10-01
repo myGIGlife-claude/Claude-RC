@@ -124,7 +124,8 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
     val unlockThen = { reason: String, action: () -> Unit -> scope.launch { if (lock.unlock(reason)) action() }; Unit }
 
     // App lock is required: turn it on first (or set a screen lock on the phone).
-    if (!s.appLock) {
+    // (also when the phone's screen lock was removed since: unlock() would pass without checking anything)
+    if (!s.appLock || !lock.canAuthenticate()) {
         ClaudeRcTheme(s.theme) {
             RequireLockScreen(lock) { scope.launch { if (lock.unlock("Turn on App lock")) { vm.markUnlocked(); vm.setAppLock(true) } } }
         }
@@ -224,7 +225,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                                             DropdownMenu(expanded = serverMenu, onDismissRequest = { serverMenu = false }) {
                                                 s.servers.filter { it.isConfigured }.forEach { srv ->
                                                     DropdownMenuItem(
-                                                        text = { Text("${srv.user}@${srv.host}") },
+                                                        text = { Text(srv.host) },
                                                         leadingIcon = {
                                                             if (srv.id == s.activeId) Icon(Icons.Filled.Check, contentDescription = "Current")
                                                         },

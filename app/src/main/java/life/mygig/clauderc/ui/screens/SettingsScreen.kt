@@ -193,7 +193,8 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 visualTransformation = if (showUser) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
                     IconButton(onClick = {
-                        showUser = !showUser
+                        if (showUser) showUser = false
+                        else scope.launch { if (appLock?.unlock("Show username") != false) showUser = true }
                     }) {
                         Icon(
                             if (showUser) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
@@ -263,6 +264,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                             }
                         })
                     }
+                    if (s.notify) OutlinedButton(onClick = { if (SessionWatcher.allowed(context)) SessionWatcher.test(context) else vm.say("Notifications are off for cLaudeRC in the phone's settings.") }) { Text("Send a test notification") }
                 }
             }
 
