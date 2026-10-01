@@ -26,6 +26,8 @@ import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
@@ -738,3 +740,20 @@ private fun AwsLogin(vm: MainViewModel, busy: Boolean) {
     }
 }
 
+
+/**
+ * Full-screen dialogs only get the keyboard's insets once they change, so a keyboard that opens
+ * with the dialog (tap in the box) can first sit over the bottom. Resize the window for it and
+ * re-send the insets whenever the keyboard shows or hides.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun DialogKeyboardFix() {
+    val view = androidx.compose.ui.platform.LocalView.current
+    val window = (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
+    val imeVisible = WindowInsets.isImeVisible
+    androidx.compose.runtime.SideEffect {
+        window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+    }
+    androidx.compose.runtime.LaunchedEffect(imeVisible) { androidx.core.view.ViewCompat.requestApplyInsets(view) }
+}

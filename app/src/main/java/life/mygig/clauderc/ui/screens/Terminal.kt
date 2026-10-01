@@ -78,6 +78,7 @@ private fun termText(size: Int) = TextStyle(
 @Composable
 private fun TerminalWindow(title: String, subtitle: String, onClose: () -> Unit, actions: @Composable () -> Unit = {}, content: @Composable ColumnScope.() -> Unit) {
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        DialogKeyboardFix()
         Column(Modifier.fillMaxSize().background(Term.Bg).statusBarsPadding().navigationBarsPadding().imePadding()) {
             Row(
                 Modifier.fillMaxWidth().background(Term.Panel).padding(start = 4.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
