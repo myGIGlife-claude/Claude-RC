@@ -1,4 +1,4 @@
-Last updated: 2026-10-01 19:00 UTC
+Last updated: 2026-10-01 19:10 UTC
 
 ## Goal
 cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage Claude Code sessions on your own server from a phone.
@@ -17,6 +17,7 @@ Waiting on the owner: the notification bug needs the phone's Notification histor
 - [ ] Owner decisions from the 2026-10-01 audit (not changed yet): gate `plugin install`/`marketplace add` and `open --start` on others' repos (they run code with `ALLOW_RUN=0`); require the chat PIN for `tail`/`keys`/`restart`; check `self-update` sha is on main; deny behaviour-changing names in `set-secret` (AWS_ENDPOINT_URL, PIP_INDEX_URL, DOCKER_HOST…); CI publishes debug-signed builds if signing secrets go missing; rename leaves the server folder under the old name.
 
 ## Decisions
+- 2026-10-01: Busy screens split with `PillTabs` (components/Tabs.kt): Claude = Accounts/Plugins/Tools, Connections = Logins/MCP/Keys, Settings = Connection/Security/App (first-run setup stays one page). Owner picked the tabs option from the HTML preview. Sessions/Projects are single lists: no tabs.
 - 2026-10-01: Mic/dictation removed from chat. Full code scan fixed in #79 (chat_session subshell bug sent messages to the wrong session; team workers killed by process group; uploads private + git-ignored; PIN grace one-shot; stale server data on switch; polling pauses in background). SSH key stays unlocked-device-only.
 - 2026-09-29: Status light: green idle, amber working, red when waiting on an answer or working 5+ min (timed from when the app first saw it busy). Shared `claudeHealth()` for chat and session tiles.
 - 2026-09-29: MCP sign-in drives `claude /mcp` in a hidden tmux session; the phone pastes back the `http://localhost…/callback` URL. Only typed while the paste box shows; success judged by a fresh `claude mcp list`. A 4xx "client_id" answer drops the saved OAuth entry and retries once.

@@ -68,8 +68,7 @@ fun ClusterSection(vm: MainViewModel) {
             Column(Modifier.weight(1f)) {
                 Text("cLaudeCluster", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Your Claude accounts and what's left on each. Tell the main chat which work goes to which worker " +
-                        "(\"research goes to research, UI goes to ui\") and it hands tasks over.",
+                    "Usage left per account. Tell the main chat which work goes to which worker.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

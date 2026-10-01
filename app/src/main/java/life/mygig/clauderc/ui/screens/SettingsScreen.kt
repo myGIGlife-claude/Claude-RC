@@ -15,6 +15,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import life.mygig.clauderc.ui.components.CardBox
 import life.mygig.clauderc.ui.components.Health
+import life.mygig.clauderc.ui.components.PillTabs
 import life.mygig.clauderc.ui.components.SectionLabel
 import life.mygig.clauderc.ui.components.StatusDot
 import life.mygig.clauderc.ui.theme.Term
@@ -91,6 +92,8 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
     var port by rememberSaveable(s.port) { mutableStateOf(s.port.toString()) }
     var user by rememberSaveable(s.user) { mutableStateOf(s.user) }
     var regenStep by remember { mutableIntStateOf(0) }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    val t = if (firstRun) 0 else tab
     val notifyPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) vm.setNotify(true) else vm.say("Notifications stay off: Android didn't allow them. You can allow them in the phone's app settings.")
     }
@@ -137,8 +140,10 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
             Text("The server needs curl, jq, tmux, git and flock.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
+        if (!firstRun) PillTabs(listOf("Connection", "Security", "App"), tab, { tab = it })
+
         // On first run the setup card above already carries the key.
-        if (!firstRun) {
+        if (t == 1) {
             SectionLabel("This phone's key")
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -171,6 +176,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
 
         }
 
+        if (t == 0) {
         SectionLabel("Server")
         OutlinedTextField(
             value = host, onValueChange = { host = it.trim() },
@@ -225,7 +231,9 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
             }
         }
 
-        if (!firstRun) {
+        }
+
+        if (t == 0 && !firstRun) {
             SectionLabel("Servers")
             CardBox {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -243,7 +251,9 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                     OutlinedButton(onClick = { vm.addServer() }, modifier = Modifier.fillMaxWidth()) { Text("+ Add server") }
                 }
             }
+        }
 
+        if (t == 2) {
             SectionLabel("Notifications")
             CardBox {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -267,7 +277,9 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                     if (s.notify) OutlinedButton(onClick = { if (SessionWatcher.allowed(context)) SessionWatcher.test(context) else vm.say("Notifications are off for cLaudeRC in the phone's settings.") }) { Text("Send a test notification") }
                 }
             }
+        }
 
+        if (t == 1) {
             SectionLabel("Chat")
             CardBox {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -279,7 +291,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 }
             }
 
-            SectionLabel("App")
+            SectionLabel("Access")
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("App lock")
@@ -290,7 +302,10 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 }
                 Text("Always on", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
             }
-            Text("Theme")
+        }
+
+        if (t == 2) {
+            SectionLabel("Theme")
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 ThemeMode.entries.forEachIndexed { i, m ->
                     SegmentedButton(
