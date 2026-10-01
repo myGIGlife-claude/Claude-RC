@@ -44,6 +44,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -64,6 +65,7 @@ import life.mygig.clauderc.ui.components.CardBox
 import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.InfoTile
 import life.mygig.clauderc.ui.components.OneLine
+import life.mygig.clauderc.ui.components.PillTabs
 import life.mygig.clauderc.ui.components.SectionLabel
 import life.mygig.clauderc.ui.components.isNarrow
 import life.mygig.clauderc.ui.theme.Term
@@ -81,6 +83,7 @@ fun ClaudeScreen(vm: MainViewModel) {
     var open by remember { mutableStateOf<InstalledPlugin?>(null) }
     var addMarket by remember { mutableStateOf(false) }
     var custom by remember { mutableStateOf(false) }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     val change = { args: String -> vm.claudeCommand(args) }
 
     LaunchedEffect(status?.scriptApi) { vm.loadPlugins() }
@@ -95,49 +98,50 @@ fun ClaudeScreen(vm: MainViewModel) {
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            fullItem {
-                CardBox {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Claude Code ${p?.claudeVersion ?: ""}".trim(), fontWeight = FontWeight.SemiBold)
-                            Text("Doctor checks the install. Full checkup runs /doctor in a chat of its own, where Claude can also fix what it finds.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            OutlinedButton(onClick = { vm.claudeCommand("doctor") }, enabled = busy == null) { Text("Doctor") }
-                            TextButton(onClick = { vm.startCheckup() }, enabled = busy == null) { Text("Full checkup") }
+            fullItem { Text("Claude Code ${p?.claudeVersion ?: ""}".trim(), style = MaterialTheme.typography.titleMedium) }
+            fullItem { PillTabs(listOf("Accounts", "Plugins", "Tools"), tab, { tab = it }) }
+            when (tab) {
+                0 -> fullItem { ClusterSection(vm) }
+                1 -> {
+                    fullItem {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            SectionLabel("Installed" + (p?.installed?.size?.let { " · $it" } ?: ""), Modifier.weight(1f))
+                            Button(onClick = { install = true }, enabled = p != null) { OneLine("+ Install") }
                         }
                     }
+                    if (p == null) fullItem { Text(if (loading) "Loading plugins…" else "Pull down to load plugins.") }
+                    p?.installed?.sortedBy { it.name.lowercase() }?.forEach { pl ->
+                        item { InfoTile(pl.name, if (pl.enabled) "on · ${pl.marketplace}" else "disabled", if (pl.enabled) Health.OK else Health.OFF, { open = pl }) }
+                    }
+                    fullItem { Text("Tap a plugin to enable, disable, update or remove it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
-            }
-            fullItem { ClusterSection(vm) }
-            fullItem {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    SectionLabel("Plugins" + (p?.installed?.size?.let { " · $it" } ?: ""), Modifier.weight(1f))
-                    Button(onClick = { install = true }, enabled = p != null) { OneLine("+ Install") }
-                }
-            }
-            if (p == null) fullItem { Text(if (loading) "Loading plugins…" else "Pull down to load plugins.") }
-            p?.installed?.sortedBy { it.name.lowercase() }?.forEach { pl ->
-                item { InfoTile(pl.name, if (pl.enabled) "on · ${pl.marketplace}" else "disabled", if (pl.enabled) Health.OK else Health.OFF, { open = pl }) }
-            }
-            fullItem { Text("Tap a plugin to enable, disable, update or remove it. Sessions pick changes up after a restart.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            fullItem { SectionLabel("Tools") }
-            item { OutlinedButton(onClick = { change("update") }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) { OneLine("Update Claude") } }
-            item { OutlinedButton(onClick = { custom = true }, modifier = Modifier.fillMaxWidth()) { OneLine(if (isNarrow()) "claude …" else "claude … command") } }
-            fullItem { SectionLabel("Marketplaces") }
-            fullItem {
-                CardBox {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        p?.marketplaces?.sortedBy { it.name.lowercase() }?.forEach { m ->
-                            val n = p.available.count { it.marketplace == m.name }
-                            Row {
-                                Text(m.name, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("$n plugin" + if (n == 1) "" else "s", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                else -> {
+                    fullItem {
+                        CardBox {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                ToolRow("Doctor", "Checks the install", "Run", busy == null) { vm.claudeCommand("doctor") }
+                                ToolRow("Full checkup", "/doctor in a chat of its own; Claude can fix what it finds", "Start", busy == null) { vm.startCheckup() }
+                                ToolRow("Update Claude", "Installs the newest version", "Update", busy == null) { change("update") }
+                                ToolRow("Other command", "claude … (doctor, plugin, mcp list)", "Run…", true) { custom = true }
                             }
                         }
-                        Row {
-                            TextButton(onClick = { addMarket = true }) { Text("+ Add marketplace") }
-                            TextButton(onClick = { change("plugin marketplace update") }, enabled = busy == null) { Text("Update all") }
+                    }
+                    fullItem { SectionLabel("Marketplaces") }
+                    fullItem {
+                        CardBox {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                p?.marketplaces?.sortedBy { it.name.lowercase() }?.forEach { m ->
+                                    val n = p.available.count { it.marketplace == m.name }
+                                    Row {
+                                        Text(m.name, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text("$n plugin" + if (n == 1) "" else "s", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                                Row {
+                                    TextButton(onClick = { addMarket = true }) { Text("+ Add marketplace") }
+                                    TextButton(onClick = { change("plugin marketplace update") }, enabled = busy == null) { Text("Update all") }
+                                }
+                            }
                         }
                     }
                 }
@@ -198,6 +202,17 @@ fun ClaudeScreen(vm: MainViewModel) {
             confirmButton = { TextButton(onClick = { vm.clearCcResult() }) { Text("Close") } },
             dismissButton = if (r.exitCode == 0 && args.startsWith("plugin")) ({ TextButton(onClick = { vm.clearCcResult(); vm.selectTab(Tab.SESSIONS) }) { Text("Go to Sessions") } }) else null,
         )
+    }
+}
+
+@Composable
+private fun ToolRow(title: String, hint: String, action: String, enabled: Boolean, onClick: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.Medium)
+            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        OutlinedButton(onClick = onClick, enabled = enabled) { OneLine(action) }
     }
 }
 

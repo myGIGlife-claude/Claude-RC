@@ -24,6 +24,9 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -41,6 +44,7 @@ import life.mygig.clauderc.ui.LoginKind
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.InfoTile
+import life.mygig.clauderc.ui.components.PillTabs
 import life.mygig.clauderc.ui.components.SectionLabel
 import life.mygig.clauderc.ui.theme.WarnAmber
 
@@ -72,6 +76,7 @@ fun ConnectionsScreen(vm: MainViewModel) {
     val refreshing by vm.statusRefreshing.collectAsState()
     val latest by vm.latest.collectAsState()
     val mcp by vm.mcp.collectAsState()
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     val login = { kind: LoginKind -> vm.showLogin(kind) }
     val detail = { d: Detail -> vm.openDetail(d) }
 
@@ -95,7 +100,9 @@ fun ConnectionsScreen(vm: MainViewModel) {
                 full { ServerUpdateCard(vm, required, newCommit) }
             }
 
-            section("Core", listOf(
+            full { PillTabs(listOf("Logins", "MCP", "Keys"), tab, { tab = it }) }
+
+            if (tab == 0) section("Core", listOf(
                 Tile("Claude", if (s.claude.loggedIn) "claude.ai subscription" else "Not logged in: tap to log in",
                     if (s.claude.loggedIn) Health.OK else Health.BAD) {
                     if (s.claude.loggedIn) detail(Detail.Login(LoginKind.CLAUDE)) else login(LoginKind.CLAUDE)
@@ -123,10 +130,10 @@ fun ConnectionsScreen(vm: MainViewModel) {
                     sv[def.id]?.takeIf { it.loggedIn }?.let { add(Tile(def.name, it.detail, Health.OK) { detail(Detail.Service(def.id)) }) }
                 }
             }.sortedBy { it.title.lowercase() }
-            section("Services", services)
+            if (tab == 0) section("Services", services)
 
             val servers = mcp?.servers.orEmpty()
-            section("MCP servers", servers.sortedWith(compareBy({ it.health != "failed" && it.health != "needs_auth" }, { it.label.lowercase() }))
+            if (tab == 1) section("MCP servers", servers.sortedWith(compareBy({ it.health != "failed" && it.health != "needs_auth" }, { it.label.lowercase() }))
                 .map { m -> Tile(m.label, mcpSubtitle(m), mcpHealth(m)) { detail(Detail.Mcp(m)) } })
 
             val keys = buildList {
@@ -135,9 +142,12 @@ fun ConnectionsScreen(vm: MainViewModel) {
                     add(Tile("Custom keys", "${s.custom.size} key" + if (s.custom.size == 1) "" else "s", Health.OK) { vm.showCustomKeys(true) })
                 }
             }
-            section("Keys", keys)
+            if (tab == 2) section("Keys", keys)
 
-            if (services.isEmpty() && keys.isEmpty()) {
+            if ((tab == 1 && servers.isEmpty()) || (tab == 2 && keys.isEmpty())) {
+                full { Text("Nothing here yet.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+            if (tab == 0 && services.isEmpty()) {
                 full {
                     Text(
                         "Tap + at the top to connect AWS, GitLab, Docker, Cloudflare, Vercel, Supabase, YouTube and more.",
