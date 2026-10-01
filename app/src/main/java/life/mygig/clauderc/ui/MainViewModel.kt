@@ -278,6 +278,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Messages you sent that the conversation file doesn't show yet (Claude queues them while it works). */
     private val _chatPending = MutableStateFlow<List<String>>(emptyList())
     val chatPending = _chatPending.asStateFlow()
+    /** Pending messages of chats you left: they come back when you reopen that chat (until the conversation shows them). */
+    private val queuedBySession = mutableMapOf<String, List<String>>()
     private var chatPoller: Job? = null
 
     /** Claude's full checkup in a session of its own, opened in the chat. */
@@ -289,6 +291,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openChat(session: String) {
         _chatSession.value = session
+        _chatPending.value = queuedBySession[session].orEmpty()
         _chat.value = null
         _chatError.value = null
         if (chatPin == null) chatPin = pinVault.load()
@@ -318,6 +321,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun closeChat() {
         fileCache.evictAll()
         chatPoller?.cancel()
+        _chatSession.value?.let { queuedBySession[it] = _chatPending.value }
         _chatPending.value = emptyList()
         _chatSession.value = null
         _chat.value = null
@@ -1331,6 +1335,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _mcpAuth.value = null
         _detail.value = null
         closeChat()
+        queuedBySession.clear()   // session names repeat across servers
         chatPin = null
         pinVault.clear()
     }
