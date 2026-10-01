@@ -23,6 +23,8 @@ class ChatPinVault(private val context: Context) {
     private val prefs = context.getSharedPreferences("chat_pin", Context.MODE_PRIVATE)
 
     fun save(pin: String, minutes: Int) {
+        // No boot count on this phone: a restart couldn't be told apart, so keep nothing.
+        if (bootCount() < 0) { clear(); return }
         runCatching {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, key())

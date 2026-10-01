@@ -38,6 +38,8 @@ object Updates {
             ?.firstOrNull { it["name"]?.jsonPrimitive?.content?.endsWith(".apk") == true }
         val run = apk?.get("name")?.jsonPrimitive?.content
             ?.let { Regex("""build\.(\d+)\.apk$""").find(it)?.groupValues?.get(1)?.toIntOrNull() }
+        // Both lookups failed (rate limit, offline): keep the caller's last good answer.
+        if (commits == null && release == null) error("GitHub didn't answer")
         Latest(serverCommit, run?.let { 100 + it }, apk?.get("browser_download_url")?.jsonPrimitive?.content)
     }
 

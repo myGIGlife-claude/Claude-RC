@@ -64,7 +64,7 @@ restore() {
     name="$(basename "$dir")"
     # Pick up the project's last conversation (the newest transcript), so a
     # restart doesn't leave a blank chat; start fresh if that can't resume.
-    sid="$(ls -t "$HOME/.claude/projects/${dir//[\/.]/-}/"*.jsonl 2>/dev/null | head -n 1 | xargs -r basename | sed 's/\.jsonl$//' || true)"
+    sid="$(ls -t "$HOME/.claude/projects/${dir//[^A-Za-z0-9]/-}/"*.jsonl 2>/dev/null | head -n 1 | xargs -r basename | sed 's/\.jsonl$//' || true)"
     [[ "$sid" =~ ^[0-9a-f-]{36}$ ]] || sid=""
     cmd="env -u ANTHROPIC_API_KEY claude --remote-control $(printf %q "$name")"
     [[ -n "$sid" ]] && cmd="$cmd --resume $sid || $cmd"

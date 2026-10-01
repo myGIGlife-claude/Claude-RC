@@ -111,6 +111,17 @@ t() { local s="$1"; shift; timeout --kill-after=5 "$s" "$@"; }
 
 session_name() { local n="$1"; echo "${n//[.:]/-}"; }   # tmux can't use . or :
 
+# The folder Claude keeps a project's conversations in: every character that isn't a letter or digit becomes "-".
+claude_proj_slug() { printf '%s' "${1//[^A-Za-z0-9]/-}"; }
+
+# A session's project folder: claude-autostart's list first, else where the pane is.
+session_dir() {
+  local d
+  d="$(awk -F'\t' -v s="$1" '$1 == s {print $2; exit}' "$AUTOSTART_LIST" 2>/dev/null)"
+  [[ -n "$d" ]] || d="$(tmux display-message -p -t "=$1:" '#{pane_current_path}' 2>/dev/null)"
+  printf '%s' "$d"
+}
+
 claude_logged_in() { [[ -s "$HOME/.claude/.credentials.json" ]]; }
 
 # Prints missing scopes, space separated. admin:org / write:org cover read:org.
@@ -596,7 +607,8 @@ api_ok() {
   if [[ -z "${1:-}" ]] || ! jq -e . >/dev/null 2>&1 <<<"$1"; then
     api_err internal "The server couldn't build its answer."
   fi
-  jq -cn --argjson d "$1" '{ok:true,data:$d}' >&3
+  # Through stdin: an argument tops out at 128 KB, which a screenshot or a long repo list exceeds.
+  printf '%s' "$1" | jq -c '{ok:true,data:.}' >&3
   EMITTED=1
   exit 0
 }
@@ -817,7 +829,7 @@ do_sessions() {
   # Same detection as claude-autostart: any session whose pane started claude.
   s="$({ tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}@@#{session_created}@@#{session_attached}' 2>/dev/null || true; } |
     awk -F'@@' -v l1="$CLAUDE_LOGIN_SESSION" -v l2="$AWS_LOGIN_SESSION" \
-      '($3 ~ /claude/ || $4 == "claude") && $1 != l1 && $1 != l2 && !seen[$1]++' |
+      '($3 ~ /claude/ || $4 == "claude") && $1 != l1 && $1 != l2 && $1 != "mcp-auth" && !seen[$1]++' |
     jq -Rc 'split("@@") | {name:.[0], dir:.[1], project:(.[1] | split("/") | last),
       started_at:(.[4] | tonumber), attached:((.[5] | tonumber) > 0)}' |
     jq -sc --argjson now "$(date +%s)" 'map(. + {uptime_seconds:($now - .started_at)}) | sort_by(.started_at)')"
@@ -881,13 +893,12 @@ do_restart() {
     api_err session_busy "Claude is still working in '$sess'. Wait for it to finish, or restart anyway."
   fi
   # The folder: claude-autostart's list first, else where the pane is.
-  dir="$(awk -F'\t' -v s="$sess" '$1 == s {print $2; exit}' "$AUTOSTART_LIST" 2>/dev/null)"
-  [[ -n "$dir" ]] || dir="$(tmux display-message -p -t "=$sess:" '#{pane_current_path}' 2>/dev/null)"
+  dir="$(session_dir "$sess")"
   [[ -d "$dir" ]] || api_err internal "Couldn't find the folder of session '$sess'."
   name="$(basename "$dir")"
   valid_project "$name" || api_err invalid_name "The folder name '$name' can't be used as a session name."
   # The live conversation is the newest transcript in Claude's folder for this project.
-  sid="$(ls -t "$HOME/.claude/projects/${dir//[\/.]/-}/"*.jsonl 2>/dev/null | head -n 1 | xargs -r basename | sed 's/\.jsonl$//')"
+  sid="$(ls -t "$HOME/.claude/projects/$(claude_proj_slug "$dir")/"*.jsonl 2>/dev/null | head -n 1 | xargs -r basename | sed 's/\.jsonl$//')"
   [[ "$sid" =~ ^[0-9a-f-]{36}$ ]] || sid=""
   tmux kill-session -t "=$sess" 2>/dev/null
   STARTED_SESSION="$(session_name "$name")"
@@ -1969,7 +1980,7 @@ do_doctor_start() {
   trust_folder "$dir"
   tmux kill-session -t "=$DOCTOR_SESSION" 2>/dev/null
   # Only this run's conversation, so the chat shows the new one.
-  rm -f "$HOME/.claude/projects/${dir//[\/.]/-}/"*.jsonl
+  rm -f "$HOME/.claude/projects/$(claude_proj_slug "$dir")/"*.jsonl
   tmux new-session -d -s "$DOCTOR_SESSION" -c "$dir" "env -u ANTHROPIC_API_KEY claude /doctor; exec bash" ||
     api_err internal "tmux could not start the checkup."
   api_ok "$(jq -cn --arg s "$DOCTOR_SESSION" '{session:$s}')"
@@ -2033,7 +2044,7 @@ do_mcp_auth_finish() {
   cb="$(read_secret_line)"
   exec 0</dev/null
   cb="${cb//[[:space:]]/}"
-  [[ "$cb" =~ ^http://(localhost|127\.0\.0\.1):[0-9]{1,5}/ && ${#cb} -le 4000 ]] ||
+  [[ "$cb" =~ ^http://(localhost|127\.0\.0\.1):[0-9]{1,5}/[A-Za-z0-9._~:/?#@!$\&\'()*+,\;=%-]*$ && ${#cb} -le 4000 ]] ||
     api_err invalid_name "Paste the whole address from the browser: it starts with http://localhost:"
   name="$(cat "$CACHE_DIR/mcp-auth/server" 2>/dev/null)"
   need claude
@@ -2138,6 +2149,8 @@ check_pin() {
   local want n until
   want="$(chat_pin)"
   [[ -n "$want" ]] || api_err pin_not_set "Set a chat PIN in the app first."
+  # One guess at a time: parallel calls would each read the same fail count.
+  exec 8>>"$CHAT_FAILS.lock"; flock -w 10 8 || api_err busy "Try again in a moment."
   if until="$(chat_locked_until)"; then
     api_err chat_locked "Too many wrong PINs. Chat is locked until $(date -d "@$until" +%H:%M), or delete ~/.config/claude-launcher/chat-locked on the server."
   fi
@@ -2181,9 +2194,8 @@ do_chat_pin_set() {
 # The session's live conversation file (newest transcript in its project folder).
 chat_transcript() {
   local sess="$1" dir
-  dir="$(awk -F'\t' -v s="$sess" '$1 == s {print $2; exit}' "$AUTOSTART_LIST" 2>/dev/null)"
-  [[ -n "$dir" ]] || dir="$(tmux display-message -p -t "=$sess:" '#{pane_current_path}' 2>/dev/null)"
-  ls -t "$HOME/.claude/projects/${dir//[\/.]/-}/"*.jsonl 2>/dev/null | head -n 1
+  dir="$(session_dir "$sess")"
+  ls -t "$HOME/.claude/projects/$(claude_proj_slug "$dir")/"*.jsonl 2>/dev/null | head -n 1
 }
 
 # chat_session <arg>: validated, running session name (or the call ends).
@@ -2191,6 +2203,8 @@ chat_session() {
   valid_project "$1" || api_err invalid_name "Invalid project name."
   local s; s="$(resolve_session "$1")"
   tmux has-session -t "=$s" 2>/dev/null || api_err invalid_name "No running session named '$1'."
+  # Login and sign-in helpers aren't project chats (their folder would be $HOME).
+  [[ " $CLAUDE_LOGIN_SESSION $AWS_LOGIN_SESSION mcp-auth " != *" $s "* ]] || api_err invalid_name "No running session named '$1'."
   echo "$s"
 }
 
@@ -2314,8 +2328,7 @@ do_upload() {
   [[ -n "$name" ]] || name="upload-$(date +%s)"
   size=$(stat -c %s "$tmp")
   ((size > 0 && size <= 15728640)) || { rm -f "$tmp"; api_err invalid_name "The file is empty or bigger than 15 MB."; }
-  dir="$(awk -F'\t' -v s="$sess" '$1 == s {print $2; exit}' "$AUTOSTART_LIST" 2>/dev/null)"
-  [[ -n "$dir" ]] || dir="$(tmux display-message -p -t "=$sess:" '#{pane_current_path}' 2>/dev/null)"
+  dir="$(session_dir "$sess")"
   [[ -d "$dir" ]] || { rm -f "$tmp"; api_err internal "Couldn't find the session's folder."; }
   d="$dir/uploads"; mkdir -p "$d"
   [[ -e "$d/$name" ]] && name="$(date +%H%M%S)-$name"
@@ -2334,12 +2347,11 @@ do_chat_file() {
   pin="$(read_secret_line)"; path="$(read_secret_line)"; exec 0</dev/null
   sess="$(chat_session "$1")"
   check_pin "$pin"
-  dir="$(awk -F'\t' -v s="$sess" '$1 == s {print $2; exit}' "$AUTOSTART_LIST" 2>/dev/null)"
-  [[ -n "$dir" ]] || dir="$(tmux display-message -p -t "=$sess:" '#{pane_current_path}' 2>/dev/null)"
+  dir="$(session_dir "$sess")"
   [[ -d "$dir" ]] || api_err internal "Couldn't find the session's folder."
   real="$(realpath -e -- "$path" 2>/dev/null)" && [[ -f "$real" ]] || api_err invalid_name "That file isn't on the server any more."
   case "$real" in
-    "$(realpath "$dir")"/* | "/tmp/claude-$(id -u)/${dir//[\/.]/-}"/*) ok=true ;;
+    "$(realpath "$dir")"/* | "/tmp/claude-$(id -u)/$(claude_proj_slug "$dir")"/*) ok=true ;;
   esac
   if ! $ok; then   # a file Claude sent in this conversation counts, wherever it is
     tf="$(chat_transcript "$sess")"

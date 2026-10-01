@@ -8,7 +8,7 @@ the phone can run the allowlisted actions below and nothing else — no shell.
 | --- | --- |
 | `claude-setup.sh` | The interactive menu (no arguments) plus `--api <subcommand>`, which prints exactly one JSON object and never waits for input. |
 | `claude-launcher-api` | Forced command. Splits `SSH_ORIGINAL_COMMAND`, checks it against the allowlist, re-validates every argument, runs `claude-setup.sh --api …`. Anything else → `{"ok":false,"error":{"code":"forbidden"}}`. |
-| `install.sh` | Downloads and installs the three scripts below without cloning, then authorizes the phone key if given. |
+| `install.sh` | Downloads and installs the scripts below (and `youtube-upload`, `claude-autostart.sh`) without cloning, then authorizes the phone key if given. |
 | `install-launcher-key.sh` | Adds the phone's public key to `~/.ssh/authorized_keys` locked to the runner. |
 | `claude-autostart.sh` | Unchanged from the original: a systemd service + 2-minute timer that saves the running Claude tmux sessions and restores them at boot. Sessions started from the phone are picked up the same way. |
 | `config.example` | Per-machine settings. The real file lives at `~/.config/claude-launcher/config` and is never committed. |
