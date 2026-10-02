@@ -1,10 +1,10 @@
-Last updated: 2026-10-01 20:02 UTC
+Last updated: 2026-10-02 04:40 UTC
 
 ## Goal
 cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage Claude Code sessions on your own server from a phone.
 
 ## Current task
-In flight: (1) main build for #85 (cluster hardening) then tell the owner to tap Update now (server scripts too); (2) a subagent (worktree, branch `claude/readme-refresh`) is refreshing README, screenshots and demo video: when it reports, check its PR (no personal values, images render) and tell the owner to merge. Next: remaining cluster review items (see Decisions 2026-10-01 "Opus review"), then the notification bug (needs phone's Notification history).
+Shipped #92-#101 (chat: ! and / commands show as typed, session-switch flash/scroll, stuck "queued" fixes incl. tap-to-remove and Enter retry for pasted messages, / suggestions incl. skills/plugins via `chat-commands`, custom key form: _AUTHKEY/_APIKEY + chips + autofill off). SCRIPT_API 29. Next: owner re-tests on phone after Update now (/ suggestions, ! echo, long pasted message, custom key TS_AUTHKEY), then the audit decisions below.
 
 ## Tasks
 - [ ] Try on the phone: 👥 in a chat (attach a worker, set role/mode), ask main to delegate and merge; usage bars fill with used.
