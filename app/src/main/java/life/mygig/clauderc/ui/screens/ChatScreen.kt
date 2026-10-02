@@ -394,7 +394,7 @@ private val SLASH_COMMANDS = listOf(
 private class GhostText(val ghost: String, val color: androidx.compose.ui.graphics.Color) : androidx.compose.ui.text.input.VisualTransformation {
     override fun filter(text: androidx.compose.ui.text.AnnotatedString): androidx.compose.ui.text.input.TransformedText {
         if (ghost.isEmpty()) return androidx.compose.ui.text.input.TransformedText(text, androidx.compose.ui.text.input.OffsetMapping.Identity)
-        val out = androidx.compose.ui.text.buildAnnotatedString { append(text); withStyle(androidx.compose.ui.text.SpanStyle(color = color)) { append(ghost) } }
+        val out = androidx.compose.ui.text.buildAnnotatedString { append(text); pushStyle(androidx.compose.ui.text.SpanStyle(color = color)); append(ghost); pop() }
         val n = text.length
         return androidx.compose.ui.text.input.TransformedText(out, object : androidx.compose.ui.text.input.OffsetMapping {
             override fun originalToTransformed(offset: Int) = offset
