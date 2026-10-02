@@ -46,6 +46,7 @@ import life.mygig.clauderc.api.OwnersData
 import life.mygig.clauderc.api.McpData
 import life.mygig.clauderc.api.McpServer
 import life.mygig.clauderc.api.PluginsData
+import life.mygig.clauderc.api.ChatCommand
 import life.mygig.clauderc.api.ChatData
 import life.mygig.clauderc.api.PinStatus
 import life.mygig.clauderc.api.ChatLogEntry
@@ -278,6 +279,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var chatPin: String? = null
     private val pinVault = ChatPinVault(app)
     /** Messages you sent that the conversation file doesn't show yet (Claude queues them while it works). */
+    private val _chatCommands = MutableStateFlow<List<ChatCommand>>(emptyList())
+    /** Slash commands from your skills, commands and plugins, for the suggestions above the chat box. */
+    val chatCommands = _chatCommands.asStateFlow()
+
     private val _chatPending = MutableStateFlow<List<String>>(emptyList())
     val chatPending = _chatPending.asStateFlow()
     /** Pending messages of chats you left: they come back when you reopen that chat (until the conversation shows them). */
@@ -295,6 +300,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _chatSession.value = session
         _chatPending.value = queuedBySession[session].orEmpty()
         _chat.value = null
+        _chatCommands.value = emptyList()
         _chatError.value = null
         if (chatPin == null) chatPin = pinVault.load()
         if (chatPin != null) { startChatPolling(); return }
@@ -381,6 +387,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun startChatPolling() {
         chatPoller?.cancel()
+        val s0 = _chatSession.value; val p0 = chatPin
+        if (s0 != null && p0 != null) viewModelScope.launch {
+            runCatching { api.chatCommands(s0, p0).commands }.getOrNull()?.let { if (_chatSession.value == s0) _chatCommands.value = it }
+        }
         chatPoller = viewModelScope.launch {
             while (true) {
                 val session = _chatSession.value ?: break

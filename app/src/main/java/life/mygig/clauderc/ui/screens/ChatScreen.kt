@@ -352,7 +352,10 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
         }
     }
     // Typing "/" suggests commands: the best match shows as faded text in the box, all matches as chips above it.
-    val matches = if (text.startsWith("/") && !text.contains(' ')) SLASH_COMMANDS.filter { it.first.startsWith(text.lowercase()) } else emptyList()
+    val extra by vm.chatCommands.collectAsState()
+    val matches = if (text.startsWith("/") && !text.contains(' ')) {
+        (SLASH_COMMANDS + extra.map { it.name to it.hint }).distinctBy { it.first }.filter { it.first.startsWith(text.lowercase()) }
+    } else emptyList()
     val ghost = matches.firstOrNull()?.first?.removePrefix(text.lowercase()).orEmpty()
     val ghostColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
     Column {

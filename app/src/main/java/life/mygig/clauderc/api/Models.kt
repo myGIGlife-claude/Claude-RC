@@ -233,6 +233,12 @@ data class AskQuestion(
 data class ChatFile(val name: String, val bytes: Long = 0, val data: String = "")
 
 @Serializable
+data class ChatCommand(val name: String, val hint: String = "")
+
+@Serializable
+data class ChatCommands(val commands: List<ChatCommand> = emptyList())
+
+@Serializable
 data class ChatData(
     val session: String = "",
     val messages: List<ChatMessage> = emptyList(),
