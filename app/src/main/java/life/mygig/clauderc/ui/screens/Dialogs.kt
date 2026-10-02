@@ -300,6 +300,7 @@ fun CustomKeysDialog(vm: MainViewModel) {
         title = { Text("Custom API keys") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                NoAutofill()
                 Text(
                     "For APIs without a built-in service. The key reaches every Claude session and MCP server after a " +
                         "restart, as an environment variable (use \${NAME} in MCP configs).",
@@ -766,4 +767,14 @@ internal fun DialogKeyboardFix() {
         window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
     }
     androidx.compose.runtime.LaunchedEffect(imeVisible) { androidx.core.view.ViewCompat.requestApplyInsets(view) }
+}
+
+/** Keeps Samsung Pass / autofill off this dialog: a name plus a secret field looks like a login to it, and its icon wrecks the keyboard. */
+@Composable
+internal fun NoAutofill() {
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.SideEffect {
+        var v: android.view.View? = view
+        while (v != null) { v.importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS; v = v.parent as? android.view.View }
+    }
 }
