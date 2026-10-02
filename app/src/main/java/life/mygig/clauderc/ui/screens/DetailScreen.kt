@@ -177,6 +177,13 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
                 extra = mcpAuth?.takeIf { signIn && it.first == m.name }?.let { (_, url) -> @Composable { McpSignIn(vm, url, busy == null) } },
             )
         }
+        Detail.Apple -> Page(
+            title = "Apple developer", health = Health.OK, statusLine = "Saved",
+            about = "An App Store Connect API key, for signing iOS builds and uploading them to TestFlight and the App Store.",
+            vars = listOf("APPLE_API_KEY_ID", "APPLE_API_ISSUER_ID", "APPLE_API_KEY_FILE", "APPLE_TEAM_ID"),
+            note = "Apple only lets you download the .p8 once: keep your own copy.",
+            edit = "Replace or remove" to { vm.openDetail(null); vm.showApple(true) },
+        )
         is Detail.Keystore -> Page(
             title = "Signing: ${d.name}", health = Health.OK, statusLine = "Saved and checked",
             about = "An Android upload key for signing app bundles.",

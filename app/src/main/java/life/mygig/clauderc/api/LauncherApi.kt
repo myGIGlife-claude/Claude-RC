@@ -202,6 +202,10 @@ class LauncherApi(
     suspend fun chatInterrupt(session: String, pin: String): JsonObject { requireName(session); return call("chat-interrupt $session", stdin = pin) }
     suspend fun loginKeystore(name: String, alias: String, storePassword: String, keyPassword: String, fileBase64: String): JsonObject =
         call("login-keystore $name", stdin = listOf(alias.trim(), storePassword, keyPassword, fileBase64).joinToString("\n"))
+    /** Saves an App Store Connect API key: key ID, issuer ID, team ID and the .p8 (base64) go on stdin. */
+    suspend fun loginApple(keyId: String, issuerId: String, teamId: String, fileBase64: String): JsonObject =
+        call("login-apple", stdin = listOf(keyId.trim(), issuerId.trim(), teamId.trim(), fileBase64).joinToString("\n"))
+    suspend fun removeApple(): JsonObject = call("remove-apple")
     suspend fun removeKeystore(name: String): JsonObject = call("remove-keystore $name")
     suspend fun removeSecret(name: String): JsonObject = call("remove-secret $name")
     suspend fun installCli(name: String, sudoPassword: String = ""): JsonObject =

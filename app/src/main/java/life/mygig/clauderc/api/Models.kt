@@ -19,6 +19,8 @@ data class StatusData(
     val custom: List<String> = emptyList(),
     /** Names of Android signing keys saved on the server. */
     val keystores: List<String> = emptyList(),
+    /** An App Store Connect API key is saved (iOS signing and uploads). */
+    val apple: Boolean = false,
 )
 
 @Serializable
