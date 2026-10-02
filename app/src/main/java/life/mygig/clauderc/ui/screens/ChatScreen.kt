@@ -8,6 +8,8 @@ import life.mygig.clauderc.ui.components.AttachFile
 import android.content.Context
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -349,21 +351,55 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
             vm.uploadToChat(name, bytes) { path -> text = (text.trimEnd() + " [attached: $path]").trim() }
         }
     }
-    Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        IconButton(onClick = { vm.externalScreen(); pick.launch(arrayOf("*/*")) }, enabled = enabled, modifier = Modifier.height(52.dp)) {
-            Icon(Icons.Filled.AttachFile, contentDescription = "Attach a file or photo")
+    // Typing "/" suggests commands: the best match shows as faded text in the box, all matches as chips above it.
+    val matches = if (text.startsWith("/") && !text.contains(' ')) SLASH_COMMANDS.filter { it.first.startsWith(text.lowercase()) } else emptyList()
+    val ghost = matches.firstOrNull()?.first?.removePrefix(text.lowercase()).orEmpty()
+    val ghostColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+    Column {
+        if (matches.isNotEmpty() && !(matches.size == 1 && ghost.isEmpty())) {
+            androidx.compose.foundation.lazy.LazyRow(Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(matches) { (cmd, hint) ->
+                    androidx.compose.material3.AssistChip(onClick = { text = "$cmd " }, label = { Text(cmd) }, modifier = Modifier.semantics { contentDescription = "$cmd: $hint" })
+                }
+            }
         }
-        OutlinedTextField(
-            value = text, onValueChange = { text = it }, placeholder = { Text("Message Claude") },
-            modifier = Modifier.weight(1f), maxLines = 6, shape = RoundedCornerShape(22.dp),
-        )
-        if (working) {
-            FilledIconButton(onClick = { vm.interruptChat() }, modifier = Modifier.height(52.dp)) { Icon(Icons.Filled.Stop, contentDescription = "Stop Claude") }
+        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            IconButton(onClick = { vm.externalScreen(); pick.launch(arrayOf("*/*")) }, enabled = enabled, modifier = Modifier.height(52.dp)) {
+                Icon(Icons.Filled.AttachFile, contentDescription = "Attach a file or photo")
+            }
+            OutlinedTextField(
+                value = text, onValueChange = { text = it }, visualTransformation = GhostText(ghost, ghostColor), placeholder = { Text("Message Claude") },
+                modifier = Modifier.weight(1f), maxLines = 6, shape = RoundedCornerShape(22.dp),
+            )
+            if (working) {
+                FilledIconButton(onClick = { vm.interruptChat() }, modifier = Modifier.height(52.dp)) { Icon(Icons.Filled.Stop, contentDescription = "Stop Claude") }
+            }
+            FilledIconButton(
+                onClick = { val t = text; vm.sendChat(t, onSent = { text = "" }, onFail = { if (text.isBlank()) text = t }) },
+                enabled = enabled && text.isNotBlank(), modifier = Modifier.height(52.dp),
+            ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
         }
-        FilledIconButton(
-            onClick = { val t = text; vm.sendChat(t, onSent = { text = "" }, onFail = { if (text.isBlank()) text = t }) },
-            enabled = enabled && text.isNotBlank(), modifier = Modifier.height(52.dp),
-        ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
+    }
+}
+
+private val SLASH_COMMANDS = listOf(
+    "/add-dir" to "add a working folder", "/agents" to "manage agents", "/clear" to "start a fresh conversation", "/compact" to "shrink the conversation",
+    "/config" to "settings", "/context" to "context usage", "/cost" to "token cost", "/doctor" to "check the install", "/export" to "export the conversation",
+    "/help" to "help", "/hooks" to "hooks", "/init" to "create CLAUDE.md", "/login" to "sign in", "/logout" to "sign out", "/mcp" to "MCP servers",
+    "/memory" to "edit memory", "/model" to "switch model", "/permissions" to "permissions", "/plugin" to "plugins", "/resume" to "resume a conversation",
+    "/review" to "review a PR", "/rewind" to "go back", "/status" to "status", "/usage" to "plan usage",
+)
+
+/** Shows [ghost] faded after the typed text; it isn't part of the text. */
+private class GhostText(val ghost: String, val color: androidx.compose.ui.graphics.Color) : androidx.compose.ui.text.input.VisualTransformation {
+    override fun filter(text: androidx.compose.ui.text.AnnotatedString): androidx.compose.ui.text.input.TransformedText {
+        if (ghost.isEmpty()) return androidx.compose.ui.text.input.TransformedText(text, androidx.compose.ui.text.input.OffsetMapping.Identity)
+        val out = androidx.compose.ui.text.buildAnnotatedString { append(text); withStyle(androidx.compose.ui.text.SpanStyle(color = color)) { append(ghost) } }
+        val n = text.length
+        return androidx.compose.ui.text.input.TransformedText(out, object : androidx.compose.ui.text.input.OffsetMapping {
+            override fun originalToTransformed(offset: Int) = offset
+            override fun transformedToOriginal(offset: Int) = minOf(offset, n)
+        })
     }
 }
 
