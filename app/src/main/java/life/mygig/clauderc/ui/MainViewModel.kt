@@ -457,7 +457,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val session = _chatSession.value ?: return
         val pin = chatPin ?: return
         val t = text.trim()
-        val tracked = !t.startsWith("/") && !t.startsWith("!")   // slash and ! commands never show up as messages, so they would stay "queued" for good
+        val tracked = !t.startsWith("/")   // a slash command never shows up as a message, so it would stay "queued" for good
         onSent()
         if (tracked) _chatPending.value = _chatPending.value + t
         action("Sending…", onError = { e ->
@@ -475,8 +475,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun setChat(session: String, c: ChatData) {
         if (session != _chatSession.value) return   // a late reply from the chat we just left
         _chat.value = c
-        val shown = c.messages.filter { it.role == "user" }.map { it.text.trim() }.toSet()
-        _chatPending.value = _chatPending.value.filterNot { it in shown }
+        // Compare loosely: Claude Code may change spacing, and the server cuts long messages at 8000 characters.
+        fun norm(t: String) = t.trim().replace(Regex("\\s+"), " ").take(7000)
+        val shown = c.messages.filter { it.role == "user" }.map { norm(it.text) }.toSet()
+        _chatPending.value = _chatPending.value.filterNot { norm(it) in shown }
     }
 
     /** Send a file from the phone into the chat's project folder; [onDone] gets its path. */
