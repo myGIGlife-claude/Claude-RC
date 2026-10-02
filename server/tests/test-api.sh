@@ -317,6 +317,8 @@ done
 api "set-secret ACME_API_KEY" "it's"; check "set-secret refuses a single quote" "$(jqt '.error.code=="invalid_name"')"
 api "remove-secret CLOUDFLARE_API_TOKEN"; check "remove-secret only removes custom keys" "$(jqt '.ok==false')"
 api "remove-secret ACME_API_KEY"; check "custom key removed" "$(jqt '.ok and .data.removed=="ACME_API_KEY"')"
+api "set-secret TS_AUTHKEY" "tskey-auth-abc"; check "TS_AUTHKEY accepted" "$(jqt '.ok and .data.saved=="TS_AUTHKEY"')"
+api "remove-secret TS_AUTHKEY"; check "TS_AUTHKEY removed" "$(jqt '.ok')"
 grep -q ACME_API_KEY "$HOME/.config/claude-launcher/env" "$HOME/.claude/settings.json"; [[ $? -ne 0 ]]; check "removed from env file and settings" $?
 grep -q abc123 "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "custom key value never logged" $?
 rm -f "$HOME/.config/claude-launcher/env"

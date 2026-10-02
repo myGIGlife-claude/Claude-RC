@@ -19,7 +19,7 @@ set -uo pipefail
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
 # 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers.
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=27
+SCRIPT_API=28
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -39,7 +39,7 @@ SERVICES_INFO="$LAUNCHER_CONFIG_DIR/services.json"   # who each token service is
 CUSTOM_NAMES="$LAUNCHER_CONFIG_DIR/custom-names"   # names added with set-secret
 # A custom key's name: upper case, a credential-like suffix, never something
 # that changes how programs run (PATH, LD_*, CLAUDE_*, …).
-CUSTOM_NAME_RE='^[A-Z][A-Z0-9_]{0,55}_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT)$'
+CUSTOM_NAME_RE='^[A-Z][A-Z0-9_]{0,55}_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT|AUTHKEY|APIKEY)$'
 TOKEN_SERVICES="cloudflare vercel netlify fly railway supabase neon npm stripe huggingface b2 gcp firebase mxroute googleplay youtube"
 
 # A question on Claude's screen: a confirm footer, a y/n, a numbered menu with the cursor on it, or the auto-mode opt-in.
