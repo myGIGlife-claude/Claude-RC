@@ -2517,8 +2517,13 @@ do_chat_send() {
   [[ -n "${msg//[[:space:]]/}" ]] || bad_args "empty message"
   printf '%s' "$msg" | tmux load-buffer -b "clauderc-chat-$$" - || api_err internal "Couldn't hand the message to tmux."
   tmux paste-buffer -p -d -b "clauderc-chat-$$" -t "=$sess:" || api_err internal "Couldn't paste the message."
-  sleep 0.3
+  # A long or multi-line paste is collapsed to "[Pasted text …]" and takes a moment to register: give it longer, and press Enter again if it is still sitting in the box.
+  if [[ ${#msg} -gt 300 || "$msg" == *$'\n'* ]]; then sleep 1; else sleep 0.3; fi
   tmux send-keys -t "=$sess:" Enter
+  if [[ ${#msg} -gt 300 || "$msg" == *$'\n'* ]]; then
+    sleep 1
+    tmux capture-pane -p -t "=$sess:" 2>/dev/null | tail -n 8 | grep -q '^❯ .*\[Pasted text' && tmux send-keys -t "=$sess:" Enter
+  fi
   unset msg
   chat_log "$sess" send
   api_ok "$(jq -cn --arg s "$sess" '{sent:true, session:$s}')"
