@@ -873,6 +873,27 @@ do_push_config() {
   fi
 }
 
+# push-setup: stdin = the Firebase service-account JSON key. Saves it (mode 600),
+# registers the Android app in that project and saves its public ids.
+do_push_setup() {
+  local key bin="$HOME/.local/bin/claude-push" r tmp
+  key="$(head -c 20000)"
+  exec 0</dev/null
+  jq -e 'select(.type == "service_account" and .project_id and .client_email and .private_key)' >/dev/null 2>&1 <<<"$key" ||
+    api_err invalid_name "That isn't a service-account JSON key. In Firebase: Project settings › Service accounts › Generate new private key."
+  [[ -x "$bin" ]] || api_err not_configured "The push helper isn't installed on the server: run Update now."
+  mkdir -p "$LAUNCHER_CONFIG_DIR"
+  tmp="$(mktemp "$LAUNCHER_CONFIG_DIR/fcm-key.json.XXXXXX")"
+  chmod 600 "$tmp"
+  printf '%s\n' "$key" >"$tmp"
+  mv "$tmp" "$LAUNCHER_CONFIG_DIR/fcm-key.json"
+  unset key
+  r="$(timeout 60 "$bin" --setup 2>/dev/null)"
+  jq -e '.app_id' >/dev/null 2>&1 <<<"$r" || { rm -f "$LAUNCHER_CONFIG_DIR/fcm-key.json" "$PUSH_CONFIG"; api_err invalid_name "$(jq -r '.error // "Firebase didn'"'"'t accept that key."' <<<"$r" 2>/dev/null)"; }
+  ensure_push_hook
+  do_push_config
+}
+
 # push-register <fcm token>: remember a phone (newest five kept).
 do_push_register() {
   [[ $# -eq 1 && "$1" =~ ^[A-Za-z0-9:_-]{20,200}$ ]] || bad_args "usage: push-register <token>"
@@ -2740,7 +2761,7 @@ api_main() {
   shift || true
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | youtube-login-start | \
-      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | worker-add | worker-set | worker-login-code | cluster-assign) ;;  # these read stdin
+      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-login-code | cluster-assign) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -2749,6 +2770,7 @@ api_main() {
     owners)              [[ $# -eq 0 ]] || bad_args "owners takes no arguments"; do_owners ;;
     repos)               [[ $# -eq 0 || ( $# -eq 1 && "$1" == --refresh ) ]] || bad_args "usage: repos [--refresh]"; do_repos "$@" ;;
     push-config)         [[ $# -eq 0 ]] || bad_args "push-config takes no arguments"; do_push_config ;;
+    push-setup)          [[ $# -eq 0 ]] || bad_args "push-setup reads the key on stdin"; do_push_setup ;;
     push-register)       do_push_register "$@" ;;
     push-session)        do_push_session "$@" ;;
     push-test)           [[ $# -eq 0 ]] || bad_args "push-test takes no arguments"; do_push_test ;;

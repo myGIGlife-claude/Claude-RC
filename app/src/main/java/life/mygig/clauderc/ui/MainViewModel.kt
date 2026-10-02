@@ -51,6 +51,7 @@ import life.mygig.clauderc.api.ChatData
 import life.mygig.clauderc.api.PinStatus
 import life.mygig.clauderc.api.ChatLogEntry
 import life.mygig.clauderc.api.Repo
+import life.mygig.clauderc.notify.Push
 import life.mygig.clauderc.notify.SessionWatcher
 import life.mygig.clauderc.api.ServiceDef
 import life.mygig.clauderc.api.RunResult
@@ -100,6 +101,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val keys = SshKeyManager(app)
     private val json = Json { ignoreUnknownKeys = true }
     private val api = LauncherApi(config = { store.current().toServerConfig() }, identity = { keys.identity() })
+    private val _pushReady = MutableStateFlow(Push.active(app))
+    /** This phone is registered for instant alerts (the server has push set up). */
+    val pushReady = _pushReady.asStateFlow()
 
     val settings: StateFlow<AppSettings?> =
         store.settings.stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -193,7 +197,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         viewModelScope.launch {
-            if (store.current().notify && SessionWatcher.allowed(getApplication())) SessionWatcher.schedule(getApplication())
+            if (store.current().notify && SessionWatcher.allowed(getApplication())) { SessionWatcher.schedule(getApplication()); setupPush() }
         }
         viewModelScope.launch {
             delay(3_000)   // let the first status call land
@@ -513,7 +517,39 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setNotify(on: Boolean) = viewModelScope.launch {
         store.setNotify(on)
         val ctx = getApplication<Application>()
-        if (on) SessionWatcher.schedule(ctx) else SessionWatcher.cancel(ctx)
+        if (on) { SessionWatcher.schedule(ctx); setupPush() } else SessionWatcher.cancel(ctx)
+    }
+
+    // ---- Instant push alerts (server hooks → Firebase) ---------------------------------
+
+    /** Quietly (re)registers this phone; fails without a word when offline or the server has no push yet. */
+    private fun setupPush() = viewModelScope.launch {
+        val ctx = getApplication<Application>()
+        _pushReady.value = runCatching { Push.setup(ctx, api) }.getOrDefault(Push.active(ctx))
+    }
+
+    /** Saves the pasted Firebase key on the server (it registers the app itself), then registers this phone. */
+    fun pushSetup(key: String) = action("Setting up push alerts…") {
+        val c = api.pushSetup(key)
+        if (c.configured) { setupPush(); say("Push alerts are set up for project ${c.projectId}. Tap \"Send a test push\" to try it, then Restart sessions so they pick up the hooks.") }
+    }
+
+    fun pushTest() = action("Sending a test push…") {
+        val sent = api.pushTest().sent
+        say(if (sent > 0) "Push sent to $sent phone(s): it should arrive in a moment." else "Nothing was sent. Push isn't fully set up on the server, or this phone isn't registered yet.")
+    }
+
+    /** A session's "finished" alerts on or off (questions always alert). */
+    fun setSessionPush(name: String, on: Boolean) {
+        _sessions.value = _sessions.value.map { if (it.name == name) it.copy(pushDone = on) else it }
+        viewModelScope.launch {
+            try {
+                api.pushSession(name, on)
+            } catch (e: ApiException) {
+                _sessions.value = _sessions.value.map { if (it.name == name) it.copy(pushDone = !on) else it }
+                report(e)
+            }
+        }
     }
 
     fun interruptChat() {
@@ -977,7 +1013,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** False while the app is in the background: screens pause their refresh loops (battery, data). */
     private val _foreground = MutableStateFlow(true)
     val foreground = _foreground.asStateFlow()
-    fun setForeground(on: Boolean) { _foreground.value = on }
+    fun setForeground(on: Boolean) {
+        _foreground.value = on
+        if (on && !_pushReady.value) viewModelScope.launch { if (store.current().notify) setupPush() }   // retry after offline / locked starts
+    }
 
     private var statusJob: Job? = null
 

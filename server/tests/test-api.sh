@@ -675,6 +675,8 @@ rm -rf "$W/ops" "$W/old" "$HOME/.claude.json"
 
 echo "push alerts"
 api "push-config"; check "push-config: not configured at first" "$(jqt '.ok and .data.configured == false')"
+api "push-setup" "not json"; check "push-setup refuses a non-key" "$(jqt '.ok == false and .error.code == "invalid_name"')"
+[[ ! -e "$HOME/.config/claude-launcher/fcm-key.json" ]]; check "push-setup keeps nothing from a bad key" $?
 api "push-register short"; check "push-register refuses a short token" "$(jqt '.ok == false')"
 api "push-register aaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbb_cc-dd"; check "push-register stores a phone" "$(jqt '.ok and .data.devices == 1')"
 api "push-register aaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbb_cc-dd"; check "same phone twice stays one" "$(jqt '.data.devices == 1')"

@@ -74,3 +74,9 @@ hostnames, IPs, emails, org names, keys. They live in
   shows the trust prompt first (`trust_folder` avoids it).
 - A session's live conversation is the newest `*.jsonl` in
   `~/.claude/projects/<dir with / and . as ->/`.
+- Push alerts: `server/claude-push` (python, stdlib) is both the Claude hook and
+  `--setup/--test`; `server/tests/test-push.py` runs it against a fake Google.
+  Config in `~/.config/claude-launcher/`: `fcm-key.json` (600), `push.json`,
+  `push-tokens`, `push-done/`. `ensure_push_hook` adds the hooks to
+  `~/.claude/settings.json` (via `status`). An FCM token has a `:`, so
+  `claude-launcher-api` skips its generic TOKEN_RE for `push-register`.

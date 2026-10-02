@@ -94,7 +94,22 @@ data class Session(
     val waiting: Boolean = false,
     /** Claude is working. */
     val busy: Boolean = false,
+    /** "Finished" push alerts are on for this session. */
+    @SerialName("push_done") val pushDone: Boolean = false,
 )
+
+/** The (public) Firebase ids the server hands the phone; [configured] is false until push is set up there. */
+@Serializable
+data class PushConfig(
+    val configured: Boolean = false,
+    @SerialName("project_id") val projectId: String = "",
+    @SerialName("app_id") val appId: String = "",
+    @SerialName("api_key") val apiKey: String = "",
+    @SerialName("sender_id") val senderId: String = "",
+)
+
+@Serializable
+data class PushTestResult(val sent: Int = 0)
 
 @Serializable
 data class SessionsData(val now: Long = 0, val sessions: List<Session> = emptyList())
