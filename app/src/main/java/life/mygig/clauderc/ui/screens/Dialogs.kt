@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -314,9 +315,18 @@ fun CustomKeysDialog(vm: MainViewModel) {
                     value = name, onValueChange = { name = it.uppercase().replace(Regex("[^A-Z0-9_]"), "_") },
                     label = { Text("Name, e.g. ACME_API_KEY") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                     isError = name.isNotEmpty() && !nameOk,
-                    supportingText = { Text("Ends in _KEY, _TOKEN, _SECRET, _PASSWORD, _USERNAME, _USER, _SERVER, _HOST, _URL, _ID, _EMAIL, _REGION, _PROJECT, _ENDPOINT, _ORG or _ACCOUNT") },
+                    supportingText = { Text(if (name.isNotEmpty() && !nameOk) "The name must end in one of the endings below" else "Pick an ending below") },
                     keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
                 )
+                // Tapping an ending adds it to the name (replacing an ending already there).
+                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(listOf("_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_USERNAME", "_URL", "_ID", "_HOST", "_SERVER", "_EMAIL", "_REGION", "_PROJECT", "_ENDPOINT", "_ORG", "_ACCOUNT", "_USER")) { e ->
+                        androidx.compose.material3.AssistChip(
+                            onClick = { name = Regex("_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT)$").replace(name, "").trimEnd('_') + e },
+                            label = { Text(e) },
+                        )
+                    }
+                }
                 OutlinedTextField(
                     value = value, onValueChange = { value = it.trim() },
                     label = { Text("Value") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
