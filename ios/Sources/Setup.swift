@@ -55,7 +55,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Server") {
+                Section {
                     LabeledContent("Host", value: "\(app.server.host):\(app.server.port)")
                     LabeledContent("User", value: app.server.user)
                     if let s = app.status {
@@ -67,7 +67,7 @@ struct SettingsView: View {
                     Button("Refresh") { app.refreshStatus() }
                     Button("Re-check host key") { app.saveAndProbe(host: app.server.host, port: app.server.port, user: app.server.user) }
                     Button("Remove this server", role: .destructive) { confirmForget = true }
-                } footer: { Text("Host key \(app.fingerprint)").font(.system(.caption2, design: .monospaced)) }
+                } header: { Text("Server") } footer: { Text("Host key \(app.fingerprint)").font(.system(.caption2, design: .monospaced)) }
                 KeySection()
             }
             .navigationTitle("Settings")
