@@ -105,7 +105,7 @@ case "$sub" in
     ((nargs == 1)) && [[ "${args[0]}" =~ ^[A-Z][A-Z0-9_]{0,30}$ ]] || deny "$sub"
     ;;
   set-secret | remove-secret)
-    ((nargs == 1)) && [[ "${args[0]}" =~ ^[A-Z][A-Z0-9_]{0,55}_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT)$ ]] || deny "$sub"
+    ((nargs == 1)) && [[ "${args[0]}" =~ ^[A-Z][A-Z0-9_]{0,55}_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT|AUTHKEY|APIKEY)$ ]] || deny "$sub"
     ;;
   keys)
     ((nargs >= 2 && nargs <= 6)) && [[ "${args[0]}" =~ $PROJECT_RE ]] || deny "$sub"

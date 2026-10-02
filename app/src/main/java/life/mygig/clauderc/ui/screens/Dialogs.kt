@@ -316,13 +316,13 @@ fun CustomKeysDialog(vm: MainViewModel) {
                     label = { Text("Name, e.g. ACME_API_KEY") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                     isError = name.isNotEmpty() && !nameOk,
                     supportingText = { Text(if (name.isNotEmpty() && !nameOk) "The name must end in one of the endings below" else "Pick an ending below") },
-                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                    keyboardOptions = KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Characters, autoCorrectEnabled = false),   // caps from the keyboard itself, so the text isn't rewritten mid-typing
                 )
                 // Tapping an ending adds it to the name (replacing an ending already there).
                 androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(listOf("_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_USERNAME", "_URL", "_ID", "_HOST", "_SERVER", "_EMAIL", "_REGION", "_PROJECT", "_ENDPOINT", "_ORG", "_ACCOUNT", "_USER")) { e ->
+                    items(listOf("_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_USERNAME", "_URL", "_ID", "_HOST", "_SERVER", "_EMAIL", "_REGION", "_PROJECT", "_ENDPOINT", "_ORG", "_ACCOUNT", "_USER", "_AUTHKEY", "_APIKEY")) { e ->
                         androidx.compose.material3.AssistChip(
-                            onClick = { name = Regex("_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT)$").replace(name, "").trimEnd('_') + e },
+                            onClick = { name = Regex("_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT|AUTHKEY|APIKEY)$").replace(name, "").trimEnd('_') + e },
                             label = { Text(e) },
                         )
                     }
