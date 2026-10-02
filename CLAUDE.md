@@ -80,3 +80,9 @@ hostnames, IPs, emails, org names, keys. They live in
   `push-tokens`, `push-done/`. `ensure_push_hook` adds the hooks to
   `~/.claude/settings.json` (via `status`). An FCM token has a `:`, so
   `claude-launcher-api` skips its generic TOKEN_RE for `push-register`.
+- iOS (branch `iOS`): `ios/` is a native SwiftUI port (no Mac here, so it is only
+  ever compiled by `.github/workflows/ios.yml` on a macOS runner: unsigned IPA
+  artifact). The Xcode project is generated from `ios/project.yml` with XcodeGen.
+  SSH is swift-nio-ssh (`Ssh.swift`), same forced-command protocol as Android.
+  Not ported yet: logins, MCP/plugins, cluster, file transfer, push (APNs needs
+  an Apple developer account). Android code is untouched.

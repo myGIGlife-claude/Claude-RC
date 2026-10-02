@@ -1,0 +1,39 @@
+name: ios
+
+# Builds the iPhone/iPad app (unsigned) on a macOS runner. Runs on pushes to the
+# iOS branch and by hand; it never signs or publishes anything.
+on:
+  push:
+    branches: [iOS]
+    paths: [ios/**, .github/workflows/ios.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Generate the Xcode project
+        run: brew install xcodegen && cd ios && xcodegen generate
+      - name: Build for iPhone and iPad (unsigned)
+        run: |
+          cd ios
+          xcodebuild -project cLaudeRC.xcodeproj -scheme cLaudeRC -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+      - name: Package unsigned IPA
+        run: |
+          cd ios/build/Build/Products/Release-iphoneos
+          mkdir Payload && cp -R cLaudeRC.app Payload/
+          zip -qry "$GITHUB_WORKSPACE/cLaudeRC-unsigned.ipa" Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cLaudeRC-ios-unsigned
+          path: cLaudeRC-unsigned.ipa

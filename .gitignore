@@ -30,3 +30,8 @@ __pycache__/
 *.pyc
 /uploads/
 .superpowers/
+
+# iOS
+ios/*.xcodeproj/
+ios/build/
+*.ipa

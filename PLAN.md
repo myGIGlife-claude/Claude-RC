@@ -1,4 +1,4 @@
-Last updated: 2026-10-02 04:40 UTC
+Last updated: 2026-10-02 21:30 UTC
 
 ## Goal
 cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage Claude Code sessions on your own server from a phone.
@@ -7,6 +7,7 @@ cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage
 Shipped #92-#101 (chat: ! and / commands show as typed, session-switch flash/scroll, stuck "queued" fixes incl. tap-to-remove and Enter retry for pasted messages, / suggestions incl. skills/plugins via `chat-commands`, custom key form: _AUTHKEY/_APIKEY + chips + autofill off). SCRIPT_API 29. Next: owner re-tests on phone after Update now (/ suggestions, ! echo, long pasted message, custom key TS_AUTHKEY), then the audit decisions below.
 
 ## Tasks
+- [ ] iOS port (branch `iOS`, `ios/`): committed, one CI build on macOS (`ios.yml`). If it fails fix and push again. Next: sign/TestFlight needs an Apple developer account; port logins, MCP/plugins, cluster, files, push.
 - [ ] Instant push alerts (branch `push-notifications`, 2 local commits, NOT pushed/merged; Kotlin never compiled: CI only). Owner at the hotel: `! firebase login --no-localhost` is NOT needed any more: create a free Firebase project in the console, Project settings › Service accounts › Generate new private key, paste it in the app (Settings › Notifications › Set up instant alerts). Steps for me: push branch, PR, watch CI build (fix compile errors: Push.kt/PushService.kt/Settings dialog are the risky bits), merge, owner Update now, set up key, Send a test push, Restart sessions so hooks load.
 - [ ] Try on the phone: 👥 in a chat (attach a worker, set role/mode), ask main to delegate and merge; usage bars fill with used.
 - [ ] cLaudeCluster (#81, replaces Team): try on the phone. Claude tab › cLaudeCluster shows usage left per account (undocumented OAuth usage endpoint; verify real numbers show), + Add account (worker + sign in), add a 2nd server signed in to another account → join prompt. Also check #80 (keyboard no longer opens over the chat box) and queued messages surviving leaving the chat.
