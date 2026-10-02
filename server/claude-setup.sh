@@ -19,7 +19,7 @@ set -uo pipefail
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
 # 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers.
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=28
+SCRIPT_API=29
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -2478,6 +2478,11 @@ do_chat_history() {
       | if startswith("<bash-input>") then
           # A "!" command you typed: shown as you typed it, then its output.
           {id:$l.uuid, role:"user", text:("!" + (capture("<bash-input>(?<c>.*)</bash-input>"; "s").c)[0:8000]), ts:$l.timestamp}
+        elif contains("<command-name>") then
+          # A slash command you ran: shown as you typed it.
+          (capture("<command-name>(?<n>[^<]*)</command-name>") | .n) as $n
+          | ((capture("<command-args>(?<a>.*)</command-args>"; "s") | .a) // "") as $a
+          | {id:$l.uuid, role:"user", text:(($n + (if $a != "" then " " + $a else "" end))[0:8000]), ts:$l.timestamp}
         elif startswith("<bash-stdout>") then
           (capture("<bash-stdout>(?<o>.*)</bash-stdout><bash-stderr>(?<e>.*)</bash-stderr>"; "s") | (.o + .e)) as $out
           | select($out | length > 0) | {id:$l.uuid, role:"assistant", text:("```\n" + $out[0:8000] + "\n```"), ts:$l.timestamp}
@@ -2531,6 +2536,53 @@ do_chat_send() {
   unset msg
   chat_log "$sess" send
   api_ok "$(jq -cn --arg s "$sess" '{sent:true, session:$s}')"
+}
+
+# chat-commands <session>: stdin = PIN. The slash commands Claude can run there beyond the built-ins:
+# your skills and commands, the project's, and those of enabled plugins (as plugin:name).
+do_chat_commands() {
+  [[ $# -eq 1 ]] || bad_args "usage: chat-commands <session>"
+  local pin sess dir; pin="$(read_secret_line)"; exec 0</dev/null
+  chat_session "$1"; sess="$CHAT_SESS"
+  check_pin "$pin"
+  dir="$(tmux display-message -p -t "=$sess:" '#{pane_current_path}' 2>/dev/null || true)"
+  local plug="$HOME/.claude/plugins/cache" enabled
+  enabled="$(jq -r '.enabledPlugins // {} | to_entries[] | select(.value == true) | .key' "$HOME/.claude/settings.json" 2>/dev/null || true)"
+  local list
+  list="$({
+    cmds_in "" "$HOME/.claude"
+    [[ -n "$dir" && "$dir" != "$HOME" ]] && cmds_in "" "$dir/.claude"
+    local m p v
+    for p in "$plug"/*/*/; do
+      [[ -d "$p" ]] || continue
+      m="$(basename "$(dirname "$p")")"; p="${p%/}"
+      grep -qx "$(basename "$p")@$m" <<<"$enabled" || continue
+      v="$(ls -v "$p" 2>/dev/null | tail -n 1)"
+      [[ -n "$v" ]] && cmds_in "$(basename "$p"):" "$p/$v"
+    done
+  } 2>/dev/null | sort -u -t$'\t' -k1,1 | head -n 400 | jq -Rcn '[inputs | split("\t") | {name:.[0], hint:(.[1] // "")}]' 2>/dev/null)" || list='[]'
+  api_ok "$(jq -cn --argjson c "${list:-[]}" '{commands:$c}')"
+}
+
+# cmds_in <prefix> <dir>: "name<TAB>hint" for each skill and command under <dir>/skills and <dir>/commands.
+cmds_in() {
+  local pre="$1" d="$2" f n h
+  for f in "$d"/skills/*/SKILL.md; do
+    [[ -f "$f" ]] || continue
+    n="$(basename "$(dirname "$f")")"; h="$(skill_hint "$f")"
+    printf '/%s%s\t%s\n' "$pre" "$n" "$h"
+  done
+  for f in "$d"/commands/*.md; do
+    [[ -f "$f" ]] || continue
+    n="$(basename "$f" .md)"; h="$(skill_hint "$f")"
+    printf '/%s%s\t%s\n' "$pre" "$n" "$h"
+  done
+}
+
+# skill_hint <file>: the front matter's description, first line only, cut short.
+skill_hint() {
+  awk '/^---/ {c++; next} c==1 && /^description:/ {sub(/^description:[ ]*/, ""); if ($0 ~ /^[>|]/) {w=1; next} print; exit} w && NF {print; exit}' "$1" 2>/dev/null \
+    | sed 's/^["'"'"']//; s/["'"'"']$//' | tr -d '\t' | sed 's/^ *//' | cut -c1-80
 }
 
 # chat-interrupt <session>: stdin = PIN. Stops what Claude is doing (Esc).
@@ -2624,7 +2676,7 @@ api_main() {
   shift || true
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | youtube-login-start | \
-      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-file | upload | mcp-auth-start | mcp-auth-finish | worker-add | worker-set | worker-login-code | cluster-assign) ;;  # these read stdin
+      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | worker-add | worker-set | worker-login-code | cluster-assign) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -2685,6 +2737,7 @@ api_main() {
     chat-history)        do_chat_history "$@" ;;
     chat-send)           do_chat_send "$@" ;;
     chat-interrupt)      do_chat_interrupt "$@" ;;
+    chat-commands)       do_chat_commands "$@" ;;
     upload)              do_upload "$@" ;;
     chat-file)           do_chat_file "$@" ;;
     chat-log)            do_chat_log "$@" ;;
