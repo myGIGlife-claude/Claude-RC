@@ -20,7 +20,7 @@ PROJECT_RE='^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$'
 REPO_RE='^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._][A-Za-z0-9._-]*$'
 OWNER_RE='^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'
 WORKER_RE='^[A-Za-z][A-Za-z0-9_-]{0,29}$'
-KNOWN="status owners repos sessions new open clone-status start stop tail login-claude-start login-claude-code login-claude-cancel login-github login-aws-keys login-aws-sso-start login-gitlab login-docker self-update install-cli run claude-cmd restart login-token keys set-secret remove-secret login-keystore remove-keystore youtube-login-start youtube-login-poll mcp mcp-refresh plugins disconnect chat-pin-status chat-pin-set chat-open chat-history chat-send chat-interrupt chat-commands upload chat-log doctor-start mcp-auth-start mcp-auth-finish mcp-auth-cancel repo-edit chat-file cluster worker-list worker-add worker-set worker-remove worker-runs worker-login-start worker-login-code cluster-session cluster-attach cluster-assign"
+KNOWN="status owners repos sessions new open clone-status start stop tail login-claude-start login-claude-code login-claude-cancel login-github login-aws-keys login-aws-sso-start login-gitlab login-docker self-update install-cli run claude-cmd restart login-token keys set-secret remove-secret login-keystore remove-keystore youtube-login-start youtube-login-poll mcp mcp-refresh plugins disconnect chat-pin-status chat-pin-set chat-open chat-history chat-send chat-interrupt chat-commands upload chat-log doctor-start mcp-auth-start mcp-auth-finish mcp-auth-cancel repo-edit chat-file cluster worker-list worker-add worker-set worker-remove worker-runs worker-login-start worker-login-code cluster-session cluster-attach cluster-assign push-config push-setup push-register push-session push-test"
 TOKEN_RE='^[A-Za-z0-9._/=-]{1,200}$'
 
 mkdir -p "$STATE_DIR" 2>/dev/null
@@ -69,15 +69,16 @@ read -r -a argv <<<"$raw"
 sub="${argv[0]:-}"
 args=("${argv[@]:1}")
 
+# (an FCM token has a ':', so push-register checks its own argument below)
 for a in "${args[@]}"; do
-  [[ "$a" =~ $TOKEN_RE ]] || deny "$sub"
+  [[ "$sub" == push-register || "$a" =~ $TOKEN_RE ]] || deny "$sub"
 done
 
 nargs=${#args[@]}
 case "$sub" in
   status | owners | sessions | doctor-start | mcp | mcp-refresh | mcp-auth-start | mcp-auth-finish | mcp-auth-cancel | plugins | chat-pin-status | chat-pin-set | chat-log | login-claude-start | login-claude-code | login-claude-cancel | \
     login-github | login-aws-keys | login-aws-sso-start | login-gitlab | login-docker | run | claude-cmd | \
-    youtube-login-start | youtube-login-poll)
+    youtube-login-start | youtube-login-poll | push-config | push-setup | push-test)
     ((nargs == 0)) || deny "$sub"
     ;;
   repos)
@@ -162,6 +163,12 @@ case "$sub" in
     ;;
   worker-set)
     ((nargs == 2)) && [[ "${args[0]}" =~ $WORKER_RE && ( "${args[1]}" == role || "${args[1]}" == mode ) ]] || deny "$sub"
+    ;;
+  push-register)
+    ((nargs == 1)) && [[ "${args[0]}" =~ ^[A-Za-z0-9:_-]{20,200}$ ]] || deny "$sub"
+    ;;
+  push-session)
+    ((nargs == 2)) && [[ "${args[0]}" =~ $PROJECT_RE && ( "${args[1]}" == on || "${args[1]}" == off ) ]] || deny "$sub"
     ;;
   cluster-session)
     ((nargs == 1)) && [[ "${args[0]}" =~ $PROJECT_RE ]] || deny "$sub"

@@ -51,14 +51,16 @@ class SessionWatcher(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
             }
         val keys = SshKeyManager(ctx)
         val api = LauncherApi(config = { store.current().toServerConfig() }, identity = { keys.identity() })
+        // The server pushes these instantly once push is set up; polling would only repeat them.
+        if (Push.active(ctx)) return Result.success()
         // Offline, or the phone is locked (the key can't be used then): try next time.
         val sessions = runCatching { api.sessions().sessions }.getOrNull() ?: return Result.success()
         val before = prefs.getStringSet("state", emptySet()).orEmpty().associate { it.substringBefore('|') to it.substringAfter('|') }
         sessions.forEach { x ->
             val was = before[x.name].orEmpty()
             when {
-                x.waiting && !was.contains("w") -> notify(ctx, x.name, "${x.project} needs an answer", "Claude is asking something. Open cLaudeRC to answer.")
-                !x.busy && was.contains("b") && !x.waiting -> notify(ctx, x.name, "${x.project} finished", x.preview.lines().lastOrNull { it.isNotBlank() }?.trim() ?: "Claude is done.")
+                x.waiting && !was.contains("w") -> notify(ctx, x.name, "${x.project} needs an answer", "Session ${x.project} is awaiting a response that is needed before it can continue.")
+                !x.busy && was.contains("b") && !x.waiting -> notify(ctx, x.name, "${x.project} finished", x.preview.lines().lastOrNull { it.isNotBlank() }?.trim() ?: "Claude is done.", FINISHED)
             }
         }
         prefs.edit().putStringSet("state", sessions.map { it.name + "|" + (if (it.waiting) "w" else "") + (if (it.busy) "b" else "") }.toSet()).apply()
@@ -68,7 +70,8 @@ class SessionWatcher(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
     companion object {
         private const val WORK = "session-watch"
         // A channel's importance can't be raised once created, so the pop-up version has a new id.
-        private const val CHANNEL = "alerts"
+        internal const val ALERTS = "alerts"       // a session needs an answer (pops up)
+        internal const val FINISHED = "finished"   // a session finished
 
         fun allowed(ctx: Context) = NotificationManagerCompat.from(ctx).areNotificationsEnabled() &&
             (Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
@@ -83,20 +86,21 @@ class SessionWatcher(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         fun cancel(ctx: Context) = WorkManager.getInstance(ctx).cancelUniqueWork(WORK)
 
         private fun channel(ctx: Context) {
-            ctx.getSystemService(NotificationManager::class.java)
-                .createNotificationChannel(NotificationChannel(CHANNEL, "Claude sessions", NotificationManager.IMPORTANCE_HIGH))
+            val m = ctx.getSystemService(NotificationManager::class.java)
+            m.createNotificationChannel(NotificationChannel(ALERTS, "Needs your answer", NotificationManager.IMPORTANCE_HIGH))
+            m.createNotificationChannel(NotificationChannel(FINISHED, "Session finished", NotificationManager.IMPORTANCE_DEFAULT))
         }
 
         fun test(ctx: Context) = notify(ctx, "test", "cLaudeRC test", "If you can read this, session notifications work.")
 
-        private fun notify(ctx: Context, id: String, title: String, text: String) {
+        internal fun notify(ctx: Context, id: String, title: String, text: String, channel: String = ALERTS) {
             if (!allowed(ctx)) return
             channel(ctx)
             val open = PendingIntent.getActivity(
                 ctx, 0, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
-            val n = NotificationCompat.Builder(ctx, CHANNEL)
+            val n = NotificationCompat.Builder(ctx, channel)
                 .setSmallIcon(R.drawable.ic_stat_clauderc)
                 .setColor(0xFFD97757.toInt())
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)

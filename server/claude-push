@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""claude-push: tell the phone right away when a Claude session needs an answer or finishes.
+
+Runs as a Claude Code hook (Notification / Stop; the hook JSON is on stdin) and
+sends a Firebase Cloud Messaging push to every registered phone. Also:
+  claude-push --test   send a test push, print {"sent": N}
+  claude-push --setup  with fcm-key.json saved: register the Android app in that
+                       Firebase project, fetch its public ids into push.json
+Config lives in ~/.config/claude-launcher/: push.json (public Firebase ids),
+fcm-key.json (service-account key, mode 600), push-tokens (one device per
+line), push-done/<session> (a file = "finished" alerts on for that session).
+Hooks must never break Claude: every failure ends in exit 0.
+"""
+import base64, json, os, re, subprocess, sys, tempfile, time, urllib.error, urllib.request
+
+CFG = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "claude-launcher")
+TOKEN_URL = os.environ.get("CLAUDE_PUSH_TOKEN_URL", "https://oauth2.googleapis.com/token")
+SEND_URL = os.environ.get("CLAUDE_PUSH_SEND_URL", "https://fcm.googleapis.com/v1/projects/{}/messages:send")
+SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
+FB_URL = os.environ.get("CLAUDE_PUSH_FIREBASE_URL", "https://firebase.googleapis.com/v1beta1")
+PACKAGE = "life.mygig.clauderc"
+NAME_RE = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$")
+
+
+def b64(b):
+    return base64.urlsafe_b64encode(b).rstrip(b"=")
+
+
+def access_token(key, scope=SCOPE):
+    now = int(time.time())
+    head = b64(json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
+    claims = b64(json.dumps({"iss": key["client_email"], "scope": scope, "aud": TOKEN_URL, "iat": now, "exp": now + 600}).encode())
+    with tempfile.NamedTemporaryFile("w", suffix=".pem") as pem:  # mode 600; deleted on close
+        pem.write(key["private_key"]); pem.flush()
+        sig = subprocess.run(["openssl", "dgst", "-sha256", "-sign", pem.name], input=head + b"." + claims, capture_output=True, check=True).stdout
+    body = ("grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=" + (head + b"." + claims + b"." + b64(sig)).decode()).encode()
+    with urllib.request.urlopen(urllib.request.Request(TOKEN_URL, data=body), timeout=10) as r:
+        return json.load(r)["access_token"]
+
+
+def send(title, body, channel, session, kind):
+    """Push to every device. Returns how many accepted it; drops tokens Google says are gone."""
+    with open(os.path.join(CFG, "push.json")) as f:
+        project = json.load(f)["project_id"]
+    with open(os.path.join(CFG, "fcm-key.json")) as f:
+        bearer = access_token(json.load(f))
+    tokens_file = os.path.join(CFG, "push-tokens")
+    with open(tokens_file) as f:
+        tokens = [t for t in f.read().split() if t]
+    sent, dead = 0, set()
+    for t in tokens:
+        # Data-only, so the app decides whether to show it (its notifications switch) and on which channel.
+        msg = {"message": {"token": t, "android": {"priority": "HIGH"},
+                           "data": {"title": title, "body": body, "channel": channel, "session": session, "kind": kind}}}
+        req = urllib.request.Request(SEND_URL.format(project), data=json.dumps(msg).encode(),
+                                     headers={"Authorization": "Bearer " + bearer, "Content-Type": "application/json"})
+        try:
+            urllib.request.urlopen(req, timeout=10).read()
+            sent += 1
+        except urllib.error.HTTPError as e:
+            if e.code == 404 or b"UNREGISTERED" in e.read():
+                dead.add(t)
+        except OSError:
+            pass
+    if dead:
+        with open(tokens_file, "w") as f:
+            f.write("".join(t + "\n" for t in tokens if t not in dead))
+    return sent
+
+
+def fb(method, url, bearer, body=None):
+    req = urllib.request.Request(url, method=method, data=None if body is None else json.dumps(body).encode(),
+                                 headers={"Authorization": "Bearer " + bearer, "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+
+def setup():
+    """Find or create the Android app in the key's Firebase project and save its (public) ids."""
+    with open(os.path.join(CFG, "fcm-key.json")) as f:
+        key = json.load(f)
+    pid = key["project_id"]
+    bearer = access_token(key, "https://www.googleapis.com/auth/cloud-platform")
+    base = "%s/projects/%s/androidApps" % (FB_URL, pid)
+
+    def find():
+        return next((a for a in fb("GET", base, bearer).get("apps", []) if a.get("packageName") == PACKAGE), None)
+
+    app = find()
+    if not app:
+        fb("POST", base, bearer, {"packageName": PACKAGE, "displayName": "cLaudeRC"})
+        for _ in range(10):  # creation is asynchronous
+            app = find()
+            if app:
+                break
+            time.sleep(2)
+    cfg = json.loads(base64.b64decode(fb("GET", "%s/%s/config" % (base, app["appId"]), bearer)["configFileContents"]))
+    c = cfg["client"][0]
+    ids = {"project_id": pid, "app_id": c["client_info"]["mobilesdk_app_id"],
+           "api_key": c["api_key"][0]["current_key"], "sender_id": cfg["project_info"]["project_number"]}
+    with open(os.path.join(CFG, "push.json"), "w") as f:
+        json.dump(ids, f)
+    return ids
+
+
+def session_name():
+    pane = os.environ.get("TMUX_PANE")
+    if not pane:
+        return ""
+    out = subprocess.run(["tmux", "display-message", "-p", "-t", pane, "#S"], capture_output=True, text=True, timeout=5).stdout.strip()
+    return out if NAME_RE.match(out) else ""
+
+
+def main():
+    if "--setup" in sys.argv:
+        try:
+            print(json.dumps(setup()))
+        except urllib.error.HTTPError as e:
+            hint = {403: "That key isn't allowed to manage Firebase: use the Firebase Admin SDK key (Project settings › Service accounts).",
+                    404: "Firebase doesn't know that project: create it at console.firebase.google.com first."}.get(e.code, "Firebase said %d." % e.code)
+            print(json.dumps({"error": hint}))
+        except Exception:
+            print(json.dumps({"error": "Couldn't set up Firebase with that key. Check it is the Firebase Admin SDK key for your project."}))
+        return
+    if "--test" in sys.argv:
+        print(json.dumps({"sent": send("cLaudeRC test", "Push works: this reached your phone right away.", "alerts", "test", "test")}))
+        return
+    ev = json.load(sys.stdin)
+    name = session_name()
+    if not name:  # not a tmux session (a headless worker, say): nobody to tell
+        return
+    if ev.get("hook_event_name") == "Notification":
+        if ev.get("notification_type") == "idle_prompt":  # the Stop alert already covered it
+            return
+        text = "Session %s is awaiting a response that is needed before it can continue." % name
+        send("%s needs you" % name, text, "alerts", name, "needs")
+    elif ev.get("hook_event_name") == "Stop" and os.path.exists(os.path.join(CFG, "push-done", name)):
+        send("%s finished" % name, "Claude is done in %s." % name, "finished", name, "done")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:  # never break the hook
+        if os.environ.get("CLAUDE_PUSH_DEBUG"): raise
+        if "--test" in sys.argv:
+            print(json.dumps({"sent": 0, "error": str(e)[:200]}))
+    sys.exit(0)

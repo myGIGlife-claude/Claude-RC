@@ -130,6 +130,12 @@ class LauncherApi(
         call("youtube-login-start", stdin = clientId.trim() + "\n" + clientSecret.trim())
     suspend fun youtubePoll(): JsonObject = call("youtube-login-poll")
     suspend fun mcp(): McpData = call("mcp")
+    suspend fun pushConfig(): PushConfig = call("push-config")
+    /** Saves the Firebase service-account key (stdin); the server registers the app and returns its ids. */
+    suspend fun pushSetup(key: String): PushConfig = call("push-setup", stdin = key.trim(), timeoutMs = 120_000)
+    suspend fun pushRegister(token: String): JsonObject = call("push-register $token")
+    suspend fun pushSession(session: String, on: Boolean): JsonObject { requireName(session); return call("push-session $session ${if (on) "on" else "off"}") }
+    suspend fun pushTest(): PushTestResult = call("push-test", timeoutMs = 60_000)
     suspend fun doctorStart(): StartResult = call("doctor-start")
     suspend fun mcpRefresh(): McpData = call("mcp-refresh", timeoutMs = 150_000)
     suspend fun mcpAuthStart(name: String): LoginUrl = call("mcp-auth-start", stdin = name, timeoutMs = 240_000)

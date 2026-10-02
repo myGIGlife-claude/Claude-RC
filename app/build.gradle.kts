@@ -109,5 +109,10 @@ dependencies {
     implementation("com.github.mwiede:jsch:2.28.7")
     implementation("org.bouncycastle:bcprov-jdk18on:1.86")
 
+    // Push alerts. No google-services plugin or json: the server hands the app its
+    // (public) Firebase ids and Push.kt starts Firebase from them at run time.
+    implementation(platform("com.google.firebase:firebase-bom:33.16.0"))
+    implementation("com.google.firebase:firebase-messaging")
+
     testImplementation("junit:junit:4.13.2")
 }

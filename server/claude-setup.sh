@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers.
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 30 = push (push-config/-register/-session/-test, sessions.push_done).
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=29
+SCRIPT_API=30
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -47,6 +47,9 @@ WAIT_RE='Enter to confirm|\(y/n\)|^ *❯ [0-9]+\. |Auto mode lets Claude'
 CLAUDE_LOGIN_SESSION="claude-login"
 AWS_LOGIN_SESSION="aws-sso-login"
 ATTACH_DIR="$LAUNCHER_CONFIG_DIR/attach"     # which workers each project's chat may hand work to (read by clauderc-team)
+PUSH_DIR="$LAUNCHER_CONFIG_DIR/push-done"       # a file per session whose "finished" alerts are on (read by claude-push)
+PUSH_TOKENS="$LAUNCHER_CONFIG_DIR/push-tokens"  # one phone (FCM token) per line
+PUSH_CONFIG="$LAUNCHER_CONFIG_DIR/push.json"    # public Firebase ids; fcm-key.json next to it is the service-account key
 WORKERS_DIR="$LAUNCHER_CONFIG_DIR/workers"   # Team: one folder per extra Claude account
 WORKER_RE='^[A-Za-z][A-Za-z0-9_-]{0,29}$'
 WORKER_MODES=" acceptEdits plan bypassPermissions "
@@ -696,6 +699,7 @@ api_start_session() {
 
 do_status() {
   ensure_env_hook   # keeps Claude's settings in step with the saved tokens
+  ensure_push_hook
   local claude_ok=false gh_ok=false gh_user="" scopes="[]" aws_ok=false aws_json="null" ident
   claude_logged_in && claude_ok=true
   if command -v gh >/dev/null 2>&1 && github_logged_in; then
@@ -851,8 +855,73 @@ do_sessions() {
     grep -q "esc to interrupt" <<<"$screen" && busy=true
     out="$(jq -c --argjson r "$row" --arg p "$tail4" --argjson w "$waiting" --argjson b "$busy" \
       '. + [$r + {preview:$p, waiting:$w, busy:$b}]' <<<"$out")"
+    out="$(jq -c --argjson d "$([[ -e "$PUSH_DIR/$name" ]] && echo true || echo false)" \
+      '.[-1].push_done = $d' <<<"$out")"
   done < <(jq -c '.[]' <<<"${s:-[]}")
   api_ok "$(jq -cn --argjson s "$out" --argjson now "$(date +%s)" '{now:$now, sessions:$s}')"
+}
+
+# Push alerts (Firebase Cloud Messaging; claude-push sends them from Claude's hooks).
+# push-config: what the phone needs to join the project (public ids only).
+do_push_config() {
+  local c=false
+  [[ -s "$PUSH_CONFIG" && -s "$LAUNCHER_CONFIG_DIR/fcm-key.json" ]] && jq -e '.project_id and .app_id and .api_key and .sender_id' "$PUSH_CONFIG" >/dev/null 2>&1 && c=true
+  if $c; then
+    api_ok "$(jq -c '{configured:true, project_id, app_id, api_key, sender_id}' "$PUSH_CONFIG")"
+  else
+    api_ok '{"configured":false}'
+  fi
+}
+
+# push-setup: stdin = the Firebase service-account JSON key. Saves it (mode 600),
+# registers the Android app in that project and saves its public ids.
+do_push_setup() {
+  local key bin="$HOME/.local/bin/claude-push" r tmp
+  key="$(head -c 20000)"
+  exec 0</dev/null
+  jq -e 'select(.type == "service_account" and .project_id and .client_email and .private_key)' >/dev/null 2>&1 <<<"$key" ||
+    api_err invalid_name "That isn't a service-account JSON key. In Firebase: Project settings › Service accounts › Generate new private key."
+  [[ -x "$bin" ]] || api_err not_configured "The push helper isn't installed on the server: run Update now."
+  mkdir -p "$LAUNCHER_CONFIG_DIR"
+  tmp="$(mktemp "$LAUNCHER_CONFIG_DIR/fcm-key.json.XXXXXX")"
+  chmod 600 "$tmp"
+  printf '%s\n' "$key" >"$tmp"
+  mv "$tmp" "$LAUNCHER_CONFIG_DIR/fcm-key.json"
+  unset key
+  r="$(timeout 60 "$bin" --setup 2>/dev/null)"
+  jq -e '.app_id' >/dev/null 2>&1 <<<"$r" || { rm -f "$LAUNCHER_CONFIG_DIR/fcm-key.json" "$PUSH_CONFIG"; api_err invalid_name "$(jq -r '.error // "Firebase didn'"'"'t accept that key."' <<<"$r" 2>/dev/null)"; }
+  ensure_push_hook
+  do_push_config
+}
+
+# push-register <fcm token>: remember a phone (newest five kept).
+do_push_register() {
+  [[ $# -eq 1 && "$1" =~ ^[A-Za-z0-9:_-]{20,200}$ ]] || bad_args "usage: push-register <token>"
+  local tmp n
+  mkdir -p "$LAUNCHER_CONFIG_DIR"
+  tmp="$(mktemp "$PUSH_TOKENS.XXXXXX")"
+  chmod 600 "$tmp"
+  { grep -vxF "$1" "$PUSH_TOKENS" 2>/dev/null || true; echo "$1"; } | tail -n 5 >"$tmp"
+  mv "$tmp" "$PUSH_TOKENS"
+  n="$(wc -l <"$PUSH_TOKENS")"
+  api_ok "$(jq -cn --argjson n "$n" '{registered:true, devices:$n}')"
+}
+
+# push-session <session> on|off: "finished" alerts for one session (questions always alert).
+do_push_session() {
+  [[ $# -eq 2 && ( "$2" == on || "$2" == off ) ]] && valid_project "$1" || bad_args "usage: push-session <session> on|off"
+  mkdir -p "$PUSH_DIR"
+  if [[ "$2" == on ]]; then : >"$PUSH_DIR/$1"; else rm -f "$PUSH_DIR/$1"; fi
+  api_ok "$(jq -cn --arg s "$1" --argjson on "$([[ "$2" == on ]] && echo true || echo false)" '{session:$s, push_done:$on}')"
+}
+
+# push-test: send a push to every registered phone now.
+do_push_test() {
+  local bin="$HOME/.local/bin/claude-push" r
+  [[ -x "$bin" && -s "$PUSH_CONFIG" ]] || api_err not_configured "Push alerts aren't set up on this server yet."
+  r="$(timeout 40 "$bin" --test 2>/dev/null)"
+  jq -e '.sent != null' >/dev/null 2>&1 <<<"$r" || r='{"sent":0}'
+  api_ok "$r"
 }
 
 do_start() {
@@ -1679,6 +1748,22 @@ ensure_env_hook() {
   jq --argjson v "$vars" --argjson old "$old" '
     .env = (((.env // {}) | with_entries(select((.key as $k | $old | index($k)) | not))) + $v)' "$f" >"$tmp" &&
     { cmp -s "$tmp" "$f" || { chmod 600 "$tmp"; mv "$tmp" "$f"; }; jq -r 'keys[]' <<<"$vars" >"$managed"; }   # rewrite (atomically) only on change
+  rm -f "$tmp"
+}
+
+# ensure_push_hook: run claude-push when a session asks something (Notification)
+# or finishes (Stop). Added once, found again by the command; never touches a
+# settings file we can't parse. Applies when a session (re)starts.
+ensure_push_hook() {
+  local f="$HOME/.claude/settings.json" bin="$HOME/.local/bin/claude-push" tmp
+  [[ -x "$bin" && -f "$PUSH_CONFIG" && -s "$f" ]] || return 0
+  jq -e . "$f" >/dev/null 2>&1 || return 0
+  tmp="$(mktemp "$f.XXXXXX")" || return 0
+  jq --arg c "$bin" '
+    reduce ("Notification", "Stop") as $e (.;
+      if ([.hooks[$e][]?.hooks[]?.command] | index($c)) then .
+      else .hooks[$e] = ((.hooks[$e] // []) + [{hooks:[{type:"command", command:$c}]}]) end)' "$f" >"$tmp" &&
+    { cmp -s "$tmp" "$f" || { chmod 600 "$tmp"; mv "$tmp" "$f"; }; }
   rm -f "$tmp"
 }
 
@@ -2676,7 +2761,7 @@ api_main() {
   shift || true
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | youtube-login-start | \
-      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | worker-add | worker-set | worker-login-code | cluster-assign) ;;  # these read stdin
+      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-login-code | cluster-assign) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -2684,6 +2769,11 @@ api_main() {
     status)              [[ $# -eq 0 ]] || bad_args "status takes no arguments"; do_status ;;
     owners)              [[ $# -eq 0 ]] || bad_args "owners takes no arguments"; do_owners ;;
     repos)               [[ $# -eq 0 || ( $# -eq 1 && "$1" == --refresh ) ]] || bad_args "usage: repos [--refresh]"; do_repos "$@" ;;
+    push-config)         [[ $# -eq 0 ]] || bad_args "push-config takes no arguments"; do_push_config ;;
+    push-setup)          [[ $# -eq 0 ]] || bad_args "push-setup reads the key on stdin"; do_push_setup ;;
+    push-register)       do_push_register "$@" ;;
+    push-session)        do_push_session "$@" ;;
+    push-test)           [[ $# -eq 0 ]] || bad_args "push-test takes no arguments"; do_push_test ;;
     sessions)            [[ $# -eq 0 ]] || bad_args "sessions takes no arguments"; do_sessions ;;
     new)                 do_new "$@" ;;
     open)                do_open "$@" ;;

@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -66,6 +67,7 @@ import life.mygig.clauderc.ui.theme.WarnAmber
 @Composable
 fun SessionsScreen(vm: MainViewModel) {
     val sessions by vm.sessions.collectAsState()
+    val pushReady by vm.pushReady.collectAsState()
     val refreshing by vm.sessionsRefreshing.collectAsState()
     val settings by vm.settings.collectAsState()
     val context = LocalContext.current
@@ -113,6 +115,7 @@ fun SessionsScreen(vm: MainViewModel) {
                     onLog = { vm.loadTail(s.name) },
                     onRestart = { confirmRestart = s },
                     onStop = { confirmStop = s },
+                    onPushDone = if (pushReady) { { vm.setSessionPush(s.name, !s.pushDone) } } else null,
                 )
             }
         }
@@ -157,7 +160,7 @@ fun SessionsScreen(vm: MainViewModel) {
 }
 
 @Composable
-private fun SessionCard(s: Session, chat: (() -> Unit)?, onOpen: () -> Unit, onLog: () -> Unit, onRestart: () -> Unit, onStop: () -> Unit) {
+private fun SessionCard(s: Session, chat: (() -> Unit)?, onOpen: () -> Unit, onLog: () -> Unit, onRestart: () -> Unit, onStop: () -> Unit, onPushDone: (() -> Unit)? = null) {
     var menu by remember { mutableStateOf(false) }
     val narrow = isNarrow()
     Surface(
@@ -202,6 +205,14 @@ private fun SessionCard(s: Session, chat: (() -> Unit)?, onOpen: () -> Unit, onL
                 }
                 TextButton(onClick = onRestart) { OneLine("Restart") }
                 if (!s.waiting) Spacer(Modifier.weight(1f))
+                // Bell: tell me right away when this session finishes (questions always alert).
+                if (onPushDone != null) IconButton(onClick = onPushDone) {
+                    Icon(
+                        Icons.Filled.Notifications,
+                        contentDescription = if (s.pushDone) "Finished alerts on for ${s.project}: tap to turn off" else "Finished alerts off for ${s.project}: tap to turn on",
+                        tint = if (s.pushDone) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                    )
+                }
                 Box {
                     IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More for ${s.project}") }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
