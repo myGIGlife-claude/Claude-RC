@@ -475,8 +475,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun setChat(session: String, c: ChatData) {
         if (session != _chatSession.value) return   // a late reply from the chat we just left
         _chat.value = c
-        val shown = c.messages.filter { it.role == "user" }.map { it.text.trim() }.toSet()
-        _chatPending.value = _chatPending.value.filterNot { it in shown }
+        // Compare loosely: Claude Code may change spacing, and the server cuts long messages at 8000 characters.
+        fun norm(t: String) = t.trim().replace(Regex("\\s+"), " ").take(7000)
+        val shown = c.messages.filter { it.role == "user" }.map { norm(it.text) }.toSet()
+        _chatPending.value = _chatPending.value.filterNot { norm(it) in shown }
     }
 
     /** Send a file from the phone into the chat's project folder; [onDone] gets its path. */
