@@ -2521,8 +2521,12 @@ do_chat_send() {
   if [[ ${#msg} -gt 300 || "$msg" == *$'\n'* ]]; then sleep 1; else sleep 0.3; fi
   tmux send-keys -t "=$sess:" Enter
   if [[ ${#msg} -gt 300 || "$msg" == *$'\n'* ]]; then
-    sleep 1
-    tmux capture-pane -p -t "=$sess:" 2>/dev/null | tail -n 8 | grep -q '^❯ .*\[Pasted text' && tmux send-keys -t "=$sess:" Enter
+    local i
+    for i in 1 2 3 4 5; do   # a busy session can swallow the Enter more than once
+      sleep 1
+      tmux capture-pane -p -t "=$sess:" 2>/dev/null | tail -n 6 | grep -q '^❯ .*\[Pasted text' || break
+      tmux send-keys -t "=$sess:" Enter
+    done
   fi
   unset msg
   chat_log "$sess" send
