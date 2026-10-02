@@ -244,7 +244,7 @@ private fun Messages(vm: MainViewModel, voice: ChatVoice, messages: List<ChatMes
                         Surface(shape = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp), color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.widthIn(max = 320.dp)) {
                             SelectionContainer { Text(linkify(r.m.text), modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium) }
                         }
-                        if (r.pending) Text("queued · Claude reads it at its next pause", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (r.pending) Text("queued · tap here to remove", modifier = Modifier.clickable { vm.dismissPending(r.m.text) }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
                     val key = r.m.id + r.m.text.hashCode()

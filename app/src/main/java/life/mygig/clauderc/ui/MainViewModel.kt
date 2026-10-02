@@ -471,6 +471,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Drops a message stuck as "queued" (it only hides it here; nothing is unsent). */
+    fun dismissPending(text: String) { _chatPending.value = _chatPending.value.toMutableList().also { it.remove(text) } }
+
     /** New history; drop pending messages the conversation now shows. */
     private fun setChat(session: String, c: ChatData) {
         if (session != _chatSession.value) return   // a late reply from the chat we just left
