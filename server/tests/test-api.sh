@@ -401,6 +401,8 @@ JL
 touch "$TD/99999999-0000-0000-0000-000000000000.jsonl"
 api "chat-history demo-app2" "482913"
 check "chat history: your text, Claude's text, tool lines, messages sent mid-turn; system lines left out" "$(jqt '.ok and ([.data.messages[] | .role] == ["user","assistant","tool","user"]) and .data.messages[0].text=="Add a forecast screen" and .data.messages[2].text=="Bash: npm test" and .data.messages[3].text=="also add tests"')"
+printf '%s\n' '{"type":"user","uuid":"b1","timestamp":"2026-09-29T10:00:11Z","message":{"role":"user","content":"<bash-input>echo hello</bash-input>"}}' '{"type":"user","uuid":"b2","timestamp":"2026-09-29T10:00:12Z","message":{"role":"user","content":"<bash-stdout>hello</bash-stdout><bash-stderr></bash-stderr>"}}' >>"$TD/99999999-0000-0000-0000-000000000000.jsonl"
+api "chat-history demo-app2" "482913"; check "chat history: a ! command shows as typed, then its output" "$(jqt '.data.messages[-2].text=="!echo hello" and .data.messages[-2].role=="user" and (.data.messages[-1].text|contains("hello"))')"
 api "chat-send demo-app2" $'482913\nline one\nline two'; check "chat send" "$(jqt '.ok and .data.sent')"
 api "chat-history demo-app2" "482913"; check "chat history carries Claude's permission mode" "$(jqt '.ok and (.data.mode | IN("default","auto","plan","edits","bypass"))')"
 tmux send-keys -t "=demo-app2:" -l "⏸ plan mode on (shift+tab to cycle)"; sleep 0.3

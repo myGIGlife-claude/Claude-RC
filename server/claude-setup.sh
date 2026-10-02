@@ -2475,8 +2475,14 @@ do_chat_history() {
       | {id:$l.uuid, role:"user", text:.[0:8000], ts:$l.timestamp}
     elif .type == "user" then
       (.message.content | if type == "string" then [.] else [.[]? | select(.type == "text") | .text] end)[]
-      | select(length > 0 and (startswith("<") | not))
-      | {id:$l.uuid, role:"user", text:.[0:8000], ts:$l.timestamp}
+      | if startswith("<bash-input>") then
+          # A "!" command you typed: shown as you typed it, then its output.
+          {id:$l.uuid, role:"user", text:("!" + (capture("<bash-input>(?<c>.*)</bash-input>"; "s").c)[0:8000]), ts:$l.timestamp}
+        elif startswith("<bash-stdout>") then
+          (capture("<bash-stdout>(?<o>.*)</bash-stdout><bash-stderr>(?<e>.*)</bash-stderr>"; "s") | (.o + .e)) as $out
+          | select($out | length > 0) | {id:$l.uuid, role:"assistant", text:("```\n" + $out[0:8000] + "\n```"), ts:$l.timestamp}
+        elif length > 0 and (startswith("<") | not) then {id:$l.uuid, role:"user", text:.[0:8000], ts:$l.timestamp}
+        else empty end
     else
       (.message.content // [])[] |
       if .type == "text" then {id:$l.uuid, role:"assistant", text:(.text[0:12000]), ts:$l.timestamp}

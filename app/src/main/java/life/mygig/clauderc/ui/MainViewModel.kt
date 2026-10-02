@@ -457,7 +457,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val session = _chatSession.value ?: return
         val pin = chatPin ?: return
         val t = text.trim()
-        val tracked = !t.startsWith("/") && !t.startsWith("!")   // slash and ! commands never show up as messages, so they would stay "queued" for good
+        val tracked = !t.startsWith("/")   // a slash command never shows up as a message, so it would stay "queued" for good
         onSent()
         if (tracked) _chatPending.value = _chatPending.value + t
         action("Sending…", onError = { e ->
