@@ -18,6 +18,7 @@ mkdir -p "$HOME/bin" "$HOME/.local/bin" "$STUB_STATE" "$TMUX_TMPDIR"
 # Stubs go where the real tools live, so the scripts' own PATH setup finds them.
 cp "$HERE"/stubs/* "$HOME/.local/bin/"
 cp "$SERVER/claude-autostart.sh" "$HOME/.local/bin/claude-autostart"
+cp "$SERVER/claude-push" "$HOME/.local/bin/"
 cp "$SERVER/claude-setup.sh" "$SERVER/claude-launcher-api" "$HOME/bin/"
 chmod +x "$HOME/bin/"* "$HOME/.local/bin/"*
 export PATH="$HOME/.local/bin:$PATH"
@@ -671,6 +672,26 @@ grep -q "sekrit-old" "$STUB_STATE/usage-config"; [[ $? -ne 0 ]]; check "expired 
 api "cluster x"
 check "cluster takes no arguments" "$(jqt '.ok == false')"
 rm -rf "$W/ops" "$W/old" "$HOME/.claude.json"
+
+echo "push alerts"
+api "push-config"; check "push-config: not configured at first" "$(jqt '.ok and .data.configured == false')"
+api "push-register short"; check "push-register refuses a short token" "$(jqt '.ok == false')"
+api "push-register aaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbb_cc-dd"; check "push-register stores a phone" "$(jqt '.ok and .data.devices == 1')"
+api "push-register aaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbb_cc-dd"; check "same phone twice stays one" "$(jqt '.data.devices == 1')"
+[[ "$(stat -c %a "$HOME/.config/claude-launcher/push-tokens")" == 600 ]]; check "token file is private" $?
+echo '{"project_id":"p","app_id":"1:2:android:3","api_key":"k","sender_id":"2"}' >"$HOME/.config/claude-launcher/push.json"
+api "push-config"; check "push-config: still needs the key file" "$(jqt '.data.configured == false')"
+echo '{}' >"$HOME/.config/claude-launcher/fcm-key.json"
+api "push-config"; check "push-config hands the app its ids" "$(jqt '.data.configured and .data.project_id == "p" and .data.sender_id == "2" and (.data | has("private_key") | not)')"
+api "push-session demo-app on"; check "push-session on" "$(jqt '.ok and .data.push_done')"
+api "sessions"; check "sessions carry push_done" "$(jqt '.ok and (.data.sessions | all(has("push_done")))')"
+api "push-session demo-app maybe"; check "push-session refuses other words" "$(jqt '.ok == false')"
+api "push-session demo-app off"; [[ ! -e "$HOME/.config/claude-launcher/push-done/demo-app" ]]; check "push-session off" $?
+echo '{"theme":"dark"}' >"$HOME/.claude/settings.json"
+api "status"; check "status installs the push hooks" "$(jq -e '.theme == "dark" and (.hooks.Notification[0].hooks[0].command | endswith("claude-push")) and (.hooks.Stop | length) == 1' "$HOME/.claude/settings.json" >/dev/null 2>&1; echo $?)"
+api "status"; check "push hooks are added once" "$(jq -e '(.hooks.Notification | length) == 1 and (.hooks.Stop | length) == 1' "$HOME/.claude/settings.json" >/dev/null 2>&1; echo $?)"
+rm -f "$HOME/.config/claude-launcher/push.json" "$HOME/.config/claude-launcher/fcm-key.json"
+OUT="$(python3 "$HERE/test-push.py" 2>&1)"; check "claude-push against a fake Google" $?
 
 echo "team MCP server"
 OUT="$(python3 "$HERE/test-team.py" 2>&1)"; check "clauderc-team MCP self-check" $?
