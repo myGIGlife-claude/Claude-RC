@@ -342,6 +342,15 @@ if [[ -n "$KT" ]]; then
   api "remove-keystore GTG"; check "signing key removed" "$(jqt '.ok and .data.removed=="GTG"')"
   [[ ! -e "$HOME/.config/claude-launcher/keystores/GTG.jks" ]] && ! grep -q GTG_ "$HOME/.config/claude-launcher/env"; check "file and variables gone" $?
 fi
+echo "apple developer key"
+P8="$(printf -- '-----BEGIN PRIVATE KEY-----\nMIGTfake\n-----END PRIVATE KEY-----\n' | base64 -w0)"
+api "login-apple" "$(printf 'BADKEY\n69a6de70-8c3e-4b1e-9f1a-0123456789ab\n\n'; echo "$P8")"; check "apple: bad key id refused" "$(jqt '.error.code=="invalid_name"')"
+api "login-apple" "$(printf 'ABC1234567\n69a6de70-8c3e-4b1e-9f1a-0123456789ab\nTEAM123456\n'; echo "$P8")"; check "apple key saved" "$(jqt '.ok and .data.key_id=="ABC1234567"')"
+[[ "$(stat -c %a "$HOME/.config/claude-launcher/apple/AuthKey.p8")" == 600 ]]; check "apple key file mode 600" $?
+jq -e '.env.APPLE_API_KEY_ID=="ABC1234567" and .env.APPLE_TEAM_ID=="TEAM123456" and (.env.APPLE_API_KEY_FILE|endswith("/apple/AuthKey.p8"))' "$HOME/.claude/settings.json" >/dev/null; check "apple vars reach Claude's settings env" $?
+api "status"; check "status reports apple" "$(jqt '.data.apple==true')"
+api "remove-apple"; check "apple key removed" "$(jqt '.ok')"
+[[ ! -e "$HOME/.config/claude-launcher/apple/AuthKey.p8" ]] && ! grep -q APPLE_ "$HOME/.config/claude-launcher/env"; check "apple file and variables gone" $?
 api "login-keystore gtg" "x"; check "signing key name must be upper case" "$(jqt '.error.code=="forbidden"')"
 rm -f "$HOME/.config/claude-launcher/env"
 

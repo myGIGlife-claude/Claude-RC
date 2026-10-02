@@ -139,6 +139,7 @@ fun AddServiceDialog(vm: MainViewModel) {
         if (sv["youtube"]?.loggedIn != true) {
             add(Triple("YouTube", "Upload videos to your channel (youtube-upload)") { vm.showAddService(false); vm.showLogin(LoginKind.YOUTUBE) })
         }
+        add(Triple("Apple developer account", "App Store Connect API key for signing and uploading iOS apps") { vm.showApple(true) })
         add(Triple("Android signing key", "Upload keystore (.jks) for signing app bundles") { vm.showKeystores(true) })
         add(Triple("Custom API key", "Any other API: a name like ACME_API_KEY and its value") { vm.showCustomKeys(true) })
         Catalog.services.forEach { def ->
@@ -282,6 +283,95 @@ fun KeystoresDialog(vm: MainViewModel) {
             text = { Text("It's deleted from the server. Keep your own backup: Google Play only accepts bundles signed with this upload key.") },
             confirmButton = { TextButton(onClick = { confirmRemove = null; vm.removeKeystore(n) }) { Text("Remove") } },
             dismissButton = { TextButton(onClick = { confirmRemove = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** Apple developer account: an App Store Connect API key (.p8) with its key ID and issuer ID. */
+@Composable
+fun AppleDialog(vm: MainViewModel) {
+    val context = LocalContext.current
+    val status by vm.status.collectAsState()
+    val busy by vm.busy.collectAsState()
+    var keyId by remember { mutableStateOf("") }
+    var issuer by remember { mutableStateOf("") }
+    var team by remember { mutableStateOf("") }
+    var file by remember { mutableStateOf<ByteArray?>(null) }
+    var fileName by remember { mutableStateOf("") }
+    var confirmRemove by remember { mutableStateOf(false) }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+            if (bytes == null || bytes.isEmpty() || bytes.size > 10_000) {
+                vm.say("That file couldn't be read (or it's too big for a .p8 key).")
+            } else {
+                file = bytes
+                fileName = uri.lastPathSegment?.substringAfterLast('/') ?: "AuthKey.p8"
+            }
+        }
+    }
+    val idOk = Regex("^[A-Z0-9]{10}$").matches(keyId)
+    val issuerOk = Regex("^[0-9a-fA-F-]{36}$").matches(issuer)
+    val teamOk = team.isEmpty() || Regex("^[A-Z0-9]{10}$").matches(team)
+    AlertDialog(
+        onDismissRequest = { if (busy == null) vm.showApple(false) },
+        title = { Text("Apple developer account") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "In App Store Connect › Users and Access › Integrations, create an API key and download its " +
+                        ".p8 (Apple shows it once). The server keeps the file private; every session gets " +
+                        "APPLE_API_KEY_ID, APPLE_API_ISSUER_ID, APPLE_API_KEY_FILE and APPLE_TEAM_ID after a restart.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                if (status?.apple == true) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("A key is saved", modifier = Modifier.weight(1f))
+                        TextButton(onClick = { confirmRemove = true }, enabled = busy == null) { Text("Remove") }
+                    }
+                }
+                OutlinedTextField(
+                    value = keyId, onValueChange = { keyId = it.trim().uppercase() },
+                    label = { Text("Key ID (10 characters)") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    isError = keyId.isNotEmpty() && !idOk,
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                )
+                OutlinedTextField(
+                    value = issuer, onValueChange = { issuer = it.trim() },
+                    label = { Text("Issuer ID (UUID)") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    isError = issuer.isNotEmpty() && !issuerOk,
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                )
+                OutlinedTextField(
+                    value = team, onValueChange = { team = it.trim().uppercase() },
+                    label = { Text("Team ID (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    isError = !teamOk,
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                )
+                OutlinedButton(onClick = { pick.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (file == null) "Choose the .p8 key file" else "File: $fileName")
+                }
+                Button(
+                    onClick = {
+                        val f = file ?: return@Button
+                        vm.saveApple(keyId, issuer, team, f)
+                        file = null; fileName = ""
+                    },
+                    enabled = busy == null && idOk && issuerOk && teamOk && file != null,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Save") }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = { vm.showApple(false) }) { Text("Close") } },
+    )
+    if (confirmRemove) {
+        AlertDialog(
+            onDismissRequest = { confirmRemove = false },
+            title = { Text("Remove the Apple developer key?") },
+            text = { Text("It's deleted from the server. You can create a new key in App Store Connect any time.") },
+            confirmButton = { TextButton(onClick = { confirmRemove = false; vm.removeApple() }) { Text("Remove") } },
+            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("Cancel") } },
         )
     }
 }

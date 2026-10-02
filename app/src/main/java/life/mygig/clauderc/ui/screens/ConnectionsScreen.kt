@@ -137,6 +137,7 @@ fun ConnectionsScreen(vm: MainViewModel) {
                 .map { m -> Tile(m.label, mcpSubtitle(m), mcpHealth(m)) { detail(Detail.Mcp(m)) } })
 
             val keys = buildList {
+                if (s.apple) add(Tile("Apple developer", "App Store Connect key", Health.OK) { detail(Detail.Apple) })
                 s.keystores.forEach { n -> add(Tile("Signing: $n", "Android upload key", Health.OK) { detail(Detail.Keystore(n)) }) }
                 if (s.custom.isNotEmpty()) {
                     add(Tile("Custom keys", "${s.custom.size} key" + if (s.custom.size == 1) "" else "s", Health.OK) { vm.showCustomKeys(true) })

@@ -19,7 +19,7 @@ set -uo pipefail
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
 # 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 30 = push (push-config/-register/-session/-test, sessions.push_done).
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=30
+SCRIPT_API=31
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -717,6 +717,7 @@ do_status() {
   local commit
   commit="$(grep -oE '^[0-9a-f]{40}$' "$INSTALLED_COMMIT_FILE" 2>/dev/null | head -n 1)"
   api_ok "$(jq -cn --argjson services "$(services_json)" --arg commit "$commit" --argjson api "$SCRIPT_API" \
+    --argjson apple "$([[ -f "$APPLE_DIR/AuthKey.p8" ]] && echo true || echo false)" \
     --argjson keystores "$(ls "$KEYSTORE_DIR" 2>/dev/null | sed -n 's/\.jks$//p' | jq -Rsc 'split("\n") | map(select(. != ""))')" \
     --argjson custom "$(if [[ -f "$CUSTOM_NAMES" ]]; then jq -Rsc 'split("\n") | map(select(. != ""))' "$CUSTOM_NAMES"; else echo '[]'; fi)" \
     --argjson run "$([[ "$ALLOW_RUN" == 1 ]] && echo true || echo false)" \
@@ -727,7 +728,7 @@ do_status() {
       claude:{logged_in:$c},
       github:{logged_in:$g, user:(if $gu=="" then null else $gu end), missing_scopes:$gm},
       aws:{logged_in:$a, identity:$ai, profile:$ap, sso_configured:$sso},
-      hostname:$host, services:$services, custom:$custom, keystores:$keystores,
+      hostname:$host, services:$services, custom:$custom, keystores:$keystores, apple:$apple,
       commit:(if $commit=="" then null else $commit end), script_api:$api, run_enabled:$run}')"
 }
 
@@ -1929,6 +1930,45 @@ do_remove_keystore() {
   api_ok "$(jq -cn --arg n "$1" '{removed:$n}')"
 }
 
+APPLE_DIR="$LAUNCHER_CONFIG_DIR/apple"
+
+# login-apple: an App Store Connect API key (signs and uploads iOS builds). stdin:
+# key ID, issuer ID, team ID (may be empty), then the .p8 file base64-encoded.
+# Saved as apple/AuthKey.p8 (mode 600); every session gets APPLE_API_KEY_ID,
+# APPLE_API_ISSUER_ID, APPLE_API_KEY_FILE and (if given) APPLE_TEAM_ID.
+do_login_apple() {
+  [[ $# -eq 0 ]] || bad_args "login-apple takes no arguments"
+  local kid iss team dir f
+  kid="$(read_secret_line)"; iss="$(read_secret_line)"; team="$(read_secret_line)"
+  dir="$(mktemp -d)" && chmod 700 "$dir"
+  trap 'rc=$?; rm -rf "$dir"; (exit $rc); on_exit' EXIT
+  head -c 20000 | tr -d '[:space:]' | base64 -d >"$dir/key" 2>/dev/null || api_err invalid_name "The key file didn't come through."
+  exec 0</dev/null
+  [[ "$kid" =~ ^[A-Z0-9]{10}$ ]] || api_err invalid_name "The Key ID is 10 letters/digits (App Store Connect › Integrations)."
+  [[ "$iss" =~ ^[0-9a-fA-F-]{36}$ ]] || api_err invalid_name "The Issuer ID is a UUID like 69a6de70-…"
+  [[ -z "$team" || "$team" =~ ^[A-Z0-9]{10}$ ]] || api_err invalid_name "The Team ID is 10 letters/digits."
+  grep -q -- '-----BEGIN PRIVATE KEY-----' "$dir/key" || api_err invalid_name "That isn't an App Store Connect .p8 key file."
+  mkdir -p "$APPLE_DIR" && chmod 700 "$APPLE_DIR"
+  f="$APPLE_DIR/AuthKey.p8"
+  install -m 600 "$dir/key" "$f.new" && mv -f "$f.new" "$f"
+  set_env APPLE_API_KEY_ID "$kid"
+  set_env APPLE_API_ISSUER_ID "$iss"
+  set_env APPLE_API_KEY_FILE "$f"
+  set_env APPLE_TEAM_ID "$team"
+  ensure_env_hook
+  api_ok "$(jq -cn --arg k "$kid" '{saved:true, key_id:$k}')"
+}
+
+do_remove_apple() {
+  [[ $# -eq 0 ]] || bad_args "remove-apple takes no arguments"
+  [[ -f "$APPLE_DIR/AuthKey.p8" ]] || api_err invalid_name "No Apple developer key saved."
+  rm -f "$APPLE_DIR/AuthKey.p8"
+  local v
+  for v in APPLE_API_KEY_ID APPLE_API_ISSUER_ID APPLE_API_KEY_FILE APPLE_TEAM_ID; do set_env "$v" ""; done
+  ensure_env_hook
+  api_ok '{"removed":true}'
+}
+
 # ---- YouTube: Google's device flow ("TVs and Limited Input devices" client).
 # youtube-upload.upload isn't allowed in that flow, the broader youtube scope is.
 YT_PENDING="$API_STATE_DIR/youtube-login.json"
@@ -2760,7 +2800,7 @@ api_main() {
   local cmd="${1:-}"
   shift || true
   case "$cmd" in
-    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | youtube-login-start | \
+    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | login-apple | youtube-login-start | \
       chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-login-code | cluster-assign) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
@@ -2799,6 +2839,8 @@ api_main() {
     set-secret)          do_set_secret "$@" ;;
     remove-secret)       do_remove_secret "$@" ;;
     login-keystore)      do_login_keystore "$@" ;;
+    login-apple)         do_login_apple "$@" ;;
+    remove-apple)        do_remove_apple "$@" ;;
     youtube-login-start) do_youtube_login_start "$@" ;;
     youtube-login-poll)  do_youtube_login_poll "$@" ;;
     repo-edit)           do_repo_edit "$@" ;;

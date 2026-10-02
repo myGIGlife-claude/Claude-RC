@@ -93,6 +93,7 @@ sealed interface Detail {
     data class Login(val kind: LoginKind) : Detail
     data class Mcp(val server: McpServer) : Detail
     data class Keystore(val name: String) : Detail
+    object Apple : Detail
 }
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -844,6 +845,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             say("$name signing key saved. Restart sessions to use it.")
             refreshStatus()
         }
+
+    private val _showApple = MutableStateFlow(false)
+    val showApple = _showApple.asStateFlow()
+    fun showApple(show: Boolean) { _showAdd.value = false; _showApple.value = show }
+
+    fun saveApple(keyId: String, issuerId: String, teamId: String, file: ByteArray) =
+        action("Checking and saving the Apple developer key…") {
+            val b64 = android.util.Base64.encodeToString(file, android.util.Base64.NO_WRAP)
+            api.loginApple(keyId, issuerId, teamId, b64)
+            say("Apple developer key saved. Restart sessions to use it.")
+            refreshStatus()
+        }
+
+    fun removeApple() = action("Removing the Apple developer key…") {
+        api.removeApple()
+        say("Apple developer key removed.")
+        refreshStatus()
+    }
 
     fun removeKeystore(name: String) = action("Removing the $name signing key…") {
         api.removeKeystore(name)
