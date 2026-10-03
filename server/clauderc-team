@@ -30,7 +30,8 @@ WAIT_SLICE = 60           # one wait call returns after this long so the request
 
 INSTRUCTIONS = (
     "Hand work to the owner's other Claude accounts. Call list_workers first, then follow the owner's routing "
-    "rules from this chat. Start every independent piece with delegate, then collect each with wait. "
+    "rules from this chat. Start every independent piece with delegate (name a worker, or give a role and the server picks the "
+    "attached account with the most room left), then collect each with wait. "
     "Workers cannot ask questions: give each a complete, self-contained task. In a git project each task runs on its own "
     "branch (from your last commit, so commit first if it needs your edits). When wait returns, read the diff with review, "
     "check it, then merge it or discard it; nothing reaches your branch until you merge. A failed task keeps its partial work on its branch, so review or discard it too. Runs keep going if your session restarts; call wait again to collect them. Use reply to continue a worker's conversation."
@@ -39,9 +40,12 @@ INSTRUCTIONS = (
 TOOLS = [
     {"name": "list_workers", "description": "List the workers attached to this chat: name, role, permission mode, signed_in.",
      "inputSchema": {"type": "object", "properties": {}}},
-    {"name": "delegate", "description": "Start a task on a worker. Returns a task_id; collect the answer with wait.",
-     "inputSchema": {"type": "object", "required": ["worker", "task"], "properties": {
-         "worker": {"type": "string"}, "task": {"type": "string", "description": "Complete, self-contained instructions."},
+    {"name": "delegate", "description": "Start a task on a worker. Give exactly one of worker (that account; if it is near its usage limit the task moves to another attached account with the same role) or role (the attached, signed-in account with that role and the most room left; the reply of wait says which one ran it). Returns a task_id; collect the answer with wait.",
+     "inputSchema": {"type": "object", "required": ["task"], "properties": {
+         "worker": {"type": "string", "description": "Name of the worker. Use this or role, not both."},
+         "role": {"type": "string", "description": "A role from list_workers (case-insensitive, a part of the role is enough). The server picks the best attached worker with that role. Use this or worker, not both."},
+         "task": {"type": "string", "description": "Complete, self-contained instructions."},
+         "from_task": {"type": "string", "description": "Optional: id of a finished task whose branch is still open (not merged or discarded). The new task starts on that branch, so it sees that worker's changes (e.g. an auditor reviewing a writer's work); review and merge then cover both."},
          "repo": {"type": "string", "description": "Optional: a checkout or git worktree of this project to branch from (and merge back into), e.g. the worktree you're working in. Default: the folder this session started in."}}}},
     {"name": "wait", "description": "Wait for a task and return the worker's final reply.",
      "inputSchema": {"type": "object", "required": ["task_id"], "properties": {
@@ -105,25 +109,43 @@ _usage = {}
 USAGE_TTL = float(os.environ.get("CLAUDERC_USAGE_TTL") or 60)
 
 
-def five_hour_pct(worker):
-    """How much of its 5-hour limit the worker's account has used, or None if unknown (cached 60 s). Same undocumented
-    endpoint as the app's usage bars; an expired token is left alone (Claude refreshes it when it next runs)."""
+def usage(worker):
+    """(five_hour_pct, seven_day_pct): how much of each limit the worker's account has used, None where unknown (cached
+    USAGE_TTL s). Same undocumented endpoint as the app's usage bars; an expired token is left alone (Claude refreshes it
+    when it next runs)."""
     now = time.time()
     c = _usage.get(worker)
     if c and now - c[0] < USAGE_TTL:
         return c[1]
-    pct = None
+    pct = (None, None)
     try:
         cred = json.loads((WORKERS / worker / "home" / ".credentials.json").read_text())["claudeAiOauth"]
         if cred.get("expiresAt", 0) / 1000 > now:
             req = urllib.request.Request(USAGE_URL, headers={"Authorization": "Bearer " + cred["accessToken"], "anthropic-beta": "oauth-2025-04-20"})
             with urllib.request.urlopen(req, timeout=8) as r:
-                v = (json.load(r).get("five_hour") or {}).get("utilization")
-            pct = float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+                j = json.load(r)
+            vals = [(j.get(k) or {}).get("utilization") for k in ("five_hour", "seven_day")]
+            pct = tuple(float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None for v in vals)
     except Exception:
-        pct = None
+        pct = (None, None)
     _usage[worker] = (now, pct)
     return pct
+
+
+def peak(u):
+    """The highest known percentage of a usage pair, or None."""
+    known = [p for p in u if p is not None]
+    return max(known) if known else None
+
+
+def near_limit(worker, cfg, u=None):
+    """True when the owner's hand-back is on and the worker has used the hand-back percentage of its 5-hour or weekly limit."""
+    top = peak(u or usage(worker))
+    return bool(cfg["handback"] and top is not None and top >= cfg["handback_pct"])
+
+
+def usage_text(u):
+    return ", ".join(f"{label} {'?' if p is None else format(p, '.0f') + '%'}" for label, p in zip(("5h", "7d"), u))
 
 
 def running_here():
@@ -139,20 +161,86 @@ def running_here():
     return n
 
 
+def running_on():
+    """Running tasks per worker (any project: they share the worker's login)."""
+    n = {}
+    for p in WORKERS.glob("*/tasks/*.json"):
+        try:
+            t = json.loads(p.read_text())
+        except (OSError, ValueError):
+            continue
+        if t.get("status") == "running":
+            n[t.get("worker")] = n.get(t.get("worker"), 0) + 1
+    return n
+
+
 def list_workers():
-    att, out = attached(), []
+    att, out, c = attached(), [], cluster_cfg()
     for meta in sorted(WORKERS.glob("*/meta.json")):
         name = meta.parent.name
         if name in att:
             role, mode = settings(name, att)
             w = {"name": name, "role": role, "mode": mode, "signed_in": (meta.parent / "home" / ".credentials.json").is_file()}
-            c, pct = cluster_cfg(), five_hour_pct(name)
-            if pct is not None:
-                w["five_hour_pct"] = round(pct)
-                if c["handback"] and pct >= c["handback_pct"]:
-                    w["available"] = False   # near its limit: do the work yourself
+            u = usage(name)
+            for key, pct in zip(("five_hour_pct", "seven_day_pct"), u):
+                if pct is not None:
+                    w[key] = round(pct)
+            if near_limit(name, c, u):
+                w["available"] = False   # near its limit: do the work yourself
             out.append(w)
     return out
+
+
+def usable(att):
+    """{name: role} of the attached workers that exist and are signed in."""
+    out = {}
+    for name in att:
+        try:
+            if isinstance(name, str) and NAME_RE.match(name) and (WORKERS / name / "home" / ".credentials.json").is_file():
+                out[name] = settings(name, att)[0]
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+def best_worker(names, c):
+    """The best of these workers that isn't near its limit: least used (the higher of the 5-hour and weekly numbers; unknown
+    counts as 50), then fewest running tasks, then name. Returns (name or None, {name: usage}) so a refusal can say what each used."""
+    us, busy = {n: usage(n) for n in names}, running_on()
+    ok = [n for n in names if not near_limit(n, c, us[n])]
+    ok.sort(key=lambda n: (50 if peak(us[n]) is None else peak(us[n]), busy.get(n, 0), n))
+    return (ok[0] if ok else None), us
+
+
+def pick_by_role(role, c):
+    """The attached, signed-in worker with this role (case-insensitive; a part of the role is enough) that has the most room left."""
+    att = attached()
+    ok, q = usable(att), role.strip().lower()
+    have = {n: settings(n, att)[0] for n in sorted(att) if isinstance(n, str) and NAME_RE.match(n) and (WORKERS / n / "meta.json").is_file()}
+    mine = [n for n, r in have.items() if q in r.lower()]
+    if not mine:
+        roles = "; ".join(f"{n}: {r or '(no role)'}" for n, r in have.items())
+        raise ToolError(f"No attached worker has the role {role!r}. Attached roles: {roles or 'none (the owner adds workers with the Cluster button in the chat)'}.")
+    ready = [n for n in mine if n in ok]
+    if not ready:
+        raise ToolError(f"The workers with role {role!r} ({', '.join(mine)}) aren't signed in. Sign them in from the Claude tab in the cLaudeRC app.")
+    best, us = best_worker(ready, c)
+    if not best:
+        raise ToolError(f"All workers with role {role!r} are near their usage limit ({'; '.join(n + ': ' + usage_text(us[n]) for n in ready)}): "
+                        "do this task yourself now and try again later.")
+    return best
+
+
+def failover(worker, c):
+    """(other worker, note) when the named worker is near its limit and another attached, signed-in worker with the same
+    role has room; None otherwise (start then refuses as usual)."""
+    ok = usable(attached())
+    role = ok.get(worker, "").strip().lower()
+    u = usage(worker) if role else (None, None)
+    if not near_limit(worker, c, u):
+        return None
+    best, _ = best_worker([n for n, r in ok.items() if n != worker and r.strip().lower() == role], c)
+    return (best, f"Routed to {best} because {worker} is at {peak(u):.0f}% of its limit.") if best else None
 
 
 def git(*a, cwd):
@@ -172,25 +260,29 @@ def repo_dir(repo):
     return p
 
 
-def workspace(worker, tid, cwd):
-    """Its own worktree + branch for a task. None only when cwd isn't a git project with a commit (then the task
-    runs in the folder). A git project that can't get a workspace is an error: never let a worker edit the main checkout."""
+def workspace(worker, tid, cwd, ref=None, base=None):
+    """Its own worktree + branch for a task, from HEAD or from ref (another task's branch; base is then that task's base, so
+    its diffs show both sets of changes). None only when cwd isn't a git project with a commit (then the task runs in the
+    folder). A git project that can't get a workspace is an error: never let a worker edit the main checkout."""
     try:
         top = git("rev-parse", "--show-toplevel", cwd=cwd)
-        base = git("rev-parse", "HEAD", cwd=cwd)
-        if top.returncode or base.returncode:
+        head = git("rev-parse", "HEAD", cwd=cwd)
+        if top.returncode or head.returncode:
             return None
         top = top.stdout.strip()
         wt, branch = WORKERS / worker / "trees" / tid, f"cluster/{worker}/{tid}"
         with git_lock:
             git("worktree", "prune", cwd=top)
-            r = git("worktree", "add", "-q", "-b", branch, str(wt), "HEAD", cwd=top)
+            r = git("worktree", "add", "-q", "-b", branch, str(wt), ref or "HEAD", cwd=top)
         if r.returncode:
             raise ToolError("Couldn't create the worker's own branch, so nothing was started: " + (r.stderr or r.stdout).strip()[-400:])
         rel = os.path.relpath(cwd, top)
         copied = bring_along(Path(top), wt)
-        return {"top": top, "base": base.stdout.strip(), "wt": str(wt), "branch": branch, "copied": copied,
-                "cwd": str(wt if rel == "." else wt / rel)}
+        ws = {"top": top, "base": base or head.stdout.strip(), "wt": str(wt), "branch": branch, "copied": copied,
+              "cwd": str(wt if rel == "." else wt / rel)}
+        if ref:
+            ws["fork"] = git("rev-parse", ref, cwd=top).stdout.strip()   # where this task starts: its own changes are fork..branch
+        return ws
     except (OSError, subprocess.SubprocessError) as e:
         raise ToolError(f"Couldn't create the worker's own branch, so nothing was started: {e}")
 
@@ -225,7 +317,7 @@ def seal(t):
             git("reset", "-q", "--", *t["copied"], cwd=t["wt"])   # copies of ignored files stay out of the branch
         git("-c", f"user.name=cluster-{t['worker']}", "-c", "user.email=cluster@localhost", "-c", "commit.gpgsign=false",
             "commit", "-q", "--no-verify", "-m", f"{t['worker']}: {t['task'][:70]}", cwd=t["wt"])
-    return git("diff", "--stat", f"{t['base']}..{t['branch']}", cwd=t["top"]).stdout.strip()
+    return git("diff", "--stat", f"{t.get('fork') or t['base']}..{t['branch']}", cwd=t["top"]).stdout.strip()
 
 
 def branch_task(tid):
@@ -373,7 +465,7 @@ def finalize(tid):
                 msg = (reply or err_s or out_s or "The worker stopped without an answer (this task was lost). Delegate it again.")[-2000:]
             t.update(status="failed", error=msg)
         elif len(reply) < 400 and LIMIT_RE.search(reply):
-            t.update(status="failed", error=reply + "\n[cluster] This worker's usage limit may be used up. Check the Accounts tab; meanwhile continue the work yourself (any partial work is on its branch).")
+            t.update(status="failed", error=reply + "\n[cluster] This worker's usage limit may be used up. Check the Accounts tab; meanwhile delegate the task again by role (delegate with role instead of worker) to use another account, or continue the work yourself (any partial work is on its branch).")
         else:
             u = out.get("usage") if isinstance(out.get("usage"), dict) else {}
             ran = f"[cluster] Ran {round((out.get('duration_ms') or 0) / 1000)}s, {out.get('num_turns') or '?'} turns, " \
@@ -389,6 +481,9 @@ def finalize(tid):
                 t[key] = (t.get(key) or "") + "\n\n[cluster] " + note
             except Exception:
                 pass
+        if t.get("note"):   # why the task ran on another account than the one asked for
+            key = "reply" if t["status"] == "done" else "error"
+            t[key] = (t.get(key) or "") + "\n\n[cluster] " + t["note"]
         t["finished"] = time.time()
         for ext in ("in", "out", "err", "started"):
             (d / f"{tid}.{ext}").unlink(missing_ok=True)
@@ -398,7 +493,7 @@ def finalize(tid):
             pass  # worker folder removed while the task ran
 
 
-def start(worker, prompt, resume=None, parent=None, repo=None):
+def start(worker, prompt, resume=None, parent=None, repo=None, stack=None, note=None):
     w = worker_dir(worker)
     att = attached()
     if worker not in att:
@@ -408,30 +503,42 @@ def start(worker, prompt, resume=None, parent=None, repo=None):
     if not isinstance(prompt, str) or not prompt.strip():
         raise ToolError("The task is empty.")
     c = cluster_cfg()
-    if c["handback"] and (pct := five_hour_pct(worker)) is not None and pct >= c["handback_pct"]:
-        raise ToolError(f"{worker} has used {pct:.0f}% of its 5-hour limit (the owner's hand-back point is {c['handback_pct']}%). "
+    u = usage(worker)
+    if near_limit(worker, c, u):
+        raise ToolError(f"{worker} has used {peak(u):.0f}% of its usage limit ({usage_text(u)}; the owner's hand-back point is {c['handback_pct']}%). "
                         "Don't delegate: do this task yourself now, and keep doing the work yourself until its usage drops.")
     if running_here() >= c["max_parallel"]:
         raise ToolError(f"This chat already has {c['max_parallel']} worker tasks running (the owner's limit). Collect one with wait first, or do this one yourself.")
     role, mode = settings(worker, att)
     tid, text = uuid.uuid4().hex[:8], prompt
     if parent:
-        ws, cwd = {k: parent.get(k) for k in ("top", "base", "wt", "branch", "copied")}, parent["cwd"]
+        ws, cwd = {k: parent.get(k) for k in ("top", "base", "fork", "wt", "branch", "copied")}, parent["cwd"]
         if ws["top"]:
             text = text.replace(ws["top"], ws["wt"])   # main's paths point at the main checkout; the worker's copy is elsewhere
     else:
         cwd = repo_dir(repo) if repo else os.getcwd()
-        ws = workspace(worker, tid, cwd)
+        if stack:   # starts on another task's branch, in the checkout that branch came from
+            top = repo_dir(stack["top"])   # same repository as this chat's project
+            if repo and os.path.realpath(git("rev-parse", "--show-toplevel", cwd=cwd).stdout.strip()) != os.path.realpath(top):
+                raise ToolError("repo isn't the checkout that task's branch came from; leave repo out when you use from_task.")
+            cwd = top
+        ws = workspace(worker, tid, cwd, *((stack["branch"], stack["base"]) if stack else ()))
+        if stack and not ws:
+            raise ToolError("Couldn't branch from that task: its checkout isn't a git project any more.")
         if ws:
             cwd = ws.pop("cwd")
             fixed = text.replace(ws["top"], ws["wt"])
-            note = " Paths in the task under the main project folder were changed to your copy." if fixed != text else ""
+            paths = " Paths in the task under the main project folder were changed to your copy." if fixed != text else ""
             text = (f"You are working on branch {ws['branch']} in your own copy of the project ({cwd}). Edit files there only. "
-                    f"Don't run git commit, merge or push: your changes are committed for you when you finish.{note}\n\n") + fixed
+                    f"Don't run git commit, merge or push: your changes are committed for you when you finish.{paths}\n\n")
+            if stack:
+                text += (f"Your branch already contains another worker's changes (task {stack['id']}, worker {stack['worker']}). "
+                         f"The base commit is {ws['base']}: see `git diff {ws['base']}..HEAD`.\n\n")
+            text += fixed
         if role:
             text = f"Your role in this project: {role}\n\n" + text
     t = {"id": tid, "worker": worker, "task": prompt[:300], "prompt": text, "cwd": cwd, "mode": mode, "project": os.getcwd(),
-         "resume": resume, "status": "running", "started": time.time(), **{k: v for k, v in (ws or {}).items() if v}}
+         "resume": resume, "status": "running", "started": time.time(), **({"note": note} if note else {}), **{k: v for k, v in (ws or {}).items() if v}}
     save(t)
     try:
         launch(t)
@@ -439,6 +546,28 @@ def start(worker, prompt, resume=None, parent=None, repo=None):
         t.update(status="failed", error=f"Couldn't start the worker: {e}", finished=time.time())
         save(t)
     return tid
+
+
+def delegate(a):
+    """Pick the worker (named, or the best one with the asked role; another one of the same role when the named one is near
+    its limit), check an optional from_task, and start the task."""
+    worker, role, from_task = a.get("worker"), a.get("role"), a.get("from_task")
+    if bool(worker) == bool(role):
+        raise ToolError("Give exactly one of worker or role.")
+    if role is not None and not (isinstance(role, str) and role.strip()):
+        raise ToolError("role must be text, e.g. a role from list_workers.")
+    stack = None
+    if from_task is not None:
+        stack = branch_task(from_task)   # finished, branch still open
+        check_idle(stack)
+    c, note = cluster_cfg(), None
+    if role:
+        worker = pick_by_role(role, c)
+    else:
+        worker_dir(worker)
+        if alt := failover(worker, c):
+            worker, note = alt
+    return start(worker, a.get("task"), repo=a.get("repo"), stack=stack, note=note)
 
 
 def is_queued(t):
@@ -470,7 +599,7 @@ def call_tool(name, a):
     if name == "list_workers":
         return json.dumps(list_workers())
     if name == "delegate":
-        return start(a.get("worker"), a.get("task"), repo=a.get("repo"))
+        return delegate(a)
     if name == "wait":
         return wait(a.get("task_id"), a.get("timeout_s"))
     if name == "reply":
