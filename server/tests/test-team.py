@@ -6,11 +6,15 @@ from pathlib import Path
 
 import http.server, threading
 
+HITS = [0]; ERR = [0]   # requests the fake endpoint got; 429 mode
 USAGE = {"tok": [10, 5]}   # bearer token -> what the fake usage endpoint says that account has used: [5-hour %, weekly %]
 
 
 class Usage(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        HITS[0] += 1
+        if ERR[0]:
+            self.send_response(429); self.send_header("Retry-After", "30"); self.send_header("Content-Length", "0"); self.end_headers(); return
         five, seven = USAGE.get(self.headers.get("Authorization", "").replace("Bearer ", ""), (None, None))
         body = json.dumps({"five_hour": {"utilization": five}, "seven_day": {"utilization": seven}}).encode()
         self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
@@ -376,6 +380,26 @@ assert not err and "Output from worker writer2" in text and "[cluster] Routed to
 tool("discard", task_id=tid)
 err, tid = tool("delegate", worker="auditor", task="named, has room")
 assert not err and "Routed" not in tool("wait", task_id=tid, timeout_s=30)[1]; tool("discard", task_id=tid)   # no hand-over
+# The usage endpoint rate-limits: a 429 backs off (no hammering), keeps the last good numbers, and the cache is shared.
+USAGE["auditor-tok"] = [91, 12]
+assert by_name()["auditor"]["five_hour_pct"] == 91
+assert (cfg.parent / "usage-cache" / "auditor.json").is_file(), "usage is cached in a file every chat's MCP process shares"
+(cfg.parent / "usage-cache" / "auditor.json").write_text(json.dumps({**json.loads((cfg.parent / "usage-cache" / "auditor.json").read_text()), "ts": 1}))   # make it stale
+ERR[0] = 1
+assert "five_hour_pct" not in by_name()["auditor"]   # numbers older than the stale limit are unknown, not trusted
+(cfg.parent / "usage-cache" / "auditor.json").unlink()
+USAGE["auditor-tok"] = [91, 12]; ERR[0] = 0
+assert by_name()["auditor"]["five_hour_pct"] == 91
+fresh = json.loads((cfg.parent / "usage-cache" / "auditor.json").read_text()); fresh["ts"] -= 500   # older than the TTL, still inside the stale limit
+(cfg.parent / "usage-cache" / "auditor.json").write_text(json.dumps(fresh))
+ERR[0] = 1; before = HITS[0]
+assert by_name()["auditor"]["five_hour_pct"] == 91, "a 429 keeps the last good numbers"
+assert HITS[0] == before + 1
+by_name(); by_name()
+assert HITS[0] == before + 1, "after a 429 it backs off instead of asking again"
+ERR[0] = 0
+(cfg.parent / "usage-cache" / "auditor.json").unlink()
+USAGE["auditor-tok"] = [5, 5]
 proc.stdin.close()
 proc.wait(timeout=5)
 print("test-team: ok")
