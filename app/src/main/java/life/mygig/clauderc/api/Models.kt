@@ -319,6 +319,14 @@ data class ClusterAccount(
 @Serializable
 data class ClusterData(val accounts: List<ClusterAccount> = emptyList())
 
+/** Server-wide cluster settings: tasks one chat may run at once, and handing work back to the main Claude near the 5-hour limit. */
+@Serializable
+data class ClusterConfig(
+    @SerialName("max_parallel") val maxParallel: Int = 3,
+    val handback: Boolean = true,
+    @SerialName("handback_pct") val handbackPct: Int = 95,
+)
+
 /** A worker as one chat sees it: attached or not, with this chat's role and mode. */
 @Serializable
 data class ChatWorker(
