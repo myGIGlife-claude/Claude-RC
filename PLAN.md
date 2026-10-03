@@ -7,6 +7,7 @@ cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage
 Shipped #92-#101 (chat: ! and / commands show as typed, session-switch flash/scroll, stuck "queued" fixes incl. tap-to-remove and Enter retry for pasted messages, / suggestions incl. skills/plugins via `chat-commands`, custom key form: _AUTHKEY/_APIKEY + chips + autofill off). SCRIPT_API 29. Next: owner re-tests on phone after Update now (/ suggestions, ! echo, long pasted message, custom key TS_AUTHKEY), then the audit decisions below.
 
 ## Tasks
+- [ ] Cluster (#105-#109): try on the phone after Update now + new APK: Claude tab › cLaudeCluster › Cluster settings (parallel tasks per chat 1-10, hand back at 50-100% of the 5 h limit). Real test of slots / repo= / file= / usage hand-back needs the updated server scripts. Open: `wait` still polls every ~60 s; iOS has no cluster screen.
 - [ ] Apple developer key in the app (PR apple-developer, SCRIPT_API 31): once the account exists, App Store Connect › Integrations › create key, then + › Apple developer account in the app. Then add signing/TestFlight to ios.yml (secrets via `gh secret set`).
 - [x] iOS port (branch `iOS`, `ios/`): builds green on macOS CI (unsigned IPA artifact, 2nd attempt). Next: sign/TestFlight needs an Apple developer account; port logins, MCP/plugins, cluster, files, push.
 - [x] Instant push alerts: working on the phone (2026-10-03: Firebase key registered, test push and a session "finished" alert both arrived).
