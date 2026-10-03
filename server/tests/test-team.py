@@ -245,6 +245,19 @@ assert not err and "+from sess-1" in text, text                  # one file at a
 assert (feat / "feat.txt").exists() and "feat.txt" not in g("diff", "--stat", f"feat..cluster/research/{tid}", c=feat)   # branched from the worktree's commit
 err, text = tool("merge", task_id=tid)
 assert not err and (feat / "cluster-out.txt").exists(), text   # merged into the worktree's branch
+# Two runs of one worker go one at a time: the second one says it is queued, then finishes.
+err, slow = tool("delegate", worker="research", task="SLOW first")
+err, nxt = tool("delegate", worker="research", task="queued behind it")
+err, text = tool("wait", task_id=nxt, timeout_s=1)
+assert not err and text.startswith("Queued"), text
+err, text = tool("wait", task_id=slow, timeout_s=30)
+err, text = tool("wait", task_id=nxt, timeout_s=30)
+assert not err and not text.startswith(("Queued", "Still")), text
+tool("discard", task_id=slow); tool("discard", task_id=nxt)
+err, tid = tool("delegate", worker="research", task="stats please")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "Ran 42s, 3 turns, 1200 tokens in (+50000 cached), 340 out." in text, text   # what the run cost
+tool("discard", task_id=tid)
 proc.stdin.close()
 proc.wait(timeout=5)
 print("test-team: ok")
