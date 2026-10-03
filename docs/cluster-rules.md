@@ -18,6 +18,9 @@ Applies when the `clauderc-team` MCP tools exist and `list_workers` shows a work
 - Size tasks to one screen or one subsystem, on disjoint files so parallel tasks merge cleanly. In every fresh instruction add "what could this break?".
 - Working in a git worktree or on a feature branch? Pass `repo=<worktree path>` to `delegate`. Read big diffs per file with `review file=<path>`, then `merge force=true`.
 - Before `merge` verify with a real build and tests yourself; the worker's "it compiles" is not enough.
+- Route by role, not by name: label each worker with what it does (for example `code writer`, `security audit`) and call `delegate(role="code writer", task=...)`. The server picks the attached worker with that role that has the most room left (5-hour and weekly usage), skips any near its limit, and the reply of `wait` says which one ran it. Naming a worker that is near its limit moves the task to another account with the same role.
+- Pipelines: after a writer finishes, send its branch to a reviewer with `delegate(role="security audit", from_task=<writer task id>, task="Audit this change: ...")`. The auditor's branch starts on the writer's branch, so it sees the changes (use a read-only role/mode so it only reports). Read the audit, then `reply` to the writer with fixes, `merge`, or `discard`.
+- When no worker with the role has room, `delegate` says so: do the work yourself and try the workers again later.
 - Limits come from the cluster settings in the app: at most N tasks per chat at once, and near the 5-hour limit `delegate` refuses with "do this task yourself". Then do the work yourself and try the worker again once its usage drops.
 ```
 
