@@ -17,6 +17,8 @@ DIFF_SHOWN = 20000        # characters of a diff that review returns
 MODES = ("acceptEdits", "plan", "bypassPermissions")
 git_lock = threading.Lock()   # one worktree is created at a time
 CLAUDE = os.environ.get("CLAUDERC_CLAUDE", "claude")
+SLOTS = max(1, int(os.environ.get("CLAUDERC_WORKER_SLOTS") or 3))   # runs of one worker at once; they share its login like several chats share one
+SLOT_SH = 'b=$1; n=$2; m=$3; shift 3; while :; do i=0; while [ $i -lt $n ]; do exec 9>"$b.$i"; flock -n 9 && { : >"$m"; exec "$@"; }; i=$((i+1)); done; sleep 2; done'
 RUN_TIMEOUT = 1800        # seconds one worker run may take
 NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,29}$")
 ID_RE = re.compile(r"^[0-9a-f]{8}$")
@@ -268,7 +270,10 @@ def launch(t):
         meta = {}
     # ponytail: model and effort are per worker, not per chat; add to the attach override if that's ever needed
     pick = [a for k in ("model", "effort") if isinstance(meta.get(k), str) and meta[k] for a in (f"--{k}", meta[k])]
-    cmd = ["flock", str(w / "run.lock"), "timeout", "--kill-after=10", str(RUN_TIMEOUT), CLAUDE, "-p", "--output-format", "json",
+    # Up to SLOTS runs of one worker at a time (any chat can use it on demand); more wait for a free slot. The marker
+    # file says the run really started, so wait can tell "Queued" from "Still running".
+    cmd = ["sh", "-c", SLOT_SH, "slot", str(w / "run.lock"), str(SLOTS), str(d / f"{tid}.started"),
+           "timeout", "--kill-after=10", str(RUN_TIMEOUT), CLAUDE, "-p", "--output-format", "json",
            "--permission-mode", mode] + pick + (["--allowed-tools", ",".join(tools)] if tools else []) + (["--resume", t["resume"]] if t.get("resume") else [])
     # The worker must run as its own account: drop the main session's credentials, Claude Code markers and the service tokens.
     drop = mirrored_names() | {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDECODE"}
@@ -325,7 +330,7 @@ def finalize(tid):
             except Exception:
                 pass
         t["finished"] = time.time()
-        for ext in ("in", "out", "err"):
+        for ext in ("in", "out", "err", "started"):
             (d / f"{tid}.{ext}").unlink(missing_ok=True)
         try:
             save(t)
@@ -371,12 +376,9 @@ def start(worker, prompt, resume=None, parent=None, repo=None):
 
 
 def is_queued(t):
-    """Runs of one worker go one at a time (flock on its run.lock): a run whose flock has no child hasn't started."""
+    """All SLOTS of the worker are busy: the run's wrapper hasn't taken a slot (no .started marker) yet."""
     pid = t.get("pid")
-    if not pid or not pid_alive(pid):
-        return False
-    r = subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True)
-    return r.returncode != 0
+    return bool(pid and pid_alive(pid) and not (WORKERS / t["worker"] / "tasks" / f"{t['id']}.started").exists())
 
 
 def wait(tid, timeout_s=600):
