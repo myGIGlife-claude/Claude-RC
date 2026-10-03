@@ -270,7 +270,13 @@ review) hands the code to the others ("workers") and you stay in charge of what 
 | Setting | What it does |
 | --- | --- |
 | **Parallel tasks per chat** (1 to 10, default 3) | How many tasks one chat may have running on workers at once. More wait for a free slot; `wait` says *Queued*. |
-| **Hand work back to the main Claude** (on, at 95%) | The server checks a worker account's 5-hour usage when the main Claude asks. At or above your percentage (50 to 100) `delegate` refuses and tells the main Claude to do the work itself, until the usage drops. |
+| **Hand work back to the main Claude** (on, at 95%) | The server checks a worker account's 5-hour and weekly usage when the main Claude asks. At or above your percentage (50 to 100) that worker is skipped: the task moves to another account with the same role, and only when none has room does the main Claude do the work itself, until usage drops. |
+
+**Roles and routing.** Give each worker a role (`code writer`, `security audit`, ...). The main Claude can then
+delegate *by role*: the server picks the matching account with the most room left, skips any near its limit,
+and spreads work across same-role accounts, so more accounts means more capacity and fewer stops at a usage limit.
+A task can also start **on another task's branch** (`from_task`), which is how a code writer's work goes to a
+security auditor before anything is merged: write, audit, fix, merge.
 
 A worker's replies end with how long the run took and how many tokens it used. Pick each worker's
 model and effort on the server (for example Sonnet 5.5 at high); the how-to and a ready-made
