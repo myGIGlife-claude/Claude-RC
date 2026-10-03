@@ -366,6 +366,15 @@ def start(worker, prompt, resume=None, parent=None, repo=None):
     return tid
 
 
+def is_queued(t):
+    """Runs of one worker go one at a time (flock on its run.lock): a run whose flock has no child hasn't started."""
+    pid = t.get("pid")
+    if not pid or not pid_alive(pid):
+        return False
+    r = subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True)
+    return r.returncode != 0
+
+
 def wait(tid, timeout_s=600):
     deadline = time.time() + min(int(timeout_s or 600), 900, WAIT_SLICE)
     while True:
@@ -378,6 +387,9 @@ def wait(tid, timeout_s=600):
         if t["status"] == "failed":
             raise ToolError(t.get("error", "The worker failed."))
         if time.time() >= deadline:
+            if is_queued(t):
+                return (f"Queued: worker {t['worker']} is busy with another task (maybe from another chat), so this one hasn't started. "
+                        f"Call wait again with task_id {tid}.")
             return f"Still running. Call wait again with task_id {tid}."
         time.sleep(1)
 
