@@ -230,6 +230,21 @@ err, text = tool("wait", task_id=tid, timeout_s=30)
 assert not err and "svc=unset" in text, text
 assert "--allowed-tools Bash(npm test:*),Bash(rm -rf /)" in text and "a,b" not in text.replace("Bash(npm test:*),Bash(rm -rf /)", ""), text
 tool("discard", task_id=tid)
+# repo=: branch from a git worktree of the same project (the main session works on a feature branch there).
+feat = tmp / "feat-wt"
+g("worktree", "add", "-q", "-b", "feat", str(feat))
+(feat / "feat.txt").write_text("feature work\n")
+g("add", "feat.txt", c=feat); g("commit", "-q", "-m", "feat", c=feat)
+err, text = tool("delegate", worker="research", task="x", repo=str(tmp))
+assert err and "repo must be" in text, text                      # a different repository is refused
+err, tid = tool("delegate", worker="research", task="WRITEFILE", repo=str(feat))
+assert not err, tid
+tool("wait", task_id=tid, timeout_s=30)
+err, text = tool("review", task_id=tid, file="cluster-out.txt")
+assert not err and "+from sess-1" in text, text                  # one file at a time
+assert (feat / "feat.txt").exists() and "feat.txt" not in g("diff", "--stat", f"feat..cluster/research/{tid}", c=feat)   # branched from the worktree's commit
+err, text = tool("merge", task_id=tid)
+assert not err and (feat / "cluster-out.txt").exists(), text   # merged into the worktree's branch
 proc.stdin.close()
 proc.wait(timeout=5)
 print("test-team: ok")

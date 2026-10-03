@@ -38,7 +38,8 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "delegate", "description": "Start a task on a worker. Returns a task_id; collect the answer with wait.",
      "inputSchema": {"type": "object", "required": ["worker", "task"], "properties": {
-         "worker": {"type": "string"}, "task": {"type": "string", "description": "Complete, self-contained instructions."}}}},
+         "worker": {"type": "string"}, "task": {"type": "string", "description": "Complete, self-contained instructions."},
+         "repo": {"type": "string", "description": "Optional: a checkout or git worktree of this project to branch from (and merge back into), e.g. the worktree you're working in. Default: the folder this session started in."}}}},
     {"name": "wait", "description": "Wait for a task and return the worker's final reply.",
      "inputSchema": {"type": "object", "required": ["task_id"], "properties": {
          "task_id": {"type": "string"}, "timeout_s": {"type": "integer", "description": "Default 600, max 900; each call returns after about a minute (call again if still running)."}}}},
@@ -46,7 +47,7 @@ TOOLS = [
      "inputSchema": {"type": "object", "required": ["task_id", "message"], "properties": {
          "task_id": {"type": "string"}, "message": {"type": "string"}}}},
     {"name": "review", "description": "Show what a finished task changed on its branch (diffstat and diff). Read it before merging.",
-     "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}}},
+     "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}, "file": {"type": "string", "description": "Optional: show the full diff of just this path (read a big diff file by file)."}}}},
     {"name": "merge", "description": "Merge a task's branch into the project's current branch and clean it up (hooks are off). On conflicts nothing changes. A diff longer than review shows needs force=true after you read the rest.",
      "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}, "force": {"type": "boolean"}}}},
     {"name": "discard", "description": "Throw away a task's branch and workspace without merging.",
@@ -94,6 +95,19 @@ def list_workers():
 
 def git(*a, cwd):
     return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True, timeout=120)
+
+
+def repo_dir(repo):
+    """A checkout or git worktree of THIS project to branch from (the main session may be working in a worktree
+    on a feature branch while this server was started in the main checkout). Same repository only."""
+    p = os.path.realpath(repo)
+    if not os.path.isdir(p):
+        raise ToolError(f"repo {repo!r} isn't a folder.")
+    ours = git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=os.getcwd())
+    theirs = git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=p)
+    if ours.returncode or theirs.returncode or os.path.realpath(ours.stdout.strip()) != os.path.realpath(theirs.stdout.strip()):
+        raise ToolError("repo must be a checkout or worktree of this project's repository.")
+    return p
 
 
 def workspace(worker, tid, cwd):
@@ -315,7 +329,7 @@ def finalize(tid):
             pass  # worker folder removed while the task ran
 
 
-def start(worker, prompt, resume=None, parent=None):
+def start(worker, prompt, resume=None, parent=None, repo=None):
     w = worker_dir(worker)
     att = attached()
     if worker not in att:
@@ -331,7 +345,7 @@ def start(worker, prompt, resume=None, parent=None):
         if ws["top"]:
             text = text.replace(ws["top"], ws["wt"])   # main's paths point at the main checkout; the worker's copy is elsewhere
     else:
-        cwd = os.getcwd()
+        cwd = repo_dir(repo) if repo else os.getcwd()
         ws = workspace(worker, tid, cwd)
         if ws:
             cwd = ws.pop("cwd")
@@ -372,7 +386,7 @@ def call_tool(name, a):
     if name == "list_workers":
         return json.dumps(list_workers())
     if name == "delegate":
-        return start(a.get("worker"), a.get("task"))
+        return start(a.get("worker"), a.get("task"), repo=a.get("repo"))
     if name == "wait":
         return wait(a.get("task_id"), a.get("timeout_s"))
     if name == "reply":
@@ -384,14 +398,17 @@ def call_tool(name, a):
         return start(t["worker"], a.get("message"), resume=t["session_id"], parent=t)
     if name == "review":
         t = branch_task(a.get("task_id"))
+        f = a.get("file")
+        if isinstance(f, str) and f:
+            return git("diff", f"{t['base']}..{t['branch']}", "--", f, cwd=t["top"]).stdout[:DIFF_SHOWN] or "No changes in that path."
         d = git("diff", f"{t['base']}..{t['branch']}", cwd=t["top"]).stdout
-        return git("diff", "--stat", f"{t['base']}..{t['branch']}", cwd=t["top"]).stdout + "\n" + (d[:DIFF_SHOWN] + (f"\n[diff cut at {DIFF_SHOWN} characters: merge will need force=true]" if len(d) > DIFF_SHOWN else ""))
+        return git("diff", "--stat", f"{t['base']}..{t['branch']}", cwd=t["top"]).stdout + "\n" + (d[:DIFF_SHOWN] + (f"\n[diff cut at {DIFF_SHOWN} characters: merge will need force=true once you have read the rest: review with file=<path> shows one file at a time]" if len(d) > DIFF_SHOWN else ""))
     if name == "merge":
         t = branch_task(a.get("task_id"))
         check_idle(t)
         size = len(git("diff", f"{t['base']}..{t['branch']}", cwd=t["top"]).stdout)
         if size > DIFF_SHOWN and a.get("force") is not True:
-            raise ToolError(f"The diff is {size} characters; review shows only the first {DIFF_SHOWN}. Read the rest with "
+            raise ToolError(f"The diff is {size} characters; review shows only the first {DIFF_SHOWN}. Read the rest with review file=<path>, or "
                             f"`git diff {t['base'][:8]}..{t['branch']} -- <path>` (also check .github/ and hook files), then call merge again with force=true.")
         try:  # hooks off: the worker's changes must not run code during the merge
             r = git("-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "merge", "--no-ff", "--no-verify", "-m", f"Merge {t['branch']}", t["branch"], cwd=t["top"])
