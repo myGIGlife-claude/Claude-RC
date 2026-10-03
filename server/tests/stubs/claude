@@ -34,6 +34,7 @@ case "$1 ${2:-}" in
   "plugin install") echo "Installed $3" ;;
   "-p --output-format")
     prompt="$(cat)"
+    echo "$*" >"$S/last-args"
     sid="sess-1"; [[ " $* " == *" --resume "* ]] && sid="$(sed 's/.*--resume \([^ ]*\).*/\1/' <<<"$*")"
     [[ "$prompt" == *WRITEFILE* ]] && echo "from $sid" >cluster-out.txt
     [[ "$prompt" == *SLOW* ]] && sleep 3
