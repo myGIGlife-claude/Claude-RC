@@ -8,7 +8,7 @@ project it runs in its own worktree on its own branch (cluster/<worker>/<task>);
 Claude reviews the diff and merges or discards. Elsewhere it runs in the project folder.
 State lives in <workers>/<name>/tasks/<id>.json.
 """
-import json, os, re, shutil, signal, subprocess, sys, threading, time, uuid
+import json, os, re, shutil, signal, subprocess, sys, threading, time, urllib.request, uuid
 from pathlib import Path
 
 CFG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "claude-launcher"
@@ -17,7 +17,8 @@ DIFF_SHOWN = 20000        # characters of a diff that review returns
 MODES = ("acceptEdits", "plan", "bypassPermissions")
 git_lock = threading.Lock()   # one worktree is created at a time
 CLAUDE = os.environ.get("CLAUDERC_CLAUDE", "claude")
-SLOTS = max(1, int(os.environ.get("CLAUDERC_WORKER_SLOTS") or 3))   # runs of one worker at once; they share its login like several chats share one
+SLOTS = max(1, int(os.environ.get("CLAUDERC_WORKER_SLOTS") or 10))   # hard cap of runs of one worker at once (they share its login like several chats share one); the owner's per-chat limit is lower
+USAGE_URL = os.environ.get("CLAUDERC_USAGE_URL") or "https://api.anthropic.com/api/oauth/usage"
 SLOT_SH = 'b=$1; n=$2; m=$3; shift 3; while :; do i=0; while [ $i -lt $n ]; do exec 9>"$b.$i"; flock -n 9 && { : >"$m"; exec "$@"; }; i=$((i+1)); done; sleep 2; done'
 RUN_TIMEOUT = 1800        # seconds one worker run may take
 NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,29}$")
@@ -85,13 +86,72 @@ def settings(name, att=None):
     return str(o.get("role") or m.get("role") or ""), mode if mode in MODES else "acceptEdits"
 
 
+def cluster_cfg():
+    """The owner's cluster settings (app: Claude tab › cLaudeCluster), read live: parallel tasks per chat and when to hand back to main."""
+    c = {"max_parallel": 3, "handback": True, "handback_pct": 95}
+    try:
+        j = json.loads((CFG / "cluster.json").read_text())
+        for k, lo, hi in (("max_parallel", 1, 10), ("handback_pct", 50, 100)):
+            if isinstance(j.get(k), (int, float)) and not isinstance(j.get(k), bool):
+                c[k] = min(max(int(j[k]), lo), hi)
+        if isinstance(j.get("handback"), bool):
+            c["handback"] = j["handback"]
+    except (OSError, ValueError, AttributeError):
+        pass
+    return c
+
+
+_usage = {}
+USAGE_TTL = float(os.environ.get("CLAUDERC_USAGE_TTL") or 60)
+
+
+def five_hour_pct(worker):
+    """How much of its 5-hour limit the worker's account has used, or None if unknown (cached 60 s). Same undocumented
+    endpoint as the app's usage bars; an expired token is left alone (Claude refreshes it when it next runs)."""
+    now = time.time()
+    c = _usage.get(worker)
+    if c and now - c[0] < USAGE_TTL:
+        return c[1]
+    pct = None
+    try:
+        cred = json.loads((WORKERS / worker / "home" / ".credentials.json").read_text())["claudeAiOauth"]
+        if cred.get("expiresAt", 0) / 1000 > now:
+            req = urllib.request.Request(USAGE_URL, headers={"Authorization": "Bearer " + cred["accessToken"], "anthropic-beta": "oauth-2025-04-20"})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                v = (json.load(r).get("five_hour") or {}).get("utilization")
+            pct = float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    except Exception:
+        pct = None
+    _usage[worker] = (now, pct)
+    return pct
+
+
+def running_here():
+    """Tasks of this chat's project that are running or queued (they count against the parallel limit)."""
+    n = 0
+    for p in WORKERS.glob("*/tasks/*.json"):
+        try:
+            t = json.loads(p.read_text())
+        except (OSError, ValueError):
+            continue
+        if t.get("status") == "running" and t.get("project") == os.getcwd():
+            n += 1
+    return n
+
+
 def list_workers():
     att, out = attached(), []
     for meta in sorted(WORKERS.glob("*/meta.json")):
         name = meta.parent.name
         if name in att:
             role, mode = settings(name, att)
-            out.append({"name": name, "role": role, "mode": mode, "signed_in": (meta.parent / "home" / ".credentials.json").is_file()})
+            w = {"name": name, "role": role, "mode": mode, "signed_in": (meta.parent / "home" / ".credentials.json").is_file()}
+            c, pct = cluster_cfg(), five_hour_pct(name)
+            if pct is not None:
+                w["five_hour_pct"] = round(pct)
+                if c["handback"] and pct >= c["handback_pct"]:
+                    w["available"] = False   # near its limit: do the work yourself
+            out.append(w)
     return out
 
 
@@ -313,7 +373,7 @@ def finalize(tid):
                 msg = (reply or err_s or out_s or "The worker stopped without an answer (this task was lost). Delegate it again.")[-2000:]
             t.update(status="failed", error=msg)
         elif len(reply) < 400 and LIMIT_RE.search(reply):
-            t.update(status="failed", error=reply + "\n[cluster] This worker's usage limit may be used up. Check the Accounts tab or use another worker.")
+            t.update(status="failed", error=reply + "\n[cluster] This worker's usage limit may be used up. Check the Accounts tab; meanwhile continue the work yourself (any partial work is on its branch).")
         else:
             u = out.get("usage") if isinstance(out.get("usage"), dict) else {}
             ran = f"[cluster] Ran {round((out.get('duration_ms') or 0) / 1000)}s, {out.get('num_turns') or '?'} turns, " \
@@ -347,6 +407,12 @@ def start(worker, prompt, resume=None, parent=None, repo=None):
         raise ToolError(f"Worker {worker} isn't signed in. Sign it in from the Claude tab in the cLaudeRC app.")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ToolError("The task is empty.")
+    c = cluster_cfg()
+    if c["handback"] and (pct := five_hour_pct(worker)) is not None and pct >= c["handback_pct"]:
+        raise ToolError(f"{worker} has used {pct:.0f}% of its 5-hour limit (the owner's hand-back point is {c['handback_pct']}%). "
+                        "Don't delegate: do this task yourself now, and keep doing the work yourself until its usage drops.")
+    if running_here() >= c["max_parallel"]:
+        raise ToolError(f"This chat already has {c['max_parallel']} worker tasks running (the owner's limit). Collect one with wait first, or do this one yourself.")
     role, mode = settings(worker, att)
     tid, text = uuid.uuid4().hex[:8], prompt
     if parent:

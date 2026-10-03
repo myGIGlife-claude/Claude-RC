@@ -342,6 +342,14 @@ if [[ -n "$KT" ]]; then
   api "remove-keystore GTG"; check "signing key removed" "$(jqt '.ok and .data.removed=="GTG"')"
   [[ ! -e "$HOME/.config/claude-launcher/keystores/GTG.jks" ]] && ! grep -q GTG_ "$HOME/.config/claude-launcher/env"; check "file and variables gone" $?
 fi
+echo "cluster settings"
+api "cluster-config"; check "cluster defaults" "$(jqt '.data == {max_parallel:3, handback:true, handback_pct:95}')"
+api "cluster-config-set max_parallel 7"; check "set parallel" "$(jqt '.ok and .data.max_parallel==7')"
+api "cluster-config-set handback false"; check "set handback" "$(jqt '.ok and .data.handback==false and .data.max_parallel==7')"
+api "cluster-config-set handback_pct 80"; api "cluster-config"; check "settings persist" "$(jqt '.data == {max_parallel:7, handback:false, handback_pct:80}')"
+for bad in "max_parallel 11" "max_parallel 0" "handback maybe" "handback_pct 49" "handback_pct 101" "color red" "max_parallel"; do
+  api "cluster-config-set $bad"; check "cluster-config-set $bad refused" "$(jqt '.ok == false')"
+done
 echo "apple developer key"
 P8="$(printf -- '-----BEGIN PRIVATE KEY-----\nMIGTfake\n-----END PRIVATE KEY-----\n' | base64 -w0)"
 api "login-apple" "$(printf 'BADKEY\n69a6de70-8c3e-4b1e-9f1a-0123456789ab\n\n'; echo "$P8")"; check "apple: bad key id refused" "$(jqt '.error.code=="invalid_name"')"

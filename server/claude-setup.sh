@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 30 = push (push-config/-register/-session/-test, sessions.push_done).
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done).
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=31
+SCRIPT_API=32
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -1410,6 +1410,41 @@ do_cluster() {
   f="$(cat "$tmp"/* | jq -sc '{accounts:.}')"
   rm -rf "$tmp"
   api_ok "$f"
+}
+
+CLUSTER_CONFIG="$LAUNCHER_CONFIG_DIR/cluster.json"
+cluster_config_json() {
+  local d='{"max_parallel":3,"handback":true,"handback_pct":95}'
+  jq -c --argjson d "$d" '($d + (if type == "object" then . else {} end)) |
+    {max_parallel: ((.max_parallel | numbers | floor) // 3 | if . < 1 then 1 elif . > 10 then 10 else . end),
+     handback: (if (.handback | type) == "boolean" then .handback else true end),
+     handback_pct: ((.handback_pct | numbers | floor) // 95 | if . < 50 then 50 elif . > 100 then 100 else . end)}' \
+    "$CLUSTER_CONFIG" 2>/dev/null || echo "$d"
+}
+
+do_cluster_config() {
+  [[ $# -eq 0 ]] || bad_args "cluster-config takes no arguments"
+  api_ok "$(cluster_config_json)"
+}
+
+# cluster-config-set max_parallel 1-10 | handback true|false | handback_pct 50-100
+do_cluster_config_set() {
+  [[ $# -eq 2 ]] || bad_args "usage: cluster-config-set max_parallel|handback|handback_pct <value>"
+  local cur new tmp
+  cur="$(cluster_config_json)"
+  case "$1" in
+    max_parallel) [[ "$2" =~ ^([1-9]|10)$ ]] || api_err invalid_name "Parallel tasks must be 1 to 10."
+      new="$(jq -c --argjson v "$2" '.max_parallel = $v' <<<"$cur")" ;;
+    handback) [[ "$2" == true || "$2" == false ]] || api_err invalid_name "Hand back must be true or false."
+      new="$(jq -c --argjson v "$2" '.handback = $v' <<<"$cur")" ;;
+    handback_pct) [[ "$2" =~ ^([5-9][0-9]|100)$ ]] || api_err invalid_name "The limit must be 50 to 100 percent."
+      new="$(jq -c --argjson v "$2" '.handback_pct = $v' <<<"$cur")" ;;
+    *) bad_args "usage: cluster-config-set max_parallel|handback|handback_pct <value>" ;;
+  esac
+  mkdir -p "$LAUNCHER_CONFIG_DIR"
+  tmp="$(mktemp "$LAUNCHER_CONFIG_DIR/cluster.json.XXXXXX")"
+  printf '%s\n' "$new" >"$tmp" && mv -f "$tmp" "$CLUSTER_CONFIG" || { rm -f "$tmp"; api_err internal "Couldn't save the cluster settings."; }
+  api_ok "$new"
 }
 
 do_worker_add() {
@@ -2851,6 +2886,8 @@ api_main() {
     worker-list)         [[ $# -eq 0 ]] || bad_args "worker-list takes no arguments"; do_worker_list ;;
     worker-add)          do_worker_add "$@" ;;
     worker-set)          do_worker_set "$@" ;;
+    cluster-config)      do_cluster_config "$@" ;;
+    cluster-config-set)  do_cluster_config_set "$@" ;;
     worker-remove)       do_worker_remove "$@" ;;
     worker-runs)         do_worker_runs "$@" ;;
     cluster-session)     do_cluster_session "$@" ;;
