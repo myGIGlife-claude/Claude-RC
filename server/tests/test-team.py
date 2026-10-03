@@ -4,12 +4,29 @@ Run: server/tests/test-team.py   (needs jq for the stub)."""
 import json, os, subprocess, sys, tempfile
 from pathlib import Path
 
+import http.server, threading
+
+USED = [10]   # what the fake usage endpoint says the worker's account has used of its 5-hour limit
+
+
+class Usage(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = json.dumps({"five_hour": {"utilization": USED[0]}}).encode()
+        self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+
+    def log_message(self, *a):
+        pass
+
+
+usage_srv = http.server.HTTPServer(("127.0.0.1", 0), Usage)
+threading.Thread(target=usage_srv.serve_forever, daemon=True).start()
 HERE = Path(__file__).resolve().parent
 tmp = Path(tempfile.mkdtemp())
 cfg = tmp / "cfg" / "claude-launcher" / "workers"
 env = {**os.environ, "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(HERE / "stubs" / "claude"),
        "ANTHROPIC_API_KEY": "secret-should-not-leak", "CLAUDE_CODE_OAUTH_TOKEN": "main-token", "CLAUDECODE": "1", "STUB_STATE": str(tmp / "stub"),
-       "CLAUDERC_TEST_SECRET": "service-token"}
+       "CLAUDERC_TEST_SECRET": "service-token", "CLAUDERC_WORKER_SLOTS": "3", "CLAUDERC_USAGE_TTL": "0",
+       "CLAUDERC_USAGE_URL": f"http://127.0.0.1:{usage_srv.server_port}/"}
 cfg.parent.mkdir(parents=True, exist_ok=True)
 (cfg.parent / "env").write_text("export CLAUDERC_TEST_SECRET='service-token'\n")
 for name, signed in (("research", True), ("ui", False)):
@@ -245,6 +262,7 @@ assert not err and "+from sess-1" in text, text                  # one file at a
 assert (feat / "feat.txt").exists() and "feat.txt" not in g("diff", "--stat", f"feat..cluster/research/{tid}", c=feat)   # branched from the worktree's commit
 err, text = tool("merge", task_id=tid)
 assert not err and (feat / "cluster-out.txt").exists(), text   # merged into the worktree's branch
+(cfg.parent / "cluster.json").write_text('{"max_parallel": 10}')
 # A worker runs 3 tasks at once (every chat can use it); the 4th says it is queued, then runs.
 ids = [tool("delegate", worker="research", task=f"SLOW {i}")[1] for i in range(4)]
 err, text = tool("wait", task_id=ids[3], timeout_s=1)
@@ -255,6 +273,28 @@ for i in ids:
     err, text = tool("wait", task_id=i, timeout_s=30)
     assert not err and not text.startswith(("Queued", "Still")), text
     tool("discard", task_id=i)
+# The owner's per-chat limit (cluster.json, set from the app) caps running tasks.
+(cfg.parent / "cluster.json").write_text('{"max_parallel": 2}')
+ids = [tool("delegate", worker="research", task=f"SLOW {i}")[1] for i in range(2)]
+err, text = tool("delegate", worker="research", task="one too many")
+assert err and "already has 2 worker tasks" in text, text
+for i in ids:
+    tool("wait", task_id=i, timeout_s=30); tool("discard", task_id=i)
+err, tid = tool("delegate", worker="research", task="room again")
+assert not err, tid                                              # finished tasks free the room
+tool("wait", task_id=tid, timeout_s=30); tool("discard", task_id=tid)
+# Near its 5-hour limit the worker is not handed work: main does it itself.
+(cfg.parent / "cluster.json").write_text('{"max_parallel": 3, "handback": true, "handback_pct": 95}')
+(cfg / "research" / "home" / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {"accessToken": "tok", "expiresAt": 9_999_999_999_999}}))
+USED[0] = 96
+err, text = tool("delegate", worker="research", task="x")
+assert err and "96%" in text and "do this task yourself" in text, text
+ws = json.loads(tool("list_workers")[1])
+assert [(w.get("five_hour_pct"), w.get("available")) for w in ws if w["name"] == "research"] == [(96, False)], ws
+(cfg.parent / "cluster.json").write_text('{"max_parallel": 3, "handback": false, "handback_pct": 95}')
+err, tid = tool("delegate", worker="research", task="handback off")
+assert not err, tid                                              # the owner can switch hand-back off
+tool("wait", task_id=tid, timeout_s=30); tool("discard", task_id=tid)
 err, tid = tool("delegate", worker="research", task="stats please")
 err, text = tool("wait", task_id=tid, timeout_s=30)
 assert not err and "Ran 42s, 3 turns, 1200 tokens in (+50000 cached), 340 out." in text, text   # what the run cost
