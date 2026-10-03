@@ -75,9 +75,12 @@ assert err and "sign" in text.lower(), text                      # not signed in
 err, text = tool("delegate", worker="../research", task="x")
 assert err, text                                                 # bad name
 
+(cfg / "research" / "meta.json").write_text(json.dumps({"role": "research role", "mode": "plan", "model": "claude-sonnet-5-5", "effort": "high"}))
 err, tid = tool("delegate", worker="research", task="summarise the repo")
 assert not err and len(tid) == 8, tid
 err, text = tool("wait", task_id=tid, timeout_s=30)
+args = (tmp / "stub" / "last-args").read_text()
+assert "--model claude-sonnet-5-5" in args and "--effort high" in args, args   # the worker's model and effort reach claude
 assert not err and "summarise the repo" in text and "Your role in this project: Docs for this project" in text, text
 assert f"cfg={cfg / 'research' / 'home'}" in text, text          # the worker's own config dir
 assert "key=unset" in text and "tok=unset" in text and "cc=unset" in text, text    # main account's tokens never reach a worker

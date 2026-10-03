@@ -1432,7 +1432,9 @@ do_worker_set() {
   case "$field" in
     role) ;;
     mode) [[ "$WORKER_MODES" == *" $val "* ]] || api_err invalid_name "Mode must be acceptEdits, plan or bypassPermissions." ;;
-    *) bad_args "usage: worker-set <name> role|mode" ;;
+    model) [[ -z "$val" || "$val" =~ ^[A-Za-z0-9._-]{1,60}$ ]] || api_err invalid_name "That doesn't look like a model name (e.g. claude-sonnet-5-5)." ;;
+    effort) [[ -z "$val" || "$val" =~ ^(low|medium|high|xhigh|max)$ ]] || api_err invalid_name "Effort must be low, medium, high, xhigh or max." ;;
+    *) bad_args "usage: worker-set <name> role|mode|model|effort" ;;
   esac
   tmp="$(mktemp "$WORKERS_DIR/$name/meta.XXXXXX")"
   jq -c --arg f "$field" --arg v "${val:0:200}" '.[$f] = $v' "$WORKERS_DIR/$name/meta.json" >"$tmp" &&

@@ -162,7 +162,7 @@ case "$sub" in
     ((nargs == 1)) && [[ "${args[0]}" =~ $WORKER_RE ]] || deny "$sub"
     ;;
   worker-set)
-    ((nargs == 2)) && [[ "${args[0]}" =~ $WORKER_RE && ( "${args[1]}" == role || "${args[1]}" == mode ) ]] || deny "$sub"
+    ((nargs == 2)) && [[ "${args[0]}" =~ $WORKER_RE && ( "${args[1]}" =~ ^(role|mode|model|effort)$ ) ]] || deny "$sub"
     ;;
   push-register)
     ((nargs == 1)) && [[ "${args[0]}" =~ ^[A-Za-z0-9:_-]{20,200}$ ]] || deny "$sub"

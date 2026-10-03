@@ -248,8 +248,14 @@ def launch(t):
     (d / f"{tid}.in").write_text(t["prompt"])
     mode = t.get("mode") if t.get("mode") in MODES else "acceptEdits"
     tools = allowed_tools(t) if mode == "acceptEdits" else []
+    try:
+        meta = json.loads((w / "meta.json").read_text())
+    except (OSError, ValueError):
+        meta = {}
+    # ponytail: model and effort are per worker, not per chat; add to the attach override if that's ever needed
+    pick = [a for k in ("model", "effort") if isinstance(meta.get(k), str) and meta[k] for a in (f"--{k}", meta[k])]
     cmd = ["flock", str(w / "run.lock"), "timeout", "--kill-after=10", str(RUN_TIMEOUT), CLAUDE, "-p", "--output-format", "json",
-           "--permission-mode", mode] + (["--allowed-tools", ",".join(tools)] if tools else []) + (["--resume", t["resume"]] if t.get("resume") else [])
+           "--permission-mode", mode] + pick + (["--allowed-tools", ",".join(tools)] if tools else []) + (["--resume", t["resume"]] if t.get("resume") else [])
     # The worker must run as its own account: drop the main session's credentials, Claude Code markers and the service tokens.
     drop = mirrored_names() | {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDECODE"}
     env = {k: v for k, v in os.environ.items() if k not in drop and not k.startswith("CLAUDE_CODE_")}
