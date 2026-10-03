@@ -43,6 +43,6 @@ case "$1 ${2:-}" in
     [[ "$prompt" == *BIGFILE* ]] && head -c 30000 /dev/zero | tr '\0' x >big.txt
     if [[ "$prompt" == *FAIL* ]]; then echo '{"is_error":true,"result":"stub failure","session_id":"'"$sid"'"}'; exit 1; fi
     jq -cn --arg r "cfg=${CLAUDE_CONFIG_DIR:-none} key=${ANTHROPIC_API_KEY:-unset} tok=${CLAUDE_CODE_OAUTH_TOKEN:-unset} cc=${CLAUDECODE:-unset} cwd=$PWD svc=${CLAUDERC_TEST_SECRET:-unset} args=$* resume=${sid} prompt=$prompt" --arg s "$sid" \
-      '{is_error:false,result:$r,session_id:$s}' ;;
+      '{is_error:false,result:$r,session_id:$s,duration_ms:42000,num_turns:3,usage:{input_tokens:1200,output_tokens:340,cache_read_input_tokens:50000}}' ;;
   *) echo "claude stub: $*" >&2; exit 1 ;;
 esac

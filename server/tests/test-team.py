@@ -254,6 +254,10 @@ err, text = tool("wait", task_id=slow, timeout_s=30)
 err, text = tool("wait", task_id=nxt, timeout_s=30)
 assert not err and not text.startswith(("Queued", "Still")), text
 tool("discard", task_id=slow); tool("discard", task_id=nxt)
+err, tid = tool("delegate", worker="research", task="stats please")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "Ran 42s, 3 turns, 1200 tokens in (+50000 cached), 340 out." in text, text   # what the run cost
+tool("discard", task_id=tid)
 proc.stdin.close()
 proc.wait(timeout=5)
 print("test-team: ok")

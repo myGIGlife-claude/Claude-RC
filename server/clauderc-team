@@ -310,7 +310,11 @@ def finalize(tid):
         elif len(reply) < 400 and LIMIT_RE.search(reply):
             t.update(status="failed", error=reply + "\n[cluster] This worker's usage limit may be used up. Check the Accounts tab or use another worker.")
         else:
-            t.update(status="done", reply=reply)
+            u = out.get("usage") if isinstance(out.get("usage"), dict) else {}
+            ran = f"[cluster] Ran {round((out.get('duration_ms') or 0) / 1000)}s, {out.get('num_turns') or '?'} turns, " \
+                  f"{(u.get('input_tokens') or 0) + (u.get('cache_creation_input_tokens') or 0)} tokens in (+{u.get('cache_read_input_tokens') or 0} cached), {u.get('output_tokens') or 0} out." \
+                if out.get("duration_ms") else ""
+            t.update(status="done", reply=reply + ("\n\n" + ran if ran else ""))
         if t.get("branch"):
             try:  # keep what the worker got done: it can be reviewed, merged or discarded
                 stat = seal(t)
