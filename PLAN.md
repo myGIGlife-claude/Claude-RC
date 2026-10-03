@@ -1,4 +1,4 @@
-Last updated: 2026-10-02 21:30 UTC
+Last updated: 2026-10-03 01:40 UTC
 
 ## Goal
 cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage Claude Code sessions on your own server from a phone.
@@ -9,7 +9,7 @@ Shipped #92-#101 (chat: ! and / commands show as typed, session-switch flash/scr
 ## Tasks
 - [ ] Apple developer key in the app (PR apple-developer, SCRIPT_API 31): once the account exists, App Store Connect › Integrations › create key, then + › Apple developer account in the app. Then add signing/TestFlight to ios.yml (secrets via `gh secret set`).
 - [x] iOS port (branch `iOS`, `ios/`): builds green on macOS CI (unsigned IPA artifact, 2nd attempt). Next: sign/TestFlight needs an Apple developer account; port logins, MCP/plugins, cluster, files, push.
-- [ ] Instant push alerts (branch `push-notifications`, 2 local commits, NOT pushed/merged; Kotlin never compiled: CI only). Owner at the hotel: `! firebase login --no-localhost` is NOT needed any more: create a free Firebase project in the console, Project settings › Service accounts › Generate new private key, paste it in the app (Settings › Notifications › Set up instant alerts). Steps for me: push branch, PR, watch CI build (fix compile errors: Push.kt/PushService.kt/Settings dialog are the risky bits), merge, owner Update now, set up key, Send a test push, Restart sessions so hooks load.
+- [x] Instant push alerts: working on the phone (2026-10-03: Firebase key registered, test push and a session "finished" alert both arrived).
 - [ ] Try on the phone: 👥 in a chat (attach a worker, set role/mode), ask main to delegate and merge; usage bars fill with used.
 - [ ] cLaudeCluster (#81, replaces Team): try on the phone. Claude tab › cLaudeCluster shows usage left per account (undocumented OAuth usage endpoint; verify real numbers show), + Add account (worker + sign in), add a 2nd server signed in to another account → join prompt. Also check #80 (keyboard no longer opens over the chat box) and queued messages surviving leaving the chat.
 - [ ] Notifications: phone vibrates but nothing shows in the shade. #79 added a clearer icon, a pop-up channel (`alerts`) and Settings › Send a test notification: try it on the phone; if the test shows, the old one was the faint icon/low importance. Session alerts only fire while the phone is unlocked (SSH key needs it; owner chose to keep that).
