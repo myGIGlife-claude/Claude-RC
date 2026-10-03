@@ -8,7 +8,7 @@ project it runs in its own worktree on its own branch (cluster/<worker>/<task>);
 Claude reviews the diff and merges or discards. Elsewhere it runs in the project folder.
 State lives in <workers>/<name>/tasks/<id>.json.
 """
-import json, os, re, shutil, signal, subprocess, sys, threading, time, urllib.request, uuid
+import json, os, re, shutil, signal, subprocess, sys, threading, time, urllib.error, urllib.request, uuid
 from pathlib import Path
 
 CFG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "claude-launcher"
@@ -105,31 +105,53 @@ def cluster_cfg():
     return c
 
 
-_usage = {}
-USAGE_TTL = float(os.environ.get("CLAUDERC_USAGE_TTL") or 60)
+USAGE_TTL = float(os.environ.get("CLAUDERC_USAGE_TTL") or 120)
+USAGE_STALE = 1800        # a failed refresh keeps showing the last good numbers this long (usage only rises inside a window)
+USAGE_CACHE = CFG / "usage-cache"   # shared by every chat's MCP process: the endpoint rate-limits (HTTP 429) after a few calls
 
 
 def usage(worker):
-    """(five_hour_pct, seven_day_pct): how much of each limit the worker's account has used, None where unknown (cached
-    USAGE_TTL s). Same undocumented endpoint as the app's usage bars; an expired token is left alone (Claude refreshes it
-    when it next runs)."""
-    now = time.time()
-    c = _usage.get(worker)
-    if c and now - c[0] < USAGE_TTL:
-        return c[1]
-    pct = (None, None)
+    """(five_hour_pct, seven_day_pct): how much of each limit the worker's account has used, None where unknown. Same
+    undocumented endpoint as the app's usage bars, called at most once per USAGE_TTL for ALL chats (shared file cache);
+    after a failure (429 etc.) it backs off and keeps the last good numbers for USAGE_STALE seconds. An expired token is
+    left alone (Claude refreshes it when it next runs)."""
+    now, f = time.time(), USAGE_CACHE / f"{worker}.json"
     try:
-        cred = json.loads((WORKERS / worker / "home" / ".credentials.json").read_text())["claudeAiOauth"]
-        if cred.get("expiresAt", 0) / 1000 > now:
-            req = urllib.request.Request(USAGE_URL, headers={"Authorization": "Bearer " + cred["accessToken"], "anthropic-beta": "oauth-2025-04-20"})
-            with urllib.request.urlopen(req, timeout=8) as r:
-                j = json.load(r)
-            vals = [(j.get(k) or {}).get("utilization") for k in ("five_hour", "seven_day")]
-            pct = tuple(float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None for v in vals)
-    except Exception:
-        pct = (None, None)
-    _usage[worker] = (now, pct)
-    return pct
+        c = json.loads(f.read_text())
+    except (OSError, ValueError):
+        c = {}
+    c = c if isinstance(c, dict) else {}
+    if now - c.get("ts", 0) >= USAGE_TTL and now >= c.get("retry_until", 0):
+        try:
+            cred = json.loads((WORKERS / worker / "home" / ".credentials.json").read_text())["claudeAiOauth"]
+            cred = cred if isinstance(cred, dict) and cred.get("accessToken") else None
+        except (OSError, ValueError, KeyError, TypeError):
+            cred = None   # not signed in: nothing to ask, nothing to back off from
+        if cred and cred.get("expiresAt", 0) / 1000 <= now:
+            c["retry_until"], cred = now + 120, None
+        if cred:
+            try:
+                req = urllib.request.Request(USAGE_URL, headers={"Authorization": "Bearer " + cred["accessToken"], "anthropic-beta": "oauth-2025-04-20"})
+                with urllib.request.urlopen(req, timeout=8) as r:
+                    j = json.load(r)
+                v = [(j.get(k) or {}).get("utilization") for k in ("five_hour", "seven_day")]
+                num = lambda x: x if isinstance(x, (int, float)) and not isinstance(x, bool) else None
+                c.update(ts=now, retry_until=0, five=num(v[0]), seven=num(v[1]))
+            except urllib.error.HTTPError as e:
+                ra = e.headers.get("Retry-After") if e.headers else None
+                c["retry_until"] = now + (min(int(ra), 900) if ra and ra.isdigit() else 120)
+            except Exception:
+                c["retry_until"] = now + 60
+            try:
+                USAGE_CACHE.mkdir(parents=True, exist_ok=True)
+                tmp = f.with_suffix(f".{os.getpid()}.tmp")
+                tmp.write_text(json.dumps(c))
+                os.replace(tmp, f)
+            except OSError:
+                pass
+    if now - c.get("ts", 0) >= USAGE_STALE:
+        return (None, None)
+    return tuple(float(v) if isinstance(v, (int, float)) else None for v in (c.get("five"), c.get("seven")))
 
 
 def peak(u):
