@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import life.mygig.clauderc.api.WORKER_NAME_RE
 import life.mygig.clauderc.api.ClusterAccount
+import life.mygig.clauderc.api.ClusterConfig
 import life.mygig.clauderc.api.TokenWindow
 import life.mygig.clauderc.api.UsageWindow
 import life.mygig.clauderc.api.Updates
@@ -59,6 +60,7 @@ fun ClusterSection(vm: MainViewModel) {
     val login by vm.workerLogin.collectAsState()
     val runs by vm.workerRuns.collectAsState()
     val busy by vm.busy.collectAsState()
+    val config by vm.clusterConfig.collectAsState()
     var add by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
     var role by remember { mutableStateOf("") }
@@ -84,6 +86,7 @@ fun ClusterSection(vm: MainViewModel) {
         }
         if (!ready) Text("Server scripts need an update (Connections tab).", style = MaterialTheme.typography.bodySmall)
         else if (groups == null) Text("Loading…", style = MaterialTheme.typography.bodySmall)
+        config?.let { ClusterSettingsCard(vm, it, idle = busy == null) }
         groups?.forEach { g ->
             if (groups!!.size > 1) Text(if (g.active) "This server (${g.host})" else g.host, style = MaterialTheme.typography.labelLarge)
             if (g.accounts == null) Text(g.error.ifBlank { "Couldn't reach this server." }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -170,6 +173,43 @@ fun ClusterSection(vm: MainViewModel) {
             title = { Text("Remove $who?") },
             text = { Text("Signs the account out on the server and forgets its past tasks.") },
         )
+    }
+}
+
+@Composable
+private fun ClusterSettingsCard(vm: MainViewModel, c: ClusterConfig, idle: Boolean) {
+    CardBox {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Cluster settings", style = MaterialTheme.typography.titleSmall)
+            Text("Parallel tasks per chat", style = MaterialTheme.typography.labelLarge)
+            Stepper(c.maxParallel.toString(), idle, canDown = c.maxParallel > 1, canUp = c.maxParallel < 10,
+                onDown = { vm.setClusterConfig("max_parallel", (c.maxParallel - 1).toString()) },
+                onUp = { vm.setClusterConfig("max_parallel", (c.maxParallel + 1).toString()) })
+            Text("How many tasks one chat may hand to workers at the same time.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Hand work back to the main Claude near the limit", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+                androidx.compose.material3.Switch(checked = c.handback, onCheckedChange = { vm.setClusterConfig("handback", it.toString()) }, enabled = idle)
+            }
+            Text(
+                "When a worker's 5-hour usage reaches the percentage below, the main Claude stops delegating and does the work itself.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (c.handback) {
+                Stepper("Hand back at ${c.handbackPct}%", idle, canDown = c.handbackPct > 50, canUp = c.handbackPct < 100,
+                    onDown = { vm.setClusterConfig("handback_pct", (c.handbackPct - 5).coerceAtLeast(50).toString()) },
+                    onUp = { vm.setClusterConfig("handback_pct", (c.handbackPct + 5).coerceAtMost(100).toString()) })
+            }
+        }
+    }
+}
+
+/** A minus button, a label and a plus button in a row. */
+@Composable
+private fun Stepper(label: String, enabled: Boolean, canDown: Boolean, canUp: Boolean, onDown: () -> Unit, onUp: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(onClick = onDown, enabled = enabled && canDown) { Text("−") }
+        Text(label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
+        OutlinedButton(onClick = onUp, enabled = enabled && canUp) { Text("+") }
     }
 }
 

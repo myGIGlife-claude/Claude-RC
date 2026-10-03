@@ -143,6 +143,11 @@ class LauncherApi(
     suspend fun mcpAuthCancel(): JsonObject = call("mcp-auth-cancel")
 
     suspend fun cluster(): ClusterData = call("cluster", timeoutMs = 30_000)
+    suspend fun clusterConfig(): ClusterConfig = call("cluster-config")
+    suspend fun clusterConfigSet(key: String, value: String): ClusterConfig {
+        require(key in listOf("max_parallel", "handback", "handback_pct") && value.all { it.isLetterOrDigit() })
+        return call("cluster-config-set $key $value")
+    }
 
     // Team: extra Claude accounts the main Claude can delegate to.
     suspend fun workers(): WorkersData = call("worker-list")

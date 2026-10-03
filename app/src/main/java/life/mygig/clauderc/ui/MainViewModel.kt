@@ -34,6 +34,7 @@ import life.mygig.clauderc.api.ApiException
 import life.mygig.clauderc.api.ChatTask
 import life.mygig.clauderc.api.ChatWorker
 import life.mygig.clauderc.api.ClusterAccount
+import life.mygig.clauderc.api.ClusterConfig
 import life.mygig.clauderc.data.Server
 import life.mygig.clauderc.api.AskQuestion
 import life.mygig.clauderc.api.Codes
@@ -598,6 +599,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val cluster = _cluster.asStateFlow()
     private val _clusterOffer = MutableStateFlow<ClusterOffer?>(null)
     val clusterOffer = _clusterOffer.asStateFlow()
+    /** Server-wide cluster settings; null until loaded, or when the server is too old to have them. */
+    private val _clusterConfig = MutableStateFlow<ClusterConfig?>(null)
+    val clusterConfig = _clusterConfig.asStateFlow()
 
     private fun apiFor(s: Server) = LauncherApi(config = { s.toServerConfig() }, identity = { keys.identity() })
 
@@ -608,7 +612,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** The active server's accounts plus those of the servers already in the cluster, looked up together. */
-    fun loadCluster() = action("Loading accounts…") { _cluster.value = clusterGroups() }
+    fun loadCluster() = action("Loading accounts…") {
+        _cluster.value = clusterGroups()
+        _clusterConfig.value = try { api.clusterConfig() } catch (_: ApiException) { null }
+    }
+    fun setClusterConfig(key: String, value: String) = action("Saving…") { _clusterConfig.value = api.clusterConfigSet(key, value) }
 
     private suspend fun clusterGroups(): List<ClusterGroup> = coroutineScope {
         val cur = store.current()
@@ -1425,6 +1433,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _ccResult.value = null
         _chatLog.value = null
         _cluster.value = null
+        _clusterConfig.value = null
         _clusterOffer.value = null
         _workerLogin.value = null
         _workerRuns.value = null
