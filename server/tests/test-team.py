@@ -6,12 +6,13 @@ from pathlib import Path
 
 import http.server, threading
 
-USED = [10]   # what the fake usage endpoint says the worker's account has used of its 5-hour limit
+USAGE = {"tok": [10, 5]}   # bearer token -> what the fake usage endpoint says that account has used: [5-hour %, weekly %]
 
 
 class Usage(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        body = json.dumps({"five_hour": {"utilization": USED[0]}}).encode()
+        five, seven = USAGE.get(self.headers.get("Authorization", "").replace("Bearer ", ""), (None, None))
+        body = json.dumps({"five_hour": {"utilization": five}, "seven_day": {"utilization": seven}}).encode()
         self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
 
     def log_message(self, *a):
@@ -35,6 +36,11 @@ for name, signed in (("research", True), ("ui", False)):
     (cfg / name / "meta.json").write_text(json.dumps({"role": f"{name} role", "mode": "plan"}))
     if signed:
         (cfg / name / "home" / ".credentials.json").write_text("{}")
+for name, role, mode in (("writer1", "code writer", "acceptEdits"), ("writer2", "code writer", "acceptEdits"), ("auditor", "security audit", "plan")):
+    (cfg / name / "home").mkdir(parents=True)
+    (cfg / name / "tasks").mkdir()
+    (cfg / name / "meta.json").write_text(json.dumps({"role": role, "mode": mode}))
+    (cfg / name / "home" / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {"accessToken": name + "-tok", "expiresAt": 9_999_999_999_999}}))
 
 import re
 
@@ -286,11 +292,11 @@ tool("wait", task_id=tid, timeout_s=30); tool("discard", task_id=tid)
 # Near its 5-hour limit the worker is not handed work: main does it itself.
 (cfg.parent / "cluster.json").write_text('{"max_parallel": 3, "handback": true, "handback_pct": 95}')
 (cfg / "research" / "home" / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {"accessToken": "tok", "expiresAt": 9_999_999_999_999}}))
-USED[0] = 96
+USAGE["tok"][0] = 96
 err, text = tool("delegate", worker="research", task="x")
 assert err and "96%" in text and "do this task yourself" in text, text
 ws = json.loads(tool("list_workers")[1])
-assert [(w.get("five_hour_pct"), w.get("available")) for w in ws if w["name"] == "research"] == [(96, False)], ws
+assert [(w.get("five_hour_pct"), w.get("seven_day_pct"), w.get("available")) for w in ws if w["name"] == "research"] == [(96, 5, False)], ws
 (cfg.parent / "cluster.json").write_text('{"max_parallel": 3, "handback": false, "handback_pct": 95}')
 err, tid = tool("delegate", worker="research", task="handback off")
 assert not err, tid                                              # the owner can switch hand-back off
@@ -299,6 +305,77 @@ err, tid = tool("delegate", worker="research", task="stats please")
 err, text = tool("wait", task_id=tid, timeout_s=30)
 assert not err and "Ran 42s, 3 turns, 1200 tokens in (+50000 cached), 340 out." in text, text   # what the run cost
 tool("discard", task_id=tid)
+
+# Role routing, failover and stacked tasks. Writers and the auditor are attached next to research.
+(cfg.parent / "cluster.json").write_text('{"max_parallel": 10, "handback": true, "handback_pct": 95}')
+attach(repo, {"research": {}, "writer1": {}, "writer2": {}, "auditor": {}})
+USAGE.update({"writer1-tok": [40, 10], "writer2-tok": [20, 10], "auditor-tok": [5, 5]})
+by_name = lambda: {w["name"]: w for w in json.loads(tool("list_workers")[1])}
+assert by_name()["writer1"]["seven_day_pct"] == 10 and "available" not in by_name()["writer1"]
+err, text = tool("delegate", role="translator", task="x")
+assert err and "No attached worker has the role" in text and "code writer" in text and "security audit" in text, text
+err, text = tool("delegate", role="code writer", worker="writer1", task="x")
+assert err and "exactly one" in text, text
+err, text = tool("delegate", task="x")
+assert err and "exactly one" in text, text
+base = g("rev-parse", "HEAD").strip()
+err, wtid = tool("delegate", role="Code Writer", task="WRITEFILE by role")            # case-insensitive; writer2 has used less
+assert not err, wtid
+err, text = tool("wait", task_id=wtid, timeout_s=30)
+assert not err and "Output from worker writer2" in text and f"cfg={cfg / 'writer2' / 'home'}" in text and "Your role in this project: code writer" in text, text
+assert "Routed" not in text, text
+# Stacked: the auditor's branch starts on the writer's branch and its diffs show both.
+err, text = tool("delegate", role="audit", task="audit the change", from_task="nope1234")
+assert err, text
+err, aid = tool("delegate", role="audit", task="audit the change", from_task=wtid)    # part of the role is enough
+assert not err, aid
+err, text = tool("wait", task_id=aid, timeout_s=30)
+assert not err and "Output from worker auditor" in text and "already contains another worker's changes" in text, text
+assert f"see `git diff {base}..HEAD`" in text and "No files changed on branch" in text, text
+assert (cfg / "auditor" / "trees" / aid / "cluster-out.txt").read_text() == "from sess-1\n", "the writer's file is in the auditor's workspace"
+err, text = tool("review", task_id=aid)
+assert not err and "cluster-out.txt" in text and "+from sess-1" in text, text           # the writer's changes show against the shared base
+assert g("rev-parse", f"cluster/auditor/{aid}") == g("rev-parse", f"cluster/writer2/{wtid}"), "the auditor added no commit"
+err, text = tool("discard", task_id=aid)
+assert not err, text
+err, text = tool("delegate", role="audit", task="again", from_task=aid)
+assert err and "no open branch" in text, text                                         # discarded
+tool("discard", task_id=wtid)
+err, slow = tool("delegate", worker="writer1", task="SLOW writer")
+err, text = tool("delegate", role="audit", task="x", from_task=slow)
+assert err and "still running" in text, text                                          # not finished yet
+# Fewest running tasks breaks a tie in usage: writer1 is busy, so writer2 gets it.
+USAGE["writer1-tok"], USAGE["writer2-tok"] = [30, 30], [30, 30]
+err, tid = tool("delegate", role="code writer", task="tie")
+assert "Output from worker writer2" in tool("wait", task_id=tid, timeout_s=30)[1]; tool("discard", task_id=tid)
+tool("wait", task_id=slow, timeout_s=30); tool("discard", task_id=slow)
+err, tid = tool("delegate", role="code writer", task="tie, none busy")
+assert "Output from worker writer1" in tool("wait", task_id=tid, timeout_s=30)[1]; tool("discard", task_id=tid)   # then by name
+# A writer over the threshold on either window is skipped.
+USAGE["writer1-tok"], USAGE["writer2-tok"] = [30, 10], [96, 10]
+err, tid = tool("delegate", role="code writer", task="5h window")
+assert "Output from worker writer1" in tool("wait", task_id=tid, timeout_s=30)[1]; tool("discard", task_id=tid)
+USAGE["writer1-tok"], USAGE["writer2-tok"] = [30, 10], [10, 97]
+err, tid = tool("delegate", role="code writer", task="weekly window")
+assert "Output from worker writer1" in tool("wait", task_id=tid, timeout_s=30)[1]; tool("discard", task_id=tid)
+w2 = by_name()["writer2"]
+assert (w2["five_hour_pct"], w2["seven_day_pct"], w2["available"]) == (10, 97, False), w2
+# Both over: main does it itself.
+USAGE["writer1-tok"], USAGE["writer2-tok"] = [96, 10], [10, 97]
+err, text = tool("delegate", role="code writer", task="x")
+assert err and "All workers with role 'code writer' are near their usage limit" in text and "writer1: 5h 96%, 7d 10%" in text \
+    and "writer2: 5h 10%, 7d 97%" in text and "do this task yourself now and try again later" in text, text
+err, text = tool("delegate", worker="writer1", task="x")
+assert err and "96%" in text and "do this task yourself" in text, text                # nothing to fail over to: refused as before
+# A named worker near its limit hands over to another account with the same role.
+USAGE["writer1-tok"], USAGE["writer2-tok"] = [96, 10], [20, 10]
+err, tid = tool("delegate", worker="writer1", task="named")
+assert not err, tid
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "Output from worker writer2" in text and "[cluster] Routed to writer2 because writer1 is at 96% of its limit." in text, text
+tool("discard", task_id=tid)
+err, tid = tool("delegate", worker="auditor", task="named, has room")
+assert not err and "Routed" not in tool("wait", task_id=tid, timeout_s=30)[1]; tool("discard", task_id=tid)   # no hand-over
 proc.stdin.close()
 proc.wait(timeout=5)
 print("test-team: ok")
