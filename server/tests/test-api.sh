@@ -48,7 +48,8 @@ for bad in "" "bash" "status; bash" 'status $(id)' "status && id" "rm -rf /" "st
   "open owner/-x" "open -o/x" "new x --owner --start" "tail -x" "clone-status nope" \
   "login-gitlab glpat-x" "login-docker docker.io" "self-update" "self-update main" \
   "self-update 0123456789abcdef0123456789abcdef0123456" "self-update ../../etc" "install-cli" \
-  "install-cli glab extra" "install-cli rm" "login-token" "login-token evil" "login-token vercel x"; do
+  "install-cli glab extra" "install-cli rm" "login-token" "login-token evil" "login-token vercel x" \
+  "skills-update" "skills-update demo" "skills-update demo/x extra" "skills-update a/b/c" "skills-update demo/x;id" "skills-update demo/x --force"; do
   api "$bad"
   check "forbidden: '${bad:0:30}'" "$(jqt '.ok==false and .error.code=="forbidden"')"
 done
@@ -401,7 +402,15 @@ echo '{"version":2,"plugins":{"demo@market":[{"scope":"user","version":"1.0","gi
 cp "$SERVER/claude-plugin-updates" "$HOME/.local/bin/"; chmod +x "$HOME/.local/bin/claude-plugin-updates"
 api "plugins"
 check "plugins: installed plugin carries update and latest" "$(jqt '.ok and .data.installed[0].update=="available" and .data.installed[0].latest=="abcdef012345" and .data.installed[0].enabled and (.data.available|length)==2')"
-rm -rf "$PD" "$HOME/.local/bin/claude-plugin-updates" "$HOME/.config/claude-launcher/plugin-updates.json"
+check "plugins: a non-skills plugin has no via/source" "$(jqt '.data.installed[0] | has("via") or has("source") | not')"
+# A plugin from a marketplace the skills CLI manages: via/source come through (the unreachable API makes it "error").
+echo '{"market":{"source":{"source":"github","repo":"demo-org/demo-skills"}}}' >"$PD/known_marketplaces.json"
+mkdir -p "$HOME/.agents"
+echo '{"version":3,"skills":{"one":{"source":"Demo-Org/Demo-Skills","sourceType":"github","updatedAt":"2026-01-01T00:00:00.000Z"}}}' >"$HOME/.agents/.skill-lock.json"
+rm -f "$HOME/.config/claude-launcher/plugin-updates.json"
+CLAUDERC_GITHUB_API=http://127.0.0.1:9 api "plugins"
+check "plugins: a skills-managed plugin carries via and source" "$(jqt '.ok and .data.installed[0].via=="skills" and .data.installed[0].source=="Demo-Org/Demo-Skills" and .data.installed[0].update=="error"')"
+rm -rf "$PD" "$HOME/.local/bin/claude-plugin-updates" "$HOME/.config/claude-launcher/plugin-updates.json" "$HOME/.agents"
 api "sessions"; check "sessions carry preview/waiting/busy" "$(jqt '.ok and (.data.sessions|length) > 0 and (.data.sessions[0]|has("preview") and has("waiting") and has("busy"))')"
 mkdir -p "$HOME/.config/claude-launcher"; printf "export VERCEL_TOKEN='abc'\n" >"$HOME/.config/claude-launcher/env"
 api "disconnect vercel"; check "disconnect removes a service's token" "$(jqt '.ok and .data.disconnected=="vercel"')"
@@ -537,6 +546,26 @@ echo "install-cli"
 api "install-cli glab"
 check "install-cli without the internet fails cleanly" "$(jqt '.ok==false and .error.code=="internal"')"
 [[ ! -e "$HOME/.local/bin/glab.new" ]]; check "install-cli leaves nothing half-installed" $?
+
+echo "skills-update"
+LOCK="$HOME/.agents/.skill-lock.json"
+api "skills-update demo-org/demo-skills"
+check "skills-update without a lock file refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+mkdir -p "$HOME/.agents"
+echo '{"version":3,"skills":{"one":{"source":"Demo-Org/Demo-Skills","sourceType":"github","installedAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z"},"two":{"source":"other-org/other","updatedAt":"2026-01-01T00:00:00.000Z"}}}' >"$LOCK"
+api "skills-update demo-org/not-in-lock"
+check "skills-update refuses a repo that isn't in the lock" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+OUT="$("$HOME/bin/claude-setup.sh" --api skills-update "bad repo" </dev/null)"
+check "skills-update refuses bad arguments" "$(jqt '.ok==false and .error.code=="bad_args"')"
+[[ ! -e "$STUB_STATE/npx-args" ]]; check "refused skills-update never ran npx" $?
+STUB_NPX_FAIL=1 api "skills-update demo-org/demo-skills"
+check "skills-update reports an npx failure with its last lines, colours stripped" "$(jqt '.ok==false and .error.code=="internal" and (.error.message | contains("repository not found") and (contains("\u001b") | not))')"
+[[ "$(jq -r '.skills.one.updatedAt' "$LOCK")" == 2026-01-01T00:00:00.000Z ]]; check "failed skills-update leaves the lock alone" $?
+api "skills-update demo-org/demo-skills"
+check "skills-update runs (repo matched case-insensitively), colours stripped" "$(jqt '.ok and .data.updated=="demo-org/demo-skills" and (.data.output | contains("done") and (contains("\u001b") | not))')"
+[[ "$(cat "$STUB_STATE/npx-args")" == "-y skills add demo-org/demo-skills -g -y -s *" ]]; check "skills-update passes the right arguments to npx" $?
+[[ "$(jq -r '.skills.one.updatedAt' "$LOCK")" != 2026-01-01T00:00:00.000Z && "$(jq -r '.skills.two.updatedAt' "$LOCK")" == 2026-01-01T00:00:00.000Z ]]; check "stub moved only that repo's updatedAt" $?
+rm -rf "$HOME/.agents" "$STUB_STATE/npx-args"
 
 echo "self-update"
 api "status"

@@ -53,6 +53,9 @@ object Codes {
 /** Same rule as the server: no leading '-', so a name is never read as an option. */
 val PROJECT_NAME_RE = Regex("^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$")
 
+/** The server's rule for a `skills` package (owner/repo). */
+val SKILLS_SOURCE_RE = Regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
 /** Same rule as the server's worker names (Team). */
 val WORKER_NAME_RE = Regex("^[A-Za-z][A-Za-z0-9_-]{0,29}$")
 
@@ -182,6 +185,10 @@ class LauncherApi(
         if (!WORKER_NAME_RE.matches(name)) throw ApiException(Codes.INVALID_NAME, "Bad worker name")
     }
     suspend fun plugins(): PluginsData = call("plugins", timeoutMs = 120_000)
+    suspend fun skillsUpdate(repo: String): JsonObject {
+        if (!SKILLS_SOURCE_RE.matches(repo)) throw ApiException(Codes.INVALID_NAME, "Bad skills source")
+        return call("skills-update $repo", timeoutMs = 300_000)
+    }
     suspend fun disconnect(service: String): JsonObject = call("disconnect $service")
 
     // In-app chat: every call carries the PIN on stdin; the server checks it.

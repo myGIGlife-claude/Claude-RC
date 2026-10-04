@@ -30,7 +30,7 @@ tmp = Path(tempfile.mkdtemp())
 cfg = tmp / "cfg" / "claude-launcher" / "workers"
 env = {**os.environ, "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(HERE / "stubs" / "claude"),
        "ANTHROPIC_API_KEY": "secret-should-not-leak", "CLAUDE_CODE_OAUTH_TOKEN": "main-token", "CLAUDECODE": "1", "STUB_STATE": str(tmp / "stub"),
-       "CLAUDERC_TEST_SECRET": "service-token", "CLAUDERC_WORKER_SLOTS": "3", "CLAUDERC_USAGE_TTL": "0",
+       "CLAUDERC_TEST_SECRET": "service-token", "CLAUDERC_WORKER_SLOTS": "3", "CLAUDERC_USAGE_TTL": "0", "CLAUDERC_START_GAP": "0",
        "CLAUDERC_USAGE_URL": f"http://127.0.0.1:{usage_srv.server_port}/"}
 cfg.parent.mkdir(parents=True, exist_ok=True)
 (cfg.parent / "env").write_text("export CLAUDERC_TEST_SECRET='service-token'\n")
@@ -418,6 +418,17 @@ err, a2 = tool("delegate", worker="writer1", task="fresh b")
 err, text = tool("wait", task_id=a2, timeout_s=1)
 assert not err and not text.startswith("Queued"), text              # a fresh token: runs side by side
 tool("wait", task_id=a1, timeout_s=30); tool("wait", task_id=a2, timeout_s=30); tool("discard", task_id=a1); tool("discard", task_id=a2)
+# Starts of one worker's runs are spaced apart: two claude processes starting together can log the worker out.
+import runpy
+ns = runpy.run_path(str(HERE.parent / "clauderc-team"), run_name="not_main")
+lk = tmp / "gap"; lk.mkdir()
+def start_wrapper(tag):
+    return subprocess.Popen(["sh", "-c", ns["SLOT_SH"], "slot", str(lk / "run.lock"), "3", str(lk / f"{tag}.started"), str(lk / "none.json"), "1000", ns["TOKEN_LEFT_PY"], "3",
+                             "sh", "-c", f"date +%s.%N >{lk}/{tag}.at"])
+w1, w2 = start_wrapper("one"), start_wrapper("two")
+w1.wait(timeout=30); w2.wait(timeout=30)
+at = [float((lk / f"{x}.at").read_text()) for x in ("one", "two")]
+assert abs(at[0] - at[1]) >= 2.5, at                            # 3 s gap between the two starts
 proc.stdin.close()
 proc.wait(timeout=5)
 print("test-team: ok")

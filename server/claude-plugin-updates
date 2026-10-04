@@ -12,17 +12,23 @@ How it decides (marketplaces on disk are plain snapshots, not git repos):
     marketplace repo, and if that moved, the GitHub compare API says whether files
     under the plugin's path changed;
   - otherwise the catalog's "version" is compared with the installed version.
+Plugins whose marketplace repo is a `source` in the `skills` CLI's lock file
+(npx skills add) are skills-managed: their answer also has "via":"skills" and
+"source":"<owner/repo>", and they are judged by the repo's HEAD commit date against the
+newest `updatedAt` the lock records for that source (the sha rules above don't apply).
 Answers are cached in ~/.config/claude-launcher/plugin-updates.json (1 h; a failed
 check keeps the last good answer for up to 24 h). Env: CLAUDE_PLUGIN_DIR,
 XDG_CONFIG_HOME, CLAUDERC_GIT (git binary), CLAUDERC_GITHUB_API (API base),
+CLAUDERC_SKILL_LOCK (default ~/.agents/.skill-lock.json),
 CLAUDERC_PLUGIN_TTL (seconds; 0 = always recheck).
 Never fails: any odd data ends in {} and exit 0.
 """
-import json, os, re, subprocess, sys, tempfile, time, urllib.error, urllib.request
+import datetime, json, os, re, subprocess, sys, tempfile, time, urllib.error, urllib.request
 
 PLUGIN_DIR = os.environ.get("CLAUDE_PLUGIN_DIR") or os.path.expanduser("~/.claude/plugins")
 CFG = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "claude-launcher")
 CACHE_FILE = os.path.join(CFG, "plugin-updates.json")
+SKILL_LOCK = os.environ.get("CLAUDERC_SKILL_LOCK") or os.path.expanduser("~/.agents/.skill-lock.json")
 GIT = os.environ.get("CLAUDERC_GIT") or "git"
 API = (os.environ.get("CLAUDERC_GITHUB_API") or "https://api.github.com").rstrip("/")
 DEFAULT_API = "https://api.github.com"
@@ -69,6 +75,38 @@ def same_sha(a, b):
     return n >= 7 and a[:n] == b[:n]
 
 
+def parse_time(v):
+    """Aware datetime for an ISO 8601 string (Z or offset; no zone = UTC), else None."""
+    if not isinstance(v, str) or not v.strip():
+        return None
+    v = v.strip()
+    if v[-1] in "zZ":
+        v = v[:-1] + "+00:00"
+    try:
+        d = datetime.datetime.fromisoformat(v)
+    except ValueError:
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=datetime.timezone.utc)
+
+
+def skill_sources():
+    """lower-case owner/repo -> (owner/repo as written, newest updatedAt string, its datetime), from the skills lock."""
+    out = {}
+    skills = as_dict(as_dict(load_json(SKILL_LOCK)).get("skills"))
+    for entry in skills.values():
+        entry = as_dict(entry)
+        src = entry.get("source")
+        if not isinstance(src, str) or not REPO_RE.match(src):
+            continue
+        when = parse_time(entry.get("updatedAt"))
+        have = out.get(src.lower())
+        if have is None:
+            out[src.lower()] = (src, entry["updatedAt"] if when else "", when)
+        elif when and (have[2] is None or when > have[2]):
+            out[src.lower()] = (have[0], entry["updatedAt"], when)
+    return out
+
+
 def repo_url(repo):
     return "https://github.com/%s.git" % repo
 
@@ -86,6 +124,7 @@ class Net:
         self.deadline = time.time() + RUN_CAP
         self.heads = {}
         self.compares = {}
+        self.commits = {}
 
     def budget(self):
         left = self.deadline - time.time()
@@ -144,22 +183,47 @@ class Net:
             raise v
         return v
 
-    def _compare(self, repo, old, new):
-        if not REPO_RE.match(repo) or not SHA_RE.match(old) or not SHA_RE.match(new):
-            raise Fail("bad compare arguments")
+    def api_get(self, path):
+        """Parsed JSON of a GitHub API GET."""
         headers = {"Accept": "application/vnd.github+json", "User-Agent": "claude-plugin-updates"}
         token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
         if token and API == DEFAULT_API:
             headers["Authorization"] = "Bearer " + token
-        req = urllib.request.Request("%s/repos/%s/compare/%s...%s" % (API, repo, old, new), headers=headers)
+        req = urllib.request.Request("%s/%s" % (API, path), headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=self.budget()) as resp:
-                data = json.loads(resp.read().decode("utf-8", "replace"))
+                return json.loads(resp.read().decode("utf-8", "replace"))
         except (urllib.error.URLError, OSError, ValueError) as e:
             if time.time() >= self.deadline - 1:
                 raise OutOfTime()
-            raise Fail("compare: %s" % e)
-        data = as_dict(data)
+            raise Fail("github api: %s" % e)
+
+    def head_commit(self, repo):
+        """(sha, commit date) of a GitHub repo's default branch."""
+        if repo not in self.commits:
+            try:
+                self.commits[repo] = self._head_commit(repo)
+            except Fail as e:
+                self.commits[repo] = e
+        v = self.commits[repo]
+        if isinstance(v, Exception):
+            raise v
+        return v
+
+    def _head_commit(self, repo):
+        if not REPO_RE.match(repo):
+            raise Fail("bad repo")
+        data = as_dict(self.api_get("repos/%s/commits/HEAD" % repo))
+        sha = data.get("sha")
+        when = parse_time(as_dict(as_dict(data.get("commit")).get("committer")).get("date"))
+        if not isinstance(sha, str) or not SHA_RE.match(sha.lower()) or when is None:
+            raise Fail("bad commit answer")
+        return sha.lower(), when
+
+    def _compare(self, repo, old, new):
+        if not REPO_RE.match(repo) or not SHA_RE.match(old) or not SHA_RE.match(new):
+            raise Fail("bad compare arguments")
+        data = as_dict(self.api_get("repos/%s/compare/%s...%s" % (repo, old, new)))
         if data.get("status") == "identical":
             return [], False
         files = data.get("files")
@@ -247,6 +311,16 @@ class Plugins:
             return "unknown", ""
         return verdict
 
+    def check_skills(self, source, updated):
+        """(state, latest) for a plugin the skills CLI manages: is the repo's HEAD newer than the last `skills add`?"""
+        sha, when = self.net.head_commit(source)
+        return ("current" if updated is not None and updated >= when else "available"), sha[:12]
+
+    def skills_managed(self, mk, sources):
+        """(owner/repo as in the lock, newest updatedAt string, its datetime) when the marketplace repo is a skills source."""
+        repo = self.marketplace_repo(mk)[1]
+        return sources.get(repo.lower()) if repo else None
+
     @staticmethod
     def compare_sha(have, latest):
         latest = latest.lower()
@@ -308,6 +382,7 @@ def main():
     now = time.time()
     limit = ttl()
     plugins = Plugins()
+    sources = skill_sources()
     for pid, entries in installed.items():
         if not isinstance(pid, str):
             continue
@@ -316,33 +391,41 @@ def main():
         version = inst.get("version") if isinstance(inst.get("version"), str) else ""
         key = sha or version
         name, _, mk = pid.partition("@")
+        managed = plugins.skills_managed(mk, sources) if mk else None
+        extra = {}
+        if managed:
+            # Running `skills add` moves updatedAt, which must drop a cached "available" at once.
+            key = "%s|skills|%s|%s" % (key, managed[0], managed[1])
+            extra = {"via": "skills", "source": managed[0]}
         prev = as_dict(old.get(pid))
         same_install = prev.get("for") == key and prev.get("state") in STATES
         if same_install and now - max(num(prev.get("ts")), num(prev.get("tried"))) < limit:
             cache[pid] = prev
-            out[pid] = {"state": prev["state"], "latest": str(prev.get("latest") or "")}
+            out[pid] = dict(extra, state=prev["state"], latest=str(prev.get("latest") or ""))
             continue
         good = same_install and prev["state"] in ("current", "available") and now - num(prev.get("ts")) < STALE_GOOD
         try:
             if not mk:
                 state, latest = "unknown", ""
+            elif managed:
+                state, latest = plugins.check_skills(managed[0], managed[2])
             else:
                 state, latest = plugins.check(name, mk, sha, version)
         except (Fail, OutOfTime) as e:
             if good:
                 cache[pid] = dict(prev, tried=now)
-                out[pid] = {"state": prev["state"], "latest": str(prev.get("latest") or "")}
+                out[pid] = dict(extra, state=prev["state"], latest=str(prev.get("latest") or ""))
             elif isinstance(e, OutOfTime):
-                out[pid] = {"state": "unknown", "latest": ""}
+                out[pid] = dict(extra, state="unknown", latest="")
             else:
-                cache[pid] = {"for": key, "ts": now, "state": "error", "latest": ""}
-                out[pid] = {"state": "error", "latest": ""}
+                cache[pid] = dict(extra, **{"for": key, "ts": now, "state": "error", "latest": ""})
+                out[pid] = dict(extra, state="error", latest="")
             continue
         except Exception:
-            out[pid] = {"state": "error", "latest": ""}
+            out[pid] = dict(extra, state="error", latest="")
             continue
-        cache[pid] = {"for": key, "ts": now, "state": state, "latest": latest}
-        out[pid] = {"state": state, "latest": latest}
+        cache[pid] = dict(extra, **{"for": key, "ts": now, "state": state, "latest": latest})
+        out[pid] = dict(extra, state=state, latest=latest)
     if cache != old:
         write_cache(cache)
     return out

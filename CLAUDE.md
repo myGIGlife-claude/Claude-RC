@@ -86,3 +86,11 @@ hostnames, IPs, emails, org names, keys. They live in
   SSH is swift-nio-ssh (`Ssh.swift`), same forced-command protocol as Android.
   Not ported yet: logins, MCP/plugins, cluster, file transfer, push (APNs needs
   an Apple developer account). Android code is untouched.
+- Worker logins (`workers/<name>/home`): two `claude` processes starting together on one login can invalidate its
+  refresh token and log the worker out (happened twice). `clauderc-team` spaces run starts 30 s apart and starts a
+  run alone when its token would expire mid-run. Never run `claude` (even `auth status`) with a worker's
+  `CLAUDE_CONFIG_DIR` by hand while it may be running. The usage endpoint rate-limits (429): lookups go through one
+  shared file cache (`usage-cache/`).
+- Plugins managed by `npx skills` (lock file `~/.agents/.skill-lock.json`) are updated by the `skills-update` action,
+  not `claude plugin update`; `claude-plugin-updates` gives each installed plugin an update state for the app's lights.
+

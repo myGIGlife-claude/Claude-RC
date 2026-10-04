@@ -800,6 +800,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** A plugin the `skills` CLI manages: the server re-runs `npx skills add <source>` (can take minutes). */
+    fun updateSkills(source: String) = action("Updating $source…") {
+        api.skillsUpdate(source)
+        say("Updated $source")
+        runCatching { api.plugins() }.getOrNull()?.let { _plugins.value = it }
+    }
+
     fun clearCcResult() { _ccResult.value = null }
 
     /** The + dialog: services that aren't connected yet. */
