@@ -77,6 +77,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import life.mygig.clauderc.BuildConfig
 import life.mygig.clauderc.api.Updates
@@ -95,6 +97,7 @@ import life.mygig.clauderc.ui.screens.AppleDialog
 import life.mygig.clauderc.ui.screens.KeystoresDialog
 import life.mygig.clauderc.ui.screens.HostKeyDialog
 import life.mygig.clauderc.ui.screens.LoginDialog
+import life.mygig.clauderc.ui.screens.MigrateScreen
 import life.mygig.clauderc.ui.screens.NewProjectScreen
 import life.mygig.clauderc.ui.screens.ProjectsScreen
 import life.mygig.clauderc.ui.screens.SessionsScreen
@@ -168,6 +171,8 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             val showCustom by vm.showCustom.collectAsState()
             val showKeystores by vm.showKeystores.collectAsState()
             val showApple by vm.showApple.collectAsState()
+            // Only the open flag: the wizard screen follows the rest of its state itself.
+            val showMigrate by remember(vm) { vm.migrate.map { it.open }.distinctUntilChanged() }.collectAsState(vm.migrate.value.open)
             val tokenService by vm.tokenService.collectAsState()
             val tail by vm.tail.collectAsState()
             val pendingKey by vm.pendingHostKey.collectAsState()
@@ -334,6 +339,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             tokenService?.let { id -> Catalog.byId(id)?.let { TokenServiceDialog(vm, it) } }
             tail?.let { TailScreen(vm, it) }
             if (showRun) RunScreen(vm)
+            if (showMigrate) MigrateScreen(vm)
             chatSession?.let { ChatScreen(vm, it) }
             clusterOffer?.let { o ->
                 AlertDialog(
