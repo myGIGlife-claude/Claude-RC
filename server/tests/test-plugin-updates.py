@@ -8,6 +8,7 @@ HELPER = os.path.join(os.path.dirname(HERE), "claude-plugin-updates")
 api_calls = []
 api_files = {}  # "old...new" -> list of changed file names
 api_fail = []
+commit_data = {"sha": "a" * 40, "date": "2026-09-10T12:00:00Z"}  # HEAD of the skills-managed repo
 
 
 class H(http.server.BaseHTTPRequestHandler):
@@ -15,6 +16,9 @@ class H(http.server.BaseHTTPRequestHandler):
         api_calls.append(self.path)
         if api_fail:
             self.send_response(500); self.end_headers(); return
+        if self.path == "/repos/demo/skilled/commits/HEAD":
+            out = json.dumps({"sha": commit_data["sha"], "commit": {"committer": {"date": commit_data["date"]}}}).encode()
+            self.send_response(200); self.end_headers(); self.wfile.write(out); return
         rng = self.path.rsplit("/compare/", 1)[-1]
         files = api_files.get(rng)
         if files is None:
@@ -80,6 +84,8 @@ def catalog(mk, plugins):
 write(os.path.join(plugin_dir, "known_marketplaces.json"), {
     "market": {"source": {"source": "github", "repo": "demo/market"}},
     "selfhosted": {"source": {"source": "git", "url": "https://git.example.com/x/y.git"}},
+    "skilled": {"source": {"source": "github", "repo": "Demo/Skilled"}},
+    "skilledurl": {"source": {"source": "git", "url": "https://github.com/demo/skilled.git"}},
 })
 catalog("market", [
     {"name": "pinned", "source": {"source": "url", "url": "https://example.com/p.git", "sha": head}},
@@ -96,8 +102,9 @@ def install(**plugins):
         k: [{"scope": "user", **v}] for k, v in plugins.items()}})
 
 
+skill_lock = os.path.join(tmp, "skill-lock.json")  # absent until the skills tests write it
 env = dict(os.environ, CLAUDE_PLUGIN_DIR=plugin_dir, XDG_CONFIG_HOME=xdg, CLAUDERC_GIT=wrapper,
-           CLAUDERC_GITHUB_API=base, CLAUDERC_PLUGIN_TTL="0")
+           CLAUDERC_GITHUB_API=base, CLAUDERC_PLUGIN_TTL="0", CLAUDERC_SKILL_LOCK=skill_lock)
 fails = 0
 
 
@@ -206,6 +213,64 @@ check("cache avoids a second network call within the TTL",
 install(**{"remote@market": {"gitCommitSha": other_head}})
 out3 = run(CLAUDERC_PLUGIN_TTL="3600")
 check("a newly installed version is rechecked despite the cache", out3["remote@market"]["state"] == "current", out3)
+
+# Plugins the skills CLI manages: HEAD commit date against the lock's newest updatedAt.
+def lock(*entries):
+    write(skill_lock, {"version": 3, "skills": {
+        "s%d" % i: {"source": src, "sourceType": "github", "installedAt": "2026-01-01T00:00:00.000Z", "updatedAt": at}
+        for i, (src, at) in enumerate(entries)}})
+
+
+install(**{"taste@skilled": {"gitCommitSha": first}, "taste2@skilledurl": {"version": "1"},
+           "pinned@market": {"gitCommitSha": head}})
+os.path.exists(cache_file) and os.remove(cache_file)
+api_calls.clear()
+out = run()
+check("no lock file -> no via/source, no commits call",
+      "via" not in out["taste@skilled"] and not any("/commits/" in c for c in api_calls), (out, api_calls))
+lock(("demo/skilled", "2026-09-01T00:00:00.000Z"), ("demo/skilled", "2026-09-11T08:00:00+00:00"),
+     ("demo/skilled", "2026-09-05T00:00:00Z"), ("demo/elsewhere", "2026-12-01T00:00:00Z"))
+out = run()
+want = {"state": "current", "latest": "a" * 12, "via": "skills", "source": "demo/skilled"}
+check("skills-managed, newest updatedAt after HEAD commit -> current", out["taste@skilled"] == want, out)
+check("repo is matched via a github url too", out["taste2@skilledurl"] == want, out)
+check("other plugins carry no via/source", out["pinned@market"] == {"state": "current", "latest": head[:12]}, out)
+commit_data["date"] = "2026-09-11T10:00:00+02:00"  # 08:00 UTC: equal to the lock's newest -> current
+check("HEAD date equal to updatedAt (offset parsed) -> current", run()["taste@skilled"]["state"] == "current")
+commit_data["date"] = "2026-09-12T00:00:00Z"
+commit_data["sha"] = "b" * 40
+out = run()
+check("HEAD commit newer than updatedAt -> available",
+      out["taste@skilled"] == dict(want, state="available", latest="b" * 12), out)
+cache = json.load(open(cache_file))
+check("via and source are cached", cache["taste@skilled"].get("via") == "skills"
+      and cache["taste@skilled"].get("source") == "demo/skilled" and "via" not in cache["pinned@market"], cache)
+api_calls.clear()
+out = run(CLAUDERC_PLUGIN_TTL="3600")
+check("cached answer keeps via/source without a network call",
+      out["taste@skilled"] == dict(want, state="available", latest="b" * 12) and not api_calls, (out, api_calls))
+lock(("demo/skilled", "2026-09-13T00:00:00Z"))
+out = run(CLAUDERC_PLUGIN_TTL="3600")
+check("running the update (new updatedAt) invalidates a cached available",
+      out["taste@skilled"]["state"] == "current" and len(api_calls) == 1, (out, api_calls))
+lock(("demo/skilled", "not a date"))
+check("unparseable updatedAt -> available", run()["taste@skilled"]["state"] == "available")
+write(skill_lock, ["odd"])
+check("odd lock file -> not managed", "via" not in run()["taste@skilled"])
+open(skill_lock, "w").write("{bad json")
+check("bad JSON lock file -> not managed", "via" not in run()["taste@skilled"])
+lock(("demo/skilled", "2026-09-13T00:00:00Z"))
+run()  # good answer cached
+api_fail.append(1)
+out = run()
+check("API failure with a good cached answer -> served stale (still via skills)",
+      out["taste@skilled"] == dict(want, state="current", latest="b" * 12), out)
+os.remove(cache_file)
+out = run()
+check("API failure, nothing cached -> error (still via skills)",
+      out["taste@skilled"] == {"state": "error", "latest": "", "via": "skills", "source": "demo/skilled"}, out)
+api_fail.clear()
+check("recovers once the API works again", run()["taste@skilled"]["state"] == "current")
 
 # Never crashes.
 write(os.path.join(plugin_dir, "installed_plugins.json"), ["not", "a", "dict"])

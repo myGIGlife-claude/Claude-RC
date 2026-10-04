@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Test stub for npx (only `npx -y skills add <owner/repo> ...`). State lives in $STUB_STATE.
+# Records its arguments in $STUB_STATE/npx-args and moves updatedAt of every entry of that
+# repo in $CLAUDERC_SKILL_LOCK to now. STUB_NPX_FAIL=1: print two lines and fail.
+S="${STUB_STATE:-$HOME/.stub-state}"; mkdir -p "$S"
+printf '%s\n' "$*" >"$S/npx-args"
+if [[ "${STUB_NPX_FAIL:-}" == 1 ]]; then
+  printf 'resolving skills\n\033[31mfailed: repository not found\033[0m\n'
+  exit 1
+fi
+[[ "$2 $3" == "skills add" ]] || exit 2
+lock="${CLAUDERC_SKILL_LOCK:-$HOME/.agents/.skill-lock.json}"
+if [[ -f "$lock" ]]; then
+  tmp="$(mktemp)"
+  jq --arg r "$4" --arg now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+    '(.skills[]? | select((.source // "" | ascii_downcase) == ($r | ascii_downcase)) | .updatedAt) = $now' "$lock" >"$tmp" && mv "$tmp" "$lock"
+fi
+printf 'Installing skills from %s\n\033[32mdone\033[0m\n' "$4"

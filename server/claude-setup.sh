@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done).
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update.
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=32
+SCRIPT_API=33
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -2491,12 +2491,31 @@ do_plugins() {
     t 100 "$HOME/.local/bin/claude-plugin-updates" </dev/null >"$d.up" 2>/dev/null || true
     if jq -e 'type == "object"' "$d.up" >/dev/null 2>&1 &&
       jq -c --slurpfile u "$d.up" '.installed |= map(if ($u[0][.id] | type) == "object"
-        then . + {update:($u[0][.id].state // "unknown"), latest:($u[0][.id].latest // "")} else . end)' "$d.res" >"$d.res2" 2>/dev/null; then
+        then . + {update:($u[0][.id].state // "unknown"), latest:($u[0][.id].latest // "")}
+          + (if ($u[0][.id].via | type) == "string" and ($u[0][.id].source | type) == "string"
+             then {via:$u[0][.id].via, source:$u[0][.id].source} else {} end) else . end)' "$d.res" >"$d.res2" 2>/dev/null; then
       mv -f "$d.res2" "$d.res"
     fi
     rm -f "$d.up" "$d.res2"
   fi
   api_ok_file "$d.res"
+}
+
+# skills-update <owner/repo>: update a plugin the `skills` CLI manages (npx skills add), which
+# `claude plugin update` can't. Only a package already in the skills lock file: the phone can't
+# install arbitrary repos this way.
+do_skills_update() {
+  local re='^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' repo="${1:-}" lock="${CLAUDERC_SKILL_LOCK:-$HOME/.agents/.skill-lock.json}" d out rc
+  [[ $# -eq 1 && "$repo" =~ $re ]] || bad_args "usage: skills-update <owner/repo>"
+  jq -e --arg r "$repo" '[(.skills // {})[]? | .source? | strings | ascii_downcase] | index($r | ascii_downcase) != null' "$lock" >/dev/null 2>&1 ||
+    api_err invalid_name "That skills package isn't installed on this server."
+  need npx
+  d="$(mktemp -d)"
+  out="$(cd "$d" && t 240 npx -y skills add "$repo" -g -y -s '*' </dev/null 2>&1)"; rc=$?
+  rm -rf "$d"
+  out="$(sed 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\r//g' <<<"$out" | grep -v '^[[:space:]]*$')"
+  [[ $rc -eq 0 ]] || api_err internal "Updating $repo failed: $(tail -n 3 <<<"$out")"
+  api_ok "$(jq -cn --arg r "$repo" --arg o "$(tail -n 5 <<<"$out")" '{updated:$r, output:$o}')"
 }
 
 # disconnect <service>: forget a token service's credentials (and its key file).
@@ -2912,6 +2931,7 @@ api_main() {
     mcp-auth-finish)     [[ $# -eq 0 ]] || bad_args "mcp-auth-finish reads the URL on stdin"; do_mcp_auth_finish ;;
     mcp-auth-cancel)     do_mcp_auth_cancel ;;
     plugins)             do_plugins "$@" ;;
+    skills-update)       do_skills_update "$@" ;;
     disconnect)          do_disconnect "$@" ;;
     chat-pin-status)     do_chat_pin_status "$@" ;;
     chat-pin-set)        do_chat_pin_set "$@" ;;
