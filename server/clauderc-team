@@ -101,6 +101,15 @@ def settings(name, att=None):
     return str(o.get("role") or m.get("role") or ""), mode if mode in MODES else "acceptEdits"
 
 
+def signed_in(name):
+    """The worker's login has a token (a logged-out Claude leaves a credentials file without one)."""
+    try:
+        t = json.loads((WORKERS / name / "home" / ".credentials.json").read_text())["claudeAiOauth"]["accessToken"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return isinstance(t, str) and bool(t)
+
+
 def cluster_cfg():
     """The owner's cluster settings (app: Claude tab › cLaudeCluster), read live: parallel tasks per chat and when to hand back to main."""
     c = {"max_parallel": 3, "handback": True, "handback_pct": 95}
@@ -213,7 +222,7 @@ def list_workers():
         name = meta.parent.name
         if name in att:
             role, mode = settings(name, att)
-            w = {"name": name, "role": role, "mode": mode, "signed_in": (meta.parent / "home" / ".credentials.json").is_file()}
+            w = {"name": name, "role": role, "mode": mode, "signed_in": signed_in(name)}
             u = usage(name)
             for key, pct in zip(("five_hour_pct", "seven_day_pct"), u):
                 if pct is not None:
@@ -229,7 +238,7 @@ def usable(att):
     out = {}
     for name in att:
         try:
-            if isinstance(name, str) and NAME_RE.match(name) and (WORKERS / name / "home" / ".credentials.json").is_file():
+            if isinstance(name, str) and NAME_RE.match(name) and signed_in(name):
                 out[name] = settings(name, att)[0]
         except (OSError, ValueError):
             continue
@@ -532,7 +541,7 @@ def start(worker, prompt, resume=None, parent=None, repo=None, stack=None, note=
     att = attached()
     if worker not in att:
         raise ToolError(f"Worker {worker!r} isn't attached to this chat. Call list_workers; the owner adds workers with the Cluster button in the chat.")
-    if not (w / "home" / ".credentials.json").is_file():
+    if not signed_in(worker):
         raise ToolError(f"Worker {worker} isn't signed in. Sign it in from the Claude tab in the cLaudeRC app.")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ToolError("The task is empty.")

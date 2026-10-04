@@ -12,7 +12,7 @@ case "$1 ${2:-}" in
     printf 'Paste code here if prompted > '
     read -r code
     if [[ "$code" == good* ]]; then
-      d="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; mkdir -p "$d" && echo '{"claudeAiOauth":{}}' >"$d/.credentials.json"
+      d="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; mkdir -p "$d" && echo '{"claudeAiOauth":{"accessToken":"stub-token"}}' >"$d/.credentials.json"
       echo "Login successful."
     else
       echo "OAuth error: invalid code"; exit 1

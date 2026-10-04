@@ -39,7 +39,7 @@ for name, signed in (("research", True), ("ui", False)):
     (cfg / name / "tasks").mkdir()
     (cfg / name / "meta.json").write_text(json.dumps({"role": f"{name} role", "mode": "plan"}))
     if signed:
-        (cfg / name / "home" / ".credentials.json").write_text("{}")
+        (cfg / name / "home" / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {"accessToken": name + "-tok"}}))
 for name, role, mode in (("writer1", "code writer", "acceptEdits"), ("writer2", "code writer", "acceptEdits"), ("auditor", "security audit", "plan")):
     (cfg / name / "home").mkdir(parents=True)
     (cfg / name / "tasks").mkdir()
@@ -429,6 +429,11 @@ w1, w2 = start_wrapper("one"), start_wrapper("two")
 w1.wait(timeout=30); w2.wait(timeout=30)
 at = [float((lk / f"{x}.at").read_text()) for x in ("one", "two")]
 assert abs(at[0] - at[1]) >= 2.5, at                            # 3 s gap between the two starts
+# A logged-out Claude leaves a credentials file without a token: that is not "signed in".
+(cfg / "writer2" / "home" / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {}}))
+assert by_name()["writer2"]["signed_in"] is False
+err, text = tool("delegate", worker="writer2", task="x")
+assert err and "isn't signed in" in text, text
 proc.stdin.close()
 proc.wait(timeout=5)
 print("test-team: ok")
