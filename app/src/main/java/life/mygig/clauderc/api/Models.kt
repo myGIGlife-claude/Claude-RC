@@ -209,6 +209,10 @@ data class InstalledPlugin(
     val update: String = "",
     /** Short version or sha of the newest release, when known. */
     val latest: String = "",
+    /** "skills" when the `skills` CLI manages it instead of `claude plugin`; empty otherwise (and on old servers). */
+    val via: String = "",
+    /** owner/repo to give `npx skills add`, when via == "skills". */
+    val source: String = "",
 )
 
 @Serializable
