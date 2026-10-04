@@ -28,7 +28,7 @@ SLOT_SH = ('b=$1; n=$2; m=$3; cred=$4; thr=$5; py=$6; gap=$7; shift 7; while :; 
            'exec 7>"$b.start"; flock 7; now=$(date +%s); last=$(cat "$b.last" 2>/dev/null || echo 0); w=$((last + gap - now)); '
            '[ $w -gt 0 ] && sleep $w; date +%s >"$b.last"; exec 7>&-; '
            ': >"$m"; exec "$@"; }; i=$((i+1)); done; sleep 2; done')
-START_GAP = int(os.environ.get("CLAUDERC_START_GAP") or 30)   # seconds between the starts of one worker's runs
+START_GAP = int(os.environ.get("CLAUDERC_START_GAP") or 0)   # seconds between the starts of one worker's runs (off: the logouts were a test bug, see CLAUDE.md)
 TOKEN_LEFT_PY = ('import json,sys,time\ntry: print(int(json.load(open(sys.argv[1]))["claudeAiOauth"]["expiresAt"]/1000-time.time()))\n'
                  'except Exception: print(999999)')
 RUN_TIMEOUT = 1800        # seconds one worker run may take
@@ -190,29 +190,39 @@ def usage_text(u):
     return ", ".join(f"{label} {'?' if p is None else format(p, '.0f') + '%'}" for label, p in zip(("5h", "7d"), u))
 
 
-def running_here():
-    """Tasks of this chat's project that are running or queued (they count against the parallel limit)."""
-    n = 0
+def live_tasks():
+    """Running tasks (any project), after finishing the ones whose process died without anyone calling wait (a chat that
+    went away): a dead run must not count against the parallel limits for ever."""
+    out = []
     for p in WORKERS.glob("*/tasks/*.json"):
         try:
             t = json.loads(p.read_text())
         except (OSError, ValueError):
             continue
-        if t.get("status") == "running" and t.get("project") == os.getcwd():
-            n += 1
-    return n
+        if t.get("status") != "running":
+            continue
+        if t.get("pid") and not pid_alive(t["pid"]):
+            try:
+                finalize(t["id"])
+                t = json.loads(p.read_text())
+            except Exception:
+                pass
+            if t.get("status") != "running":
+                continue
+        out.append(t)
+    return out
+
+
+def running_here():
+    """Tasks of this chat's project that are running or queued (they count against the parallel limit)."""
+    return sum(1 for t in live_tasks() if t.get("project") == os.getcwd())
 
 
 def running_on():
     """Running tasks per worker (any project: they share the worker's login)."""
     n = {}
-    for p in WORKERS.glob("*/tasks/*.json"):
-        try:
-            t = json.loads(p.read_text())
-        except (OSError, ValueError):
-            continue
-        if t.get("status") == "running":
-            n[t.get("worker")] = n.get(t.get("worker"), 0) + 1
+    for t in live_tasks():
+        n[t.get("worker")] = n.get(t.get("worker"), 0) + 1
     return n
 
 

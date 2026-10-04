@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update.
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot).
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=33
+SCRIPT_API=35
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -836,7 +836,8 @@ do_repos() {
         })}' <<<"$raw")"
 }
 
-do_sessions() {
+# The running Claude sessions as a JSON array (what `sessions` and `migrate-plan` report).
+sessions_list_json() {
   local s
   # Same detection as claude-autostart: any session whose pane started claude.
   s="$({ tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}@@#{session_created}@@#{session_attached}' 2>/dev/null || true; } |
@@ -862,7 +863,11 @@ do_sessions() {
     out="$(jq -c --argjson d "$([[ -e "$PUSH_DIR/$name" ]] && echo true || echo false)" \
       '.[-1].push_done = $d' <<<"$out")"
   done < <(jq -c '.[]' <<<"${s:-[]}")
-  api_ok "$(jq -cn --argjson s "$out" --argjson now "$(date +%s)" '{now:$now, sessions:$s}')"
+  printf '%s' "$out"
+}
+
+do_sessions() {
+  api_ok "$(jq -cn --argjson s "$(sessions_list_json)" --argjson now "$(date +%s)" '{now:$now, sessions:$s}')"
 }
 
 # Push alerts (Firebase Cloud Messaging; claude-push sends them from Claude's hooks).
@@ -2094,11 +2099,17 @@ sudo_askpass() {
   local dir="$1" real_sudo
   [[ -n "$2" ]] && real_sudo="$(command -v sudo)" || return 0
   printf '%s\n' "$2" >"$dir/pw"
-  printf '#!/bin/sh\ncat %q\n' "$dir/pw" >"$dir/askpass"
+  # "once" (a password test): the second prompt, after a wrong password, finds no file, so sudo gives up
+  # after one failed try (three would count as three failures for pam_faillock).
+  if [[ "${3:-}" == once ]]; then printf '#!/bin/sh\ncat %q && rm -f %q\n' "$dir/pw" "$dir/pw" >"$dir/askpass"
+  else printf '#!/bin/sh\ncat %q\n' "$dir/pw" >"$dir/askpass"; fi
+  chmod 700 "$dir/askpass"
+  chmod 600 "$dir/pw"
+  # (called again for the same dir: only the password and askpass change; a second wrapper would exec itself)
+  [[ ! -x "$dir/bin/sudo" ]] || return 0
   mkdir -p "$dir/bin"
   printf '#!/bin/sh\nexec %q -A "$@"\n' "$real_sudo" >"$dir/bin/sudo"
-  chmod 700 "$dir/askpass" "$dir/bin/sudo"
-  chmod 600 "$dir/pw"
+  chmod 700 "$dir/bin/sudo"
   export SUDO_ASKPASS="$dir/askpass" PATH="$dir/bin:$PATH"
 }
 
@@ -2858,6 +2869,777 @@ do_chat_log() {
     split("\n") | map(select(length > 0) | split("\t") | {ts:.[0], session:.[1], action:.[2]}) | reverse')"
 }
 
+# ======================================================================
+# Migrate: move this server's setup to another one (the contract is docs/migrate-design.md).
+# These actions touch only ~/.config/claude-launcher/migrate, ~/.local/state/claude-launcher/migrate,
+# ~/backups and the clauderc-migrate lines of ~/.ssh/authorized_keys. Passphrases live in mode-600
+# files and on stdin, never in argv, the environment or a log.
+# ======================================================================
+MIGRATE_CFG="$LAUNCHER_CONFIG_DIR/migrate"       # the ephemeral ssh key, the passphrase, the pinned known_hosts
+MIGRATE_STATE="$API_STATE_DIR/migrate"           # status.json, manifest.json
+MIGRATE_STATUS="$MIGRATE_STATE/status.json"
+MIGRATE_BACKUPS="$HOME/backups"
+MIGRATE_HOST_RE='^([A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|[0-9A-Fa-f]{0,4}(:[0-9A-Fa-f]{0,4}){2,7})$'
+MIGRATE_USER_RE='^[A-Za-z_][A-Za-z0-9_.-]{0,31}$'
+MIGRATE_HOSTKEY_TYPE_RE='^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521))$'
+MIGRATE_BLOB_RE='^[A-Za-z0-9+/]{20,2000}={0,2}$'
+MIGRATE_PUBKEY_RE='^ssh-ed25519 [A-Za-z0-9+/]+={0,2}( [A-Za-z0-9@._-]{1,64})?$'
+MIGRATE_ADDR_RE='^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$'
+MIGRATE_INCOMING_RE='^incoming-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\.gpg$'
+
+# claude-backup does the real work; the env override is for the tests.
+migrate_backup_bin() { printf '%s' "${CLAUDERC_BACKUP_BIN:-$HOME/.local/bin/claude-backup}"; }
+migrate_need_backup() {
+  [[ -x "$(migrate_backup_bin)" ]] || api_err not_configured "claude-backup is missing: run Update now"
+}
+# Same switch as `run`: the actions that sudo, read the passphrase or push this server's secrets need ALLOW_RUN=1 here.
+migrate_need_run() {
+  [[ "$ALLOW_RUN" == 1 ]] ||
+    api_err run_disabled "Running commands from the phone is off on this server. To allow it, run this on the server: echo 'ALLOW_RUN=1' >> ~/.config/claude-launcher/config"
+}
+
+migrate_last_lines() {   # the last few lines of a file, colours stripped, on one line
+  tail -n 5 "$1" 2>/dev/null | sed 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\r//g' | grep -v '^[[:space:]]*$' | tr '\n' ' ' | cut -c1-500
+}
+
+# migrate_status_write <job> <phase> <message> <pct> <bytes> <file> <started> <error>
+# (pid = MIGRATE_PID while a worker is writing; migrate-status never shows it)
+migrate_status_write() {
+  local tmp
+  mkdir -p "$MIGRATE_STATE" && chmod 700 "$MIGRATE_STATE" || return 1
+  tmp="$(mktemp "$MIGRATE_STATE/status.XXXXXX")" || return 1
+  if jq -cn --arg job "$1" --arg phase "$2" --arg message "$3" --argjson pct "$4" --argjson bytes "$5" \
+    --arg file "$6" --argjson started "$7" --arg error "$8" --argjson pid "${MIGRATE_PID:-null}" --argjson updated "$(date +%s)" \
+    '{job:$job, phase:$phase, message:$message, pct:$pct, bytes:$bytes, file:$file, started:$started, updated:$updated, error:$error, pid:$pid}' >"$tmp"; then
+    mv -f "$tmp" "$MIGRATE_STATUS"
+  else
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
+# Is the worker named in status.json still running? (A worker that never wrote its pid counts for a minute.)
+migrate_job_alive() {
+  local pid updated
+  pid="$(jq -r '(.pid // "") | tostring' "$MIGRATE_STATUS" 2>/dev/null)"
+  if [[ "$pid" =~ ^[0-9]+$ ]]; then
+    kill -0 "$pid" 2>/dev/null && grep -aq -- '--migrate-worker' "/proc/$pid/cmdline" 2>/dev/null
+  else
+    updated="$(jq -r '.updated // 0' "$MIGRATE_STATUS" 2>/dev/null)"
+    [[ "$updated" =~ ^[0-9]+$ ]] || updated=0
+    (($(date +%s) - updated < 60))
+  fi
+}
+
+# 0 when status.json describes a job that is still running.
+migrate_job_active() {
+  [[ -s "$MIGRATE_STATUS" ]] || return 1
+  case "$(jq -r '.phase // ""' "$MIGRATE_STATUS" 2>/dev/null)" in
+    export | transfer | restore) migrate_job_alive ;;
+    *) return 1 ;;
+  esac
+}
+
+# Takes the one-job-at-a-time lock (fd 8, released when this action exits) and refuses while a job runs.
+migrate_take_job() {
+  mkdir -p "$MIGRATE_STATE" "$MIGRATE_CFG" "$MIGRATE_BACKUPS" && chmod 700 "$MIGRATE_STATE" "$MIGRATE_CFG" "$MIGRATE_BACKUPS" ||
+    api_err internal "Couldn't create the migration folders."
+  exec 8>"$MIGRATE_STATE/job.lock"
+  flock -n 8 || api_err busy "A migration step is already running."
+  migrate_job_active && api_err busy "A migration step is already running."
+  return 0
+}
+
+# migrate-plan: what a move would take (claude-backup's plan, plus the running sessions and connected services).
+do_migrate_plan() {
+  [[ $# -eq 0 ]] || bad_args "migrate-plan takes no arguments"
+  migrate_need_backup
+  local plan sessions svc
+  plan="$(t 120 "$(migrate_backup_bin)" plan --json 2>/dev/null </dev/null)" || api_err internal "claude-backup couldn't check this server."
+  jq -e 'type == "object"' >/dev/null 2>&1 <<<"$plan" || api_err internal "claude-backup gave no usable plan."
+  sessions="$(sessions_list_json | jq -c 'map({name, busy, waiting})')"
+  svc="$(services_json | jq -c 'to_entries | map(select(.value.logged_in == true) | .key)')"
+  api_ok "$(jq -c --argjson s "${sessions:-[]}" --argjson v "${svc:-[]}" '{
+    sessions:$s, repos:(.repos // []), logins:(.logins // {claude:false, workers:[]}), services:$v,
+    docker_volumes:(.docker_volumes // []), estimate_mb:(.estimate_mb // 0), other_dirs:(.other_dirs // [])}' <<<"$plan")"
+}
+
+# migrate-keygen: the ephemeral key this server uses to push the backup (kept between calls).
+do_migrate_keygen() {
+  [[ $# -eq 0 ]] || bad_args "migrate-keygen takes no arguments"
+  umask 077
+  need ssh-keygen
+  local key="$MIGRATE_CFG/key" pub
+  mkdir -p "$MIGRATE_CFG" && chmod 700 "$MIGRATE_CFG" || api_err internal "Couldn't create $MIGRATE_CFG."
+  if [[ ! -s "$key" || ! -s "$key.pub" ]]; then
+    rm -f "$key" "$key.pub"
+    ssh-keygen -q -t ed25519 -N '' -C clauderc-migrate -f "$key" </dev/null >/dev/null 2>&1 || api_err internal "Couldn't create the transfer key."
+  fi
+  chmod 600 "$key"
+  pub="$(awk 'NR == 1 {print $1, $2, "clauderc-migrate"}' "$key.pub")"
+  [[ "$pub" =~ ^ssh-ed25519\ [A-Za-z0-9+/]+=*\ clauderc-migrate$ ]] || api_err internal "The transfer key is unreadable: delete $MIGRATE_CFG and try again."
+  api_ok "$(jq -cn --arg k "$pub" '{public_key:$k}')"
+}
+
+# migrate-authorize: stdin = the From server's public key line, then (optional) its address.
+# The key may only run `claude-backup receive`; an older clauderc-migrate line is replaced.
+do_migrate_authorize() {
+  [[ $# -eq 0 ]] || bad_args "migrate-authorize reads the key on stdin"
+  local key addr blob opts tmp ak="$HOME/.ssh/authorized_keys"
+  key="$(read_secret_line)"; addr="$(read_secret_line)"
+  exec 0</dev/null
+  umask 077
+  [[ "$key" =~ $MIGRATE_PUBKEY_RE && ${#key} -le 300 ]] || api_err invalid_name "That isn't a public key line (ssh-ed25519 AAAA…)."
+  [[ -z "$addr" || "$addr" =~ $MIGRATE_ADDR_RE ]] || api_err invalid_name "That isn't a host name or IP address."
+  [[ "$HOME" =~ ^/[A-Za-z0-9._/-]+$ ]] || api_err internal "The home folder name can't be put in an authorized_keys option."
+  [[ -x "$HOME/.local/bin/claude-backup" ]] || api_err not_configured "claude-backup is missing: run Update now"
+  blob="$(awk '{print $2}' <<<"$key")"
+  opts="restrict,command=\"$HOME/.local/bin/claude-backup receive\""
+  # from= only for a literal IP (sshd compares it with the client's IP, it doesn't resolve names): a host name would lock the sender out.
+  addr="${addr,,}"
+  if migrate_is_ip "$addr"; then opts+=",from=\"$addr\""; fi
+  [[ -d "$HOME/.ssh" ]] || mkdir -m 700 "$HOME/.ssh" || api_err internal "Couldn't create ~/.ssh."
+  # An existing file is copied first (minus the older clauderc-migrate line); if that fails it is left exactly as it was.
+  if [[ -e "$ak" && ( ! -f "$ak" || ! -r "$ak" ) ]]; then
+    api_err internal "Your authorized_keys file can't be read: left as it is."
+  fi
+  tmp="$(mktemp "$HOME/.ssh/authorized_keys.XXXXXX")" || api_err internal "Couldn't write ~/.ssh/authorized_keys."
+  if [[ -f "$ak" ]] && ! awk '$NF != "clauderc-migrate"' "$ak" >"$tmp"; then
+    rm -f "$tmp"
+    api_err internal "Couldn't read ~/.ssh/authorized_keys: left as it is."
+  fi
+  if printf '%s ssh-ed25519 %s clauderc-migrate\n' "$opts" "$blob" >>"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$ak"; then
+    api_ok '{"authorized":true}'
+  fi
+  rm -f "$tmp"
+  api_err internal "Couldn't write ~/.ssh/authorized_keys."
+}
+
+# A literal IPv4 (no leading zeros) or IPv6 address, nothing else.
+migrate_is_ip() {
+  local o='(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
+  [[ "$1" =~ ^$o\.$o\.$o\.$o$ ]] && return 0
+  [[ "$1" == *:*:* && "$1" =~ ^[0-9a-f:]{2,39}$ && "$1" != *:::* ]]
+}
+
+# ---- the detached jobs (internal: started as `claude-setup.sh --migrate-worker`, not reachable through the runner)
+
+MIGRATE_JOB="" MIGRATE_STARTED=0 MIGRATE_FILE="" MIGRATE_FINISHED=0 MIGRATE_CHILD=""
+MIGRATE_ON_FAIL=() MIGRATE_ALWAYS=()   # files removed when the job fails / whenever it ends
+
+migrate_progress() { migrate_status_write "$MIGRATE_JOB" "$1" "$2" "$3" "$4" "$MIGRATE_FILE" "$MIGRATE_STARTED" ""; }
+
+migrate_fail() {
+  local f pct=0 bytes=0
+  read -r pct bytes < <(jq -r '[(.pct // 0), (.bytes // 0)] | @tsv' "$MIGRATE_STATUS" 2>/dev/null) || true
+  for f in "${MIGRATE_ON_FAIL[@]}" "${MIGRATE_ALWAYS[@]}"; do rm -f -- "$f"; done
+  MIGRATE_FINISHED=1
+  migrate_status_write "$MIGRATE_JOB" failed "Failed" "${pct:-0}" "${bytes:-0}" "$MIGRATE_FILE" "$MIGRATE_STARTED" "$1"
+  exit 1
+}
+
+migrate_worker_exit() {
+  local f
+  [[ -z "$MIGRATE_CHILD" ]] || kill "$MIGRATE_CHILD" 2>/dev/null
+  ((MIGRATE_FINISHED == 1)) || migrate_fail "The job stopped unexpectedly"
+  for f in "${MIGRATE_ALWAYS[@]}"; do rm -f -- "$f"; done
+}
+
+# PROGRESS lines (CLAUDE_BACKUP_PROGRESS=1) on stdin; anything else is kept in $1 for the error text.
+# $2 = send|restore decides how a phase's percent maps onto the job's 0-100.
+migrate_read_progress() {
+  local log="$1" kind="$2" line ph p lo hi msg
+  while IFS= read -r line; do
+    line="${line//$'\r'/}"
+    if [[ "$line" =~ ^PROGRESS[[:space:]]+([A-Za-z_-]+)[[:space:]]+([0-9]{1,3})([[:space:]].*)?$ ]]; then
+      ph="${BASH_REMATCH[1]}"; p=$((10#${BASH_REMATCH[2]})); ((p > 100)) && p=100
+      if [[ "$kind" == send ]]; then
+        lo=0 hi=60 msg="Packing up this server ($ph)"
+      else
+        case "$ph" in
+          verify)  lo=0  hi=20 msg="Checking the file" ;;
+          extract) lo=20 hi=70 msg="Unpacking" ;;
+          clone)   lo=70 hi=99 msg="Cloning the repos" ;;
+          *)       lo=0  hi=99 msg="Restoring ($ph)" ;;
+        esac
+      fi
+      migrate_progress "$([[ "$kind" == send ]] && echo export || echo restore)" "$msg" $((lo + p * (hi - lo) / 100)) 0
+    elif [[ -n "$line" ]]; then
+      printf '%s\n' "$line" >>"$log"
+    fi
+  done
+}
+
+# migrate_worker_send <host> <port> <user> <host-key type> <known_hosts file> <out file> <started>
+migrate_worker_send() {
+  local host="$1" port="$2" user="$3" ktype="$4" kh="$5" out="$6" started="$7"
+  local pf="$MIGRATE_CFG/passphrase" errlog sshout rc size pos pct msg name hostalg="$4" t0
+  MIGRATE_JOB=send MIGRATE_STARTED="$started"
+  errlog="$(mktemp "$MIGRATE_STATE/err.XXXXXX")"; sshout="$(mktemp "$MIGRATE_STATE/out.XXXXXX")"
+  MIGRATE_ON_FAIL=("$out"); MIGRATE_ALWAYS=("$kh" "$errlog" "$sshout")
+  migrate_progress export "Packing up this server" 0 0
+
+  CLAUDE_BACKUP_PROGRESS=1 "$(migrate_backup_bin)" export --no-claude-login --pass-file "$pf" --out "$out" </dev/null 2>&1 >/dev/null |
+    migrate_read_progress "$errlog" send
+  rc="${PIPESTATUS[0]}"
+  ((rc == 0)) || migrate_fail "The export failed: $(migrate_last_lines "$errlog")"
+  [[ -s "$out" ]] || migrate_fail "The export produced no file."
+  size="$(stat -c %s "$out")"
+
+  : >"$errlog"
+  migrate_progress transfer "Sending to the new server" 60 0
+  [[ "$ktype" == ssh-rsa ]] && hostalg="rsa-sha2-512,rsa-sha2-256,ssh-rsa"
+  ssh -F /dev/null -i "$MIGRATE_CFG/key" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none \
+    -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$kh" -o GlobalKnownHostsFile=/dev/null -o UpdateHostKeys=no \
+    -o "HostKeyAlgorithms=$hostalg" -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
+    -o ForwardAgent=no -o LogLevel=ERROR -T -p "$port" "$user@$host" receive <"$out" >"$sshout" 2>"$errlog" &
+  MIGRATE_CHILD=$!
+  t0=$SECONDS
+  while kill -0 "$MIGRATE_CHILD" 2>/dev/null; do
+    # How far ssh has read the file: fd 0's offset.
+    pos="$(awk '/^pos:/ {print $2}' "/proc/$MIGRATE_CHILD/fdinfo/0" 2>/dev/null)"
+    if [[ "$pos" =~ ^[0-9]+$ ]] && ((size > 0)); then
+      ((pos > size)) && pos="$size"
+      pct=$((60 + 39 * pos / size)); msg="Sending to the new server: $((pos / 1048576)) of $((size / 1048576)) MB"
+    else
+      pos=0 pct=60 msg="Sending to the new server: $((SECONDS - t0)) s, $((size / 1048576)) MB"
+    fi
+    migrate_progress transfer "$msg" "$pct" "$pos"
+    sleep 1
+  done
+  wait "$MIGRATE_CHILD"; rc=$?
+  MIGRATE_CHILD=""
+  ((rc == 0)) || migrate_fail "Couldn't send the file: $(migrate_last_lines "$errlog")"
+  name="$(grep -oE 'incoming-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\.gpg' "$sshout" | head -n 1 || true)"
+  [[ -n "$name" ]] || migrate_fail "The new server didn't confirm that it got the file."
+  MIGRATE_FINISHED=1
+  migrate_status_write send "done" "Sent to the new server" 100 "$size" "$name" "$started" ""
+}
+
+# migrate_worker_restore <incoming file name> <pass file> <started>
+migrate_worker_restore() {
+  local name="$1" pf="$2" started="$3" file="$MIGRATE_BACKUPS/$1" errlog rc detail
+  MIGRATE_JOB=restore MIGRATE_STARTED="$started" MIGRATE_FILE="$name"
+  errlog="$(mktemp "$MIGRATE_STATE/err.XXXXXX")"
+  MIGRATE_ALWAYS=("$pf" "$errlog")   # the incoming file stays after a failure, so a retry works
+  migrate_progress restore "Checking the file" 0 0
+
+  CLAUDE_BACKUP_PROGRESS=1 "$(migrate_backup_bin)" import "$file" --pass-file "$pf" --clone \
+    --manifest-out "$MIGRATE_STATE/manifest.json" </dev/null 2>&1 | migrate_read_progress "$errlog" restore
+  rc="${PIPESTATUS[0]}"
+  if ((rc != 0)); then
+    detail="$(migrate_last_lines "$errlog")"
+    if grep -qiE 'decrypt|passphrase|bad session key' "$errlog" 2>/dev/null; then
+      migrate_fail "The passphrase didn't work (decryption failed). Check it and try again. $detail"
+    fi
+    migrate_fail "The restore failed: $detail"
+  fi
+  rm -f -- "$file"
+  MIGRATE_FINISHED=1
+  MIGRATE_FILE=""
+  migrate_status_write restore "done" "Restored" 100 0 "" "$started" ""
+}
+
+migrate_worker() {
+  local kind="${1:-}"
+  shift || true
+  umask 077
+  MIGRATE_PID=$$
+  trap migrate_worker_exit EXIT
+  trap 'exit 143' TERM INT HUP
+  case "$kind" in
+    send) migrate_worker_send "$@" ;;
+    restore) migrate_worker_restore "$@" ;;
+    *) MIGRATE_FINISHED=1; exit 2 ;;
+  esac
+}
+
+# migrate-send: stdin = host, port, user, host-key type, host-key base64 (the To server as the app pinned it).
+do_migrate_send() {
+  [[ $# -eq 0 ]] || bad_args "migrate-send reads the target on stdin"
+  migrate_need_run
+  local host port user ktype blob kh out pass started hostpat
+  host="$(read_secret_line)"; port="$(read_secret_line)"; user="$(read_secret_line)"
+  ktype="$(read_secret_line)"; blob="$(read_secret_line)"
+  exec 0</dev/null
+  umask 077
+  [[ "$host" =~ $MIGRATE_HOST_RE ]] || api_err invalid_name "That isn't a host name or IP address."
+  [[ "$port" =~ ^[0-9]{1,5}$ ]] && ((10#$port >= 1 && 10#$port <= 65535)) || api_err invalid_name "The port must be 1-65535."
+  port=$((10#$port))
+  [[ "$user" =~ $MIGRATE_USER_RE ]] || api_err invalid_name "That isn't a valid user name."
+  [[ "$ktype" =~ $MIGRATE_HOSTKEY_TYPE_RE ]] || api_err invalid_name "That host key type isn't supported."
+  [[ "$blob" =~ $MIGRATE_BLOB_RE ]] || api_err invalid_name "That host key isn't valid base64."
+  migrate_need_backup
+  need ssh
+  migrate_take_job
+  [[ -s "$MIGRATE_CFG/key" ]] || api_err not_ready "The transfer key doesn't exist yet (migrate-keygen)."
+
+  # known_hosts with exactly the one pinned key: no other host is accepted.
+  host="${host,,}"
+  if ((port == 22)); then hostpat="$host"; else hostpat="[$host]:$port"; fi
+  kh="$MIGRATE_CFG/known_hosts"
+  printf '%s %s %s\n' "$hostpat" "$ktype" "$blob" >"$kh" || api_err internal "Couldn't write the pinned host key."
+
+  # Five groups of four, no look-alike characters (I, O, 0, 1).
+  pass="$(LC_ALL=C tr -dc 'A-HJ-NP-Z2-9' </dev/urandom | head -c 20 || true)"
+  ((${#pass} == 20)) || api_err internal "Couldn't generate a passphrase."
+  printf '%s-%s-%s-%s-%s\n' "${pass:0:4}" "${pass:4:4}" "${pass:8:4}" "${pass:12:4}" "${pass:16:4}" >"$MIGRATE_CFG/passphrase.new" &&
+    mv -f "$MIGRATE_CFG/passphrase.new" "$MIGRATE_CFG/passphrase" || api_err internal "Couldn't save the passphrase."
+  unset pass
+
+  started="$(date +%s)"
+  out="$MIGRATE_BACKUPS/migrate-$(date +%Y%m%d-%H%M%S).gpg"
+  migrate_status_write send export "Starting the export" 0 0 "" "$started" "" || api_err internal "Couldn't write the status."
+  # Detach fully: fd 3 is the SSH channel, 8 the job lock.
+  setsid "$SCRIPT_PATH" --migrate-worker send "$host" "$port" "$user" "$ktype" "$kh" "$out" "$started" \
+    </dev/null >/dev/null 2>&1 3>&- 8>&- 9>&- &
+  api_ok '{"started":true}'
+}
+
+# migrate-passphrase: the passphrase migrate-send generated (the app shows it to Jonathan to type on the new server).
+do_migrate_passphrase() {
+  [[ $# -eq 0 ]] || bad_args "migrate-passphrase takes no arguments"
+  migrate_need_run
+  [[ -s "$MIGRATE_CFG/passphrase" ]] || api_err not_ready "The export hasn't started yet."
+  api_ok "$(jq -cn --rawfile p "$MIGRATE_CFG/passphrase" '{passphrase:($p | rtrimstr("\n"))}')"
+}
+
+# migrate-status: where the current job is. A job whose worker died without finishing is reported (and recorded) as failed.
+do_migrate_status() {
+  [[ $# -eq 0 ]] || bad_args "migrate-status takes no arguments"
+  if [[ -s "$MIGRATE_STATUS" ]] && jq -e 'type == "object" and has("phase")' "$MIGRATE_STATUS" >/dev/null 2>&1; then
+    case "$(jq -r '.phase' "$MIGRATE_STATUS")" in
+      export | transfer | restore)
+        if ! migrate_job_alive; then
+          rm -f "$MIGRATE_STATE"/restore-pass.*   # a dead restore leaves its passphrase file behind
+          jq -c '.phase = "failed" | .message = "Failed" | .error = "The job stopped unexpectedly" | .updated = (now | floor) | .pid = null' \
+            "$MIGRATE_STATUS" >"$MIGRATE_STATUS.new" && mv -f "$MIGRATE_STATUS.new" "$MIGRATE_STATUS"
+        fi
+        ;;
+    esac
+    api_ok "$(jq -c 'del(.pid)' "$MIGRATE_STATUS")"
+  fi
+  api_ok '{"job":"none","phase":"none","message":"","pct":0,"bytes":0}'
+}
+
+# migrate-restore <incoming file>: stdin = the passphrase. Runs claude-backup import --clone in the background.
+do_migrate_restore() {
+  [[ $# -eq 1 && "$1" =~ $MIGRATE_INCOMING_RE ]] || bad_args "usage: migrate-restore <incoming-….gpg> (passphrase on stdin)"
+  local name="$1" pass pf started
+  pass="$(read_secret_line)"
+  exec 0</dev/null
+  umask 077
+  [[ "$pass" =~ ^[[:print:]]{8,200}$ ]] || api_err invalid_name "That passphrase doesn't look right."
+  migrate_need_backup
+  [[ -f "$MIGRATE_BACKUPS/$name" && ! -L "$MIGRATE_BACKUPS/$name" ]] || api_err invalid_name "There is no $name in ~/backups."
+  migrate_take_job
+  pf="$(mktemp "$MIGRATE_STATE/restore-pass.XXXXXX")" || api_err internal "Couldn't save the passphrase."
+  printf '%s\n' "$pass" >"$pf"
+  unset pass
+  started="$(date +%s)"
+  migrate_status_write restore restore "Starting the restore" 0 0 "$name" "$started" "" || { rm -f "$pf"; api_err internal "Couldn't write the status."; }
+  setsid "$SCRIPT_PATH" --migrate-worker restore "$name" "$pf" "$started" </dev/null >/dev/null 2>&1 3>&- 8>&- 9>&- &
+  api_ok '{"started":true}'
+}
+
+# ======================================================================
+# Migrate, second half: sudo check, new user, verify, sign out, reboot (docs/migrate-design.md).
+# The sudo password is read from stdin and reaches sudo only through the askpass helper (a mode-600 file in a
+# private temp dir): never in argv, the environment or a log. Tests put stub sudo/adduser/systemctl/... on PATH.
+# ======================================================================
+MIGRATE_NAME_RE='^[a-z][a-z0-9_-]{0,30}$'
+MIGRATE_RESERVED_RE='^(admin|root|daemon|bin|sys|sync|games|man|lp|mail|news|uucp|proxy|www-data|backup|list|irc|gnats|nobody|sshd|syslog|messagebus|operator|shutdown|halt|ftp|adm|sudo|wheel|docker|users|staff|postgres|mysql|redis|nginx|apache|tcpdump|polkitd|chrony|dnsmasq|avahi|tss|uuidd|lxd|landscape|pollinate|usbmux|systemd-.*)$'
+MIGRATE_HOME_RE='^/[A-Za-z0-9._/-]+$'
+MIGRATE_NOSUDO_RE='may not run sudo|not allowed to run sudo|not in the sudoers'
+MIGRATE_SUDO=""    # root | nopasswd | password_ok | password_needed | none (set by migrate_sudo_mode)
+MIGRATE_TMO=120    # seconds msudo / as_user allow one command
+MIG_LOG=""         # where migrate_step keeps a step's output
+MIG_STDIN=""       # a file migrate_step feeds the command on stdin
+
+# migrate_sudo_mode <dir> <password>: sets MIGRATE_SUDO. A given password is tested through the askpass helper (one try).
+migrate_sudo_mode() {
+  local dir="$1" pw="$2" out
+  if [[ "$(id -u)" == 0 ]]; then MIGRATE_SUDO=root; return 0; fi
+  command -v sudo >/dev/null 2>&1 || { MIGRATE_SUDO=none; return 0; }
+  if t 15 sudo -n true </dev/null >/dev/null 2>&1; then MIGRATE_SUDO=nopasswd; return 0; fi
+  out="$(t 15 sudo -n -l </dev/null 2>&1)"
+  if [[ "$out" =~ $MIGRATE_NOSUDO_RE ]]; then MIGRATE_SUDO=none; return 0; fi
+  MIGRATE_SUDO=password_needed
+  [[ -n "$pw" ]] || return 0
+  sudo_askpass "$dir" "$pw" once   # (puts a `sudo -A` wrapper first on PATH)
+  if out="$(t 30 sudo -k true </dev/null 2>&1)"; then MIGRATE_SUDO=password_ok
+  elif [[ "$out" =~ $MIGRATE_NOSUDO_RE ]]; then MIGRATE_SUDO=none; fi
+  return 0
+}
+
+# Stops the action unless sudo works (root, no password, or the password that was given); sets up the askpass for later calls.
+migrate_need_sudo() {   # migrate_need_sudo <dir> <password>
+  migrate_sudo_mode "$1" "$2"
+  case "$MIGRATE_SUDO" in
+    root | nopasswd) ;;
+    password_ok) sudo_askpass "$1" "$2" ;;
+    password_needed) api_err sudo_password "The sudo password is missing or wrong." ;;
+    *) api_err sudo_none "This user can't use sudo on this server." ;;
+  esac
+}
+
+# A command as root: bare for root, `sudo -n` when no password is needed, else sudo through the askpass wrapper.
+msudo() {
+  case "$MIGRATE_SUDO" in
+    root) t "$MIGRATE_TMO" "$@" ;;
+    nopasswd) t "$MIGRATE_TMO" sudo -n "$@" ;;
+    *) t "$MIGRATE_TMO" sudo "$@" ;;
+  esac
+}
+
+# as_user <name> <command...>: the command as that user, with their HOME.
+as_user() {
+  local u="$1"
+  shift
+  case "$MIGRATE_SUDO" in
+    root)
+      if command -v sudo >/dev/null 2>&1; then t "$MIGRATE_TMO" sudo -u "$u" -H "$@"
+      else t "$MIGRATE_TMO" runuser -u "$u" -- env "HOME=$(getent passwd "$u" | cut -d: -f6)" "$@"; fi ;;
+    nopasswd) t "$MIGRATE_TMO" sudo -n -u "$u" -H "$@" ;;
+    *) t "$MIGRATE_TMO" sudo -u "$u" -H "$@" ;;
+  esac
+}
+
+# migrate_step <id> <what> <command...>: output to $MIG_LOG; a failure ends the action and names the step.
+migrate_step() {
+  local id="$1" what="$2"
+  shift 2
+  "$@" >"$MIG_LOG" 2>&1 <"${MIG_STDIN:-/dev/null}" ||
+    api_err internal "Couldn't $what: $(migrate_last_lines "$MIG_LOG")" "$(jq -cn --arg s "$id" '{step:$s}')"
+}
+
+# Is claude-autostart's boot service enabled (for user $1)? The unit dir override is for the tests.
+migrate_autostart_enabled() {
+  local unit="${CLAUDERC_UNIT_DIR:-/etc/systemd/system}/claude-sessions.service"
+  command -v systemctl >/dev/null 2>&1 || return 1
+  [[ "$(t 10 systemctl is-enabled claude-sessions.service 2>/dev/null </dev/null)" == enabled ]] || return 1
+  [[ ! -r "$unit" ]] || grep -qx "User=$1" "$unit"
+}
+
+# migrate-sudo-check: how can this SSH user get root? stdin line 1 (optional) = a sudo password to test.
+do_migrate_sudo_check() {
+  [[ $# -eq 0 ]] || bad_args "migrate-sudo-check takes no arguments (an optional password on stdin)"
+  migrate_need_run
+  local pw dir
+  pw="$(read_secret_line)"
+  exec 0</dev/null
+  umask 077
+  dir="$(mktemp -d)"
+  trap 'rc=$?; rm -rf "$dir"; (exit $rc); on_exit' EXIT
+  migrate_sudo_mode "$dir" "$pw"
+  unset pw
+  api_ok "$(jq -cn --arg m "$MIGRATE_SUDO" '{mode:$m}')"
+}
+
+# migrate-create-user <name>: stdin line 1 = sudo password (empty for root / no-password sudo), line 2 = the phone's public key.
+# Every step can be repeated: a user an earlier try created (its root-owned marker file is there) is reused.
+do_migrate_create_user() {
+  [[ $# -eq 1 ]] || bad_args "usage: migrate-create-user <name> (sudo password, then the phone key, on stdin)"
+  migrate_need_run
+  local name="$1" pw key dir home pwent uid mark out blob line url inst akscript pending=true created=0
+  pw="$(read_secret_line)"; key="$(read_secret_line)"
+  exec 0</dev/null
+  umask 077
+  [[ "$name" =~ $MIGRATE_NAME_RE && ! "$name" =~ $MIGRATE_RESERVED_RE ]] ||
+    api_err invalid_name "That isn't a user name I can create (lower case letters, digits, - and _; not a system name)."
+  [[ "$key" =~ $MIGRATE_PUBKEY_RE && ${#key} -le 300 ]] || api_err invalid_name "That isn't a public key line (ssh-ed25519 AAAA…)."
+  [[ -z "${CLAUDERC_BASE:-}" || "$CLAUDERC_BASE" =~ ^[A-Za-z0-9:/._@%+=~-]{1,300}$ ]] || api_err internal "CLAUDERC_BASE has characters I won't pass on."
+  [[ "$CLAUDERC_RAW" =~ ^[A-Za-z0-9:/._@%+=~-]{1,300}$ && "$CLAUDERC_REPO" =~ ^[A-Za-z0-9._/-]{1,100}$ ]] ||
+    api_err internal "CLAUDERC_RAW or CLAUDERC_REPO has characters I won't pass on."
+  dir="$(mktemp -d)"
+  trap 'rc=$?; rm -rf "$dir"; (exit $rc); on_exit' EXIT
+  MIG_LOG="$dir/log"
+  migrate_need_sudo "$dir" "$pw"
+  unset pw
+
+  mark=".clauderc-migrate-user"
+  pwent="$(getent passwd "$name" 2>/dev/null || true)"
+  if [[ -n "$pwent" ]]; then
+    # Already there: only a user this feature created is reused. Its marker file was written as root (a regular file
+    # owned by root, mode 644), which the user can delete but can't forge.
+    home="$(cut -d: -f6 <<<"$pwent")"; uid="$(cut -d: -f3 <<<"$pwent")"
+    [[ "$uid" =~ ^[0-9]+$ && "$uid" -ge 1000 && "$home" =~ $MIGRATE_HOME_RE ]] || api_err user_exists "A user named $name already exists on this server."
+    [[ "$(msudo stat -c '%U %a %F' -- "$home/$mark" 2>/dev/null)" == "root 644 regular file" ]] ||
+      api_err user_exists "A user named $name already exists on this server (and wasn't created by Migrate)."
+  else
+    ! getent group "$name" >/dev/null 2>&1 || api_err user_exists "A group named $name already exists on this server."
+    if command -v adduser >/dev/null 2>&1; then
+      migrate_step adduser "create the user" msudo adduser --disabled-password --gecos "" "$name"
+    else
+      migrate_step adduser "create the user" msudo useradd -m -s /bin/bash "$name"
+    fi
+    created=1
+    pwent="$(getent passwd "$name" 2>/dev/null || true)"
+    home="$(cut -d: -f6 <<<"$pwent")"
+    [[ "$home" =~ $MIGRATE_HOME_RE ]] || api_err internal "The user was created but I can't find the home folder." '{"step":"adduser"}'
+    # The marker goes in first, as root, so a retry after any later failure finds the user again.
+    migrate_step marker "write the marker file" msudo install -m 644 -o root -g root /dev/null "$home/$mark"
+  fi
+  # Whoever creates this user must not hand out root: a sudo rule (a catch-all group rule, say) deletes the new user again.
+  if command -v sudo >/dev/null 2>&1; then
+    out="$(msudo sudo -l -U "$name" 2>&1 </dev/null || true)"
+    if ! [[ "$out" =~ $MIGRATE_NOSUDO_RE ]]; then
+      if ((created)); then
+        msudo userdel -r "$name" >"$MIG_LOG" 2>&1 || true
+        api_err sudo_rule "The new user $name would have sudo rights on this server (a sudoers rule matches it), so it was deleted again. Pick another name or fix the sudoers rule." '{"step":"sudo_rule"}'
+      fi
+      api_err sudo_rule "The user $name has sudo rights on this server: Migrate won't use it." '{"step":"sudo_rule"}'
+    fi
+  fi
+  if ((created)) && getent group docker >/dev/null 2>&1; then
+    migrate_step docker "add $name to the docker group" msudo usermod -aG docker "$name"
+  fi
+  migrate_step home "find the home folder" msudo test -d "$home"
+
+  # The phone key, locked to the runner exactly like install-launcher-key.sh does it (restrict + the forced command).
+  # (The line goes in on stdin; a line with the same key is replaced.)
+  blob="$(awk '{print $2}' <<<"$key")"
+  line="restrict,command=\"$home/bin/claude-launcher-api\" ssh-ed25519 $blob clauderc"
+  printf '%s\n' "$line" >"$dir/ak"
+  read -r -d '' akscript <<'EOS' || true
+umask 077
+ak="$HOME/.ssh/authorized_keys"
+mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh" || exit 1
+IFS= read -r line || exit 1
+blob="${line##* ssh-ed25519 }"; blob="${blob%% *}"
+tmp="$(mktemp "$HOME/.ssh/authorized_keys.XXXXXX")" || exit 1
+{ awk -v b="$blob" '{ for (i = 1; i <= NF; i++) if ($i == b) next } 1' "$ak" 2>/dev/null; printf '%s\n' "$line"; } >"$tmp" &&
+  chmod 600 "$tmp" && mv -f "$tmp" "$ak" || { rm -f "$tmp"; exit 1; }
+EOS
+  MIG_STDIN="$dir/ak" migrate_step authorize "authorize the phone key" as_user "$name" bash -c "$akscript"
+
+  # Claude Code (the official installer), then the cLaudeRC scripts without a key.
+  if ! as_user "$name" test -x "$home/.local/bin/claude" >/dev/null 2>&1; then
+    MIGRATE_TMO=300 migrate_step claude_install "install Claude Code" as_user "$name" bash -lc 'set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash'
+  fi
+  if [[ -n "${CLAUDERC_BASE:-}" ]]; then url="$CLAUDERC_BASE/install.sh"; else url="$CLAUDERC_RAW/$CLAUDERC_REPO/main/server/install.sh"; fi
+  inst="set -o pipefail; export CLAUDERC_RAW=$(printf %q "$CLAUDERC_RAW");"
+  [[ -z "${CLAUDERC_BASE:-}" ]] || inst+=" export CLAUDERC_BASE=$(printf %q "$CLAUDERC_BASE");"
+  inst+=" curl -fsSL $(printf %q "$url") | bash"
+  # (its own sudo step for autostart can't ask anything: no terminal and stdin closed, so it declines)
+  MIGRATE_TMO=300 migrate_step installer "install the cLaudeRC scripts" as_user "$name" bash -lc "$inst"
+  # claude-autostart needs the user's own sudo and this user has none: it is left for later.
+  ! migrate_autostart_enabled "$name" || pending=false
+  api_ok "$(jq -cn --arg h "$home" --argjson p "$pending" '{created:true, home:$h, autostart_pending:$p}')"
+}
+
+# ---- migrate-verify
+
+# migrate_vitem <id> <ok true|false> <detail>: adds a checklist item to MIGRATE_ITEMS.
+MIGRATE_ITEMS="[]"
+migrate_vitem() {
+  MIGRATE_ITEMS="$(jq -c --arg id "$1" --argjson ok "$2" --arg d "$3" '. + [{id:$id, ok:$ok, detail:$d}]' <<<"$MIGRATE_ITEMS")"
+}
+
+migrate_names() {   # "a, b, c (+2 more)": the first 8 of the arguments
+  local out="" i=0 x
+  for x; do
+    ((i++ < 8)) && out+="${out:+, }$x"
+  done
+  ((i > 8)) && out+=" (+$((i - 8)) more)"
+  printf '%s' "$out"
+}
+
+# The folder a manifest repo has on this server: its path relative to $HOME (where claude-backup restores it), else under the projects folder.
+migrate_repo_path() {
+  local p="$1" d="$2"
+  if [[ "$p" =~ ^[A-Za-z0-9._][A-Za-z0-9._/-]*$ && "/$p/" != *"/../"* && -d "$HOME/$p" ]]; then printf '%s' "$HOME/$p"; return 0; fi
+  if [[ "$d" =~ $PROJECT_RE && "$d" != . && "$d" != .. && -d "$PROJECTS_DIR/$d" ]]; then printf '%s' "$PROJECTS_DIR/$d"; return 0; fi
+  return 1
+}
+
+# migrate-verify [manifest file]: the checklist at the end of the wizard. Read-only, except that it removes the migrate key.
+do_migrate_verify() {
+  [[ $# -le 1 ]] || bad_args "usage: migrate-verify [manifest file name]"
+  local mf="" f m w miss=() rest=() cfg_bad=() out v ak tmp
+  if [[ $# -eq 1 ]]; then
+    [[ "$1" =~ ^[A-Za-z0-9._-]{1,100}$ && "$1" != .* ]] || bad_args "That isn't a manifest file name."
+    mf="$MIGRATE_STATE/$1"
+    [[ -f "$mf" && ! -L "$mf" ]] || api_err invalid_name "There is no manifest named $1."
+    jq -e 'type == "object"' "$mf" >/dev/null 2>&1 || api_err invalid_name "The manifest $1 can't be read."
+  fi
+  MIGRATE_ITEMS="[]"
+
+  # scripts and API
+  for f in "$HOME/claude-setup.sh" "$HOME/bin/claude-launcher-api" "$HOME/.local/bin/claude-backup" "$HOME/.local/bin/clauderc-team" "$HOME/.local/bin/claude-push"; do
+    [[ -x "$f" ]] || miss+=("${f#"$HOME"/}")
+  done
+  if ((${#miss[@]} == 0)); then migrate_vitem scripts_installed true "all in place"
+  else migrate_vitem scripts_installed false "missing: $(migrate_names "${miss[@]}"). Run Update now."; fi
+  if ((SCRIPT_API >= 35)); then migrate_vitem script_api_current true "script API $SCRIPT_API"
+  else migrate_vitem script_api_current false "script API $SCRIPT_API is older than 35: run Update now."; fi
+
+  # folders and their modes
+  if [[ -d "$HOME/.claude" && "$(stat -c %a "$HOME/.claude" 2>/dev/null)" == 700 ]]; then migrate_vitem claude_home true "the .claude folder is there (mode 700)"
+  elif [[ -d "$HOME/.claude" ]]; then migrate_vitem claude_home false "the .claude folder has mode $(stat -c %a "$HOME/.claude" 2>/dev/null), it should be 700"
+  else migrate_vitem claude_home false "the .claude folder is missing"; fi
+  if [[ ! -d "$LAUNCHER_CONFIG_DIR" ]]; then cfg_bad+=("$LAUNCHER_CONFIG_DIR is missing")
+  else
+    [[ "$(stat -c %a "$LAUNCHER_CONFIG_DIR" 2>/dev/null)" == 700 ]] || cfg_bad+=("the launcher folder has mode $(stat -c %a "$LAUNCHER_CONFIG_DIR" 2>/dev/null), it should be 700")
+    [[ ! -e "$SERVICES_ENV" || "$(stat -c %a "$SERVICES_ENV" 2>/dev/null)" == 600 ]] || cfg_bad+=("the env file has mode $(stat -c %a "$SERVICES_ENV" 2>/dev/null), it should be 600")
+  fi
+  if ((${#cfg_bad[@]} == 0)); then migrate_vitem launcher_config true "present, modes are right"
+  else migrate_vitem launcher_config false "$(printf '%s; ' "${cfg_bad[@]}" | sed 's/; $//')"; fi
+
+  # what the manifest says should be here
+  if [[ -n "$mf" ]]; then
+    miss=()
+    while IFS= read -r w; do
+      [[ "$w" =~ $WORKER_RE && -d "$WORKERS_DIR/$w" ]] || miss+=("$w")
+    done < <(jq -r '(.claude_logins.workers // [])[]? | strings' "$mf")
+    if ((${#miss[@]} == 0)); then migrate_vitem workers true "all worker folders are there"
+    else migrate_vitem workers false "missing worker folders: $(migrate_names "${miss[@]}")"; fi
+
+    local present=() broken=() rdir rpath rstate p
+    miss=()
+    while IFS=$'\x1f' read -r rdir rpath rstate; do
+      if p="$(migrate_repo_path "$rpath" "$rdir")"; then
+        present+=("$p")
+        if [[ "$rstate" == clean ]] && ! git -C "$p" rev-parse HEAD >/dev/null 2>&1; then broken+=("${rdir:-$rpath}"); fi
+      else
+        miss+=("${rdir:-$rpath}")
+      fi
+    done < <(jq -r '(.repos // [])[]? | select(type == "object") | [(.dir // ""), (.path // ""), (.state // "")] | join("\u001f")' "$mf")
+    if ((${#miss[@]} == 0 && ${#broken[@]} == 0)); then migrate_vitem repos true "${#present[@]} repo(s) present"
+    else
+      out=""
+      ((${#miss[@]} == 0)) || out="missing: $(migrate_names "${miss[@]}")"
+      ((${#broken[@]} == 0)) || out+="${out:+; }no commits (clone incomplete): $(migrate_names "${broken[@]}")"
+      migrate_vitem repos false "$out"
+    fi
+
+    # remotes: the lookups run at once, 15 s at most, for the first 12 repos
+    local td i=0 bad=()
+    td="$(mktemp -d)"
+    for p in "${present[@]:0:12}"; do
+      f="$(git -C "$p" remote 2>/dev/null | grep -x origin || git -C "$p" remote 2>/dev/null | head -n 1)"
+      [[ -n "$f" ]] || continue
+      printf '%s\n' "$(basename -- "$p")" >"$td/$i.name"
+      ( t 15 git -C "$p" ls-remote --heads "$f" </dev/null >/dev/null 2>&1; echo $? >"$td/$i.rc" ) 3>&- 9>&- &
+      i=$((i + 1))
+    done
+    wait
+    for ((m = 0; m < i; m++)); do
+      [[ "$(cat "$td/$m.rc" 2>/dev/null)" == 0 ]] || bad+=("$(cat "$td/$m.name")")
+    done
+    rm -rf "$td"
+    if ((i == 0)); then migrate_vitem remotes true "not checked"
+    elif ((${#bad[@]} == 0)); then migrate_vitem remotes true "$i remote(s) reachable"
+    else migrate_vitem remotes false "can't reach the remote of: $(migrate_names "${bad[@]}")"; fi
+  fi
+
+  # tools
+  if ! command -v claude >/dev/null 2>&1; then migrate_vitem claude_runs false "claude isn't installed for this user"
+  elif v="$(t 20 claude --version </dev/null 2>&1)"; then migrate_vitem claude_runs true "$(head -n 1 <<<"$v" | cut -c1-80)"
+  else migrate_vitem claude_runs false "claude --version failed"; fi
+  if ! command -v gh >/dev/null 2>&1; then migrate_vitem gh false "gh isn't installed for this user"
+  elif t 20 gh auth status </dev/null >/dev/null 2>&1; then migrate_vitem gh true "signed in to GitHub"
+  else migrate_vitem gh false "gh isn't signed in to GitHub"; fi
+  if migrate_autostart_enabled "$(id -un)"; then migrate_vitem autostart true "sessions come back after a reboot"
+  else migrate_vitem autostart false "claude-autostart isn't set up (no boot service): run 'claude-autostart install' on the server as this user; it asks for sudo"; fi
+
+  # sign-ins the user still has to do (information only)
+  if [[ -n "$mf" ]]; then
+    rest=()
+    [[ "$(jq -r '.claude_logins.main // false' "$mf")" != true ]] || creds_ok "$HOME/.claude/.credentials.json" || rest+=(main)
+    while IFS= read -r w; do
+      [[ "$w" =~ $WORKER_RE ]] || continue
+      creds_ok "$WORKERS_DIR/$w/home/.credentials.json" || rest+=("$w")
+    done < <(jq -r '(.claude_logins.workers // [])[]? | strings' "$mf")
+    if ((${#rest[@]} == 0)); then migrate_vitem pending_logins true "nothing to sign in"
+    else migrate_vitem pending_logins true "still to sign in: $(migrate_names "${rest[@]}")"; fi
+  fi
+
+  # the transfer key must not stay authorized
+  ak="$HOME/.ssh/authorized_keys"
+  if [[ -f "$ak" ]] && awk '$NF == "clauderc-migrate" { f = 1 } END { exit !f }' "$ak"; then
+    tmp="$(mktemp "$HOME/.ssh/authorized_keys.XXXXXX")"
+    if [[ -n "$tmp" ]] && awk '$NF != "clauderc-migrate"' "$ak" >"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$ak"; then migrate_vitem migrate_key_removed true removed
+    else rm -f "$tmp"; migrate_vitem migrate_key_removed false "couldn't remove the transfer key from ~/.ssh/authorized_keys"; fi
+  else
+    migrate_vitem migrate_key_removed true "no transfer key found"
+  fi
+  api_ok "$(jq -c '{items:., ok:(all(.[]; .ok))}' <<<"$MIGRATE_ITEMS")"
+}
+
+# ---- migrate-signout-old <claude|workers|github|autostart...>: local files only; nothing is revoked on Anthropic's or GitHub's side.
+do_migrate_signout_old() {
+  [[ $# -ge 1 && $# -le 4 ]] || bad_args "usage: migrate-signout-old <claude|workers|github|autostart>..."
+  local item seen=" " f n done_=() names=() list="$AUTOSTART_LIST"
+  for item in "$@"; do
+    [[ "$item" =~ ^(claude|workers|github|autostart)$ && "$seen" != *" $item "* ]] || bad_args "Each of claude, workers, github, autostart at most once."
+    seen+="$item "
+  done
+  for item in "$@"; do
+    case "$item" in
+      claude)   # only the local token file (`claude auth logout` would revoke the grant)
+        if [[ -e "$HOME/.claude/.credentials.json" ]]; then
+          rm -f "$HOME/.claude/.credentials.json" || api_err internal "Couldn't delete ~/.claude/.credentials.json."
+          done_+=(claude)
+        fi ;;
+      workers)
+        n=0
+        for f in "$WORKERS_DIR"/*/home/.credentials.json; do
+          [[ -e "$f" ]] || continue
+          rm -f "$f" || api_err internal "Couldn't delete $f."
+          n=$((n + 1))
+        done
+        ((n == 0)) || done_+=(workers) ;;
+      github)
+        if command -v gh >/dev/null 2>&1 && t 20 gh auth status </dev/null >/dev/null 2>&1; then
+          t 30 gh auth logout --hostname github.com </dev/null >/dev/null 2>&1 || api_err internal "gh couldn't sign out of GitHub."
+          done_+=(github)
+        fi ;;
+      autostart)
+        # Stop the sessions (the saved list and any running Claude session), then set the saved list aside so a restore does nothing.
+        while IFS= read -r n; do names+=("$n"); done < <({ awk -F'\t' 'NF {print $1}' "$list" 2>/dev/null; sessions_list_json | jq -r '.[].name'; } | sort -u)
+        for n in "${names[@]}"; do tmux kill-session -t "=$n" 2>/dev/null || true; done
+        n=0
+        if [[ -e "$list" ]]; then
+          mv -f "$list" "$list.migrated" || api_err internal "Couldn't set the saved session list aside."
+          n=1
+        fi
+        if ((n == 1 || ${#names[@]} > 0)); then done_+=(autostart); fi ;;
+    esac
+  done
+  # Whatever was ticked: the transfer key (the private half), the passphrase files and the exported backups go.
+  rm -rf -- "${MIGRATE_CFG:?}" || api_err internal "Couldn't delete the transfer key folder $MIGRATE_CFG."
+  for f in "$MIGRATE_STATE"/restore-pass.* "$MIGRATE_BACKUPS"/migrate-*.gpg; do
+    [[ -e "$f" || -L "$f" ]] || continue
+    rm -f -- "$f" || api_err internal "Couldn't delete $f."
+  done
+  api_ok "$(jq -cn '{done:$ARGS.positional}' --args "${done_[@]}")"
+}
+
+# ---- migrate-reboot: stdin line 1 = sudo password. The answer goes out first; the reboot follows a few seconds later from a detached job.
+do_migrate_reboot() {
+  [[ $# -eq 0 ]] || bad_args "migrate-reboot takes no arguments (the sudo password on stdin)"
+  migrate_need_run
+  migrate_job_active && api_err busy "A migration step is still running: wait for it to finish before rebooting."
+  local pw dir delay="${CLAUDERC_REBOOT_DELAY:-5}"
+  pw="$(read_secret_line)"
+  exec 0</dev/null
+  umask 077
+  [[ "$delay" =~ ^[0-9]{1,3}$ ]] || delay=5
+  dir="$(mktemp -d)"
+  trap 'rc=$?; rm -rf "$dir"; (exit $rc); on_exit' EXIT
+  migrate_need_sudo "$dir" "$pw"
+  unset pw
+  # From here the detached job owns $dir (it holds the password file) and removes it after the reboot call.
+  trap on_exit EXIT
+  setsid bash -c '
+    sleep "$2"
+    case "$3" in root) c=() ;; nopasswd) c=(sudo -n) ;; *) c=(sudo) ;; esac
+    if command -v systemctl >/dev/null 2>&1; then "${c[@]}" systemctl reboot; else "${c[@]}" reboot; fi
+    rm -rf "$1"' _ "$dir" "$delay" "$MIGRATE_SUDO" </dev/null >/dev/null 2>&1 3>&- 8>&- 9>&- &
+  api_ok '{"rebooting":true}'
+}
+
 api_main() {
   # fd 3 = the one JSON object; everything else goes to stderr.
   exec 3>&1 1>&2
@@ -2871,7 +3653,8 @@ api_main() {
   shift || true
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | login-apple | youtube-login-start | \
-      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-login-code | cluster-assign) ;;  # these read stdin
+      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-login-code | cluster-assign | \
+      migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -2935,7 +3718,19 @@ api_main() {
     mcp-auth-cancel)     do_mcp_auth_cancel ;;
     plugins)             do_plugins "$@" ;;
     skills-update)       do_skills_update "$@" ;;
-    disconnect)          do_disconnect "$@" ;;
+    migrate-plan)        do_migrate_plan "$@" ;;
+    migrate-keygen)      do_migrate_keygen "$@" ;;
+    migrate-authorize)   do_migrate_authorize "$@" ;;
+    migrate-send)        do_migrate_send "$@" ;;
+    migrate-passphrase)  do_migrate_passphrase "$@" ;;
+    migrate-status)      do_migrate_status "$@" ;;
+    migrate-restore)     do_migrate_restore "$@" ;;
+    migrate-sudo-check)  do_migrate_sudo_check "$@" ;;
+    migrate-create-user) do_migrate_create_user "$@" ;;
+    migrate-verify)      do_migrate_verify "$@" ;;
+    migrate-signout-old) do_migrate_signout_old "$@" ;;
+    migrate-reboot)      do_migrate_reboot "$@" ;;
+    disconnect)         do_disconnect "$@" ;;
     chat-pin-status)     do_chat_pin_status "$@" ;;
     chat-pin-set)        do_chat_pin_set "$@" ;;
     chat-open)           do_chat_open "$@" ;;
@@ -2960,6 +3755,7 @@ main() {
   case "${1:-}" in
     --api) shift; api_main "$@" ;;
     --clone-worker) shift; clone_worker "$@" ;;
+    --migrate-worker) shift; migrate_worker "$@" ;;
     --mcp-refresh) mcp_refresh_now ;;
     --version) echo "$SCRIPT_API" ;;
     -h | --help) sed -n '2,10p' "$SCRIPT_PATH" | sed 's/^# \{0,1\}//' ;;

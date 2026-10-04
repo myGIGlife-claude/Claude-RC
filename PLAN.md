@@ -1,4 +1,4 @@
-Last updated: 2026-10-04 16:30 UTC
+Last updated: 2026-10-04 19:05 UTC
 
 ## Goal
 cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage Claude Code sessions on your own server from a phone.
@@ -7,6 +7,7 @@ cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage
 SAVE POINT before moving to a bigger VPS (2026-10-04). Everything below is merged to main (#92-#117) and CI is green. Next: migrate the server (see docs/migration.md; the owner's private inventory lives outside the repo), then on the new server run the server tests, Update now from the app, re-sign in the CodeWriter worker, restart sessions. After that: Apple developer account (iOS signing/TestFlight), phone-testing the new screens, and the optional "offload to server programs" ideas (output condensers, lint/gitleaks pre-pass, repo index, self-hosted runner + local builds, emulator screenshot QA).
 
 ## Tasks
+- [ ] In-app MIGRATE wizard (PR #120, SCRIPT_API 35): built and security-audited (design docs/migrate-design.md; actions migrate-*, claude-backup receive/plan; app screens Settings › Connection › Migrate). NEXT: merge, Update now + new APK, real test with a second server (needs ALLOW_RUN=1 on both servers, both servers added in the app, sudo mode root/nopasswd/password).
 - [ ] MIGRATE to the new VPS: on the old server `claude-backup export` (1.7 GB, ~1 min, encrypted, prints a passphrase once), on the new one install cLaudeRC then `claude-backup import --from user@old:FILE --clone`; docs/migration.md has the details and the manual fallback. Stop old sessions before copying logins; copy ~/.claude, ~/.config/claude-launcher, ~/.agents, project folders; run install.sh with the phone's key; add the new server in the app and trust its host key; re-sign in workers; check docker volumes/services. Push or copy unpushed work first (owner's private list).
 - [ ] Try on the phone after Update now + new APK: Plugins tab lights (green current / yellow update / red can't check / hollow off, tab dot, Update on `npx skills` plugins runs `skills-update`), Cluster settings card, Apple developer account dialog, instant alerts (done, working).
 - [ ] Cluster: delegate by role (`delegate(role=...)`), failover, `from_task` writer->auditor pipelines, 3 parallel tasks/chat, 5 h + weekly hand-back at 95%: untested with a second real account. CodeWriter was logged out twice by concurrent starts; starts are now 30 s apart. If it happens again consider long-lived worker tokens (loses usage numbers).

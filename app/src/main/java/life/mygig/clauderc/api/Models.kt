@@ -2,6 +2,8 @@ package life.mygig.clauderc.api
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 
 @Serializable
 data class StatusData(
@@ -367,3 +369,63 @@ data class WorkerRun(
 
 @Serializable
 data class WorkerRunsData(val runs: List<WorkerRun> = emptyList())
+
+// In-app Migrate (docs/migrate-design.md): the server's migrate-* answers.
+
+@Serializable
+data class MigrateSession(val name: String = "", val busy: Boolean = false, val waiting: Boolean = false)
+
+@Serializable
+data class MigrateRepo(
+    val dir: String = "",
+    val state: String = "",
+    val rescued: Boolean = false,
+    @SerialName("skipped_reason") val skippedReason: String = "",
+)
+
+@Serializable
+data class MigrateLogins(val claude: Boolean = false, val workers: List<String> = emptyList())
+
+@Serializable
+data class MigratePlan(
+    val sessions: List<MigrateSession> = emptyList(),
+    val repos: List<MigrateRepo> = emptyList(),
+    val logins: MigrateLogins = MigrateLogins(),
+    val services: List<String> = emptyList(),
+    @SerialName("docker_volumes") val dockerVolumes: List<String> = emptyList(),
+    @SerialName("estimate_mb") val estimateMb: Int = 0,
+    @SerialName("other_dirs") val otherDirs: List<String> = emptyList(),
+)
+
+@Serializable
+data class MigrateStatus(
+    /** send, restore or none. */
+    val job: String = "none",
+    /** export, transfer, restore, done or failed. */
+    val phase: String = "",
+    val message: String = "",
+    val pct: Int = 0,
+    val bytes: Long = 0,
+    /** The incoming file's name (on the receiving server). */
+    val file: String = "",
+    /** Timestamps as the server wrote them (number or text); the app doesn't use them. */
+    val started: JsonElement = JsonNull,
+    val updated: JsonElement = JsonNull,
+    val error: String? = null,
+)
+
+@Serializable
+data class VerifyItem(val id: String = "", val ok: Boolean = false, val detail: String = "")
+
+@Serializable
+data class VerifyResult(val items: List<VerifyItem> = emptyList(), val ok: Boolean = false)
+
+@Serializable
+data class PublicKey(@SerialName("public_key") val publicKey: String = "")
+
+@Serializable
+data class Passphrase(val passphrase: String = "")
+
+/** root, nopasswd, password_ok, password_needed or none. */
+@Serializable
+data class SudoCheck(val mode: String = "none")

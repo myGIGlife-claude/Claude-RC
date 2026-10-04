@@ -26,7 +26,7 @@ see usage across your Claude accounts and get instant alerts. Your server, your 
 ## Contents
 
 - [Quick start](#quick-start)
-- [Features](#features): [Sessions and chat](#sessions-and-chat) · [Instant alerts](#instant-alerts) · [Projects](#projects) · [Several accounts](#several-accounts-as-a-team) · [Connections and keys](#connections-and-keys)
+- [Features](#features): [Sessions and chat](#sessions-and-chat) · [Instant alerts](#instant-alerts) · [Projects](#projects) · [Several accounts](#several-accounts-as-a-team) · [Connections and keys](#connections-and-keys) · [Move to a new server](#move-to-a-new-server)
 - [Screenshots](#screenshots)
 - [How it works](#how-it-works) · [Screen reference](#screen-reference)
 - [Install on the phone](#install-on-the-phone) · [Updates](#updates)
@@ -123,6 +123,25 @@ Details and rules to give your sessions: [cLaudeCluster](#claudecluster).
 
 - Everything your server is signed in to, as tiles with a live status: Claude, GitHub, AWS, GitLab, Docker/GHCR, YouTube, Cloudflare, Vercel, Supabase, Stripe, Firebase and more, plus **MCP servers** found automatically.
 - **Keys**: Android signing keys, an **Apple developer account** (App Store Connect key for iOS builds), and any custom API key. Values are never shown; every Claude session gets them as environment variables.
+
+</td>
+</tr>
+</table>
+
+### Move to a new server
+
+<table>
+<tr>
+<td width="25%"><img src="docs/screens/migrate-choose.png" alt="Migrate: choose the old and the new server"></td>
+<td width="25%"><img src="docs/screens/migrate-progress.png" alt="Migrate: encrypted transfer with progress"></td>
+<td width="25%"><img src="docs/screens/migrate-done.png" alt="Migrate: final check, everything moved"></td>
+<td>
+
+- **Settings › Connection › Migrate** moves everything from one server to another, from the phone: pick the old and the new server (both already in the app) and the user to run Claude as, which is created on the new server if it doesn't exist.
+- Sessions on the old server are checked first: idle ones are stopped, busy ones wait for your decision.
+- Everything is sent encrypted straight between the servers (logins, keys, chat history, scripts, plus a rescue copy of project work that exists nowhere else; clean repos are cloned again). The Claude accounts are **not** copied: you sign in again on the new server, then sign out of the old one.
+- Optional reboot, then a final check that lists exactly what is missing, or says everything is moved.
+- Needs `ALLOW_RUN=1` on both servers (the same switch as *Run a command*, set on the server so a lost phone can't turn it on). Without the app you can do the same from a terminal: [docs/migration.md](docs/migration.md) and `claude-backup`.
 
 </td>
 </tr>

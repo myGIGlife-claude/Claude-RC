@@ -38,5 +38,6 @@ case "$1 $2" in
   "repo delete") [[ -f "$S/gh_no_delete" ]] && { echo "HTTP 403: Must have admin rights to Repository. This API operation needs the \"delete_repo\" scope." >&2; exit 1; }; true ;;
   "repo rename" | "repo edit") true ;;
   "auth setup-git") ;;
+  "auth logout") echo "$*" >>"$S/gh-logout-argv"; rm -f "$S/gh_token" ;;
   *) echo "gh stub: unhandled $*" >&2; exit 1 ;;
 esac

@@ -2,6 +2,7 @@
 # Test stub for Claude Code.
 S="${STUB_STATE:-$HOME/.stub-state}"; mkdir -p "$S"
 case "$1 ${2:-}" in
+  "auth logout") echo "$*" >>"$S/claude-logout-called"; exit 0 ;;   # migrate-signout-old must never get here
   "auth login")
     echo "Select login method:"
     echo " ❯ 1. Claude account with subscription"
@@ -12,7 +13,10 @@ case "$1 ${2:-}" in
     printf 'Paste code here if prompted > '
     read -r code
     if [[ "$code" == good* ]]; then
-      d="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; mkdir -p "$d" && echo '{"claudeAiOauth":{"accessToken":"stub-token"}}' >"$d/.credentials.json"
+      d="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+      # Never write a login outside a test HOME / temp dir (a real CLAUDE_CONFIG_DIR leaking in would be clobbered).
+      [[ "$d" == "$HOME"/* && "$HOME" == /tmp/* || "$d" == /tmp/* || "$d" == "${TMPDIR:-/nonexistent}"/* ]] || { echo "stub claude: refusing to write credentials to $d" >&2; exit 1; }
+      mkdir -p "$d" && echo '{"claudeAiOauth":{"accessToken":"stub-token"}}' >"$d/.credentials.json"
       echo "Login successful."
     else
       echo "OAuth error: invalid code"; exit 1

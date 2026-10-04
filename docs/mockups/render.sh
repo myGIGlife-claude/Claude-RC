@@ -8,7 +8,7 @@ OUT=../screens; TMP=$(mktemp -d "$PWD/.frames.XXXXXX")  # not /tmp: sandboxed Ch
 python3 -m http.server 8765 -d . >/dev/null 2>&1 & SRV=$!
 trap 'kill $SRV; rm -rf "$TMP"' EXIT; sleep 1
 shot(){ "$CH" --no-sandbox --disable-gpu --hide-scrollbars --window-size=412,"$3" --force-device-scale-factor="$4" --screenshot="$1" "http://localhost:8765/app.html?$2" >/dev/null 2>&1; }
-for s in accounts plugins tools chat chat-cluster chat-handback conn-logins conn-mcp conn-keys settings-connection settings-security settings-app sessions projects new session-log add-service apple push ios-sessions ios-chat ios-setup; do shot "$OUT/$s.png" "s=$s" 844 2; done
+for s in accounts plugins tools chat chat-cluster chat-handback conn-logins conn-mcp conn-keys settings-connection settings-security settings-app sessions projects new session-log add-service apple push ios-sessions ios-chat ios-setup migrate-choose migrate-progress migrate-done; do shot "$OUT/$s.png" "s=$s" 844 2; done
 shot "$OUT/accounts-more.png" "s=accounts&scroll=330" 844 2
 [ "${DEMO:-0}" = 1 ] || exit 0  # the animated demo takes a few minutes: DEMO=1 to rebuild it
 # demo: 5 fps, 36 s; each frame is a 56 px caption bar + the 844 px app

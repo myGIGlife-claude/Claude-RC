@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Test stub for claude-backup (the subcommands the Migrate actions use). State in $STUB_STATE:
+#   backup-argv            one line per call: the arguments
+#   backup-expect-pass     the passphrase `import` accepts (anything else = "decryption failed")
+#   backup-fail-export     exists -> `export` writes half a file and fails
+#   backup-fail-import     exists -> `import` fails with that file's text (after the passphrase check)
+#   backup-sleep           seconds `export`/`import` wait between progress lines
+set -u
+cmd="${1:-}"; shift || true
+echo "$cmd $*" >>"$STUB_STATE/backup-argv"
+nap() { sleep "$(cat "$STUB_STATE/backup-sleep" 2>/dev/null || echo 0)"; }
+
+pass_file="" out="" manifest=""
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case "${args[$i]}" in
+    --pass-file) pass_file="${args[$((i + 1))]:-}" ;;
+    --out) out="${args[$((i + 1))]:-}" ;;
+    --manifest-out) manifest="${args[$((i + 1))]:-}" ;;
+  esac
+done
+progress() { [[ "${CLAUDE_BACKUP_PROGRESS:-}" == 1 ]] && printf 'PROGRESS %s %s\n' "$1" "$2" >&2; }
+
+case "$cmd" in
+  plan)
+    cat <<'EOF'
+{"repos":[{"dir":"/home/x/projects/app","state":"dirty","rescued":true,"skipped_reason":null}],
+ "logins":{"claude":true,"workers":["ops"]},"docker_volumes":["db"],"estimate_mb":12,"other_dirs":["/home/x/data"],
+ "extra":"dropped"}
+EOF
+    ;;
+  export)
+    [[ -f "$pass_file" && "$(stat -c %a "$pass_file")" == 600 ]] || { echo "stub: pass file missing or not 600" >&2; exit 2; }
+    cp "$pass_file" "$STUB_STATE/backup-export-pass"
+    [[ " $* " == *" --no-claude-login "* && -n "$out" ]] || { echo "stub: bad export arguments" >&2; exit 2; }
+    progress pack 0; nap; progress pack 50; nap
+    if [[ -e "$STUB_STATE/backup-fail-export" ]]; then
+      echo "half" >"$out"
+      printf '\033[31mgpg: out of disk space\033[0m\n' >&2
+      exit 1
+    fi
+    head -c 3000000 /dev/zero >"$out"
+    progress pack 100
+    ;;
+  import)
+    file="${1:-}"
+    [[ -f "$file" && -f "$pass_file" && "$(stat -c %a "$pass_file")" == 600 ]] || { echo "stub: bad import arguments" >&2; exit 2; }
+    [[ " $* " == *" --clone "* && -n "$manifest" ]] || { echo "stub: bad import arguments" >&2; exit 2; }
+    progress verify 0; nap
+    if [[ -f "$STUB_STATE/backup-expect-pass" && "$(head -n 1 "$pass_file")" != "$(cat "$STUB_STATE/backup-expect-pass")" ]]; then
+      printf '\033[31mgpg: decryption failed: Bad session key\033[0m\n' >&2
+      exit 2
+    fi
+    progress verify 100; progress extract 50; nap
+    if [[ -e "$STUB_STATE/backup-fail-import" ]]; then cat "$STUB_STATE/backup-fail-import" >&2; exit 1; fi
+    progress extract 100; progress clone 100
+    echo "restored" # human output on stdout, like the real one
+    echo '{"repos":[]}' >"$manifest"
+    ;;
+  receive)
+    # ($STUB_STATE/receive-suffix = "-7" plays the real receive's clash name incoming-<time>-7.gpg)
+    name="incoming-$(date +%Y%m%d-%H%M%S)$(cat "$STUB_STATE/receive-suffix" 2>/dev/null || true).gpg"
+    mkdir -p "$HOME/backups"
+    cat >"$HOME/backups/$name"
+    chmod 600 "$HOME/backups/$name"
+    echo "$name"
+    ;;
+  *) echo "stub: unknown subcommand $cmd" >&2; exit 2 ;;
+esac

@@ -20,7 +20,7 @@ PROJECT_RE='^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$'
 REPO_RE='^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._][A-Za-z0-9._-]*$'
 OWNER_RE='^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'
 WORKER_RE='^[A-Za-z][A-Za-z0-9_-]{0,29}$'
-KNOWN="status owners repos sessions new open clone-status start stop tail login-claude-start login-claude-code login-claude-cancel login-github login-aws-keys login-aws-sso-start login-gitlab login-docker self-update install-cli run claude-cmd restart login-token keys set-secret remove-secret login-keystore remove-keystore login-apple remove-apple youtube-login-start youtube-login-poll mcp mcp-refresh plugins disconnect chat-pin-status chat-pin-set chat-open chat-history chat-send chat-interrupt chat-commands upload chat-log doctor-start mcp-auth-start mcp-auth-finish mcp-auth-cancel repo-edit chat-file cluster worker-list worker-add worker-set worker-remove worker-runs worker-login-start worker-login-code cluster-config cluster-config-set cluster-session cluster-attach cluster-assign push-config push-setup push-register push-session push-test skills-update"
+KNOWN="status owners repos sessions new open clone-status start stop tail login-claude-start login-claude-code login-claude-cancel login-github login-aws-keys login-aws-sso-start login-gitlab login-docker self-update install-cli run claude-cmd restart login-token keys set-secret remove-secret login-keystore remove-keystore login-apple remove-apple youtube-login-start youtube-login-poll mcp mcp-refresh plugins disconnect chat-pin-status chat-pin-set chat-open chat-history chat-send chat-interrupt chat-commands upload chat-log doctor-start mcp-auth-start mcp-auth-finish mcp-auth-cancel repo-edit chat-file cluster worker-list worker-add worker-set worker-remove worker-runs worker-login-start worker-login-code cluster-config cluster-config-set cluster-session cluster-attach cluster-assign push-config push-setup push-register push-session push-test skills-update migrate-plan migrate-keygen migrate-authorize migrate-send migrate-passphrase migrate-status migrate-restore migrate-sudo-check migrate-create-user migrate-verify migrate-signout-old migrate-reboot"
 TOKEN_RE='^[A-Za-z0-9._/=-]{1,200}$'
 
 mkdir -p "$STATE_DIR" 2>/dev/null
@@ -139,6 +139,28 @@ case "$sub" in
     ;;
   clone-status)
     ((nargs == 1)) && [[ "${args[0]}" =~ $REPO_RE ]] || deny "$sub"
+    ;;
+  migrate-plan | migrate-keygen | migrate-authorize | migrate-send | migrate-passphrase | migrate-status)
+    ((nargs == 0)) || deny "$sub"   # (authorize and send read their values on stdin)
+    ;;
+  migrate-restore)
+    ((nargs == 1)) && [[ "${args[0]}" =~ ^incoming-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\.gpg$ ]] || deny "$sub"
+    ;;
+  migrate-sudo-check | migrate-reboot)
+    ((nargs == 0)) || deny "$sub"   # (the sudo password comes on stdin)
+    ;;
+  migrate-create-user)
+    ((nargs == 1)) && [[ "${args[0]}" =~ ^[a-z][a-z0-9_-]{0,30}$ ]] || deny "$sub"
+    ;;
+  migrate-verify)
+    ((nargs == 0)) || { ((nargs == 1)) && [[ "${args[0]}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ ]]; } || deny "$sub"
+    ;;
+  migrate-signout-old)
+    ((nargs >= 1 && nargs <= 4)) || deny "$sub"
+    for k in "${args[@]}"; do
+      [[ " claude workers github autostart " == *" $k "* ]] || deny "$sub"
+    done
+    [[ "$(printf '%s\n' "${args[@]}" | sort | uniq -d)" == "" ]] || deny "$sub"
     ;;
   new)
     [[ "${args[0]:-}" =~ $PROJECT_RE ]] || deny "$sub"

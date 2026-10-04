@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Test stub for reboot: only records the call.
+echo "$(date +%s%N) reboot $*" >>"${STUB_STATE:-$HOME/.stub-state}/systemctl-log"

@@ -13,7 +13,9 @@ SERVER="$(dirname "$HERE")"
 
 WORK="$(mktemp -d)"
 export HOME="$WORK/home" STUB_STATE="$WORK/stub" TMUX_TMPDIR="$WORK/tmux"
-unset XDG_CONFIG_HOME XDG_STATE_HOME XDG_CACHE_HOME TMUX ANTHROPIC_API_KEY GH_TOKEN GITHUB_TOKEN
+# CLAUDE_CONFIG_DIR must go: a worker that runs this suite has it pointing at its REAL login, and the stub `claude auth
+# login` would overwrite the real credentials (that logged CodeWriter out three times).
+unset XDG_CONFIG_HOME XDG_STATE_HOME XDG_CACHE_HOME TMUX ANTHROPIC_API_KEY GH_TOKEN GITHUB_TOKEN CLAUDE_CONFIG_DIR CLAUDE_CODE_OAUTH_TOKEN
 mkdir -p "$HOME/bin" "$HOME/.local/bin" "$STUB_STATE" "$TMUX_TMPDIR"
 # Stubs go where the real tools live, so the scripts' own PATH setup finds them.
 cp "$HERE"/stubs/* "$HOME/.local/bin/"
@@ -49,7 +51,18 @@ for bad in "" "bash" "status; bash" 'status $(id)' "status && id" "rm -rf /" "st
   "login-gitlab glpat-x" "login-docker docker.io" "self-update" "self-update main" \
   "self-update 0123456789abcdef0123456789abcdef0123456" "self-update ../../etc" "install-cli" \
   "install-cli glab extra" "install-cli rm" "login-token" "login-token evil" "login-token vercel x" \
-  "skills-update" "skills-update demo" "skills-update demo/x extra" "skills-update a/b/c" "skills-update demo/x;id" "skills-update demo/x --force"; do
+  "skills-update" "skills-update demo" "skills-update demo/x extra" "skills-update a/b/c" "skills-update demo/x;id" "skills-update demo/x --force" \
+  "migrate-plan x" "migrate-keygen x" "migrate-authorize x" "migrate-authorize --force" "migrate-send x" "migrate-send 1.2.3.4" \
+  "migrate-passphrase x" "migrate-status x" "migrate-status --all" "migrate-restore" "migrate-restore ../../etc/passwd" \
+  "migrate-restore incoming-1.gpg" "migrate-restore incoming-20260101-010101.gpgx" "migrate-restore incoming-20260101-010101.gpg extra" \
+  "migrate-restore incoming-20260101-010101.gpg pass" "migrate-restore -incoming-20260101-010101.gpg" "migrate-restore incoming-20260101-010101.gpg;id" \
+  "migrate-restore /etc/passwd" \
+  "migrate-sudo-check x" "migrate-sudo-check --password" "migrate-reboot x" "migrate-reboot now" "migrate-create-user" "migrate-create-user Bad" \
+  "migrate-create-user 1abc" "migrate-create-user -x" "migrate-create-user a b" "migrate-create-user ab;id" "migrate-create-user ab/cd" \
+  "migrate-create-user ab pw-ok" "migrate-create-user $(printf 'a%.0s' {1..40})" "migrate-verify a b" "migrate-verify ../x" "migrate-verify .hidden" \
+  "migrate-verify a/b" "migrate-verify $(printf 'a%.0s' {1..120})" "migrate-signout-old" "migrate-signout-old bogus" "migrate-signout-old claude claude" \
+  "migrate-signout-old claude workers github autostart claude" "migrate-signout-old claude --all" "migrate-signout-old ../claude" "migrate-signout-old claude;id" \
+  "migrate-signout-old all"; do
   api "$bad"
   check "forbidden: '${bad:0:30}'" "$(jqt '.ok==false and .error.code=="forbidden"')"
 done
@@ -753,6 +766,544 @@ api "status"; check "status installs the push hooks" "$(jq -e '.theme == "dark" 
 api "status"; check "push hooks are added once" "$(jq -e '(.hooks.Notification | length) == 1 and (.hooks.Stop | length) == 1' "$HOME/.claude/settings.json" >/dev/null 2>&1; echo $?)"
 rm -f "$HOME/.config/claude-launcher/push.json" "$HOME/.config/claude-launcher/fcm-key.json"
 OUT="$(python3 "$HERE/test-push.py" 2>&1)"; check "claude-push against a fake Google" $?
+
+echo "migrate"
+# Earlier tests run install.sh against this HOME, which installs the REAL claude-backup over the stub: put the stub back.
+cp "$HERE/stubs/claude-backup" "$HOME/.local/bin/claude-backup"; chmod +x "$HOME/.local/bin/claude-backup"
+MIG="$HOME/.config/claude-launcher/migrate"; MST="$HOME/.local/state/claude-launcher/migrate"; AK="$HOME/.ssh/authorized_keys"
+APILOG="$HOME/.local/state/claude-launcher/api.log"
+KB=AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+mkdir -p "$HOME/.ssh"; [[ -f "$AK" ]] && cp "$AK" "$WORK/authorized_keys.orig"
+# A stub ssh: remembers its arguments and the pinned known_hosts, then plays the new server by running `claude-backup receive`.
+cat >"$HOME/.local/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >"$STUB_STATE/ssh-argv"
+for a in "$@"; do
+  case "$a" in UserKnownHostsFile=*) cp "${a#*=}" "$STUB_STATE/ssh-known-hosts" ;; esac
+done
+[[ -e "$STUB_STATE/ssh-fail" ]] && { echo "Host key verification failed." >&2; exit 255; }
+[[ -e "$STUB_STATE/ssh-sleep" ]] && sleep "$(cat "$STUB_STATE/ssh-sleep")"
+exec claude-backup receive
+EOF
+chmod +x "$HOME/.local/bin/ssh"
+mig_wait() { # mig_wait <jq condition> [tries]: poll migrate-status until it holds
+  local i
+  for ((i = 0; i < ${2:-80}; i++)); do
+    api "migrate-status"
+    [[ "$(jqt "$1")" == 0 ]] && return 0
+    sleep 0.5
+  done
+  return 1
+}
+send_in() { printf '%s\n%s\n%s\n%s\n%s' "$1" "$2" "$3" "$4" "$5"; }
+
+# Task 6: the actions that sudo, push this server's secrets or show the passphrase need ALLOW_RUN=1, like `run`.
+grep -q '^ALLOW_RUN=1$' "$HOME/.config/claude-launcher/config" 2>/dev/null; [[ $? -ne 0 ]]; check "migrate: ALLOW_RUN is off at this point" $?
+api "migrate-send" "$(send_in 192.0.2.10 2222 ops ssh-ed25519 "$KB")"
+check "send: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled" and (.error.message | contains("ALLOW_RUN=1"))')"
+[[ ! -e "$MST/status.json" && ! -e "$MIG/passphrase" ]]; check "...and nothing was started" $?
+api "migrate-passphrase"
+check "passphrase: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled" and (.error.message | contains("ALLOW_RUN=1"))')"
+api "migrate-sudo-check"
+check "sudo-check: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled" and (.error.message | contains("ALLOW_RUN=1"))')"
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
+
+api "status"; check "migrate: script_api is 34 or more" "$(jqt '.data.script_api >= 34')"
+api "migrate-status"
+check "migrate-status: nothing yet" "$(jqt '.ok and .data == {job:"none",phase:"none",message:"",pct:0,bytes:0}')"
+api "migrate-passphrase"
+check "migrate-passphrase: not_ready before a send" "$(jqt '.ok==false and .error.code=="not_ready"')"
+CLAUDERC_BACKUP_BIN=/nonexistent api "migrate-plan"
+check "migrate-plan without claude-backup: not_configured" "$(jqt '.ok==false and .error.code=="not_configured" and .error.message=="claude-backup is missing: run Update now"')"
+tmux new-session -d -s migsess -c "$HOME" "claude --remote-control migsess; exec bash"
+api "migrate-plan"
+tmux kill-session -t "=migsess" 2>/dev/null
+check "migrate-plan: merged shape" "$(jqt '.ok and (.data | keys) == ["docker_volumes","estimate_mb","logins","other_dirs","repos","services","sessions"] and .data.estimate_mb==12 and .data.logins == {claude:true,workers:["ops"]} and .data.docker_volumes==["db"] and .data.other_dirs==["/home/x/data"] and .data.repos[0].dir=="/home/x/projects/app"')"
+check "migrate-plan: sessions are name/busy/waiting, services are ids" "$(jqt '(.data.sessions | length > 0 and all(keys == ["busy","name","waiting"])) and (.data.services | all(type=="string"))')"
+[[ "$(tail -n 1 "$STUB_STATE/backup-argv")" == "plan --json" ]]; check "migrate-plan runs 'plan --json'" $?
+
+echo "migrate keygen / authorize"
+api "migrate-keygen"
+check "keygen returns an ed25519 key" "$(jqt '.ok and (.data.public_key | test("^ssh-ed25519 [A-Za-z0-9+/]+=* clauderc-migrate$"))')"
+PUB1="$(jq -r .data.public_key <<<"$OUT")"
+[[ "$(stat -c %a "$MIG/key")" == 600 && "$(stat -c %a "$MIG")" == 700 ]]; check "keygen: key 600, folder 700" $?
+api "migrate-keygen"
+[[ "$(jq -r .data.public_key <<<"$OUT")" == "$PUB1" ]]; check "keygen is idempotent" $?
+printf '%s\n' 'ssh-ed25519 AAAAOTHERKEY phone' 'restrict,command="x" ssh-rsa AAAAB3OTHER other-key' >"$AK"
+api "migrate-authorize" "$(printf '%s\n%s' "$PUB1" 203.0.113.5)"
+check "authorize ok" "$(jqt '.ok and .data.authorized')"
+BLOB1="$(awk '{print $2}' <<<"$PUB1")"
+[[ "$(grep -c ' clauderc-migrate$' "$AK")" == 1 && "$(wc -l <"$AK")" == 3 ]]; check "authorize writes exactly one line" $?
+[[ "$(tail -n 1 "$AK")" == "restrict,command=\"$HOME/.local/bin/claude-backup receive\",from=\"203.0.113.5\" ssh-ed25519 $BLOB1 clauderc-migrate" ]]; check "the line is restricted to claude-backup receive from that address" $?
+[[ "$(head -n 2 "$AK")" == $'ssh-ed25519 AAAAOTHERKEY phone\nrestrict,command="x" ssh-rsa AAAAB3OTHER other-key' && "$(stat -c %a "$AK")" == 600 ]]; check "authorize leaves other lines alone, file 600" $?
+ssh-keygen -q -t ed25519 -N '' -C 'someone@host' -f "$WORK/k2" </dev/null
+PUB2="$(cat "$WORK/k2.pub")"; BLOB2="$(awk '{print $2}' <<<"$PUB2")"
+api "migrate-authorize" "$PUB2"
+check "authorize again ok" "$(jqt '.ok and .data.authorized')"
+[[ "$(grep -c ' clauderc-migrate$' "$AK")" == 1 && "$(wc -l <"$AK")" == 3 && "$(tail -n 1 "$AK")" == "restrict,command=\"$HOME/.local/bin/claude-backup receive\" ssh-ed25519 $BLOB2 clauderc-migrate" ]]; check "an older clauderc-migrate line is replaced (no address: no from=)" $?
+grep -q "$BLOB1" "$AK"; [[ $? -ne 0 ]]; check "the old key is gone" $?
+SUM="$(cksum <"$AK")"
+for bad in "ssh-rsa AAAAB3NzaC1yc2E x" "ssh-ed25519 AAAA;id" 'ssh-ed25519 AAAA"x' "ssh-ed25519 AAAA two words" "ssh-ed25519" "" "ssh-ed25519 AAAA x
+ssh-ed25519 BBBB"; do
+  api "migrate-authorize" "$bad"
+  check "authorize refuses key '${bad:0:24}'" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+for bad in 'a"b' "evil.com,command=x" "a b" "*" "-x" "a;b"; do
+  api "migrate-authorize" "$(printf '%s\n%s' "$PUB2" "$bad")"
+  check "authorize refuses address '$bad'" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+[[ "$(cksum <"$AK")" == "$SUM" ]]; check "refused authorizations changed nothing" $?
+CLAUDERC_BACKUP_BIN=/nonexistent api "migrate-authorize" "$PUB2"
+check "authorize with the stub present uses the fixed path (env override can't change it)" "$(jqt '.ok')"
+# Task 6: from= only for a literal IP address
+api "migrate-authorize" "$(printf '%s\n%s' "$PUB2" Backup.Example.com)"
+[[ "$(jqt '.ok')" == 0 && "$(tail -n 1 "$AK")" == "restrict,command=\"$HOME/.local/bin/claude-backup receive\" ssh-ed25519 $BLOB2 clauderc-migrate" ]]; check "authorize: a host name gets no from= (sshd would never match it)" $?
+api "migrate-authorize" "$(printf '%s\n%s' "$PUB2" 198.51.100.7)"
+[[ "$(tail -n 1 "$AK")" == "restrict,command=\"$HOME/.local/bin/claude-backup receive\",from=\"198.51.100.7\" ssh-ed25519 $BLOB2 clauderc-migrate" ]]; check "authorize: an IPv4 address gets from=" $?
+api "migrate-authorize" "$(printf '%s\n%s' "$PUB2" 2001:DB8::5)"
+[[ "$(tail -n 1 "$AK")" == "restrict,command=\"$HOME/.local/bin/claude-backup receive\",from=\"2001:db8::5\" ssh-ed25519 $BLOB2 clauderc-migrate" ]]; check "authorize: an IPv6 address gets from= (lower case)" $?
+for notip in 999.1.1.1 1.2.3 01.2.3.4 1.2.3.4.5 12:34 a.b.c.d 1-2-3-4; do
+  api "migrate-authorize" "$(printf '%s\n%s' "$PUB2" "$notip")"
+  [[ "$(jqt '.ok')" == 0 && "$(tail -n 1 "$AK")" != *from=* ]]; check "authorize: '$notip' is not an IP address: no from=" $?
+done
+[[ "$(grep -c ' clauderc-migrate$' "$AK")" == 1 && "$(wc -l <"$AK")" == 3 ]]; check "authorize: still exactly one transfer line" $?
+# Task 6: an unreadable authorized_keys is never wiped
+if [[ "$(id -u)" != 0 ]]; then
+  SUM="$(cksum <"$AK")"; chmod 000 "$AK"
+  api "migrate-authorize" "$PUB2"
+  chmod 600 "$AK"
+  [[ "$(jqt '.ok==false and .error.code=="internal"')" == 0 && "$(cksum <"$AK")" == "$SUM" ]]; check "authorize: an unreadable authorized_keys makes it fail and stays untouched" $?
+  [[ -z "$(ls "$HOME"/.ssh/authorized_keys.* 2>/dev/null)" ]]; check "...and no temp file is left" $?
+fi
+
+echo "migrate send"
+for bad in "bad host|2222|ops|ssh-ed25519|$KB" "h.example.com|0|ops|ssh-ed25519|$KB" "h.example.com|99999|ops|ssh-ed25519|$KB" \
+  "h.example.com|22x|ops|ssh-ed25519|$KB" "h.example.com|2222|-oProxyCommand=x|ssh-ed25519|$KB" "h.example.com|2222|ops|ssh-dss|$KB" \
+  "h.example.com|2222|ops|ssh-ed25519|not base64!" "h.example.com|2222|ops|ssh-ed25519|AAAA" "-oProxyCommand=x|2222|ops|ssh-ed25519|$KB" "|||" "h.example.com|2222|op s|ssh-ed25519|$KB"; do
+  IFS='|' read -r h p u ty bl <<<"$bad"
+  api "migrate-send" "$(send_in "$h" "$p" "$u" "$ty" "$bl")"
+  check "send refuses '${bad:0:34}'" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+[[ ! -e "$MST/status.json" && ! -e "$MIG/passphrase" && ! -e "$MIG/known_hosts" ]]; check "refused sends started nothing" $?
+echo 1 >"$STUB_STATE/backup-sleep"; echo 3 >"$STUB_STATE/ssh-sleep"
+api "migrate-send" "$(send_in 192.0.2.10 2222 ops ssh-ed25519 "$KB")"
+check "send starts" "$(jqt '.ok and .data.started')"
+api "migrate-send" "$(send_in 192.0.2.10 2222 ops ssh-ed25519 "$KB")"
+check "a second send while one runs is busy" "$(jqt '.ok==false and .error.code=="busy"')"
+touch "$HOME/backups/incoming-20260101-010101.gpg"
+api "migrate-restore incoming-20260101-010101.gpg" "AAAA-BBBB-CCCC-DDDD-EEEE"
+check "a restore while a send runs is busy" "$(jqt '.ok==false and .error.code=="busy"')"
+rm -f "$HOME/backups/incoming-20260101-010101.gpg"
+api "migrate-status"
+check "status while running: job send, exactly the contract's fields" "$(jqt '.ok and .data.job=="send" and (.data.phase=="export" or .data.phase=="transfer") and (.data|keys) == ["bytes","error","file","job","message","pct","phase","started","updated"] and .data.error==""')"
+api "migrate-passphrase"
+check "passphrase: five groups of four, no look-alikes" "$(jqt '.ok and (.data.passphrase | test("^[A-HJ-NP-Z2-9]{4}(-[A-HJ-NP-Z2-9]{4}){4}$"))')"
+PASS="$(jq -r .data.passphrase <<<"$OUT")"
+[[ "$(stat -c %a "$MIG/passphrase")" == 600 && "$(stat -c %a "$MST/status.json")" == 600 && "$(stat -c %a "$MST")" == 700 ]]; check "passphrase file 600, status.json 600, state folder 700" $?
+mig_wait '.data.phase=="done"'; check "send reaches done" $?
+check "done: 100%, the name the new server printed, all bytes" "$(jqt '.data.job=="send" and .data.pct==100 and .data.bytes==3000000 and .data.error=="" and (.data.file | test("^incoming-[0-9]{8}-[0-9]{6}\\.gpg$"))')"
+INC="$(jq -r .data.file <<<"$OUT")"
+[[ "$(stat -c %s "$HOME/backups/$INC")" == 3000000 ]]; check "the new server's file arrived whole" $?
+[[ "$(ls "$HOME"/backups/migrate-*.gpg | wc -l)" == 1 ]]; check "the local export is kept after a good send" $?
+[[ "$(cat "$STUB_STATE/backup-export-pass")" == "$PASS" ]]; check "export used the generated passphrase file" $?
+grep -q -- "export --no-claude-login --pass-file $MIG/passphrase --out $HOME/backups/migrate-" "$STUB_STATE/backup-argv"; check "export arguments: --no-claude-login, pass file, out" $?
+[[ "$(cat "$STUB_STATE/ssh-argv")" == *"-i $MIG/key "* && "$(cat "$STUB_STATE/ssh-argv")" == *"-o BatchMode=yes"* && "$(cat "$STUB_STATE/ssh-argv")" == *"-o IdentitiesOnly=yes"* && "$(cat "$STUB_STATE/ssh-argv")" == *"-o StrictHostKeyChecking=yes"* && "$(cat "$STUB_STATE/ssh-argv")" == *"-p 2222 ops@192.0.2.10 receive" ]]; check "ssh arguments: key, batch, pinned host key, port, user@host receive" $?
+[[ "$(cat "$STUB_STATE/ssh-known-hosts")" == "[192.0.2.10]:2222 ssh-ed25519 $KB" ]]; check "known_hosts holds exactly the pinned key ([host]:port form)" $?
+[[ ! -e "$MIG/known_hosts" ]]; check "the temporary known_hosts is removed" $?
+grep -rq "$PASS" "$STUB_STATE/backup-argv" "$STUB_STATE/ssh-argv" "$APILOG"; [[ $? -ne 0 ]]; check "passphrase in no argv and not in the api log" $?
+grep -q "migrate-passphrase" "$APILOG"; check "(the passphrase call itself is logged by name only)" $?
+
+echo "migrate send failures"
+rm -f "$STUB_STATE/backup-sleep" "$STUB_STATE/ssh-sleep" "$STUB_STATE/ssh-argv"
+touch "$STUB_STATE/ssh-fail"
+api "migrate-send" "$(send_in Host.Example.com 22 ops ssh-ed25519 "$KB")"
+check "send (port 22) starts" "$(jqt '.ok and .data.started')"
+mig_wait '.data.phase=="failed"'; check "a refused host key ends in failed" $?
+check "failed: error says why" "$(jqt '.data.job=="send" and (.data.error | contains("Host key verification failed"))')"
+[[ "$(cat "$STUB_STATE/ssh-known-hosts")" == "host.example.com ssh-ed25519 $KB" ]]; check "port 22 known_hosts line has no brackets" $?
+[[ "$(ls "$HOME"/backups/migrate-*.gpg | wc -l)" == 1 && ! -e "$MIG/known_hosts" ]]; check "failed send deleted its local file and known_hosts" $?
+rm -f "$STUB_STATE/ssh-fail" "$STUB_STATE/ssh-argv"; touch "$STUB_STATE/backup-fail-export"
+api "migrate-send" "$(send_in 192.0.2.10 2222 ops ssh-ed25519 "$KB")"
+mig_wait '.data.phase=="failed"'; check "a failing export ends in failed" $?
+check "export failure: error has claude-backup's last line, colours stripped" "$(jqt '.data.error | contains("The export failed") and contains("out of disk space") and (contains("\u001b") | not)')"
+[[ "$(ls "$HOME"/backups/migrate-*.gpg | wc -l)" == 1 && ! -e "$STUB_STATE/ssh-argv" ]]; check "the partial export is deleted and nothing was sent" $?
+rm -f "$STUB_STATE/backup-fail-export"
+
+echo "migrate status"
+jq -cn '{job:"send",phase:"transfer",message:"x",pct:70,bytes:5,file:"",started:1,updated:1,error:"",pid:999999}' >"$MST/status.json"
+echo leftover >"$MST/restore-pass.dead1"
+api "migrate-status"
+check "a dead pid mid-job is reported failed" "$(jqt '.data.phase=="failed" and .data.error=="The job stopped unexpectedly" and .data.pct==70 and (.data|has("pid")|not)')"
+[[ ! -e "$MST/restore-pass.dead1" ]]; check "...and a dead job's pass file in the state folder is removed" $?
+api "migrate-status"
+check "and stays failed" "$(jqt '.data.phase=="failed"')"
+jq -cn --argjson n "$(date +%s)" '{job:"send",phase:"export",message:"x",pct:0,bytes:0,file:"",started:$n,updated:$n,error:"",pid:null}' >"$MST/status.json"
+api "migrate-status"
+check "a job that hasn't written its pid yet counts as starting" "$(jqt '.data.phase=="export"')"
+jq -cn '{job:"send",phase:"export",message:"x",pct:0,bytes:0,file:"",started:1,updated:1,error:"",pid:null}' >"$MST/status.json"
+api "migrate-status"
+check "...for a minute only" "$(jqt '.data.phase=="failed"')"
+jq -cn '{job:"restore",phase:"restore",message:"x",pct:5,bytes:0,file:"",started:1,updated:1,error:"",pid:999999}' >"$MST/status.json"
+
+echo "migrate restore"
+api "migrate-restore" "AAAA-BBBB-CCCC-DDDD-EEEE"
+check "restore needs the file name argument" "$(jqt '.ok==false')"
+api "migrate-restore incoming-20200101-000000.gpg" "AAAA-BBBB-CCCC-DDDD-EEEE"
+check "restore of a file that isn't there" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "migrate-restore $INC" "abc"
+check "restore refuses a short passphrase" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+[[ -f "$HOME/backups/$INC" ]]; check "refusals left the file" $?
+echo "RIGHT-PASS-PHRASE-1" >"$STUB_STATE/backup-expect-pass"
+api "migrate-restore $INC" "WRONG-PASS-PHRASE-9"
+check "restore starts (a stale dead job doesn't block it)" "$(jqt '.ok and .data.started')"
+mig_wait '.data.phase=="failed"'; check "wrong passphrase ends in failed" $?
+check "wrong passphrase: a clear error, colours stripped" "$(jqt '.data.job=="restore" and (.data.error | contains("passphrase didn'"'"'t work") and (contains("\u001b") | not)) and .data.file=="'"$INC"'"')"
+[[ -f "$HOME/backups/$INC" ]]; check "failed restore keeps the incoming file" $?
+[[ -z "$(ls "$MST"/restore-pass.* "$MIG"/restore-pass.* 2>/dev/null)" ]]; check "failed restore removed its pass file" $?
+echo "git clone failed for example/app" >"$STUB_STATE/backup-fail-import"
+api "migrate-restore $INC" "RIGHT-PASS-PHRASE-1"
+mig_wait '.data.phase=="failed"'; check "an import failure ends in failed" $?
+check "import failure: its last lines are the error" "$(jqt '.data.error | contains("The restore failed") and contains("git clone failed for example/app")')"
+[[ -f "$HOME/backups/$INC" && -z "$(ls "$MST"/restore-pass.* "$MIG"/restore-pass.* 2>/dev/null)" ]]; check "...file kept, pass file gone" $?
+rm -f "$STUB_STATE/backup-fail-import"; echo 1 >"$STUB_STATE/backup-sleep"
+api "migrate-restore $INC" "RIGHT-PASS-PHRASE-1"
+check "retry starts" "$(jqt '.ok and .data.started')"
+PFS="$(ls "$MST"/restore-pass.* 2>/dev/null)"
+[[ -n "$PFS" && "$(stat -c %a $PFS)" == 600 && -z "$(ls "$MIG"/restore-pass.* 2>/dev/null)" && "$(stat -c %a "$MST")" == 700 ]]; check "while it runs the pass file is in the state folder (600), not in the config folder" $?
+api "migrate-restore $INC" "RIGHT-PASS-PHRASE-1"
+check "a second restore while one runs is busy" "$(jqt '.ok==false and .error.code=="busy"')"
+api "migrate-send" "$(send_in 192.0.2.10 2222 ops ssh-ed25519 "$KB")"
+check "and so is a send" "$(jqt '.ok==false and .error.code=="busy"')"
+api "migrate-status"
+check "restore status while running" "$(jqt '.data.job=="restore" and .data.phase=="restore" and .data.file=="'"$INC"'" and .data.pct < 100')"
+mig_wait '.data.phase=="done"'; check "restore reaches done" $?
+check "done: 100%" "$(jqt '.data.job=="restore" and .data.pct==100 and .data.error==""')"
+[[ ! -e "$HOME/backups/$INC" && -z "$(ls "$MST"/restore-pass.* "$MIG"/restore-pass.* 2>/dev/null)" ]]; check "success deletes the incoming file and the pass file" $?
+[[ -s "$MST/manifest.json" ]]; check "the manifest was written for migrate-verify" $?
+grep -q -- "import $HOME/backups/$INC --pass-file $MST/restore-pass\.[A-Za-z0-9]* --clone --manifest-out $MST/manifest.json" "$STUB_STATE/backup-argv"; check "import arguments: pass file (in the state folder, not the config folder), --clone, --manifest-out" $?
+grep -rq "RIGHT-PASS-PHRASE-1\|WRONG-PASS-PHRASE-9" "$STUB_STATE/backup-argv" "$APILOG"; [[ $? -ne 0 ]]; check "restore passphrases in no argv and not in the api log" $?
+# Task 6: receive names a clash incoming-<time>-N.gpg; send's status, the runner and restore all accept it
+echo -7 >"$STUB_STATE/receive-suffix"; echo 0 >"$STUB_STATE/backup-sleep"
+api "migrate-send" "$(send_in 192.0.2.10 2222 ops ssh-ed25519 "$KB")"
+mig_wait '.data.phase=="done"'; check "send reaches done when the new server names the file with a -N suffix" $?
+check "...and the status carries that name" "$(jqt '.data.file | test("^incoming-[0-9]{8}-[0-9]{6}-7\\.gpg$")')"
+INC7="$(jq -r .data.file <<<"$OUT")"
+[[ -f "$HOME/backups/$INC7" ]]; check "...the file is there" $?
+api "migrate-restore $INC7" "RIGHT-PASS-PHRASE-1"
+check "restore accepts incoming-<time>-N.gpg (runner and action)" "$(jqt '.ok and .data.started')"
+mig_wait '.data.phase=="done"'; check "...and finishes" $?
+[[ ! -e "$HOME/backups/$INC7" ]]; check "...deleting that file" $?
+api "migrate-restore incoming-20260101-010101-1000.gpg" "RIGHT-PASS-PHRASE-1"
+check "restore refuses a 4-digit suffix" "$(jqt '.ok==false and .error.code=="forbidden"')"
+api "migrate-restore incoming-20260101-010101-.gpg" "RIGHT-PASS-PHRASE-1"
+check "restore refuses an empty suffix" "$(jqt '.ok==false and .error.code=="forbidden"')"
+rm -f "$STUB_STATE/receive-suffix"
+rm -f "$STUB_STATE/backup-sleep" "$STUB_STATE/backup-expect-pass" "$HOME/.local/bin/ssh"
+if [[ -f "$WORK/authorized_keys.orig" ]]; then cp "$WORK/authorized_keys.orig" "$AK"; else rm -f "$AK"; fi
+
+echo "migrate (2): sudo check"
+# Everything here runs against stubs on PATH (sudo, adduser, usermod, getent, id, systemctl, reboot, gh, claude, curl) and the
+# test HOME: nothing may reach the real system. The stub users and their homes live under $STUB_STATE.
+MS="$STUB_STATE"; mkdir -p "$WORK/tmp"; export TMPDIR="$WORK/tmp"
+REALHOME="$(getent passwd "$(id -un)" | cut -d: -f6)"
+# (files a real server doesn't change by itself: the logins and the saved session list do refresh while a test runs)
+realsnap() { local f; for f in .ssh/authorized_keys .config/claude-launcher/migrate .config/gh/hosts.yml; do
+  stat -c '%n %Y %s' "$REALHOME/$f" 2>/dev/null || echo "$f none"; done; }
+REAL_BEFORE="$(realsnap)"
+[[ -f "$AK" ]] && cp "$AK" "$WORK/authorized_keys.orig2"
+echo password >"$MS/sudo-mode"; rm -f "$MS/sudo-argv"
+api "status"; check "migrate (2): script_api is 35 or more" "$(jqt '.data.script_api >= 35')"
+STUB_ID_U=0 api "migrate-sudo-check"
+check "sudo-check: root" "$(jqt '.ok and .data == {mode:"root"}')"
+[[ ! -s "$MS/sudo-argv" ]]; check "sudo-check: root never calls sudo" $?
+echo nopasswd >"$MS/sudo-mode"
+api "migrate-sudo-check"
+check "sudo-check: nopasswd" "$(jqt '.ok and .data == {mode:"nopasswd"}')"
+echo password >"$MS/sudo-mode"
+api "migrate-sudo-check"
+check "sudo-check: password_needed without a password" "$(jqt '.ok and .data == {mode:"password_needed"}')"
+api "migrate-sudo-check" "pw-ok"
+check "sudo-check: password_ok with the right password" "$(jqt '.ok and .data == {mode:"password_ok"}')"
+api "migrate-sudo-check" "pw-wrong"
+check "sudo-check: password_needed with a wrong password" "$(jqt '.ok and .data == {mode:"password_needed"}')"
+[[ "$(grep -c -- '-A -k true' "$MS/sudo-argv")" == 2 ]]; check "sudo-check: one sudo try per password" $?
+echo none >"$MS/sudo-mode"
+api "migrate-sudo-check"
+check "sudo-check: none" "$(jqt '.ok and .data == {mode:"none"}')"
+api "migrate-sudo-check" "pw-ok"
+check "sudo-check: none even with a password" "$(jqt '.ok and .data == {mode:"none"}')"
+grep -rq "pw-ok\|pw-wrong" "$MS/sudo-argv" "$APILOG"; [[ $? -ne 0 ]]; check "sudo-check: the password is in no argv and not in the api log" $?
+[[ -z "$(find "$WORK/tmp" -name pw 2>/dev/null)" ]]; check "sudo-check: no password file is left behind" $?
+echo password >"$MS/sudo-mode"
+
+echo "migrate (2): create user"
+FB="$WORK/fakebase"; mkdir -p "$FB"
+cat >"$FB/install.sh" <<'EOF'
+#!/usr/bin/env bash
+# Stand-in for the cLaudeRC installer (the real one is tested above): records how it was started.
+[[ ! -e "$STUB_STATE/installer-fail" ]] || { echo "installer exploded" >&2; exit 1; }
+echo "HOME=$HOME args=$# base=${CLAUDERC_BASE:-}" >>"$STUB_STATE/installer-log"
+mkdir -p "$HOME/bin" "$HOME/.local/bin"
+EOF
+PUBK="$(cat "$WORK/phone.pub")"; BLOBK="$(awk '{print $2}' "$WORK/phone.pub")"
+cu() { CLAUDERC_BASE="file://$FB" api "migrate-create-user $1" "$(printf '%s\n%s' "$2" "$3")"; }   # cu <name> <password> <key>
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
+cu newguy pw-ok "$PUBK"
+check "create-user: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+[[ ! -e "$MS/adduser-log" ]]; check "...and nothing was created" $?
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
+cu newguy pw-ok "$PUBK"
+check "create-user: ok, home under the stub, autostart left pending" "$(jqt '.ok and .data == {created:true, home:"'"$MS/home/newguy"'", autostart_pending:true}')"
+grep -q -- "^-A adduser --disabled-password --gecos  newguy$" "$MS/sudo-argv"; check "create-user: adduser --disabled-password --gecos \"\" NAME, through the sudo askpass" $?
+[[ "$(cat "$MS/adduser-log")" == "--disabled-password --gecos  newguy" ]]; check "create-user: adduser ran once with those arguments" $?
+[[ ! -e "$MS/usermod-log" ]]; check "create-user: no docker group, no usermod" $?
+NH="$MS/home/newguy"
+[[ "$(cat "$NH/.ssh/authorized_keys")" == "restrict,command=\"$NH/bin/claude-launcher-api\" ssh-ed25519 $BLOBK clauderc" ]]; check "create-user: authorized_keys holds exactly the forced-command line" $?
+[[ "$(stat -c %a "$NH/.ssh")" == 700 && "$(stat -c %a "$NH/.ssh/authorized_keys")" == 600 ]]; check "create-user: .ssh is 700, authorized_keys 600" $?
+grep -q "claude installer: $NH" "$MS/claude-install-log"; check "create-user: Claude Code's installer ran as the new user (HOME = theirs)" $?
+[[ "$(cat "$MS/installer-log")" == "HOME=$NH args=0 base=file://$FB" ]]; check "create-user: the cLaudeRC installer ran as them, with no key, honouring CLAUDERC_BASE" $?
+grep -q -- "-u newguy -H bash -lc" "$MS/sudo-argv"; check "create-user: user steps run as sudo -u NAME -H bash -lc" $?
+[[ -e "$NH/.clauderc-migrate-user" ]]; check "create-user: marker file written" $?
+[[ "$(stat -c '%U %a %F' -- "$NH/.clauderc-migrate-user")" == "root 644 regular file" && "$(grep -c "^-A install -m 644 -o root -g root /dev/null $NH/.clauderc-migrate-user$" "$MS/sudo-argv")" == 1 ]]; check "create-user: the marker is written as root (owner root, mode 644) through the sudo helper" $?
+grep -q -- "^-A sudo -l -U newguy$" "$MS/sudo-argv" || grep -q -- "^-l -U newguy$" "$MS/sudo-argv"; check "create-user: sudo -l -U NAME checked the new user" $?
+[[ ! -e "$MS/userdel-log" ]]; check "create-user: a user without sudo rules is kept (no userdel)" $?
+grep -rq "pw-ok" "$MS/sudo-argv" "$MS/adduser-log" "$MS/installer-log" "$APILOG"; [[ $? -ne 0 ]]; check "create-user: the password is in no argv and not in the api log" $?
+grep -q "$BLOBK" "$MS/sudo-argv"; [[ $? -ne 0 ]]; check "create-user: the key is not on any command line" $?
+[[ -z "$(find "$WORK/tmp" -name pw 2>/dev/null)" ]]; check "create-user: no password file is left behind" $?
+cu newguy pw-ok "$PUBK"
+check "create-user: running it again reuses the user it made" "$(jqt '.ok and .data.created and .data.home=="'"$NH"'"')"
+[[ "$(wc -l <"$MS/adduser-log")" == 1 && "$(wc -l <"$NH/.ssh/authorized_keys")" == 1 ]]; check "...no second adduser, still one authorized_keys line" $?
+# refusals
+cu "ab" pw-ok "$PUBK"; [[ "$(jqt '.ok')" == 0 ]]; check "create-user: a short valid name works" $?
+for bad in Bad 1abc -x "a b" 'a;b' "a/b" "$(printf 'a%.0s' {1..40})"; do
+  api "migrate-create-user $bad" "$(printf 'pw-ok\n%s' "$PUBK")"
+  check "create-user: runner refuses '${bad:0:12}'" "$(jqt '.ok==false and .error.code=="forbidden"')"
+done
+for bad in root daemon www-data nobody systemd-network sshd docker admin sudo wheel adm staff; do
+  OUT="$(CLAUDERC_BASE="file://$FB" "$HOME/bin/claude-setup.sh" --api migrate-create-user "$bad" <<<"$(printf 'pw-ok\n%s' "$PUBK")" 2>/dev/null)"
+  check "create-user: reserved/system name '$bad' refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+mkdir -p "$MS/users" "$MS/home/olduser" && echo 1500 >"$MS/users/olduser" && echo data >"$MS/home/olduser/notes.txt"
+cu olduser pw-ok "$PUBK"
+check "create-user: an existing user with files is refused" "$(jqt '.ok==false and .error.code=="user_exists"')"
+[[ "$(wc -l <"$MS/adduser-log")" == 2 && ! -e "$MS/home/olduser/.ssh" ]]; check "...and left alone" $?
+mkdir -p "$MS/users" "$MS/groups" "$MS/home/lowuid" && echo 500 >"$MS/users/lowuid"
+cu lowuid pw-ok "$PUBK"
+check "create-user: an existing user with a system uid is refused" "$(jqt '.error.code=="user_exists"')"
+touch "$MS/groups/taken"
+cu taken pw-ok "$PUBK"
+check "create-user: a name that is already a group is refused" "$(jqt '.error.code=="user_exists"')"
+mkdir -p "$MS/home/skel" && echo 1502 >"$MS/users/skel" && touch "$MS/home/skel/.bashrc" "$MS/home/skel/.profile"
+cu skel pw-ok "$PUBK"
+# (changed in task 6: this used to continue a user with only skeleton files; now only a user with the root-owned marker is reused)
+check "create-user: an existing user with only skeleton files and no root-owned marker is refused" "$(jqt '.ok==false and .error.code=="user_exists"')"
+[[ ! -e "$MS/home/skel/.ssh" ]]; check "...and left alone (no key authorized)" $?
+mkdir -p "$MS/home/forged" && echo 1503 >"$MS/users/forged" && touch "$MS/home/forged/.bashrc" "$MS/home/forged/.clauderc-migrate-user"
+cu forged pw-ok "$PUBK"
+check "create-user: a marker file the user owns (not root) doesn't count" "$(jqt '.ok==false and .error.code=="user_exists"')"
+rm -f "$MS/home/forged/.clauderc-migrate-user"
+ln -s "$NH/.clauderc-migrate-user" "$MS/home/forged/.clauderc-migrate-user"
+cu forged pw-ok "$PUBK"
+check "create-user: ...nor a symlink to somebody's real marker" "$(jqt '.ok==false and .error.code=="user_exists"')"
+[[ ! -e "$MS/home/forged/.ssh" ]]; check "...nothing was authorized for that user" $?
+# no sudo rights for the new user
+mkdir -p "$MS/sudo-rules"; echo "(ALL) ALL" >"$MS/sudo-rules/ruled"
+cu ruled pw-ok "$PUBK"
+check "create-user: a sudo rule that matches the new user fails with sudo_rule" "$(jqt '.ok==false and .error.code=="sudo_rule" and (.error.message | contains("deleted"))')"
+[[ "$(cat "$MS/userdel-log")" == "-r ruled" && ! -e "$MS/users/ruled" && ! -e "$MS/home/ruled" ]]; check "...and the user it just created is deleted again (userdel -r)" $?
+grep -q -- "^-A userdel -r ruled$" "$MS/sudo-argv"; check "...through the sudo helper" $?
+echo "(ALL) NOPASSWD: ALL" >"$MS/sudo-rules/newguy"
+cu newguy pw-ok "$PUBK"
+check "create-user: a reused user that has a sudo rule is refused" "$(jqt '.ok==false and .error.code=="sudo_rule"')"
+[[ -e "$MS/users/newguy" && "$(wc -l <"$MS/userdel-log")" == 1 ]]; check "...but not deleted (this run didn't create it)" $?
+rm -f "$MS/sudo-rules/newguy" "$MS/userdel-log"
+cu newguy pw-wrong "$PUBK"
+check "create-user: a wrong sudo password is refused" "$(jqt '.ok==false and .error.code=="sudo_password"')"
+cu newguy "" "$PUBK"
+check "create-user: a missing sudo password is refused" "$(jqt '.ok==false and .error.code=="sudo_password"')"
+for badkey in "" "ssh-rsa AAAAB3Nza clauderc" "ssh-ed25519 AAAA bad comment" 'ssh-ed25519 AAAA";command="id"'; do
+  cu fresh1 pw-ok "$badkey"
+  check "create-user: bad key '${badkey:0:20}' refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+[[ ! -e "$MS/users/fresh1" ]]; check "...and no user was created for them" $?
+echo none >"$MS/sudo-mode"
+cu fresh2 pw-ok "$PUBK"
+check "create-user: a user without sudo gets sudo_none" "$(jqt '.ok==false and .error.code=="sudo_none"')"
+echo password >"$MS/sudo-mode"
+touch "$MS/adduser-fail"
+cu fresh3 pw-ok "$PUBK"
+check "create-user: adduser failing names the step" "$(jqt '.ok==false and .error.step=="adduser" and (.error.message | contains("Couldn'"'"'t create the user"))')"
+rm -f "$MS/adduser-fail"
+touch "$MS/installer-fail"
+cu fresh3 pw-ok "$PUBK"
+check "create-user: the installer failing names the step and says why" "$(jqt '.ok==false and .error.step=="installer" and (.error.message | contains("installer exploded"))')"
+[[ -e "$MS/users/fresh3" && -s "$MS/home/fresh3/.ssh/authorized_keys" ]]; check "...the user stays in place with the key authorized" $?
+rm -f "$MS/installer-fail"
+cu fresh3 pw-ok "$PUBK"
+check "create-user: re-running continues after the failure" "$(jqt '.ok and .data.created')"
+[[ "$(wc -l <"$MS/adduser-log")" == 5 ]]; check "...without a second adduser" $?   # (newguy, ab, ruled, fresh3 once failing + once ok)
+# docker group, root, no-password sudo
+touch "$MS/has-docker-group"
+cu dockerguy pw-ok "$PUBK"
+check "create-user: with a docker group the user joins it" "$(jqt '.ok')"
+grep -q -- "-A usermod -aG docker dockerguy" "$MS/sudo-argv"; check "create-user: usermod -aG docker NAME via sudo" $?
+cu dockerguy pw-ok "$PUBK"
+check "create-user: running it again for that user works" "$(jqt '.ok and .data.created')"
+[[ "$(wc -l <"$MS/usermod-log")" == 1 ]]; check "create-user: a reused user is NOT added to docker again (only the run that created them does it)" $?
+rm -f "$MS/has-docker-group" "$MS/sudo-argv"
+echo nopasswd >"$MS/sudo-mode"
+cu nopwguy "" "$PUBK"
+check "create-user: no-password sudo needs no password" "$(jqt '.ok and .data.created')"
+grep -q -- "^-n adduser " "$MS/sudo-argv" && ! grep -q -- "^-A " "$MS/sudo-argv"; check "create-user: ...and uses sudo -n, never -A" $?
+echo password >"$MS/sudo-mode"; rm -f "$MS/sudo-argv"
+STUB_ID_U=0 cu rootmade "" "$PUBK"
+check "create-user: as root no password and no sudo for adduser" "$(jqt '.ok and .data.created')"
+! grep -q " adduser\|^adduser" "$MS/sudo-argv" && grep -q "rootmade" "$MS/adduser-log"; check "create-user: as root adduser runs bare" $?
+# autostart_pending
+UD="$WORK/units"; mkdir -p "$UD"; touch "$MS/systemd-enabled"
+CLAUDERC_UNIT_DIR="$UD" cu auto1 pw-ok "$PUBK"
+check "create-user: boot service enabled (no unit file to compare) -> not pending" "$(jqt '.ok and .data.autostart_pending==false')"
+printf '[Service]\nUser=someone-else\n' >"$UD/claude-sessions.service"
+CLAUDERC_UNIT_DIR="$UD" cu auto2 pw-ok "$PUBK"
+check "create-user: boot service enabled for another user -> pending" "$(jqt '.ok and .data.autostart_pending==true')"
+printf '[Service]\nUser=auto3\n' >"$UD/claude-sessions.service"
+CLAUDERC_UNIT_DIR="$UD" cu auto3 pw-ok "$PUBK"
+check "create-user: boot service enabled for this user -> not pending" "$(jqt '.ok and .data.autostart_pending==false')"
+rm -f "$MS/systemd-enabled" "$UD/claude-sessions.service"
+[[ ! -e /home/newguy && ! -e /home/auto3 && ! -e /home/rootmade ]]; check "create-user: nothing was created under /home" $?
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
+
+echo "migrate (2): verify"
+cp "$SERVER/claude-setup.sh" "$HOME/claude-setup.sh"; cp "$SERVER/clauderc-team" "$HOME/.local/bin/clauderc-team"
+chmod +x "$HOME/claude-setup.sh" "$HOME/.local/bin/clauderc-team"
+mkdir -p "$HOME/.claude" "$MST" "$HOME/.config/claude-launcher/workers/vw/home"
+chmod 700 "$HOME/.claude" "$HOME/.config/claude-launcher"; [[ ! -e "$HOME/.config/claude-launcher/env" ]] || chmod 600 "$HOME/.config/claude-launcher/env"
+echo '{"claudeAiOauth":{"accessToken":"tok"}}' >"$HOME/.claude/.credentials.json"
+echo '{"claudeAiOauth":{"accessToken":"tok"}}' >"$HOME/.config/claude-launcher/workers/vw/home/.credentials.json"
+echo ghp_x >"$MS/gh_token"; touch "$MS/systemd-enabled"
+export CLAUDERC_UNIT_DIR="$UD"
+rm -f "$MS/sudo-argv"
+git init -q --bare "$WORK/vremote.git"
+mkgit() { mkdir -p "$HOME/projects/$1" && git -C "$HOME/projects/$1" init -q && git -C "$HOME/projects/$1" commit -q --allow-empty -m init; }
+mkgit vapp; git -C "$HOME/projects/vapp" remote add origin "$WORK/vremote.git"
+mkgit vdirty
+jq -cn '{repos:[{dir:"vapp",path:"projects/vapp",state:"clean",remote:"x"},{dir:"vdirty",path:"projects/vdirty",state:"dirty"}],claude_logins:{main:true,workers:["vw"]}}' >"$MST/m1.json"
+mkdir -p "$HOME/.ssh"; printf '%s\n%s\n' "ssh-ed25519 AAAAkeep keepme" "restrict,command=\"x\" ssh-ed25519 AAAAmig clauderc-migrate" >"$AK"
+api "migrate-verify m1.json"
+check "verify: everything ok -> ok true, 12 items" "$(jqt '.ok and .data.ok and (.data.items | length) == 12 and all(.data.items[]; .ok and (.detail | length) > 0)')"
+check "verify: item ids in order" "$(jqt '[.data.items[].id] == ["scripts_installed","script_api_current","claude_home","launcher_config","workers","repos","remotes","claude_runs","gh","autostart","pending_logins","migrate_key_removed"]')"
+check "verify: details" "$(jqt '(.data.items | map({(.id): .detail}) | add) | .repos=="2 repo(s) present" and .remotes=="1 remote(s) reachable" and .pending_logins=="nothing to sign in" and .migrate_key_removed=="removed"')"
+[[ "$(cat "$AK")" == "ssh-ed25519 AAAAkeep keepme" && "$(stat -c %a "$AK")" == 600 ]]; check "verify: the migrate key line was removed, the others kept (mode 600)" $?
+api "migrate-verify m1.json"
+check "verify: again, no key to remove, still ok" "$(jqt '.data.ok and ((.data.items[] | select(.id=="migrate_key_removed")) | .ok and .detail=="no transfer key found")')"
+api "migrate-verify"
+check "verify without a manifest: only the manifest-independent items" "$(jqt '.ok and ([.data.items[].id] == ["scripts_installed","script_api_current","claude_home","launcher_config","claude_runs","gh","autostart","migrate_key_removed"]) and .data.ok')"
+# failures
+jq -cn '{repos:[{dir:"vapp",path:"projects/vapp",state:"clean"},{dir:"gone",path:"projects/gone",state:"clean"},{dir:"gone2",state:"dirty"}],claude_logins:{main:true,workers:["vw","ghost"]}}' >"$MST/m2.json"
+api "migrate-verify m2.json"
+check "verify: a missing repo and a missing worker fail with details" "$(jqt '(.data.items | map({(.id): .}) | add) as $i | (.data.ok|not) and ($i.repos.ok|not) and ($i.repos.detail | contains("missing: gone, gone2")) and ($i.workers.ok|not) and ($i.workers.detail | contains("ghost")) and $i.scripts_installed.ok and $i.gh.ok')"
+rm -f "$HOME/.config/claude-launcher/workers/vw/home/.credentials.json" "$HOME/.claude/.credentials.json"
+api "migrate-verify m1.json"
+check "verify: missing logins are information only (pending_logins ok:true, lists them)" "$(jqt '.data.ok and ((.data.items[] | select(.id=="pending_logins")) | .ok and .detail=="still to sign in: main, vw")')"
+echo '{"claudeAiOauth":{}}' >"$HOME/.claude/.credentials.json"
+api "migrate-verify m1.json"
+check "verify: a logged-out credentials file counts as no login" "$(jqt '((.data.items[] | select(.id=="pending_logins")) | .detail=="still to sign in: main, vw")')"
+git -C "$HOME/projects/vapp" remote set-url origin "$WORK/no-such-remote.git"
+mkdir -p "$HOME/projects/vempty" && git -C "$HOME/projects/vempty" init -q
+jq -cn '{repos:[{dir:"vapp",path:"projects/vapp",state:"clean"},{dir:"vempty",path:"projects/vempty",state:"clean"}],claude_logins:{main:false,workers:[]}}' >"$MST/m3.json"
+chmod 755 "$HOME/.claude"; chmod 644 "$HOME/.config/claude-launcher/env" 2>/dev/null || { touch "$HOME/.config/claude-launcher/env"; chmod 644 "$HOME/.config/claude-launcher/env"; }
+rm -f "$MS/gh_token" "$MS/systemd-enabled" "$HOME/.local/bin/claude-push"
+api "migrate-verify m3.json"
+check "verify: unreachable remote, empty clone, bad modes, no gh, no autostart, missing script: each fails with a clear detail" "$(jqt '
+  (.data.items | map({(.id): .}) | add) as $i | (.data.ok|not) and
+  ($i.remotes.ok|not) and ($i.remotes.detail | contains("vapp")) and
+  ($i.repos.ok|not) and ($i.repos.detail | contains("vempty")) and
+  ($i.claude_home.ok|not) and ($i.claude_home.detail | contains("755")) and
+  ($i.launcher_config.ok|not) and ($i.launcher_config.detail | contains("env file has mode 644")) and
+  ($i.gh.ok|not) and ($i.autostart.ok|not) and ($i.autostart.detail | contains("claude-autostart")) and
+  ($i.scripts_installed.ok|not) and ($i.scripts_installed.detail | contains("claude-push"))')"
+chmod 700 "$HOME/.claude"; chmod 600 "$HOME/.config/claude-launcher/env"; cp "$SERVER/claude-push" "$HOME/.local/bin/claude-push"; chmod +x "$HOME/.local/bin/claude-push"
+api "migrate-verify nope.json"
+check "verify: unknown manifest" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+echo '[1]' >"$MST/bad.json"
+api "migrate-verify bad.json"
+check "verify: unreadable manifest" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+[[ ! -e "$MS/claude-logout-called" ]]; check "verify never calls claude auth logout" $?
+unset CLAUDERC_UNIT_DIR
+
+echo "migrate (2): sign out the old server"
+rm -f "$MS/gh-logout-argv"
+fix_signout() {
+  mkdir -p "$HOME/.claude" "$HOME/.config/claude-launcher/workers/vw/home" "$HOME/.config/claude-launcher/workers/vx/home" "$MIG" "$HOME/.config/claude-setup"
+  echo '{"claudeAiOauth":{"accessToken":"tok"}}' | tee "$HOME/.claude/.credentials.json" "$HOME/.config/claude-launcher/workers/vw/home/.credentials.json" "$HOME/.config/claude-launcher/workers/vx/home/.credentials.json" >/dev/null
+  echo ghp_x >"$MS/gh_token"
+  echo key >"$MIG/key"; echo pass >"$MIG/passphrase"; echo pass >"$MST/restore-pass.abc"
+  mkdir -p "$HOME/backups" "$MST"; touch "$HOME/backups/migrate-20260101-000000.gpg" "$HOME/backups/incoming-20260101-000000.gpg"
+  tmux has-session -t "=mig-a" 2>/dev/null || tmux new-session -d -s mig-a -c "$HOME" "claude --remote-control mig-a; exec bash"
+  printf 'mig-a\t%s\n' "$HOME" >"$LIST"
+}
+fix_signout
+api "migrate-signout-old claude"
+check "signout claude: done [claude]" "$(jqt '.ok and .data == {done:["claude"]}')"
+[[ ! -e "$HOME/.claude/.credentials.json" && -e "$HOME/.config/claude-launcher/workers/vw/home/.credentials.json" && -e "$MS/gh_token" ]] && tmux has-session -t "=mig-a" 2>/dev/null; check "signout claude: only ~/.claude/.credentials.json is gone" $?
+# Task 6: whatever is ticked, the transfer key folder, the pass files and the exported backups go (an incoming file is not ours to delete)
+[[ ! -e "$MIG" && ! -e "$MST/restore-pass.abc" && ! -e "$HOME/backups/migrate-20260101-000000.gpg" && -e "$HOME/backups/incoming-20260101-000000.gpg" ]]; check "signout claude: ...and the migrate key folder, passphrase files and ~/backups/migrate-*.gpg are deleted too (incoming-*.gpg stays)" $?
+api "migrate-signout-old claude"
+check "signout claude: nothing left to do -> done []" "$(jqt '.ok and .data == {done:[]}')"
+api "migrate-signout-old workers"
+check "signout workers: done [workers]" "$(jqt '.ok and .data == {done:["workers"]}')"
+[[ ! -e "$HOME/.config/claude-launcher/workers/vw/home/.credentials.json" && ! -e "$HOME/.config/claude-launcher/workers/vx/home/.credentials.json" && -d "$HOME/.config/claude-launcher/workers/vw/home" ]]; check "signout workers: every worker's token file is gone, the folders stay" $?
+api "migrate-signout-old github"
+check "signout github: done [github]" "$(jqt '.ok and .data == {done:["github"]}')"
+[[ "$(cat "$MS/gh-logout-argv")" == "auth logout --hostname github.com" && ! -e "$MS/gh_token" ]]; check "signout github: gh auth logout --hostname github.com (local only)" $?
+api "migrate-signout-old github"
+check "signout github: not signed in -> done []" "$(jqt '.ok and .data == {done:[]}')"
+api "migrate-signout-old autostart"
+check "signout autostart: done [autostart]" "$(jqt '.ok and .data == {done:["autostart"]}')"
+tmux has-session -t "=mig-a" 2>/dev/null; [[ $? -ne 0 ]]; check "signout autostart: the managed tmux session was killed" $?
+[[ ! -e "$LIST" && "$(cat "$LIST.migrated")" == "mig-a	$HOME" ]]; check "signout autostart: the saved list is set aside (.migrated copy kept), so restore does nothing" $?
+[[ ! -e "$MIG" ]]; check "signout autostart: the migrate key and pass files are gone" $?
+OUT="$(claude-autostart restore 2>&1)"; [[ "$OUT" == *"no saved sessions"* ]] && ! tmux has-session -t "=mig-a" 2>/dev/null; check "signout autostart: claude-autostart restore is now a no-op" $?
+fix_signout
+api "migrate-signout-old claude workers github autostart"
+check "signout all four at once" "$(jqt '.ok and .data == {done:["claude","workers","github","autostart"]}')"
+[[ ! -e "$MS/claude-logout-called" ]]; check "signout: claude auth logout is never called" $?
+[[ "$(realsnap)" == "$REAL_BEFORE" ]]; check "signout / verify / create-user touched nothing outside the test HOME" $?
+
+echo "migrate (2): reboot"
+rm -f "$MS/systemctl-log" "$MS/sudo-argv"
+export CLAUDERC_REBOOT_DELAY=2
+api "migrate-reboot" "pw-ok"
+check "reboot: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
+# Task 6: no reboot while a migrate job runs
+jq -cn --argjson n "$(date +%s)" '{job:"send",phase:"transfer",message:"x",pct:60,bytes:5,file:"",started:$n,updated:$n,error:"",pid:null}' >"$MST/status.json"
+api "migrate-reboot" "pw-ok"
+check "reboot: busy while a migrate job is running" "$(jqt '.ok==false and .error.code=="busy"')"
+sleep 3; ! grep -q reboot "$MS/systemctl-log" 2>/dev/null; check "reboot: ...and nothing rebooted" $?
+jq -cn '{job:"send",phase:"done",message:"x",pct:100,bytes:5,file:"",started:1,updated:1,error:"",pid:null}' >"$MST/status.json"
+api "migrate-reboot" "pw-wrong"
+check "reboot: a wrong sudo password is refused" "$(jqt '.ok==false and .error.code=="sudo_password"')"
+sleep 3; [[ ! -e "$MS/systemctl-log" ]] || ! grep -q reboot "$MS/systemctl-log"; check "reboot: ...and nothing rebooted" $?
+api "migrate-reboot" "pw-ok"
+REPLY_T="$(date +%s%N)"
+check "reboot: answers {rebooting:true}" "$(jqt '.ok and .data == {rebooting:true}')"
+! grep -q reboot "$MS/systemctl-log" 2>/dev/null; check "reboot: the reply came before the reboot was recorded" $?
+for _ in $(seq 1 40); do grep -q reboot "$MS/systemctl-log" 2>/dev/null && break; sleep 0.25; done
+grep -q "reboot" "$MS/systemctl-log"; check "reboot: the stub systemctl reboot was called a moment later" $?
+[[ "$(awk '/reboot/ {print $1; exit}' "$MS/systemctl-log")" -gt "$REPLY_T" ]]; check "reboot: its timestamp is after the reply" $?
+grep -q -- "^-A systemctl reboot$" "$MS/sudo-argv"; check "reboot: via sudo with the askpass" $?
+grep -rq "pw-ok\|pw-wrong" "$MS/sudo-argv" "$MS/systemctl-log" "$APILOG"; [[ $? -ne 0 ]]; check "reboot: the password is in no argv and not in the api log" $?
+sleep 1; [[ -z "$(find "$WORK/tmp" -name pw 2>/dev/null)" ]]; check "reboot: the password file is removed after the reboot call" $?
+rm -f "$MS/systemctl-log" "$MS/sudo-argv"
+STUB_ID_U=0 api "migrate-reboot" ""
+check "reboot as root: needs no password" "$(jqt '.ok and .data.rebooting')"
+for _ in $(seq 1 40); do grep -q reboot "$MS/systemctl-log" 2>/dev/null && break; sleep 0.25; done
+grep -q reboot "$MS/systemctl-log" && [[ ! -s "$MS/sudo-argv" ]]; check "reboot as root: systemctl reboot without sudo" $?
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
+unset CLAUDERC_REBOOT_DELAY TMPDIR
+rm -f "$MS/sudo-mode" "$HOME/claude-setup.sh"
+if [[ -f "$WORK/authorized_keys.orig2" ]]; then cp "$WORK/authorized_keys.orig2" "$AK"; else rm -f "$AK"; fi
 
 echo "team MCP server"
 OUT="$(python3 "$HERE/test-team.py" 2>&1)"; check "clauderc-team MCP self-check" $?

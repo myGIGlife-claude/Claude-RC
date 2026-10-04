@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Test stub for adduser: records the call in $STUB_STATE/adduser-log and "creates" the user inside $STUB_STATE only:
+# users/NAME (the uid) and home/NAME with the skeleton files. $STUB_STATE/adduser-fail makes it fail.
+S="${STUB_STATE:-$HOME/.stub-state}"
+echo "$*" >>"$S/adduser-log"
+[[ ! -e "$S/adduser-fail" ]] || { echo "adduser: The system user cannot be created (stub)" >&2; exit 1; }
+name="${*: -1}"
+[[ "$name" =~ ^[a-z][a-z0-9_-]*$ ]] || { echo "adduser stub: bad name" >&2; exit 1; }
+mkdir -p "$S/users" "$S/home/$name"
+echo "$((1001 + $(ls "$S/users" | wc -l)))" >"$S/users/$name"
+touch "$S/home/$name/.bashrc" "$S/home/$name/.profile" "$S/home/$name/.bash_logout"
+echo "Adding user $name ..."
