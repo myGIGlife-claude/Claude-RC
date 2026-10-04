@@ -133,7 +133,7 @@ fun MigrateScreen(vm: MainViewModel) {
                             Text(ui.log.lastOrNull() ?: "Working…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                    ui.error?.let { MigrateError(it, ui.busy) { vm.migrateRetry() } }
+                    ui.error?.let { MigrateError(it, ui.busy, { vm.migrateReset() }) { vm.migrateRetry() } }
                     ui.loginKeyPem?.let { MigrateLoginKey(vm, it, ui.loginKeyFor) }
                     when (ui.step) {
                         MigrateStep.CHOOSE -> MigrateChoose(vm, ui, servers)
@@ -166,10 +166,13 @@ private fun MigrateWarning(body: @Composable ColumnScope.() -> Unit) =
     MigrateNotice(MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer, body)
 
 @Composable
-private fun MigrateError(text: String, busy: Boolean, onRetry: () -> Unit) {
+private fun MigrateError(text: String, busy: Boolean, onStartOver: (() -> Unit)? = null, onRetry: () -> Unit) {
     MigrateNotice(MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer) {
         SelectionContainer { Text(text, style = MaterialTheme.typography.bodyMedium) }
-        Button(onClick = onRetry, enabled = !busy) { Text("Try again") }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(onClick = onRetry, enabled = !busy) { Text("Try again") }
+            if (onStartOver != null) OutlinedButton(onClick = onStartOver, enabled = !busy) { Text("Start over") }
+        }
     }
 }
 
@@ -210,7 +213,11 @@ private fun MigrateChoose(vm: MainViewModel, ui: MigrateUi, servers: List<Server
     val to = ui.to
     val same = from != null && to != null && from.id == to.id
     Text("Move everything from one server to another: sessions, projects, settings and logins.", style = MaterialTheme.typography.bodyMedium)
-    if (servers.size < 2) MigrateHint("Add the second server first (Settings › Connection › + Add server).")
+    if (servers.size < 2) MigrateHint("The new server isn't in the app yet: add it first (host, user, trust its key), then come back here.")
+    OutlinedButton(
+        onClick = { vm.migrateClose(); vm.addServer() },
+        enabled = !ui.busy, modifier = Modifier.fillMaxWidth(),
+    ) { Text("Add the new server") }
     MigrateServerPicker("Move from", from, servers, !ui.busy) { vm.migrateSetServers(it.id, to?.id.orEmpty()) }
     MigrateServerPicker("Move to", to, servers, !ui.busy) { vm.migrateSetServers(from?.id.orEmpty(), it.id) }
     if (same) Text("Pick two different servers.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -709,6 +716,6 @@ private fun MigrateVerify(vm: MainViewModel, ui: MigrateUi) {
     }
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         OutlinedButton(onClick = { vm.migrateClose() }, modifier = Modifier.weight(1f)) { Text("Close") }
-        if (done) OutlinedButton(onClick = { vm.migrateReset() }, modifier = Modifier.weight(1f)) { Text("Start over") }
+        OutlinedButton(onClick = { vm.migrateReset() }, modifier = Modifier.weight(1f)) { Text("Start over") }
     }
 }
