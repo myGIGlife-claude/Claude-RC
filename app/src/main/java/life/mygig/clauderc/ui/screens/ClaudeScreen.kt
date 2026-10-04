@@ -99,7 +99,7 @@ fun ClaudeScreen(vm: MainViewModel) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             fullItem { Text("Claude Code ${p?.claudeVersion ?: ""}".trim(), style = MaterialTheme.typography.titleMedium) }
-            fullItem { PillTabs(listOf("Accounts", "Plugins", "Tools"), tab, { tab = it }) }
+            fullItem { PillTabs(listOf("Accounts", "Plugins", "Tools"), tab, { tab = it }, badges = if (p?.installed?.any { it.update == "available" } == true) setOf(1) else emptySet()) }
             when (tab) {
                 0 -> fullItem { ClusterSection(vm) }
                 1 -> {
@@ -110,10 +110,17 @@ fun ClaudeScreen(vm: MainViewModel) {
                         }
                     }
                     if (p == null) fullItem { Text(if (loading) "Loading plugins…" else "Pull down to load plugins.") }
-                    p?.installed?.sortedBy { it.name.lowercase() }?.forEach { pl ->
-                        item { InfoTile(pl.name, if (pl.enabled) "on · ${pl.marketplace}" else "disabled", if (pl.enabled) Health.OK else Health.OFF, { open = pl }) }
+                    p?.installed?.sortedBy { it.name.lowercase() }?.sortedBy { it.update != "available" }?.forEach { pl ->
+                        val (health, sub) = when {
+                            !pl.enabled -> Health.OFF to if (pl.update == "available") "disabled · update available" else "disabled"
+                            pl.update == "available" -> Health.WARN to "update available · ${pl.marketplace}"
+                            pl.update == "error" -> Health.BAD to "can't check for updates · ${pl.marketplace}"
+                            else -> Health.OK to "on · ${pl.marketplace}"
+                        }
+                        item { InfoTile(pl.name, sub, health, { open = pl }) }
                     }
                     fullItem { Text("Tap a plugin to enable, disable, update or remove it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    if (p?.installed?.isNotEmpty() == true) fullItem { Text("Green: on and current · Yellow: update available · Red: can't check · Hollow: off", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
                 else -> {
                     fullItem {
@@ -231,6 +238,12 @@ private fun PluginSheet(vm: MainViewModel, pl: InstalledPlugin, p: PluginsData?,
     ModalBottomSheet(onDismissRequest = onClose, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(pl.name, style = MaterialTheme.typography.headlineSmall)
+            when (pl.update) {
+                "current" -> "Up to date"
+                "available" -> "Update available" + if (pl.latest.isNotBlank()) " (latest: ${pl.latest})" else ""
+                "error" -> "Couldn't check for updates (marketplace unreachable)"
+                else -> null
+            }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             desc?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
             CardBox {
                 life.mygig.clauderc.ui.components.InfoRows(listOf(
@@ -240,11 +253,17 @@ private fun PluginSheet(vm: MainViewModel, pl: InstalledPlugin, p: PluginsData?,
                     "Scope" to pl.scope,
                 ))
             }
+            val toggleLabel = if (pl.enabled) "Disable" else "Enable"
+            val toggle = { change(if (pl.enabled) "plugin disable ${pl.id}" else "plugin enable ${pl.id}") }
+            val update = { change("plugin update ${pl.id}") }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(onClick = { change(if (pl.enabled) "plugin disable ${pl.id}" else "plugin enable ${pl.id}") }, enabled = busy == null, modifier = Modifier.weight(1f)) {
-                    Text(if (pl.enabled) "Disable" else "Enable")
+                if (pl.update == "available") {
+                    Button(onClick = update, enabled = busy == null, modifier = Modifier.weight(1f)) { Text("Update") }
+                    OutlinedButton(onClick = toggle, enabled = busy == null, modifier = Modifier.weight(1f)) { Text(toggleLabel) }
+                } else {
+                    Button(onClick = toggle, enabled = busy == null, modifier = Modifier.weight(1f)) { Text(toggleLabel) }
+                    OutlinedButton(onClick = update, enabled = busy == null, modifier = Modifier.weight(1f)) { Text("Update") }
                 }
-                OutlinedButton(onClick = { change("plugin update ${pl.id}") }, enabled = busy == null, modifier = Modifier.weight(1f)) { Text("Update") }
             }
             TextButton(onClick = { confirm = true }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) { Text("Uninstall ${pl.name}", color = Color(0xFFF09A9D)) }
         }
