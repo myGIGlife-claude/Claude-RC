@@ -2485,6 +2485,17 @@ do_plugins() {
      marketplaces:($m | map({name, source:(.repo // .url // .source // "")}))}')"
   rm -f "$d.pl" "$d.mk"
   printf '%s' "$res" >"$d.res"
+  # Update lights: the helper says per plugin whether a newer version exists.
+  # Not installed or failing: the list goes out without the extra fields.
+  if [[ -x "$HOME/.local/bin/claude-plugin-updates" ]]; then
+    t 100 "$HOME/.local/bin/claude-plugin-updates" </dev/null >"$d.up" 2>/dev/null || true
+    if jq -e 'type == "object"' "$d.up" >/dev/null 2>&1 &&
+      jq -c --slurpfile u "$d.up" '.installed |= map(if ($u[0][.id] | type) == "object"
+        then . + {update:($u[0][.id].state // "unknown"), latest:($u[0][.id].latest // "")} else . end)' "$d.res" >"$d.res2" 2>/dev/null; then
+      mv -f "$d.res2" "$d.res"
+    fi
+    rm -f "$d.up" "$d.res2"
+  fi
   api_ok_file "$d.res"
 }
 

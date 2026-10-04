@@ -117,7 +117,7 @@ Exit code 0 = success, 1 = handled error, 2 = bad arguments.
 | `mcp-auth-start` | server name on stdin | `url` to sign in (a user or plugin server that needs it). |
 | `mcp-auth-finish` | stdin: the `http://localhost…` address the browser ended on | Same as `mcp-refresh` once signed in. |
 | `mcp-auth-cancel` | — | `cancelled` |
-| `plugins` | — | `claude_version`, `installed[{id,name,marketplace,version,enabled,scope}]`, `available[{id,name,marketplace,description,installs,installed}]`, `marketplaces[{name,source}]` (from `claude plugin list --json --available`). |
+| `plugins` | — | `claude_version`, `installed[{id,name,marketplace,version,enabled,scope,update?,latest?}]` (`update` = `current`/`available`/`unknown`/`error`, from the `claude-plugin-updates` helper that `install.sh` puts in `~/.local/bin`; absent without it), `available[{id,name,marketplace,description,installs,installed}]`, `marketplaces[{name,source}]` (from `claude plugin list --json --available`). |
 | `disconnect` | `<service>` | `disconnected`. Deletes a token service's (or YouTube's) credentials and key file; sessions lose them on restart. |
 | `chat-pin-status` | — | `set`, `locked_until`. |
 | `chat-pin-set` | stdin: new PIN (6–12 digits), then the current one if set | `set`. Written to `~/.config/claude-launcher/chat-pin` (mode 600); never returned by any action. |
