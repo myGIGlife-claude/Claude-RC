@@ -806,6 +806,37 @@ merge_projects_dir() {
   echo "Took PROJECTS_DIR from the backup's launcher config (the rest of that file stays as it is here)."
 }
 
+# rewrite_home: the backup came from another home folder (another user name): point the restored files at this one.
+# Text config only (json/env/mcp files), plus the chat-history folders, whose names are the project path with / and . as -.
+rewrite_home() {
+  local old new oe ne f oslug nslug d base dest
+  old="$(jq -r '.home // empty' "$TMP/manifest.json")"
+  new="$HOME"
+  [[ "$old" == /* && "$old" != "$new" ]] || return 0
+  oe="$(printf '%s' "$old" | sed 's/[][\.*^$|]/\\&/g')"
+  ne="$(printf '%s' "$new" | sed 's/[\&|]/\\&/g')"
+  while IFS= read -r f; do
+    [[ -f "$f" && ! -L "$f" ]] || continue
+    if grep -qF -- "$old" "$f" 2>/dev/null; then sed -i "s|$oe|$ne|g" "$f"; fi
+  done < <({
+    for f in .claude.json .mcp.json .claude/settings.json .claude/settings.local.json .config/claude-launcher/env; do
+      if [[ -f "$HOME/$f" ]]; then printf '%s\n' "$HOME/$f"; fi
+    done
+    find "$HOME/.claude/plugins" "$HOME/.config/claude-launcher" -maxdepth 1 -type f \( -name '*.json' -o -name env \) 2>/dev/null || true
+    find "$HOME/.config/claude-launcher/workers" -maxdepth 4 -type f \( -name '.claude.json' -o -name 'settings*.json' \) -size -20M 2>/dev/null || true
+  } | sort -u)
+  oslug="$(printf '%s' "$old" | sed 's/[^A-Za-z0-9]/-/g')"
+  nslug="$(printf '%s' "$new" | sed 's/[^A-Za-z0-9]/-/g')"
+  for d in "$HOME/.claude/projects/$oslug"*; do
+    [[ -d "$d" ]] || continue
+    base="$(basename -- "$d")"
+    [[ "$base" == "$oslug" || "$base" == "$oslug"-* ]] || continue
+    dest="$HOME/.claude/projects/$nslug${base#"$oslug"}"
+    if [[ -e "$dest" ]]; then cp -an -- "$d/." "$dest/" && rm -rf -- "$d"; else mv -- "$d" "$dest"; fi
+  done
+  echo "Rewrote $old to $new in the restored settings and chat history."
+}
+
 fix_permissions() {
   local f
   for f in .ssh .config/claude-launcher .claude backups; do
@@ -944,6 +975,7 @@ cmd_import() {
   stop_read
   progress extract 100
   merge_projects_dir
+  rewrite_home
   fix_permissions
 
   if ((clone)); then

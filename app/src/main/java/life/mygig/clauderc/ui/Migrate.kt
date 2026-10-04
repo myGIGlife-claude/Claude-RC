@@ -405,6 +405,8 @@ class MigrateFlow(
         apiFor(entry).status()   // the new entry must answer before it is used
         _ui.update { it.copy(to = entry, sudoMode = null, setupEntry = t.takeIf { s -> s.id != entry.id }) }
         log("${entry.host} as $name is in the server list.")
+        // One machine, one entry: the setup login (the empty first user) is dropped now that the new user answers.
+        removeSetupEntry()
         setStep(MigrateStep.TRANSFER)
         retryBlock = { transfer() }
     }
