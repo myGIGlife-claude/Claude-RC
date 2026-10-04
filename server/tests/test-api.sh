@@ -49,7 +49,12 @@ for bad in "" "bash" "status; bash" 'status $(id)' "status && id" "rm -rf /" "st
   "login-gitlab glpat-x" "login-docker docker.io" "self-update" "self-update main" \
   "self-update 0123456789abcdef0123456789abcdef0123456" "self-update ../../etc" "install-cli" \
   "install-cli glab extra" "install-cli rm" "login-token" "login-token evil" "login-token vercel x" \
-  "skills-update" "skills-update demo" "skills-update demo/x extra" "skills-update a/b/c" "skills-update demo/x;id" "skills-update demo/x --force"; do
+  "skills-update" "skills-update demo" "skills-update demo/x extra" "skills-update a/b/c" "skills-update demo/x;id" "skills-update demo/x --force" \
+  "migrate-plan x" "migrate-keygen x" "migrate-authorize x" "migrate-authorize --force" "migrate-send x" "migrate-send 1.2.3.4" \
+  "migrate-passphrase x" "migrate-status x" "migrate-status --all" "migrate-restore" "migrate-restore ../../etc/passwd" \
+  "migrate-restore incoming-1.gpg" "migrate-restore incoming-20260101-010101.gpgx" "migrate-restore incoming-20260101-010101.gpg extra" \
+  "migrate-restore incoming-20260101-010101.gpg pass" "migrate-restore -incoming-20260101-010101.gpg" "migrate-restore incoming-20260101-010101.gpg;id" \
+  "migrate-restore /etc/passwd"; do
   api "$bad"
   check "forbidden: '${bad:0:30}'" "$(jqt '.ok==false and .error.code=="forbidden"')"
 done
@@ -753,6 +758,187 @@ api "status"; check "status installs the push hooks" "$(jq -e '.theme == "dark" 
 api "status"; check "push hooks are added once" "$(jq -e '(.hooks.Notification | length) == 1 and (.hooks.Stop | length) == 1' "$HOME/.claude/settings.json" >/dev/null 2>&1; echo $?)"
 rm -f "$HOME/.config/claude-launcher/push.json" "$HOME/.config/claude-launcher/fcm-key.json"
 OUT="$(python3 "$HERE/test-push.py" 2>&1)"; check "claude-push against a fake Google" $?
+
+echo "migrate"
+MIG="$HOME/.config/claude-launcher/migrate"; MST="$HOME/.local/state/claude-launcher/migrate"; AK="$HOME/.ssh/authorized_keys"
+APILOG="$HOME/.local/state/claude-launcher/api.log"
+KB=AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+mkdir -p "$HOME/.ssh"; [[ -f "$AK" ]] && cp "$AK" "$WORK/authorized_keys.orig"
+# A stub ssh: remembers its arguments and the pinned known_hosts, then plays the new server by running `claude-backup receive`.
+cat >"$HOME/.local/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >"$STUB_STATE/ssh-argv"
+for a in "$@"; do
+  case "$a" in UserKnownHostsFile=*) cp "${a#*=}" "$STUB_STATE/ssh-known-hosts" ;; esac
+done
+[[ -e "$STUB_STATE/ssh-fail" ]] && { echo "Host key verification failed." >&2; exit 255; }
+[[ -e "$STUB_STATE/ssh-sleep" ]] && sleep "$(cat "$STUB_STATE/ssh-sleep")"
+exec claude-backup receive
+EOF
+chmod +x "$HOME/.local/bin/ssh"
+mig_wait() { # mig_wait <jq condition> [tries]: poll migrate-status until it holds
+  local i
+  for ((i = 0; i < ${2:-80}; i++)); do
+    api "migrate-status"
+    [[ "$(jqt "$1")" == 0 ]] && return 0
+    sleep 0.5
+  done
+  return 1
+}
+send_in() { printf '%s\n%s\n%s\n%s\n%s' "$1" "$2" "$3" "$4" "$5"; }
+
+api "status"; check "migrate: script_api is 34 or more" "$(jqt '.data.script_api >= 34')"
+api "migrate-status"
+check "migrate-status: nothing yet" "$(jqt '.ok and .data == {job:"none",phase:"none",message:"",pct:0,bytes:0}')"
+api "migrate-passphrase"
+check "migrate-passphrase: not_ready before a send" "$(jqt '.ok==false and .error.code=="not_ready"')"
+CLAUDERC_BACKUP_BIN=/nonexistent api "migrate-plan"
+check "migrate-plan without claude-backup: not_configured" "$(jqt '.ok==false and .error.code=="not_configured" and .error.message=="claude-backup is missing: run Update now"')"
+tmux new-session -d -s migsess -c "$HOME" "claude --remote-control migsess; exec bash"
+api "migrate-plan"
+tmux kill-session -t "=migsess" 2>/dev/null
+check "migrate-plan: merged shape" "$(jqt '.ok and (.data | keys) == ["docker_volumes","estimate_mb","logins","other_dirs","repos","services","sessions"] and .data.estimate_mb==12 and .data.logins == {claude:true,workers:["ops"]} and .data.docker_volumes==["db"] and .data.other_dirs==["/home/x/data"] and .data.repos[0].dir=="/home/x/projects/app"')"
+check "migrate-plan: sessions are name/busy/waiting, services are ids" "$(jqt '(.data.sessions | length > 0 and all(keys == ["busy","name","waiting"])) and (.data.services | all(type=="string"))')"
+[[ "$(tail -n 1 "$STUB_STATE/backup-argv")" == "plan --json" ]]; check "migrate-plan runs 'plan --json'" $?
+
+echo "migrate keygen / authorize"
+api "migrate-keygen"
+check "keygen returns an ed25519 key" "$(jqt '.ok and (.data.public_key | test("^ssh-ed25519 [A-Za-z0-9+/]+=* clauderc-migrate$"))')"
+PUB1="$(jq -r .data.public_key <<<"$OUT")"
+[[ "$(stat -c %a "$MIG/key")" == 600 && "$(stat -c %a "$MIG")" == 700 ]]; check "keygen: key 600, folder 700" $?
+api "migrate-keygen"
+[[ "$(jq -r .data.public_key <<<"$OUT")" == "$PUB1" ]]; check "keygen is idempotent" $?
+printf '%s\n' 'ssh-ed25519 AAAAOTHERKEY phone' 'restrict,command="x" ssh-rsa AAAAB3OTHER other-key' >"$AK"
+api "migrate-authorize" "$(printf '%s\n%s' "$PUB1" 203.0.113.5)"
+check "authorize ok" "$(jqt '.ok and .data.authorized')"
+BLOB1="$(awk '{print $2}' <<<"$PUB1")"
+[[ "$(grep -c ' clauderc-migrate$' "$AK")" == 1 && "$(wc -l <"$AK")" == 3 ]]; check "authorize writes exactly one line" $?
+[[ "$(tail -n 1 "$AK")" == "restrict,command=\"$HOME/.local/bin/claude-backup receive\",from=\"203.0.113.5\" ssh-ed25519 $BLOB1 clauderc-migrate" ]]; check "the line is restricted to claude-backup receive from that address" $?
+[[ "$(head -n 2 "$AK")" == $'ssh-ed25519 AAAAOTHERKEY phone\nrestrict,command="x" ssh-rsa AAAAB3OTHER other-key' && "$(stat -c %a "$AK")" == 600 ]]; check "authorize leaves other lines alone, file 600" $?
+ssh-keygen -q -t ed25519 -N '' -C 'someone@host' -f "$WORK/k2" </dev/null
+PUB2="$(cat "$WORK/k2.pub")"; BLOB2="$(awk '{print $2}' <<<"$PUB2")"
+api "migrate-authorize" "$PUB2"
+check "authorize again ok" "$(jqt '.ok and .data.authorized')"
+[[ "$(grep -c ' clauderc-migrate$' "$AK")" == 1 && "$(wc -l <"$AK")" == 3 && "$(tail -n 1 "$AK")" == "restrict,command=\"$HOME/.local/bin/claude-backup receive\" ssh-ed25519 $BLOB2 clauderc-migrate" ]]; check "an older clauderc-migrate line is replaced (no address: no from=)" $?
+grep -q "$BLOB1" "$AK"; [[ $? -ne 0 ]]; check "the old key is gone" $?
+SUM="$(cksum <"$AK")"
+for bad in "ssh-rsa AAAAB3NzaC1yc2E x" "ssh-ed25519 AAAA;id" 'ssh-ed25519 AAAA"x' "ssh-ed25519 AAAA two words" "ssh-ed25519" "" "ssh-ed25519 AAAA x
+ssh-ed25519 BBBB"; do
+  api "migrate-authorize" "$bad"
+  check "authorize refuses key '${bad:0:24}'" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+for bad in 'a"b' "evil.com,command=x" "a b" "*" "-x" "a;b"; do
+  api "migrate-authorize" "$(printf '%s\n%s' "$PUB2" "$bad")"
+  check "authorize refuses address '$bad'" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+[[ "$(cksum <"$AK")" == "$SUM" ]]; check "refused authorizations changed nothing" $?
+CLAUDERC_BACKUP_BIN=/nonexistent api "migrate-authorize" "$PUB2"
+check "authorize with the stub present uses the fixed path (env override can't change it)" "$(jqt '.ok')"
+
+echo "migrate send"
+for bad in "bad host|2222|ops|ssh-ed25519|$KB" "h.example.com|0|ops|ssh-ed25519|$KB" "h.example.com|99999|ops|ssh-ed25519|$KB" \
+  "h.example.com|22x|ops|ssh-ed25519|$KB" "h.example.com|2222|-oProxyCommand=x|ssh-ed25519|$KB" "h.example.com|2222|ops|ssh-dss|$KB" \
+  "h.example.com|2222|ops|ssh-ed25519|not base64!" "h.example.com|2222|ops|ssh-ed25519|AAAA" "-oProxyCommand=x|2222|ops|ssh-ed25519|$KB" "|||" "h.example.com|2222|op s|ssh-ed25519|$KB"; do
+  IFS='|' read -r h p u ty bl <<<"$bad"
+  api "migrate-send" "$(send_in "$h" "$p" "$u" "$ty" "$bl")"
+  check "send refuses '${bad:0:34}'" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+[[ ! -e "$MST/status.json" && ! -e "$MIG/passphrase" && ! -e "$MIG/known_hosts" ]]; check "refused sends started nothing" $?
+echo 1 >"$STUB_STATE/backup-sleep"; echo 3 >"$STUB_STATE/ssh-sleep"
+api "migrate-send" "$(send_in 192.0.2.10 2222 ops ssh-ed25519 "$KB")"
+check "send starts" "$(jqt '.ok and .data.started')"
+api "migrate-send" "$(send_in 192.0.2.10 2222 ops ssh-ed25519 "$KB")"
+check "a second send while one runs is busy" "$(jqt '.ok==false and .error.code=="busy"')"
+touch "$HOME/backups/incoming-20260101-010101.gpg"
+api "migrate-restore incoming-20260101-010101.gpg" "AAAA-BBBB-CCCC-DDDD-EEEE"
+check "a restore while a send runs is busy" "$(jqt '.ok==false and .error.code=="busy"')"
+rm -f "$HOME/backups/incoming-20260101-010101.gpg"
+api "migrate-status"
+check "status while running: job send, exactly the contract's fields" "$(jqt '.ok and .data.job=="send" and (.data.phase=="export" or .data.phase=="transfer") and (.data|keys) == ["bytes","error","file","job","message","pct","phase","started","updated"] and .data.error==""')"
+api "migrate-passphrase"
+check "passphrase: five groups of four, no look-alikes" "$(jqt '.ok and (.data.passphrase | test("^[A-HJ-NP-Z2-9]{4}(-[A-HJ-NP-Z2-9]{4}){4}$"))')"
+PASS="$(jq -r .data.passphrase <<<"$OUT")"
+[[ "$(stat -c %a "$MIG/passphrase")" == 600 && "$(stat -c %a "$MST/status.json")" == 600 && "$(stat -c %a "$MST")" == 700 ]]; check "passphrase file 600, status.json 600, state folder 700" $?
+mig_wait '.data.phase=="done"'; check "send reaches done" $?
+check "done: 100%, the name the new server printed, all bytes" "$(jqt '.data.job=="send" and .data.pct==100 and .data.bytes==3000000 and .data.error=="" and (.data.file | test("^incoming-[0-9]{8}-[0-9]{6}\\.gpg$"))')"
+INC="$(jq -r .data.file <<<"$OUT")"
+[[ "$(stat -c %s "$HOME/backups/$INC")" == 3000000 ]]; check "the new server's file arrived whole" $?
+[[ "$(ls "$HOME"/backups/migrate-*.gpg | wc -l)" == 1 ]]; check "the local export is kept after a good send" $?
+[[ "$(cat "$STUB_STATE/backup-export-pass")" == "$PASS" ]]; check "export used the generated passphrase file" $?
+grep -q -- "export --no-claude-login --pass-file $MIG/passphrase --out $HOME/backups/migrate-" "$STUB_STATE/backup-argv"; check "export arguments: --no-claude-login, pass file, out" $?
+[[ "$(cat "$STUB_STATE/ssh-argv")" == *"-i $MIG/key "* && "$(cat "$STUB_STATE/ssh-argv")" == *"-o BatchMode=yes"* && "$(cat "$STUB_STATE/ssh-argv")" == *"-o IdentitiesOnly=yes"* && "$(cat "$STUB_STATE/ssh-argv")" == *"-o StrictHostKeyChecking=yes"* && "$(cat "$STUB_STATE/ssh-argv")" == *"-p 2222 ops@192.0.2.10 receive" ]]; check "ssh arguments: key, batch, pinned host key, port, user@host receive" $?
+[[ "$(cat "$STUB_STATE/ssh-known-hosts")" == "[192.0.2.10]:2222 ssh-ed25519 $KB" ]]; check "known_hosts holds exactly the pinned key ([host]:port form)" $?
+[[ ! -e "$MIG/known_hosts" ]]; check "the temporary known_hosts is removed" $?
+grep -rq "$PASS" "$STUB_STATE/backup-argv" "$STUB_STATE/ssh-argv" "$APILOG"; [[ $? -ne 0 ]]; check "passphrase in no argv and not in the api log" $?
+grep -q "migrate-passphrase" "$APILOG"; check "(the passphrase call itself is logged by name only)" $?
+
+echo "migrate send failures"
+rm -f "$STUB_STATE/backup-sleep" "$STUB_STATE/ssh-sleep" "$STUB_STATE/ssh-argv"
+touch "$STUB_STATE/ssh-fail"
+api "migrate-send" "$(send_in Host.Example.com 22 ops ssh-ed25519 "$KB")"
+check "send (port 22) starts" "$(jqt '.ok and .data.started')"
+mig_wait '.data.phase=="failed"'; check "a refused host key ends in failed" $?
+check "failed: error says why" "$(jqt '.data.job=="send" and (.data.error | contains("Host key verification failed"))')"
+[[ "$(cat "$STUB_STATE/ssh-known-hosts")" == "host.example.com ssh-ed25519 $KB" ]]; check "port 22 known_hosts line has no brackets" $?
+[[ "$(ls "$HOME"/backups/migrate-*.gpg | wc -l)" == 1 && ! -e "$MIG/known_hosts" ]]; check "failed send deleted its local file and known_hosts" $?
+rm -f "$STUB_STATE/ssh-fail" "$STUB_STATE/ssh-argv"; touch "$STUB_STATE/backup-fail-export"
+api "migrate-send" "$(send_in 192.0.2.10 2222 ops ssh-ed25519 "$KB")"
+mig_wait '.data.phase=="failed"'; check "a failing export ends in failed" $?
+check "export failure: error has claude-backup's last line, colours stripped" "$(jqt '.data.error | contains("The export failed") and contains("out of disk space") and (contains("\u001b") | not)')"
+[[ "$(ls "$HOME"/backups/migrate-*.gpg | wc -l)" == 1 && ! -e "$STUB_STATE/ssh-argv" ]]; check "the partial export is deleted and nothing was sent" $?
+rm -f "$STUB_STATE/backup-fail-export"
+
+echo "migrate status"
+jq -cn '{job:"send",phase:"transfer",message:"x",pct:70,bytes:5,file:"",started:1,updated:1,error:"",pid:999999}' >"$MST/status.json"
+api "migrate-status"
+check "a dead pid mid-job is reported failed" "$(jqt '.data.phase=="failed" and .data.error=="The job stopped unexpectedly" and .data.pct==70 and (.data|has("pid")|not)')"
+api "migrate-status"
+check "and stays failed" "$(jqt '.data.phase=="failed"')"
+jq -cn --argjson n "$(date +%s)" '{job:"send",phase:"export",message:"x",pct:0,bytes:0,file:"",started:$n,updated:$n,error:"",pid:null}' >"$MST/status.json"
+api "migrate-status"
+check "a job that hasn't written its pid yet counts as starting" "$(jqt '.data.phase=="export"')"
+jq -cn '{job:"send",phase:"export",message:"x",pct:0,bytes:0,file:"",started:1,updated:1,error:"",pid:null}' >"$MST/status.json"
+api "migrate-status"
+check "...for a minute only" "$(jqt '.data.phase=="failed"')"
+jq -cn '{job:"restore",phase:"restore",message:"x",pct:5,bytes:0,file:"",started:1,updated:1,error:"",pid:999999}' >"$MST/status.json"
+
+echo "migrate restore"
+api "migrate-restore" "AAAA-BBBB-CCCC-DDDD-EEEE"
+check "restore needs the file name argument" "$(jqt '.ok==false')"
+api "migrate-restore incoming-20200101-000000.gpg" "AAAA-BBBB-CCCC-DDDD-EEEE"
+check "restore of a file that isn't there" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "migrate-restore $INC" "abc"
+check "restore refuses a short passphrase" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+[[ -f "$HOME/backups/$INC" ]]; check "refusals left the file" $?
+echo "RIGHT-PASS-PHRASE-1" >"$STUB_STATE/backup-expect-pass"
+api "migrate-restore $INC" "WRONG-PASS-PHRASE-9"
+check "restore starts (a stale dead job doesn't block it)" "$(jqt '.ok and .data.started')"
+mig_wait '.data.phase=="failed"'; check "wrong passphrase ends in failed" $?
+check "wrong passphrase: a clear error, colours stripped" "$(jqt '.data.job=="restore" and (.data.error | contains("passphrase didn'"'"'t work") and (contains("\u001b") | not)) and .data.file=="'"$INC"'"')"
+[[ -f "$HOME/backups/$INC" ]]; check "failed restore keeps the incoming file" $?
+[[ -z "$(ls "$MIG"/restore-pass.* 2>/dev/null)" ]]; check "failed restore removed its pass file" $?
+echo "git clone failed for example/app" >"$STUB_STATE/backup-fail-import"
+api "migrate-restore $INC" "RIGHT-PASS-PHRASE-1"
+mig_wait '.data.phase=="failed"'; check "an import failure ends in failed" $?
+check "import failure: its last lines are the error" "$(jqt '.data.error | contains("The restore failed") and contains("git clone failed for example/app")')"
+[[ -f "$HOME/backups/$INC" && -z "$(ls "$MIG"/restore-pass.* 2>/dev/null)" ]]; check "...file kept, pass file gone" $?
+rm -f "$STUB_STATE/backup-fail-import"; echo 1 >"$STUB_STATE/backup-sleep"
+api "migrate-restore $INC" "RIGHT-PASS-PHRASE-1"
+check "retry starts" "$(jqt '.ok and .data.started')"
+api "migrate-restore $INC" "RIGHT-PASS-PHRASE-1"
+check "a second restore while one runs is busy" "$(jqt '.ok==false and .error.code=="busy"')"
+api "migrate-send" "$(send_in 192.0.2.10 2222 ops ssh-ed25519 "$KB")"
+check "and so is a send" "$(jqt '.ok==false and .error.code=="busy"')"
+api "migrate-status"
+check "restore status while running" "$(jqt '.data.job=="restore" and .data.phase=="restore" and .data.file=="'"$INC"'" and .data.pct < 100')"
+mig_wait '.data.phase=="done"'; check "restore reaches done" $?
+check "done: 100%" "$(jqt '.data.job=="restore" and .data.pct==100 and .data.error==""')"
+[[ ! -e "$HOME/backups/$INC" && -z "$(ls "$MIG"/restore-pass.* 2>/dev/null)" ]]; check "success deletes the incoming file and the pass file" $?
+[[ -s "$MST/manifest.json" ]]; check "the manifest was written for migrate-verify" $?
+grep -q -- "import $HOME/backups/$INC --pass-file $MIG/restore-pass\.[A-Za-z0-9]* --clone --manifest-out $MST/manifest.json" "$STUB_STATE/backup-argv"; check "import arguments: pass file, --clone, --manifest-out" $?
+grep -rq "RIGHT-PASS-PHRASE-1\|WRONG-PASS-PHRASE-9" "$STUB_STATE/backup-argv" "$APILOG"; [[ $? -ne 0 ]]; check "restore passphrases in no argv and not in the api log" $?
+rm -f "$STUB_STATE/backup-sleep" "$STUB_STATE/backup-expect-pass" "$HOME/.local/bin/ssh"
+if [[ -f "$WORK/authorized_keys.orig" ]]; then cp "$WORK/authorized_keys.orig" "$AK"; else rm -f "$AK"; fi
 
 echo "team MCP server"
 OUT="$(python3 "$HERE/test-team.py" 2>&1)"; check "clauderc-team MCP self-check" $?
