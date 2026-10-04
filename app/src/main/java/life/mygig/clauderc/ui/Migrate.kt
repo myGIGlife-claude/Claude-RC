@@ -354,7 +354,7 @@ class MigrateFlow(
         if (probe(candidate)) {
             log("$name already answers on ${t.host}.")
         } else {
-            val pw = sudoPassword(sudoPassword)
+            val pw = sudoFor(sudoPassword)
             val phoneKey = withContext(Dispatchers.Default) { keys.publicKey() }
             log("Creating $name on ${t.host} (installs Claude Code; this takes a few minutes)…")
             apiFor(t).migrateCreateUser(name, pw, phoneKey)
