@@ -93,4 +93,5 @@ hostnames, IPs, emails, org names, keys. They live in
   shared file cache (`usage-cache/`).
 - Plugins managed by `npx skills` (lock file `~/.agents/.skill-lock.json`) are updated by the `skills-update` action,
   not `claude plugin update`; `claude-plugin-updates` gives each installed plugin an update state for the app's lights.
+- `claude-backup` (server/): `export` = one encrypted file (tar|gzip|gpg AES256, passphrase only via file/tty, printed once) with the Claude/launcher/agents/cloud logins, ssh, scripts, chat history and a rescue copy of git repos that are unpushed/dirty/without a remote; `import [--from user@host:FILE] [--clone]` restores it (pre-restore copies kept), `list` shows the manifest (no secret values). Tests: `server/tests/test-backup.sh`.
 
