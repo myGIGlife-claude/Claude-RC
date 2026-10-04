@@ -87,7 +87,7 @@ send:'<svg viewBox="0 0 24 24" style="stroke:#1A0F0A"><path d="M4 12l16-8-6 16-2
 const $=id=>document.getElementById(id);
 const nav=on=>'<div class="nav">'+[['ses','Sessions'],['pro','Projects'],['new','New'],['cla','Claude'],['con','Connections']].map(([k,l])=>`<div class="${k==on?'on':''}"><span>${I[k]}</span>${l}</div>`).join('')+'</div>';
 const topbar=(t,s)=>`<div class="top"><h1>${t}</h1>${s?`<small>${s}</small>`:''}</div>`;
-const pills=(l,i)=>'<div class="pills">'+l.map((x,j)=>`<div class="${i==j?'on':''}">${x}</div>`).join('')+'</div>';
+const pills=(l,i,b=[])=>'<div class="pills">'+l.map((x,j)=>`<div class="${i==j?'on':''}" style="position:relative">${x}${b.includes(j)?'<i style="position:absolute;top:7px;right:12px;width:8px;height:8px;border-radius:50%;background:var(--warn)"></i>':''}</div>`).join('')+'</div>';
 const lab=t=>`<div class="lab">${t}</div>`;
 const tile=(t,s,d='')=>`<div class="tile ${d=='w'?'w':''}"><div class="t"><i class="dot ${d}"></i>${t}</div><div class="s">${s}</div></div>`;
 const bar=(l,p,r,k=1)=>{const c=p>=90?'var(--bad)':p>=75?'var(--warn)':'var(--p)';return `<div><div class="lm">${l}: ${Math.round(p*k)}% used${r?' · resets in '+r:''}</div><div class="bar"><i style="width:${p*k}%;background:${c}"></i></div></div>`};
@@ -108,10 +108,10 @@ const SCR={
 accounts:(o={})=>[topbar('cLaudeRC','home-server ▾'),`<div class="body"><div class="in" style="margin-top:${-(o.scroll||0)}px">${head}${pills(['Accounts','Plugins','Tools'],0)}
  <div class="row"><div class="sp"><div class="t1">cLaudeCluster</div><div class="sm">Usage per account. Tell the main chat which work goes to which worker.</div></div><div><span class="btn">+ Add account</span><br><span class="txt" style="float:right">Refresh</span></div></div>
  ${cset}${ACC.map(a=>acct(a,o.k??1)).join('')}</div></div>`,nav('cla')],
-plugins:()=>[topbar('cLaudeRC','home-server ▾'),`<div class="body"><div class="in">${head}${pills(['Accounts','Plugins','Tools'],1)}
+plugins:()=>[topbar('cLaudeRC','home-server ▾'),`<div class="body"><div class="in">${head}${pills(['Accounts','Plugins','Tools'],1,[1])}
  <div class="row"><div class="lab sp">Installed · 5</div><span class="btn f">+ Install</span></div>
- <div class="grid">${tile('cloudflare','skills + MCP · on')}${tile('superpowers','skills · on')}${tile('community-skills','skills · on')}${tile('playwright','disabled','o')}${tile('sentry','update available','w')}</div>
- <div class="sm">Tap a plugin to enable, disable, update or remove it.</div></div></div>`,nav('cla')],
+ <div class="grid">${tile('sentry','update available · official','w')}${tile('cloudflare','update available · cloudflare','w')}${tile('superpowers','on · official')}${tile('community-skills','on · community')}${tile('legacy-tools','can\'t check for updates · old-market','b')}${tile('playwright','disabled','o')}</div>
+ <div class="sm">Tap a plugin to enable, disable, update or remove it.</div><div class="sm">Green: on and current · Yellow: update available · Red: can't check · Hollow: off</div></div></div>`,nav('cla')],
 tools:()=>[topbar('cLaudeRC','home-server ▾'),`<div class="body"><div class="in">${head}${pills(['Accounts','Plugins','Tools'],2)}
  <div class="card" style="gap:14px">${[['Doctor','Checks the install','Run'],['Full checkup','/doctor in a chat of its own; Claude can fix what it finds','Start'],['Update Claude','Installs the newest version','Update'],['Other command','claude … (doctor, plugin, mcp list)','Run…']].map(([a,b,c])=>`<div class="row"><div class="sp"><div class="t2">${a}</div><div class="sm">${b}</div></div><span class="btn">${c}</span></div>`).join('')}</div>
  ${lab('Marketplaces')}<div class="card" style="gap:8px"><div class="row"><span class="sp">claude-plugins-official</span><span class="sm">42 plugins</span></div><div class="row"><span class="sp">community-skills</span><span class="sm">1 plugin</span></div><div><span class="txt">+ Add marketplace</span><span class="txt">Update all</span></div></div></div></div>`,nav('cla')],

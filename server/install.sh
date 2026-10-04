@@ -32,7 +32,7 @@ main() {
   for f in jq tmux git flock curl; do command -v "$f" >/dev/null || missing+=("$f"); done
   ((${#missing[@]} == 0)) || echo "Note: install these first: ${missing[*]} (e.g. sudo apt install ${missing[*]})" >&2
 
-  for f in claude-setup.sh claude-launcher-api install-launcher-key.sh claude-autostart.sh youtube-upload clauderc-team claude-push; do
+  for f in claude-setup.sh claude-launcher-api install-launcher-key.sh claude-autostart.sh youtube-upload clauderc-team claude-push claude-plugin-updates; do
     curl -fsSL "$base/$f" -o "$tmp/$f"
   done
 
@@ -53,6 +53,7 @@ main() {
   put "$tmp/youtube-upload" "$HOME/.local/bin/youtube-upload"
   put "$tmp/clauderc-team" "$HOME/.local/bin/clauderc-team"
   put "$tmp/claude-push" "$HOME/.local/bin/claude-push"
+  put "$tmp/claude-plugin-updates" "$HOME/.local/bin/claude-plugin-updates"
   if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
     printf '%s\n' "$sha" >"$HOME/.config/claude-launcher/installed-commit"
   fi

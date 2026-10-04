@@ -1,0 +1,360 @@
+#!/usr/bin/env python3
+"""claude-plugin-updates: say whether a newer version of each installed Claude Code plugin exists.
+
+Prints ONE JSON object on stdout:
+  {"<plugin>@<marketplace>": {"state": "current"|"available"|"unknown"|"error", "latest": "<12-char sha or version>"}}
+for every plugin in $CLAUDE_PLUGIN_DIR/installed_plugins.json (default ~/.claude/plugins).
+
+How it decides (marketplaces on disk are plain snapshots, not git repos):
+  - catalog entry pins a "sha": compare with the installed commit, no network;
+  - catalog entry is a git source without a sha: `git ls-remote` of its ref/HEAD;
+  - catalog entry is a path inside the marketplace repo: `git ls-remote` HEAD of the
+    marketplace repo, and if that moved, the GitHub compare API says whether files
+    under the plugin's path changed;
+  - otherwise the catalog's "version" is compared with the installed version.
+Answers are cached in ~/.config/claude-launcher/plugin-updates.json (1 h; a failed
+check keeps the last good answer for up to 24 h). Env: CLAUDE_PLUGIN_DIR,
+XDG_CONFIG_HOME, CLAUDERC_GIT (git binary), CLAUDERC_GITHUB_API (API base),
+CLAUDERC_PLUGIN_TTL (seconds; 0 = always recheck).
+Never fails: any odd data ends in {} and exit 0.
+"""
+import json, os, re, subprocess, sys, tempfile, time, urllib.error, urllib.request
+
+PLUGIN_DIR = os.environ.get("CLAUDE_PLUGIN_DIR") or os.path.expanduser("~/.claude/plugins")
+CFG = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "claude-launcher")
+CACHE_FILE = os.path.join(CFG, "plugin-updates.json")
+GIT = os.environ.get("CLAUDERC_GIT") or "git"
+API = (os.environ.get("CLAUDERC_GITHUB_API") or "https://api.github.com").rstrip("/")
+DEFAULT_API = "https://api.github.com"
+CALL_TIMEOUT = 20
+RUN_CAP = 90
+STALE_GOOD = 24 * 3600
+COMPARE_LIMIT = 300
+STATES = ("current", "available", "unknown", "error")
+REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+GH_URL_RE = re.compile(r"github\.com[:/]([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
+SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
+
+
+class Fail(Exception):
+    """A check that could not be completed (network, git, bad answer)."""
+
+
+class OutOfTime(Exception):
+    """The overall time cap was reached."""
+
+
+def ttl():
+    try:
+        return max(0, float(os.environ.get("CLAUDERC_PLUGIN_TTL", "3600")))
+    except ValueError:
+        return 3600.0
+
+
+def load_json(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def as_dict(v):
+    return v if isinstance(v, dict) else {}
+
+
+def same_sha(a, b):
+    a, b = a.lower(), b.lower()
+    n = min(len(a), len(b))
+    return n >= 7 and a[:n] == b[:n]
+
+
+def repo_url(repo):
+    return "https://github.com/%s.git" % repo
+
+
+def github_repo(url):
+    """owner/name for a GitHub clone URL, else None."""
+    m = GH_URL_RE.search(url or "")
+    return "%s/%s" % m.groups() if m else None
+
+
+class Net:
+    """Network calls with one overall deadline; repeated lookups are remembered."""
+
+    def __init__(self):
+        self.deadline = time.time() + RUN_CAP
+        self.heads = {}
+        self.compares = {}
+
+    def budget(self):
+        left = self.deadline - time.time()
+        if left <= 1:
+            raise OutOfTime()
+        return min(CALL_TIMEOUT, left)
+
+    def ls_remote(self, url, ref=None):
+        key = (url, ref or "HEAD")
+        if key not in self.heads:
+            try:
+                self.heads[key] = self._ls_remote(url, ref or "HEAD")
+            except Fail as e:
+                self.heads[key] = e
+        v = self.heads[key]
+        if isinstance(v, Exception):
+            raise v
+        return v
+
+    def _ls_remote(self, url, ref):
+        env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+        env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
+        env.setdefault("GIT_ALLOW_PROTOCOL", "https:http:ssh:git:file")
+        try:
+            r = subprocess.run([GIT, "ls-remote", "--", url, ref], capture_output=True, text=True,
+                               timeout=self.budget(), env=env, stdin=subprocess.DEVNULL,
+                               start_new_session=True)
+        except subprocess.TimeoutExpired:
+            if time.time() >= self.deadline - 1:
+                raise OutOfTime()
+            raise Fail("git ls-remote timed out")
+        except OSError as e:
+            raise Fail("git: %s" % e)
+        if r.returncode != 0:
+            raise Fail("git ls-remote failed")
+        rows = [ln.split("\t", 1) for ln in r.stdout.splitlines() if "\t" in ln]
+        rows = [(s.strip().lower(), n.strip()) for s, n in rows if SHA_RE.match(s.strip().lower())]
+        if not rows:
+            raise Fail("ref not found")
+        want = {ref, "refs/heads/" + ref, "refs/tags/" + ref + "^{}", "refs/tags/" + ref}
+        for s, n in rows:
+            if n in want:
+                return s
+        return rows[0][0]
+
+    def changed_files(self, repo, old, new):
+        """(paths, truncated) between two commits of a GitHub repo."""
+        key = (repo, old, new)
+        if key not in self.compares:
+            try:
+                self.compares[key] = self._compare(repo, old, new)
+            except Fail as e:
+                self.compares[key] = e
+        v = self.compares[key]
+        if isinstance(v, Exception):
+            raise v
+        return v
+
+    def _compare(self, repo, old, new):
+        if not REPO_RE.match(repo) or not SHA_RE.match(old) or not SHA_RE.match(new):
+            raise Fail("bad compare arguments")
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": "claude-plugin-updates"}
+        token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+        if token and API == DEFAULT_API:
+            headers["Authorization"] = "Bearer " + token
+        req = urllib.request.Request("%s/repos/%s/compare/%s...%s" % (API, repo, old, new), headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=self.budget()) as resp:
+                data = json.loads(resp.read().decode("utf-8", "replace"))
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            if time.time() >= self.deadline - 1:
+                raise OutOfTime()
+            raise Fail("compare: %s" % e)
+        data = as_dict(data)
+        if data.get("status") == "identical":
+            return [], False
+        files = data.get("files")
+        if not isinstance(files, list):
+            return [], True
+        paths = [f.get("filename", "") for f in files if isinstance(f, dict)]
+        # A rename also touches its old location.
+        paths += [f["previous_filename"] for f in files if isinstance(f, dict) and f.get("previous_filename")]
+        return paths, len(files) >= COMPARE_LIMIT
+
+
+class Plugins:
+    def __init__(self):
+        self.net = Net()
+        self.known = as_dict(load_json(os.path.join(PLUGIN_DIR, "known_marketplaces.json")))
+        self.catalogs = {}
+
+    def marketplace_dir(self, mk):
+        if not mk or "/" in mk or mk in (".", ".."):
+            return None
+        d = os.path.join(PLUGIN_DIR, "marketplaces", mk)
+        if os.path.isdir(d):
+            return d
+        loc = as_dict(self.known.get(mk)).get("installLocation")
+        return loc if isinstance(loc, str) and os.path.isdir(loc) else None
+
+    def catalog(self, mk):
+        """name -> catalog entry, or None when the marketplace folder is missing."""
+        if mk not in self.catalogs:
+            d = self.marketplace_dir(mk)
+            if d is None:
+                self.catalogs[mk] = None
+            else:
+                by_name = {}
+                data = as_dict(load_json(os.path.join(d, ".claude-plugin", "marketplace.json")))
+                plugins = data.get("plugins")
+                for p in plugins if isinstance(plugins, list) else []:
+                    if isinstance(p, dict) and isinstance(p.get("name"), str):
+                        by_name.setdefault(p["name"], p)
+                self.catalogs[mk] = by_name
+        return self.catalogs[mk]
+
+    def marketplace_repo(self, mk):
+        """(clone url, owner/name or None) of a marketplace's own repo, or (None, None)."""
+        src = as_dict(as_dict(self.known.get(mk)).get("source"))
+        repo, url = src.get("repo"), src.get("url")
+        if isinstance(repo, str) and REPO_RE.match(repo):
+            return repo_url(repo), repo
+        if isinstance(url, str) and url:
+            return url, github_repo(url)
+        return None, None
+
+    def git_source_url(self, src):
+        repo, url = src.get("repo"), src.get("url")
+        if isinstance(repo, str) and REPO_RE.match(repo):
+            return repo_url(repo)
+        if isinstance(url, str) and url:
+            return repo_url(url) if REPO_RE.match(url) else url
+        return None
+
+    def check(self, name, mk, sha, version):
+        """(state, latest) for one plugin; raises Fail / OutOfTime."""
+        cat = self.catalog(mk)
+        if cat is None:
+            return "error", ""
+        entry = cat.get(name)
+        if entry is None:
+            return "unknown", ""
+        src = entry.get("source")
+        verdict = None
+        if isinstance(src, dict):
+            if isinstance(src.get("sha"), str) and src["sha"].strip():
+                verdict = self.compare_sha(sha, src["sha"].strip())
+            else:
+                url = self.git_source_url(src)
+                ref = src.get("ref") if isinstance(src.get("ref"), str) and src.get("ref") else None
+                if url:
+                    verdict = self.compare_sha(sha, self.net.ls_remote(url, ref))
+        elif isinstance(src, str):
+            verdict = self.check_in_marketplace(mk, src, sha)
+        if verdict is None:
+            cat_version = entry.get("version")
+            if isinstance(cat_version, str) and cat_version and version:
+                return ("current" if cat_version == version else "available"), cat_version
+            return "unknown", ""
+        return verdict
+
+    @staticmethod
+    def compare_sha(have, latest):
+        latest = latest.lower()
+        if have and same_sha(have, latest):
+            return "current", latest[:12]
+        return "available", latest[:12]
+
+    def check_in_marketplace(self, mk, rel, sha):
+        url, repo = self.marketplace_repo(mk)
+        if not url or not repo:
+            return None
+        latest = self.net.ls_remote(url)
+        if not sha or not SHA_RE.match(sha.lower()):
+            return None
+        sha = sha.lower()
+        if same_sha(sha, latest):
+            return "current", latest[:12]
+        path = rel.strip()
+        while path.startswith("./"):
+            path = path[2:]
+        path = path.strip("/")
+        paths, truncated = self.net.changed_files(repo, sha, latest)
+        if truncated or not path or any(p == path or p.startswith(path + "/") for p in paths):
+            return "available", latest[:12]
+        return "current", latest[:12]
+
+
+def newest(entries):
+    items = [e for e in entries if isinstance(e, dict)] if isinstance(entries, list) else []
+    if not items:
+        return {}
+    return max(enumerate(items), key=lambda p: (str(p[1].get("lastUpdated") or ""), p[0]))[1]
+
+
+def read_cache():
+    return as_dict(load_json(CACHE_FILE))
+
+
+def write_cache(cache):
+    try:
+        os.makedirs(CFG, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=CFG, prefix="plugin-updates.json.")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(cache, f)
+        os.replace(tmp, CACHE_FILE)
+    except OSError:
+        pass
+
+
+def num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else 0
+
+
+def main():
+    installed = as_dict(as_dict(load_json(os.path.join(PLUGIN_DIR, "installed_plugins.json"))).get("plugins"))
+    old = read_cache()
+    cache = {}
+    out = {}
+    now = time.time()
+    limit = ttl()
+    plugins = Plugins()
+    for pid, entries in installed.items():
+        if not isinstance(pid, str):
+            continue
+        inst = newest(entries)
+        sha = inst.get("gitCommitSha") if isinstance(inst.get("gitCommitSha"), str) else ""
+        version = inst.get("version") if isinstance(inst.get("version"), str) else ""
+        key = sha or version
+        name, _, mk = pid.partition("@")
+        prev = as_dict(old.get(pid))
+        same_install = prev.get("for") == key and prev.get("state") in STATES
+        if same_install and now - max(num(prev.get("ts")), num(prev.get("tried"))) < limit:
+            cache[pid] = prev
+            out[pid] = {"state": prev["state"], "latest": str(prev.get("latest") or "")}
+            continue
+        good = same_install and prev["state"] in ("current", "available") and now - num(prev.get("ts")) < STALE_GOOD
+        try:
+            if not mk:
+                state, latest = "unknown", ""
+            else:
+                state, latest = plugins.check(name, mk, sha, version)
+        except (Fail, OutOfTime) as e:
+            if good:
+                cache[pid] = dict(prev, tried=now)
+                out[pid] = {"state": prev["state"], "latest": str(prev.get("latest") or "")}
+            elif isinstance(e, OutOfTime):
+                out[pid] = {"state": "unknown", "latest": ""}
+            else:
+                cache[pid] = {"for": key, "ts": now, "state": "error", "latest": ""}
+                out[pid] = {"state": "error", "latest": ""}
+            continue
+        except Exception:
+            out[pid] = {"state": "error", "latest": ""}
+            continue
+        cache[pid] = {"for": key, "ts": now, "state": state, "latest": latest}
+        out[pid] = {"state": state, "latest": latest}
+    if cache != old:
+        write_cache(cache)
+    return out
+
+
+if __name__ == "__main__":
+    try:
+        result = main()
+    except Exception:
+        result = {}
+    try:
+        sys.stdout.write(json.dumps(result) + "\n")
+    except Exception:
+        sys.stdout.write("{}\n")
+    sys.exit(0)

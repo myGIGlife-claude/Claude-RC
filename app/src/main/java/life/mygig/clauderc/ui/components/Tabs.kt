@@ -2,14 +2,18 @@ package life.mygig.clauderc.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
@@ -22,7 +26,7 @@ import androidx.compose.ui.unit.dp
 
 /** A pill-shaped tab switcher: one group of a long screen at a time. */
 @Composable
-fun PillTabs(labels: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+fun PillTabs(labels: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier, badges: Set<Int> = emptySet()) {
     Row(
         modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(24.dp)).padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -36,10 +40,13 @@ fun PillTabs(labels: List<String>, selected: Int, onSelect: (Int) -> Unit, modif
                 color = if (on) MaterialTheme.colorScheme.primary else Color.Transparent,
                 contentColor = if (on) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
             ) {
-                Text(
-                    label, Modifier.padding(vertical = 9.dp).fillMaxWidth(), textAlign = TextAlign.Center,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge,
-                )
+                Box {
+                    Text(
+                        label, Modifier.padding(vertical = 9.dp).fillMaxWidth(), textAlign = TextAlign.Center,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge,
+                    )
+                    if (i in badges) Box(Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 10.dp).size(8.dp).background(Health.WARN.color(), CircleShape))
+                }
             }
         }
     }
