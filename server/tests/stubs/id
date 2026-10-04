@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Test stub for id: `id -u` answers $STUB_ID_U when it is set (to play root); everything else is the real id.
+[[ "$1" == -u && $# -eq 1 && -n "${STUB_ID_U:-}" ]] && { echo "$STUB_ID_U"; exit 0; }
+exec "$(command -p -v id)" "$@"

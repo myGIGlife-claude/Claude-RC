@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Test stub for systemctl: never touches the real system. Calls are recorded in $STUB_STATE/systemctl-log
+# (with a nanosecond timestamp); `is-enabled` says "enabled" when $STUB_STATE/systemd-enabled exists.
+S="${STUB_STATE:-$HOME/.stub-state}"
+echo "$(date +%s%N) $*" >>"$S/systemctl-log"
+case "${1:-}" in
+  is-enabled) if [[ -e "$S/systemd-enabled" ]]; then echo enabled; exit 0; else echo disabled; exit 1; fi ;;
+esac
+exit 0

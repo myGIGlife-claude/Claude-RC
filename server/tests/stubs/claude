@@ -2,6 +2,7 @@
 # Test stub for Claude Code.
 S="${STUB_STATE:-$HOME/.stub-state}"; mkdir -p "$S"
 case "$1 ${2:-}" in
+  "auth logout") echo "$*" >>"$S/claude-logout-called"; exit 0 ;;   # migrate-signout-old must never get here
   "auth login")
     echo "Select login method:"
     echo " ❯ 1. Claude account with subscription"

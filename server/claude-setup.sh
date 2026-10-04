@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore).
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot).
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=34
+SCRIPT_API=35
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -2099,11 +2099,17 @@ sudo_askpass() {
   local dir="$1" real_sudo
   [[ -n "$2" ]] && real_sudo="$(command -v sudo)" || return 0
   printf '%s\n' "$2" >"$dir/pw"
-  printf '#!/bin/sh\ncat %q\n' "$dir/pw" >"$dir/askpass"
+  # "once" (a password test): the second prompt, after a wrong password, finds no file, so sudo gives up
+  # after one failed try (three would count as three failures for pam_faillock).
+  if [[ "${3:-}" == once ]]; then printf '#!/bin/sh\ncat %q && rm -f %q\n' "$dir/pw" "$dir/pw" >"$dir/askpass"
+  else printf '#!/bin/sh\ncat %q\n' "$dir/pw" >"$dir/askpass"; fi
+  chmod 700 "$dir/askpass"
+  chmod 600 "$dir/pw"
+  # (called again for the same dir: only the password and askpass change; a second wrapper would exec itself)
+  [[ ! -x "$dir/bin/sudo" ]] || return 0
   mkdir -p "$dir/bin"
   printf '#!/bin/sh\nexec %q -A "$@"\n' "$real_sudo" >"$dir/bin/sudo"
-  chmod 700 "$dir/askpass" "$dir/bin/sudo"
-  chmod 600 "$dir/pw"
+  chmod 700 "$dir/bin/sudo"
   export SUDO_ASKPASS="$dir/askpass" PATH="$dir/bin:$PATH"
 }
 
@@ -3213,6 +3219,387 @@ do_migrate_restore() {
   api_ok '{"started":true}'
 }
 
+# ======================================================================
+# Migrate, second half: sudo check, new user, verify, sign out, reboot (docs/migrate-design.md).
+# The sudo password is read from stdin and reaches sudo only through the askpass helper (a mode-600 file in a
+# private temp dir): never in argv, the environment or a log. Tests put stub sudo/adduser/systemctl/... on PATH.
+# ======================================================================
+MIGRATE_NAME_RE='^[a-z][a-z0-9_-]{0,30}$'
+MIGRATE_RESERVED_RE='^(root|daemon|bin|sys|sync|games|man|lp|mail|news|uucp|proxy|www-data|backup|list|irc|gnats|nobody|sshd|syslog|messagebus|operator|shutdown|halt|ftp|adm|sudo|wheel|docker|users|staff|postgres|mysql|redis|nginx|apache|tcpdump|polkitd|chrony|dnsmasq|avahi|tss|uuidd|lxd|landscape|pollinate|usbmux|systemd-.*)$'
+MIGRATE_HOME_RE='^/[A-Za-z0-9._/-]+$'
+MIGRATE_NOSUDO_RE='may not run sudo|not allowed to run sudo|not in the sudoers'
+MIGRATE_SUDO=""    # root | nopasswd | password_ok | password_needed | none (set by migrate_sudo_mode)
+MIGRATE_TMO=120    # seconds msudo / as_user allow one command
+MIG_LOG=""         # where migrate_step keeps a step's output
+MIG_STDIN=""       # a file migrate_step feeds the command on stdin
+
+# migrate_sudo_mode <dir> <password>: sets MIGRATE_SUDO. A given password is tested through the askpass helper (one try).
+migrate_sudo_mode() {
+  local dir="$1" pw="$2" out
+  if [[ "$(id -u)" == 0 ]]; then MIGRATE_SUDO=root; return 0; fi
+  command -v sudo >/dev/null 2>&1 || { MIGRATE_SUDO=none; return 0; }
+  if t 15 sudo -n true </dev/null >/dev/null 2>&1; then MIGRATE_SUDO=nopasswd; return 0; fi
+  out="$(t 15 sudo -n -l </dev/null 2>&1)"
+  if [[ "$out" =~ $MIGRATE_NOSUDO_RE ]]; then MIGRATE_SUDO=none; return 0; fi
+  MIGRATE_SUDO=password_needed
+  [[ -n "$pw" ]] || return 0
+  sudo_askpass "$dir" "$pw" once   # (puts a `sudo -A` wrapper first on PATH)
+  if out="$(t 30 sudo -k true </dev/null 2>&1)"; then MIGRATE_SUDO=password_ok
+  elif [[ "$out" =~ $MIGRATE_NOSUDO_RE ]]; then MIGRATE_SUDO=none; fi
+  return 0
+}
+
+# Stops the action unless sudo works (root, no password, or the password that was given); sets up the askpass for later calls.
+migrate_need_sudo() {   # migrate_need_sudo <dir> <password>
+  migrate_sudo_mode "$1" "$2"
+  case "$MIGRATE_SUDO" in
+    root | nopasswd) ;;
+    password_ok) sudo_askpass "$1" "$2" ;;
+    password_needed) api_err sudo_password "The sudo password is missing or wrong." ;;
+    *) api_err sudo_none "This user can't use sudo on this server." ;;
+  esac
+}
+
+# A command as root: bare for root, `sudo -n` when no password is needed, else sudo through the askpass wrapper.
+msudo() {
+  case "$MIGRATE_SUDO" in
+    root) t "$MIGRATE_TMO" "$@" ;;
+    nopasswd) t "$MIGRATE_TMO" sudo -n "$@" ;;
+    *) t "$MIGRATE_TMO" sudo "$@" ;;
+  esac
+}
+
+# as_user <name> <command...>: the command as that user, with their HOME.
+as_user() {
+  local u="$1"
+  shift
+  case "$MIGRATE_SUDO" in
+    root)
+      if command -v sudo >/dev/null 2>&1; then t "$MIGRATE_TMO" sudo -u "$u" -H "$@"
+      else t "$MIGRATE_TMO" runuser -u "$u" -- env "HOME=$(getent passwd "$u" | cut -d: -f6)" "$@"; fi ;;
+    nopasswd) t "$MIGRATE_TMO" sudo -n -u "$u" -H "$@" ;;
+    *) t "$MIGRATE_TMO" sudo -u "$u" -H "$@" ;;
+  esac
+}
+
+# migrate_step <id> <what> <command...>: output to $MIG_LOG; a failure ends the action and names the step.
+migrate_step() {
+  local id="$1" what="$2"
+  shift 2
+  "$@" >"$MIG_LOG" 2>&1 <"${MIG_STDIN:-/dev/null}" ||
+    api_err internal "Couldn't $what: $(migrate_last_lines "$MIG_LOG")" "$(jq -cn --arg s "$id" '{step:$s}')"
+}
+
+# Is claude-autostart's boot service enabled (for user $1)? The unit dir override is for the tests.
+migrate_autostart_enabled() {
+  local unit="${CLAUDERC_UNIT_DIR:-/etc/systemd/system}/claude-sessions.service"
+  command -v systemctl >/dev/null 2>&1 || return 1
+  [[ "$(t 10 systemctl is-enabled claude-sessions.service 2>/dev/null </dev/null)" == enabled ]] || return 1
+  [[ ! -r "$unit" ]] || grep -qx "User=$1" "$unit"
+}
+
+# migrate-sudo-check: how can this SSH user get root? stdin line 1 (optional) = a sudo password to test.
+do_migrate_sudo_check() {
+  [[ $# -eq 0 ]] || bad_args "migrate-sudo-check takes no arguments (an optional password on stdin)"
+  local pw dir
+  pw="$(read_secret_line)"
+  exec 0</dev/null
+  umask 077
+  dir="$(mktemp -d)"
+  trap 'rc=$?; rm -rf "$dir"; (exit $rc); on_exit' EXIT
+  migrate_sudo_mode "$dir" "$pw"
+  unset pw
+  api_ok "$(jq -cn --arg m "$MIGRATE_SUDO" '{mode:$m}')"
+}
+
+# migrate-create-user <name>: stdin line 1 = sudo password (empty for root / no-password sudo), line 2 = the phone's public key.
+# Every step can be repeated: a user an earlier try created (marker file, or nothing but the skeleton files) is reused.
+do_migrate_create_user() {
+  [[ $# -eq 1 ]] || bad_args "usage: migrate-create-user <name> (sudo password, then the phone key, on stdin)"
+  [[ "$ALLOW_RUN" == 1 ]] ||
+    api_err run_disabled "Running commands from the phone is off on this server. To allow it, run this on the server: echo 'ALLOW_RUN=1' >> ~/.config/claude-launcher/config"
+  local name="$1" pw key dir home pwent uid listing blob line url inst akscript pending=true
+  pw="$(read_secret_line)"; key="$(read_secret_line)"
+  exec 0</dev/null
+  umask 077
+  [[ "$name" =~ $MIGRATE_NAME_RE && ! "$name" =~ $MIGRATE_RESERVED_RE ]] ||
+    api_err invalid_name "That isn't a user name I can create (lower case letters, digits, - and _; not a system name)."
+  [[ "$key" =~ $MIGRATE_PUBKEY_RE && ${#key} -le 300 ]] || api_err invalid_name "That isn't a public key line (ssh-ed25519 AAAA…)."
+  [[ -z "${CLAUDERC_BASE:-}" || "$CLAUDERC_BASE" =~ ^[A-Za-z0-9:/._@%+=~-]{1,300}$ ]] || api_err internal "CLAUDERC_BASE has characters I won't pass on."
+  [[ "$CLAUDERC_RAW" =~ ^[A-Za-z0-9:/._@%+=~-]{1,300}$ && "$CLAUDERC_REPO" =~ ^[A-Za-z0-9._/-]{1,100}$ ]] ||
+    api_err internal "CLAUDERC_RAW or CLAUDERC_REPO has characters I won't pass on."
+  dir="$(mktemp -d)"
+  trap 'rc=$?; rm -rf "$dir"; (exit $rc); on_exit' EXIT
+  MIG_LOG="$dir/log"
+  migrate_need_sudo "$dir" "$pw"
+  unset pw
+
+  pwent="$(getent passwd "$name" 2>/dev/null || true)"
+  if [[ -n "$pwent" ]]; then
+    # Already there: only a user an earlier try created (and nothing else) is reused.
+    home="$(cut -d: -f6 <<<"$pwent")"; uid="$(cut -d: -f3 <<<"$pwent")"
+    [[ "$uid" =~ ^[0-9]+$ && "$uid" -ge 1000 && "$home" =~ $MIGRATE_HOME_RE ]] || api_err user_exists "A user named $name already exists on this server."
+    listing="$(msudo ls -A -- "$home" 2>/dev/null)" || api_err user_exists "A user named $name already exists on this server."
+    if [[ -n "$listing" ]] && grep -qvxE '\.bash_logout|\.bashrc|\.profile|\.clauderc-migrate-user' <<<"$listing" &&
+      ! grep -qx '\.clauderc-migrate-user' <<<"$listing"; then
+      api_err user_exists "A user named $name already exists on this server (and has files)."
+    fi
+  else
+    ! getent group "$name" >/dev/null 2>&1 || api_err user_exists "A group named $name already exists on this server."
+    if command -v adduser >/dev/null 2>&1; then
+      migrate_step adduser "create the user" msudo adduser --disabled-password --gecos "" "$name"
+    else
+      migrate_step adduser "create the user" msudo useradd -m -s /bin/bash "$name"
+    fi
+    pwent="$(getent passwd "$name" 2>/dev/null || true)"
+    home="$(cut -d: -f6 <<<"$pwent")"
+    [[ "$home" =~ $MIGRATE_HOME_RE ]] || api_err internal "The user was created but I can't find the home folder." '{"step":"adduser"}'
+  fi
+  if getent group docker >/dev/null 2>&1; then
+    migrate_step docker "add $name to the docker group" msudo usermod -aG docker "$name"
+  fi
+  migrate_step home "find the home folder" msudo test -d "$home"
+  migrate_step marker "write the marker file" as_user "$name" touch "$home/.clauderc-migrate-user"
+
+  # The phone key, locked to the runner exactly like install-launcher-key.sh does it (restrict + the forced command).
+  # (The line goes in on stdin; a line with the same key is replaced.)
+  blob="$(awk '{print $2}' <<<"$key")"
+  line="restrict,command=\"$home/bin/claude-launcher-api\" ssh-ed25519 $blob clauderc"
+  printf '%s\n' "$line" >"$dir/ak"
+  read -r -d '' akscript <<'EOS' || true
+umask 077
+ak="$HOME/.ssh/authorized_keys"
+mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh" || exit 1
+IFS= read -r line || exit 1
+blob="${line##* ssh-ed25519 }"; blob="${blob%% *}"
+tmp="$(mktemp "$HOME/.ssh/authorized_keys.XXXXXX")" || exit 1
+{ awk -v b="$blob" '{ for (i = 1; i <= NF; i++) if ($i == b) next } 1' "$ak" 2>/dev/null; printf '%s\n' "$line"; } >"$tmp" &&
+  chmod 600 "$tmp" && mv -f "$tmp" "$ak" || { rm -f "$tmp"; exit 1; }
+EOS
+  MIG_STDIN="$dir/ak" migrate_step authorize "authorize the phone key" as_user "$name" bash -c "$akscript"
+
+  # Claude Code (the official installer), then the cLaudeRC scripts without a key.
+  if ! as_user "$name" test -x "$home/.local/bin/claude" >/dev/null 2>&1; then
+    MIGRATE_TMO=300 migrate_step claude_install "install Claude Code" as_user "$name" bash -lc 'set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash'
+  fi
+  if [[ -n "${CLAUDERC_BASE:-}" ]]; then url="$CLAUDERC_BASE/install.sh"; else url="$CLAUDERC_RAW/$CLAUDERC_REPO/main/server/install.sh"; fi
+  inst="set -o pipefail; export CLAUDERC_RAW=$(printf %q "$CLAUDERC_RAW");"
+  [[ -z "${CLAUDERC_BASE:-}" ]] || inst+=" export CLAUDERC_BASE=$(printf %q "$CLAUDERC_BASE");"
+  inst+=" curl -fsSL $(printf %q "$url") | bash"
+  # (its own sudo step for autostart can't ask anything: no terminal and stdin closed, so it declines)
+  MIGRATE_TMO=300 migrate_step installer "install the cLaudeRC scripts" as_user "$name" bash -lc "$inst"
+  # claude-autostart needs the user's own sudo and this user has none: it is left for later.
+  ! migrate_autostart_enabled "$name" || pending=false
+  api_ok "$(jq -cn --arg h "$home" --argjson p "$pending" '{created:true, home:$h, autostart_pending:$p}')"
+}
+
+# ---- migrate-verify
+
+# migrate_vitem <id> <ok true|false> <detail>: adds a checklist item to MIGRATE_ITEMS.
+MIGRATE_ITEMS="[]"
+migrate_vitem() {
+  MIGRATE_ITEMS="$(jq -c --arg id "$1" --argjson ok "$2" --arg d "$3" '. + [{id:$id, ok:$ok, detail:$d}]' <<<"$MIGRATE_ITEMS")"
+}
+
+migrate_names() {   # "a, b, c (+2 more)": the first 8 of the arguments
+  local out="" i=0 x
+  for x; do
+    ((i++ < 8)) && out+="${out:+, }$x"
+  done
+  ((i > 8)) && out+=" (+$((i - 8)) more)"
+  printf '%s' "$out"
+}
+
+# The folder a manifest repo has on this server: its path relative to $HOME (where claude-backup restores it), else under the projects folder.
+migrate_repo_path() {
+  local p="$1" d="$2"
+  if [[ "$p" =~ ^[A-Za-z0-9._][A-Za-z0-9._/-]*$ && "/$p/" != *"/../"* && -d "$HOME/$p" ]]; then printf '%s' "$HOME/$p"; return 0; fi
+  if [[ "$d" =~ $PROJECT_RE && "$d" != . && "$d" != .. && -d "$PROJECTS_DIR/$d" ]]; then printf '%s' "$PROJECTS_DIR/$d"; return 0; fi
+  return 1
+}
+
+# migrate-verify [manifest file]: the checklist at the end of the wizard. Read-only, except that it removes the migrate key.
+do_migrate_verify() {
+  [[ $# -le 1 ]] || bad_args "usage: migrate-verify [manifest file name]"
+  local mf="" f m w miss=() rest=() cfg_bad=() out v ak tmp
+  if [[ $# -eq 1 ]]; then
+    [[ "$1" =~ ^[A-Za-z0-9._-]{1,100}$ && "$1" != .* ]] || bad_args "That isn't a manifest file name."
+    mf="$MIGRATE_STATE/$1"
+    [[ -f "$mf" && ! -L "$mf" ]] || api_err invalid_name "There is no manifest named $1."
+    jq -e 'type == "object"' "$mf" >/dev/null 2>&1 || api_err invalid_name "The manifest $1 can't be read."
+  fi
+  MIGRATE_ITEMS="[]"
+
+  # scripts and API
+  for f in "$HOME/claude-setup.sh" "$HOME/bin/claude-launcher-api" "$HOME/.local/bin/claude-backup" "$HOME/.local/bin/clauderc-team" "$HOME/.local/bin/claude-push"; do
+    [[ -x "$f" ]] || miss+=("${f#"$HOME"/}")
+  done
+  if ((${#miss[@]} == 0)); then migrate_vitem scripts_installed true "all in place"
+  else migrate_vitem scripts_installed false "missing: $(migrate_names "${miss[@]}"). Run Update now."; fi
+  if ((SCRIPT_API >= 35)); then migrate_vitem script_api_current true "script API $SCRIPT_API"
+  else migrate_vitem script_api_current false "script API $SCRIPT_API is older than 35: run Update now."; fi
+
+  # folders and their modes
+  if [[ -d "$HOME/.claude" && "$(stat -c %a "$HOME/.claude" 2>/dev/null)" == 700 ]]; then migrate_vitem claude_home true "the .claude folder is there (mode 700)"
+  elif [[ -d "$HOME/.claude" ]]; then migrate_vitem claude_home false "the .claude folder has mode $(stat -c %a "$HOME/.claude" 2>/dev/null), it should be 700"
+  else migrate_vitem claude_home false "the .claude folder is missing"; fi
+  if [[ ! -d "$LAUNCHER_CONFIG_DIR" ]]; then cfg_bad+=("$LAUNCHER_CONFIG_DIR is missing")
+  else
+    [[ "$(stat -c %a "$LAUNCHER_CONFIG_DIR" 2>/dev/null)" == 700 ]] || cfg_bad+=("the launcher folder has mode $(stat -c %a "$LAUNCHER_CONFIG_DIR" 2>/dev/null), it should be 700")
+    [[ ! -e "$SERVICES_ENV" || "$(stat -c %a "$SERVICES_ENV" 2>/dev/null)" == 600 ]] || cfg_bad+=("the env file has mode $(stat -c %a "$SERVICES_ENV" 2>/dev/null), it should be 600")
+  fi
+  if ((${#cfg_bad[@]} == 0)); then migrate_vitem launcher_config true "present, modes are right"
+  else migrate_vitem launcher_config false "$(printf '%s; ' "${cfg_bad[@]}" | sed 's/; $//')"; fi
+
+  # what the manifest says should be here
+  if [[ -n "$mf" ]]; then
+    miss=()
+    while IFS= read -r w; do
+      [[ "$w" =~ $WORKER_RE && -d "$WORKERS_DIR/$w" ]] || miss+=("$w")
+    done < <(jq -r '(.claude_logins.workers // [])[]? | strings' "$mf")
+    if ((${#miss[@]} == 0)); then migrate_vitem workers true "all worker folders are there"
+    else migrate_vitem workers false "missing worker folders: $(migrate_names "${miss[@]}")"; fi
+
+    local present=() broken=() rdir rpath rstate p
+    miss=()
+    while IFS=$'\x1f' read -r rdir rpath rstate; do
+      if p="$(migrate_repo_path "$rpath" "$rdir")"; then
+        present+=("$p")
+        if [[ "$rstate" == clean ]] && ! git -C "$p" rev-parse HEAD >/dev/null 2>&1; then broken+=("${rdir:-$rpath}"); fi
+      else
+        miss+=("${rdir:-$rpath}")
+      fi
+    done < <(jq -r '(.repos // [])[]? | select(type == "object") | [(.dir // ""), (.path // ""), (.state // "")] | join("\u001f")' "$mf")
+    if ((${#miss[@]} == 0 && ${#broken[@]} == 0)); then migrate_vitem repos true "${#present[@]} repo(s) present"
+    else
+      out=""
+      ((${#miss[@]} == 0)) || out="missing: $(migrate_names "${miss[@]}")"
+      ((${#broken[@]} == 0)) || out+="${out:+; }no commits (clone incomplete): $(migrate_names "${broken[@]}")"
+      migrate_vitem repos false "$out"
+    fi
+
+    # remotes: the lookups run at once, 15 s at most, for the first 12 repos
+    local td i=0 bad=()
+    td="$(mktemp -d)"
+    for p in "${present[@]:0:12}"; do
+      f="$(git -C "$p" remote 2>/dev/null | grep -x origin || git -C "$p" remote 2>/dev/null | head -n 1)"
+      [[ -n "$f" ]] || continue
+      printf '%s\n' "$(basename -- "$p")" >"$td/$i.name"
+      ( t 15 git -C "$p" ls-remote --heads "$f" </dev/null >/dev/null 2>&1; echo $? >"$td/$i.rc" ) 3>&- 9>&- &
+      i=$((i + 1))
+    done
+    wait
+    for ((m = 0; m < i; m++)); do
+      [[ "$(cat "$td/$m.rc" 2>/dev/null)" == 0 ]] || bad+=("$(cat "$td/$m.name")")
+    done
+    rm -rf "$td"
+    if ((i == 0)); then migrate_vitem remotes true "not checked"
+    elif ((${#bad[@]} == 0)); then migrate_vitem remotes true "$i remote(s) reachable"
+    else migrate_vitem remotes false "can't reach the remote of: $(migrate_names "${bad[@]}")"; fi
+  fi
+
+  # tools
+  if ! command -v claude >/dev/null 2>&1; then migrate_vitem claude_runs false "claude isn't installed for this user"
+  elif v="$(t 20 claude --version </dev/null 2>&1)"; then migrate_vitem claude_runs true "$(head -n 1 <<<"$v" | cut -c1-80)"
+  else migrate_vitem claude_runs false "claude --version failed"; fi
+  if ! command -v gh >/dev/null 2>&1; then migrate_vitem gh false "gh isn't installed for this user"
+  elif t 20 gh auth status </dev/null >/dev/null 2>&1; then migrate_vitem gh true "signed in to GitHub"
+  else migrate_vitem gh false "gh isn't signed in to GitHub"; fi
+  if migrate_autostart_enabled "$(id -un)"; then migrate_vitem autostart true "sessions come back after a reboot"
+  else migrate_vitem autostart false "claude-autostart isn't set up (no boot service): run 'claude-autostart install' on the server as this user; it asks for sudo"; fi
+
+  # sign-ins the user still has to do (information only)
+  if [[ -n "$mf" ]]; then
+    rest=()
+    [[ "$(jq -r '.claude_logins.main // false' "$mf")" != true ]] || creds_ok "$HOME/.claude/.credentials.json" || rest+=(main)
+    while IFS= read -r w; do
+      [[ "$w" =~ $WORKER_RE ]] || continue
+      creds_ok "$WORKERS_DIR/$w/home/.credentials.json" || rest+=("$w")
+    done < <(jq -r '(.claude_logins.workers // [])[]? | strings' "$mf")
+    if ((${#rest[@]} == 0)); then migrate_vitem pending_logins true "nothing to sign in"
+    else migrate_vitem pending_logins true "still to sign in: $(migrate_names "${rest[@]}")"; fi
+  fi
+
+  # the transfer key must not stay authorized
+  ak="$HOME/.ssh/authorized_keys"
+  if [[ -f "$ak" ]] && awk '$NF == "clauderc-migrate" { f = 1 } END { exit !f }' "$ak"; then
+    tmp="$(mktemp "$HOME/.ssh/authorized_keys.XXXXXX")"
+    if [[ -n "$tmp" ]] && awk '$NF != "clauderc-migrate"' "$ak" >"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$ak"; then migrate_vitem migrate_key_removed true removed
+    else rm -f "$tmp"; migrate_vitem migrate_key_removed false "couldn't remove the transfer key from ~/.ssh/authorized_keys"; fi
+  else
+    migrate_vitem migrate_key_removed true "no transfer key found"
+  fi
+  api_ok "$(jq -c '{items:., ok:(all(.[]; .ok))}' <<<"$MIGRATE_ITEMS")"
+}
+
+# ---- migrate-signout-old <claude|workers|github|autostart...>: local files only; nothing is revoked on Anthropic's or GitHub's side.
+do_migrate_signout_old() {
+  [[ $# -ge 1 && $# -le 4 ]] || bad_args "usage: migrate-signout-old <claude|workers|github|autostart>..."
+  local item seen=" " f n done_=() names=() list="$AUTOSTART_LIST"
+  for item in "$@"; do
+    [[ "$item" =~ ^(claude|workers|github|autostart)$ && "$seen" != *" $item "* ]] || bad_args "Each of claude, workers, github, autostart at most once."
+    seen+="$item "
+  done
+  for item in "$@"; do
+    case "$item" in
+      claude)   # only the local token file (`claude auth logout` would revoke the grant)
+        if [[ -e "$HOME/.claude/.credentials.json" ]]; then
+          rm -f "$HOME/.claude/.credentials.json" || api_err internal "Couldn't delete ~/.claude/.credentials.json."
+          done_+=(claude)
+        fi ;;
+      workers)
+        n=0
+        for f in "$WORKERS_DIR"/*/home/.credentials.json; do
+          [[ -e "$f" ]] || continue
+          rm -f "$f" || api_err internal "Couldn't delete $f."
+          n=$((n + 1))
+        done
+        ((n == 0)) || done_+=(workers) ;;
+      github)
+        if command -v gh >/dev/null 2>&1 && t 20 gh auth status </dev/null >/dev/null 2>&1; then
+          t 30 gh auth logout --hostname github.com </dev/null >/dev/null 2>&1 || api_err internal "gh couldn't sign out of GitHub."
+          done_+=(github)
+        fi ;;
+      autostart)
+        # Stop the sessions (the saved list and any running Claude session), then set the saved list aside so a restore does nothing.
+        while IFS= read -r n; do names+=("$n"); done < <({ awk -F'\t' 'NF {print $1}' "$list" 2>/dev/null; sessions_list_json | jq -r '.[].name'; } | sort -u)
+        for n in "${names[@]}"; do tmux kill-session -t "=$n" 2>/dev/null || true; done
+        n=0
+        if [[ -e "$list" ]]; then
+          mv -f "$list" "$list.migrated" || api_err internal "Couldn't set the saved session list aside."
+          n=1
+        fi
+        if [[ -e "$MIGRATE_CFG" ]]; then rm -rf -- "${MIGRATE_CFG:?}"; n=1; fi
+        if ((n == 1 || ${#names[@]} > 0)); then done_+=(autostart); fi ;;
+    esac
+  done
+  api_ok "$(jq -cn '{done:$ARGS.positional}' --args "${done_[@]}")"
+}
+
+# ---- migrate-reboot: stdin line 1 = sudo password. The answer goes out first; the reboot follows a few seconds later from a detached job.
+do_migrate_reboot() {
+  [[ $# -eq 0 ]] || bad_args "migrate-reboot takes no arguments (the sudo password on stdin)"
+  [[ "$ALLOW_RUN" == 1 ]] ||
+    api_err run_disabled "Running commands from the phone is off on this server. To allow it, run this on the server: echo 'ALLOW_RUN=1' >> ~/.config/claude-launcher/config"
+  local pw dir delay="${CLAUDERC_REBOOT_DELAY:-5}"
+  pw="$(read_secret_line)"
+  exec 0</dev/null
+  umask 077
+  [[ "$delay" =~ ^[0-9]{1,3}$ ]] || delay=5
+  dir="$(mktemp -d)"
+  trap 'rc=$?; rm -rf "$dir"; (exit $rc); on_exit' EXIT
+  migrate_need_sudo "$dir" "$pw"
+  unset pw
+  # From here the detached job owns $dir (it holds the password file) and removes it after the reboot call.
+  trap on_exit EXIT
+  setsid bash -c '
+    sleep "$2"
+    case "$3" in root) c=() ;; nopasswd) c=(sudo -n) ;; *) c=(sudo) ;; esac
+    if command -v systemctl >/dev/null 2>&1; then "${c[@]}" systemctl reboot; else "${c[@]}" reboot; fi
+    rm -rf "$1"' _ "$dir" "$delay" "$MIGRATE_SUDO" </dev/null >/dev/null 2>&1 3>&- 8>&- 9>&- &
+  api_ok '{"rebooting":true}'
+}
+
 api_main() {
   # fd 3 = the one JSON object; everything else goes to stderr.
   exec 3>&1 1>&2
@@ -3227,7 +3614,7 @@ api_main() {
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | login-apple | youtube-login-start | \
       chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-login-code | cluster-assign | \
-      migrate-authorize | migrate-send | migrate-restore) ;;  # these read stdin
+      migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -3298,6 +3685,11 @@ api_main() {
     migrate-passphrase)  do_migrate_passphrase "$@" ;;
     migrate-status)      do_migrate_status "$@" ;;
     migrate-restore)     do_migrate_restore "$@" ;;
+    migrate-sudo-check)  do_migrate_sudo_check "$@" ;;
+    migrate-create-user) do_migrate_create_user "$@" ;;
+    migrate-verify)      do_migrate_verify "$@" ;;
+    migrate-signout-old) do_migrate_signout_old "$@" ;;
+    migrate-reboot)      do_migrate_reboot "$@" ;;
     disconnect)         do_disconnect "$@" ;;
     chat-pin-status)     do_chat_pin_status "$@" ;;
     chat-pin-set)        do_chat_pin_set "$@" ;;

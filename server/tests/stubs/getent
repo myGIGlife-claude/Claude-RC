@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Test stub for getent: users made by the adduser stub live in $STUB_STATE/users/NAME (their home is
+# $STUB_STATE/home/NAME); `getent group docker` says yes only when $STUB_STATE/has-docker-group exists.
+# Everything else is the real getent.
+S="${STUB_STATE:-$HOME/.stub-state}"
+case "$1 ${2:-}" in
+  "passwd "?*)
+    if [[ -e "$S/users/$2" ]]; then echo "$2:x:$(cat "$S/users/$2"):$(cat "$S/users/$2")::$S/home/$2:/bin/bash"; exit 0; fi ;;
+  "group docker")
+    [[ -e "$S/has-docker-group" ]] && { echo "docker:x:998:"; exit 0; }
+    exit 2 ;;
+  "group "?*)
+    [[ -e "$S/groups/$2" ]] && { echo "$2:x:1500:"; exit 0; } ;;
+esac
+exec "$(command -p -v getent)" "$@"
