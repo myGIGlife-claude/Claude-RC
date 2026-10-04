@@ -5,7 +5,7 @@
 #   curl -fsSL …/install.sh | bash -s -- 'ssh-ed25519 AAAA… clauderc'   # also authorize the phone
 #
 # Puts claude-setup.sh in ~/, claude-launcher-api and install-launcher-key.sh in
-# ~/bin/, youtube-upload in ~/.local/bin, keeps a backup of a changed ~/claude-setup.sh, sets up claude-autostart
+# ~/bin/, youtube-upload and claude-backup (encrypted backup for moving servers) in ~/.local/bin, keeps a backup of a changed ~/claude-setup.sh, sets up claude-autostart
 # (saves running sessions, restores them at boot; asks for sudo once) if it isn't
 # installed yet, authorizes the key if given, and prints what to enter in the app.
 # Safe to run again to update.
@@ -32,7 +32,7 @@ main() {
   for f in jq tmux git flock curl; do command -v "$f" >/dev/null || missing+=("$f"); done
   ((${#missing[@]} == 0)) || echo "Note: install these first: ${missing[*]} (e.g. sudo apt install ${missing[*]})" >&2
 
-  for f in claude-setup.sh claude-launcher-api install-launcher-key.sh claude-autostart.sh youtube-upload clauderc-team claude-push claude-plugin-updates; do
+  for f in claude-setup.sh claude-launcher-api install-launcher-key.sh claude-autostart.sh youtube-upload clauderc-team claude-push claude-plugin-updates claude-backup; do
     curl -fsSL "$base/$f" -o "$tmp/$f"
   done
 
@@ -54,6 +54,7 @@ main() {
   put "$tmp/clauderc-team" "$HOME/.local/bin/clauderc-team"
   put "$tmp/claude-push" "$HOME/.local/bin/claude-push"
   put "$tmp/claude-plugin-updates" "$HOME/.local/bin/claude-plugin-updates"
+  put "$tmp/claude-backup" "$HOME/.local/bin/claude-backup"
   if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
     printf '%s\n' "$sha" >"$HOME/.config/claude-launcher/installed-commit"
   fi

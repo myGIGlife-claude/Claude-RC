@@ -29,6 +29,7 @@ captures/
 __pycache__/
 *.pyc
 /uploads/
+backups/
 .superpowers/
 
 # iOS

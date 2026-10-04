@@ -129,6 +129,9 @@ session_dir() {
   printf '%s' "$d"
 }
 
+# A credentials file that has a token (a logged-out Claude leaves `{"claudeAiOauth":{}}` behind, which must not count as signed in).
+creds_ok() { jq -e '(.claudeAiOauth.accessToken // empty) | strings | length > 0' "$1" >/dev/null 2>&1; }
+
 claude_logged_in() { [[ -s "${LOGIN_CONFIG_DIR:-$HOME/.claude}/.credentials.json" ]]; }
 
 # Prints missing scopes, space separated. admin:org / write:org cover read:org.
@@ -1334,7 +1337,7 @@ do_worker_list() {
   for d in "$WORKERS_DIR"/*/; do
     [[ -f "$d/meta.json" ]] || continue
     n="$(basename "$d")"; signed=false
-    [[ -s "$d/home/.credentials.json" ]] && signed=true
+    creds_ok "$d/home/.credentials.json" && signed=true
     out+="$(jq -c --arg n "$n" --argjson s "$signed" '{name:$n, role:(.role // ""), mode:(.mode // "acceptEdits"), signed_in:$s}' "$d/meta.json")"$'\n'
   done
   api_ok "$(printf '%s' "$out" | jq -sc '{workers:.}')"
@@ -1370,7 +1373,7 @@ token_usage() {
 cluster_account() {
   local name="$1" dir="$2" cj="$3" role="$4" mode="$5" cred="$2/.credentials.json"
   local email="" plan="" exp=0 tok="" raw="" usage=null uerr=null signed=false
-  if [[ -s "$cred" ]]; then
+  if creds_ok "$cred"; then
     signed=true
     plan="$(jq -r '.claudeAiOauth.subscriptionType // empty' "$cred" 2>/dev/null || true)"
     exp="$(jq -r '.claudeAiOauth.expiresAt // 0' "$cred" 2>/dev/null || echo 0)"
@@ -1518,7 +1521,7 @@ do_cluster_session() {
   for d in "$WORKERS_DIR"/*/; do
     [[ -f "$d/meta.json" ]] || continue
     n="$(basename "$d")"; signed=false
-    [[ -s "$d/home/.credentials.json" ]] && signed=true
+    creds_ok "$d/home/.credentials.json" && signed=true
     out+="$(jq -c --arg n "$n" --argjson s "$signed" --argjson a "$att" \
       '{name:$n, signed_in:$s, attached:($a | has($n)), role:((try $a[$n].role catch null) // .role // ""), mode:((try $a[$n].mode catch null) // .mode // "acceptEdits")}' "$d/meta.json")"$'\n'
   done

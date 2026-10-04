@@ -1,0 +1,689 @@
+#!/usr/bin/env bash
+# claude-backup — one encrypted file with everything a cLaudeRC server user needs on a new server.
+#
+#   claude-backup export [--out FILE] [--slim] [--projects] [--docker] [--pass-file F]
+#   claude-backup import FILE [--pass-file F] [--dry-run] [--clone] [--from USER@HOST]
+#   claude-backup list FILE [--pass-file F]
+#
+# Run `claude-backup --help` for the details. The archive is
+# tar | gzip | gpg (AES256, symmetric): no big temp files, passphrase only via
+# files or the terminal, never on a command line.
+
+set -euo pipefail
+umask 077
+
+TMP="" PART="" PASSFILE="" GEN_PASS=""
+
+usage() {
+  cat <<'EOF'
+claude-backup — encrypted backup and restore of a cLaudeRC server user's setup.
+
+  claude-backup export [--out FILE] [--slim] [--projects] [--docker] [--pass-file F]
+  claude-backup import FILE [--pass-file F] [--dry-run] [--clone] [--from USER@HOST]
+  claude-backup list FILE [--pass-file F]
+  claude-backup --help
+
+export   Writes ONE encrypted file (default ~/backups/clauderc-backup-<host>-<time>.tar.gz.gpg,
+         folder mode 700, file mode 600): Claude settings, logins, skills, memory and chat history,
+         cLaudeRC config (keys, workers' logins, env), SSH/git/GitHub/AWS/... credentials, helper
+         scripts, and a manifest.json (what was found on this server, no secret values).
+         Work that exists only here is rescued: every git repo directly under the projects folder
+         (PROJECTS_DIR in ~/.config/claude-launcher/config, default ~/projects; override with
+         CLAUDE_BACKUP_PROJECTS=dir1:dir2) that has unpushed commits, uncommitted or untracked
+         changes, no upstream branch or no remote is stored with its .git (files that .gitignore
+         ignores are left out). A repo bigger than 500 MB (CLAUDE_BACKUP_RESCUE_MAX_MB) is skipped
+         and reported. Clean, fully pushed repos are not stored: import --clone clones them again.
+   --out FILE      where to write (an existing file is never overwritten)
+   --slim          leave out plugin caches and marketplaces (Claude downloads them again)
+   --projects      store ALL repos and non-git folders under the projects folder
+                   (non-git folders without node_modules, build, .gradle, target, .cache, __pycache__)
+   --docker        also store every named docker volume (needs docker access; stop databases first
+                   for a consistent copy; needs temporary space in the output folder for the
+                   compressed volumes)
+   --pass-file F   passphrase from file F (or env CLAUDE_BACKUP_PASS_FILE). Without one a
+                   passphrase like K7QD-M2XW-... is generated and shown ONCE at the end:
+                   write it down, it is not saved anywhere.
+
+import   Restores into $HOME on the new server. The passphrase comes from --pass-file, env
+         CLAUDE_BACKUP_PASS_FILE or a prompt (no echo). The file is fully read once before
+         anything is written, so a wrong passphrase or a damaged file changes nothing.
+         Existing files are overwritten, but every path about to be overwritten is first copied
+         to ~/backups/pre-restore-<time>/. Never uses sudo, never touches systemd, never starts
+         anything; prints what is still to do.
+   FILE            local path (with --from: path on the old server)
+   --from U@H      first fetch FILE from U@H with scp (key login, no password prompt) into ~/backups.
+                   U@H:PATH also works instead of FILE.
+   --dry-run       list what would be restored and show the manifest summary; writes nothing
+   --clone         git clone every clean, fully pushed repo of the manifest that does not exist yet
+   (docker volumes in the archive are restored into new volumes; an existing non-empty volume is
+   never overwritten)
+
+list     Prints the manifest of FILE (the first member; no full read).
+
+The file contains every secret of this server (encrypted). Delete it after the move.
+EOF
+}
+
+die() { echo "claude-backup: $*" >&2; exit 1; }
+warn() { echo "claude-backup: warning: $*" >&2; }
+bad_usage() { echo "claude-backup: $*" >&2; usage >&2; exit 2; }
+
+cleanup() {
+  local rc=$?
+  [[ -z "$PART" ]] || rm -f -- "$PART"
+  [[ -z "$TMP" ]] || rm -rf -- "$TMP"
+  exit "$rc"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+need() { local t; for t in "$@"; do command -v "$t" >/dev/null || die "$t is required (e.g. sudo apt install $t)"; done; }
+
+abs() { case "$1" in /*) printf '%s\n' "$1" ;; *) printf '%s\n' "$PWD/$1" ;; esac; }
+
+# Relative path inside $HOME, no ".." parts: used for every path read from an archive.
+safe_rel() {
+  case "$1" in
+    "" | /* | .. | ../* | */.. | */../*) return 1 ;;
+  esac
+}
+
+gz() { if command -v pigz >/dev/null; then pigz -c; else gzip -c; fi; }
+gunz() { if command -v pigz >/dev/null; then pigz -dc; else gzip -dc; fi; }
+
+# JSON array of the non-empty lines of a file.
+lines_json() { jq -Rn '[inputs | select(length > 0)]' <"$1"; }
+
+# ---------------------------------------------------------------- passphrase
+# Sets PASSFILE (a file holding the passphrase) for import/list.
+resolve_pass() {
+  local pf="${PASS_FILE:-${CLAUDE_BACKUP_PASS_FILE:-}}" p=""
+  if [[ -n "$pf" ]]; then
+    pf="$(abs "$pf")"
+    [[ -f "$pf" && -r "$pf" && -s "$pf" ]] || die "passphrase file $pf is missing, empty or unreadable"
+    PASSFILE="$pf"
+    return 0
+  fi
+  { : </dev/tty; } 2>/dev/null || die "no passphrase: use --pass-file FILE (or env CLAUDE_BACKUP_PASS_FILE); there is no terminal to ask on"
+  printf 'Backup passphrase: ' >/dev/tty
+  IFS= read -rs p </dev/tty || { echo >/dev/tty; die "no passphrase entered"; }
+  echo >/dev/tty
+  [[ -n "$p" ]] || die "empty passphrase"
+  printf '%s\n' "$p" >"$TMP/pass"
+  PASSFILE="$TMP/pass"
+}
+
+# ---------------------------------------------------------------- reading an archive
+# decrypt <file>: plain tar.gz on stdout, gpg's complaints in $TMP/gpg.err.
+decrypt() {
+  gpg --batch --quiet --no-tty --pinentry-mode loopback --passphrase-file "$PASSFILE" --decrypt <"$1" 2>>"$TMP/gpg.err"
+}
+
+gpg_reason() {
+  local line
+  line="$(grep -m1 -i 'gpg:' "$TMP/gpg.err" 2>/dev/null || true)"
+  [[ -z "$line" ]] || printf ' (%s)' "$line"
+}
+
+# Whole-archive read: listing into $TMP/list.txt. Fails cleanly on a wrong passphrase or damage.
+check_archive() {
+  : >"$TMP/gpg.err"
+  if ! decrypt "$1" | gunz | tar -tf - >"$TMP/list.txt" 2>"$TMP/tar.err"; then
+    die "cannot read $1: wrong passphrase or damaged file$(gpg_reason). Nothing was written."
+  fi
+}
+
+# First member only (manifest.json) into $1, from archive $2.
+read_manifest() {
+  : >"$TMP/gpg.err"
+  { decrypt "$2" | gunz | tar -xOf - --occurrence=1 manifest.json >"$1"; } 2>/dev/null || true
+  jq -e '.version == 1' "$1" >/dev/null 2>&1 ||
+    die "cannot read the manifest of $2: wrong passphrase, damaged file or not a claude-backup file$(gpg_reason)"
+}
+
+# ---------------------------------------------------------------- export
+# Everything below runs with the current directory = $HOME.
+
+add_path() { # add_path <path relative to $HOME>: only when it exists
+  if [[ -e "$1" || -L "$1" ]]; then
+    printf '%s\0' "$1" >>"$TMP/list"
+    printf '%s\n' "$1" >>"$TMP/backed_up"
+  fi
+}
+
+# Total bytes of the NUL-separated file list $1 (files only; missing ones count 0).
+list_bytes() {
+  xargs -0 -r stat -c %s -- <"$1" 2>/dev/null | awk '{ s += $1 } END { printf "%.0f\n", s + 0 }' || true
+}
+
+# git state of repo $1: no-remote | no-upstream | dirty | unpushed | clean.
+# Anything git cannot answer counts as "not clean" so work is never skipped by mistake.
+repo_state() {
+  local d="$1" st ahead
+  if [[ -z "$(git -C "$d" remote 2>/dev/null || true)" ]]; then echo no-remote; return; fi
+  if ! git -C "$d" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then echo no-upstream; return; fi
+  st="$(git -C "$d" status --porcelain 2>/dev/null)" || st="?"
+  if [[ -n "$st" ]]; then echo dirty; return; fi
+  st="$(git -C "$d" stash list 2>/dev/null)" || st="?"
+  if [[ -n "$st" ]]; then echo dirty; return; fi
+  ahead="$(git -C "$d" rev-list --count '@{u}..HEAD' 2>/dev/null)" || ahead=1
+  if [[ "$ahead" != 0 ]]; then echo unpushed; return; fi
+  # Commits on other local branches that no remote has.
+  st="$(git -C "$d" log --branches --not --remotes -n 1 --format=%H 2>/dev/null)" || st="?"
+  [[ -z "$st" ]] || { echo unpushed; return; }
+  echo clean
+}
+
+# Files of repo $1 (relative to $HOME) that belong in a rescue copy, plus its .git, into $2.
+repo_list() {
+  {
+    printf '%s\0' "$1/.git"
+    git -C "$1" ls-files -z --cached --others --exclude-standard | while IFS= read -r -d '' f; do
+      if [[ -e "$1/$f" || -L "$1/$f" ]]; then printf '%s\0' "$1/$f"; fi
+    done
+  } >"$2"
+}
+
+dir_list() { # all files of non-git folder $1 into $2, minus rebuildable junk
+  find "$1" \( -name node_modules -o -name build -o -name .gradle -o -name target -o -name .cache -o -name __pycache__ \) -prune -o ! -type d -print0 >"$2"
+}
+
+# Where the projects live: env, else PROJECTS_DIR of the cLaudeRC config, else ~/projects.
+project_dirs() {
+  local v cfg="$HOME/.config/claude-launcher/config"
+  if [[ -n "${CLAUDE_BACKUP_PROJECTS:-}" ]]; then
+    tr ':' '\n' <<<"$CLAUDE_BACKUP_PROJECTS"
+    return 0
+  fi
+  v="$(grep -m1 '^PROJECTS_DIR=' "$cfg" 2>/dev/null | cut -d= -f2- | tr -d "\"'" || true)"
+  v="${v//\$\{HOME\}/$HOME}"
+  v="${v//\$HOME/$HOME}"
+  [[ "$v" == /?* ]] || v="$HOME/projects"
+  printf '%s\n' "${v%/}"
+}
+
+scan_projects() { # scan_projects <all 0|1> <max bytes>
+  local all="$1" max="$2" pd d name rel state branch rescued reason size gitk url r
+  while IFS= read -r pd; do
+    [[ -n "$pd" && -d "$pd" ]] || continue
+    pd="${pd%/}"
+    if [[ "$pd" != "$HOME"/* ]]; then warn "projects folder $pd is not inside $HOME: skipped"; continue; fi
+    for d in "$pd"/*/; do
+      d="${d%/}"
+      [[ -d "$d" && ! -L "$d" ]] || continue
+      name="$(basename -- "$d")"
+      rel="${d#"$HOME"/}"
+      if [[ -e "$d/.git" ]]; then
+        if ! command -v git >/dev/null; then warn "git is missing: $rel not scanned"; continue; fi
+        state="$(repo_state "$d")"
+        r="$(git -C "$d" remote get-url origin 2>/dev/null || true)"
+        if [[ -z "$r" ]]; then
+          r="$(git -C "$d" remote 2>/dev/null | head -n 1 || true)"
+          [[ -z "$r" ]] || r="$(git -C "$d" remote get-url "$r" 2>/dev/null || true)"
+        fi
+        # Never let a token in a remote URL reach the manifest.
+        url="$(sed -E 's#^([A-Za-z][A-Za-z0-9+.-]*://)[^/@]*@#\1#' <<<"$r")"
+        branch="$(git -C "$d" symbolic-ref --short -q HEAD 2>/dev/null || true)"
+        rescued=false reason=""
+        if [[ "$state" != clean || "$all" == 1 ]]; then
+          if repo_list "$rel" "$TMP/repo.list"; then
+            gitk="$(du -sk "$d/.git" 2>/dev/null | cut -f1 || true)"
+            size=$(($(list_bytes "$TMP/repo.list") + ${gitk:-0} * 1024))
+            if ((size > max)); then
+              reason="larger than $((max / 1048576)) MB ($((size / 1048576)) MB), not stored"
+              printf '  %s (%s): %s\n' "$rel" "$state" "$reason" >>"$TMP/skipped"
+            else
+              cat "$TMP/repo.list" >>"$TMP/list"
+              printf '%s\n' "$rel" >>"$TMP/backed_up"
+              rescued=true
+            fi
+          else
+            reason="could not list the files (git failed), not stored"
+            printf '  %s (%s): %s\n' "$rel" "$state" "$reason" >>"$TMP/skipped"
+          fi
+        fi
+        jq -nc --arg dir "$name" --arg path "$rel" --arg remote "$url" --arg branch "$branch" --arg state "$state" \
+          --argjson rescued "$rescued" --arg reason "$reason" \
+          '{dir:$dir, path:$path, remote:$remote, branch:$branch, state:$state, rescued:$rescued} + (if $reason != "" then {skipped_reason:$reason} else {} end)' \
+          >>"$TMP/repos.jsonl"
+      else
+        printf '%s\n' "$name" >>"$TMP/other_dirs"
+        if [[ "$all" == 1 ]]; then
+          dir_list "$rel" "$TMP/repo.list"
+          size="$(list_bytes "$TMP/repo.list")"
+          if ((size > max)); then
+            printf '  %s (not a git folder): larger than %d MB (%d MB), not stored\n' "$rel" $((max / 1048576)) $((size / 1048576)) >>"$TMP/skipped"
+          else
+            cat "$TMP/repo.list" >>"$TMP/list"
+            printf '%s\n' "$rel" >>"$TMP/backed_up"
+            printf '%s\n' "$name" >>"$TMP/other_saved"
+          fi
+        fi
+      fi
+    done
+  done < <(project_dirs)
+  return 0
+}
+
+docker_ok() { command -v docker >/dev/null && timeout 20 docker volume ls -q >/dev/null 2>&1; }
+
+cmd_export() {
+  local out="" slim=0 all=0 docker=0 host ts outdir max_mb gen="" vols=() v rel tarrc=0
+  while (($#)); do
+    case "$1" in
+      --out) (($# >= 2)) || bad_usage "--out needs a file"; out="$2"; shift 2 ;;
+      --slim) slim=1; shift ;;
+      --projects) all=1; shift ;;
+      --docker) docker=1; shift ;;
+      --pass-file) (($# >= 2)) || bad_usage "--pass-file needs a file"; PASS_FILE="$2"; shift 2 ;;
+      *) bad_usage "unknown option for export: $1" ;;
+    esac
+  done
+  need tar gpg jq gzip
+  host="$(hostname 2>/dev/null | tr -cd 'A-Za-z0-9._-' || true)"
+  host="${host:-server}"
+  ts="$(date +%Y%m%d-%H%M%S)"
+  [[ -n "$out" ]] || out="$HOME/backups/clauderc-backup-$host-$ts.tar.gz.gpg"
+  out="$(abs "$out")"
+  outdir="$(dirname -- "$out")"
+  if [[ ! -d "$outdir" ]]; then mkdir -p "$outdir"; chmod 700 "$outdir"; fi
+  [[ "$outdir" != "$HOME/backups" ]] || chmod 700 "$outdir"
+  [[ ! -e "$out" ]] || die "$out already exists: pick another --out"
+  [[ -z "${PASS_FILE:-}" ]] || PASS_FILE="$(abs "$PASS_FILE")"
+  max_mb="${CLAUDE_BACKUP_RESCUE_MAX_MB:-500}"
+  [[ "$max_mb" =~ ^[0-9]+$ ]] || die "CLAUDE_BACKUP_RESCUE_MAX_MB must be a number"
+
+  # Temp files (the passphrase, lists, docker volumes) live next to the output, never in /tmp.
+  TMP="$(mktemp -d "$outdir/.claude-backup.XXXXXX")"
+  PART="$out.part"
+  : >"$TMP/gpg.err"
+  touch "$TMP/list" "$TMP/backed_up" "$TMP/repos.jsonl" "$TMP/other_dirs" "$TMP/other_saved" "$TMP/skipped"
+
+  local pf="${PASS_FILE:-${CLAUDE_BACKUP_PASS_FILE:-}}"
+  if [[ -n "$pf" ]]; then
+    pf="$(abs "$pf")"
+    [[ -f "$pf" && -r "$pf" && -s "$pf" ]] || die "passphrase file $pf is missing, empty or unreadable"
+    PASSFILE="$pf"
+  else
+    gen="$(LC_ALL=C tr -dc 'A-HJ-NP-Z2-9' </dev/urandom | head -c 20 || true)"
+    [[ "${#gen}" -eq 20 ]] || die "could not generate a passphrase"
+    GEN_PASS="${gen:0:4}-${gen:4:4}-${gen:8:4}-${gen:12:4}-${gen:16:4}"
+    printf '%s\n' "$GEN_PASS" >"$TMP/pass"
+    PASSFILE="$TMP/pass"
+  fi
+
+  cd "$HOME"
+  echo "Collecting files from $HOME ..."
+
+  local include=(.claude .claude.json .config/claude-launcher .config/claude-setup .agents
+    .config/gh .config/glab-cli .config/stripe .config/b2 .config/git .aws .ssh .gitconfig .git-credentials
+    .docker/config.json .npmrc claude-setup.sh bin
+    .local/bin/claude-autostart .local/bin/clauderc-team .local/bin/claude-push
+    .local/bin/claude-plugin-updates .local/bin/youtube-upload)
+  local excl=(.claude/shell-snapshots .claude/session-env .claude/cache .claude/file-history
+    .config/claude-launcher/usage-cache .config/claude-launcher/plugin-updates.json
+    '.config/claude-launcher/workers/*/trees'
+    '.config/claude-launcher/workers/*/tasks/*.in' '.config/claude-launcher/workers/*/tasks/*.out'
+    '.config/claude-launcher/workers/*/tasks/*.err' '.config/claude-launcher/workers/*/tasks/*.started'
+    '.config/claude-launcher/workers/*/run.lock*')
+  if ((slim)); then
+    excl+=(.claude/plugins/cache .claude/plugins/marketplaces
+      '.config/claude-launcher/workers/*/home/plugins/cache' '.config/claude-launcher/workers/*/home/plugins/marketplaces'
+      '.config/claude-launcher/workers/*/home/.claude/plugins/cache' '.config/claude-launcher/workers/*/home/.claude/plugins/marketplaces')
+  fi
+  # The output and temp files may live inside $HOME: never put them in themselves.
+  if [[ "$outdir" == "$HOME"/* ]]; then
+    rel="${outdir#"$HOME"/}"
+    excl+=("$rel/.claude-backup.*" "$rel/$(basename -- "$out").part")
+  fi
+  for rel in "${include[@]}"; do add_path "$rel"; done
+
+  scan_projects "$all" $((max_mb * 1048576))
+
+  if ((docker)); then
+    if docker_ok; then
+      while IFS= read -r v; do
+        if [[ "$v" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ && ! "$v" =~ ^[0-9a-f]{64}$ ]]; then vols+=("$v"); fi
+      done < <(docker volume ls -q 2>/dev/null || true)
+    else
+      warn "docker is not available or not accessible: --docker skipped"
+      docker=0
+    fi
+  fi
+  # Docker facts for the manifest (named volumes and containers, also without --docker).
+  : >"$TMP/docker_volumes"; : >"$TMP/docker_containers"
+  if docker_ok; then
+    { docker volume ls -q 2>/dev/null || true; } | grep -vE '^[0-9a-f]{64}$' >"$TMP/docker_volumes" || true
+    docker ps -a --format '{{.Names}}:{{.Image}}' >"$TMP/docker_containers" 2>/dev/null || true
+  fi
+  if ((docker && ${#vols[@]} > 0)); then
+    echo "Docker volumes: copying ${#vols[@]} (stop databases first for a consistent copy) ..."
+    mkdir -p "$TMP/docker"
+    for v in "${vols[@]}"; do
+      docker run --rm -v "$v:/v:ro" busybox tar -C /v -czf - . >"$TMP/docker/$v.tar.gz" 2>"$TMP/docker.err" ||
+        die "docker volume $v could not be copied: $(tail -n 1 "$TMP/docker.err")"
+    done
+  fi
+
+  # Facts about this server for the manifest: names and numbers only, never values.
+  { systemctl list-unit-files --state=enabled --no-legend 2>/dev/null | awk '{print $1}' | grep -i claude || true
+    systemctl --user list-unit-files --state=enabled --no-legend 2>/dev/null | awk '{print $1}' | grep -i claude || true
+  } | sort -u >"$TMP/units" || true
+  { ss -H -ltn 2>/dev/null | awk '{ n = split($4, a, ":"); print a[n] }' | sort -un || true; } >"$TMP/ports"
+  { grep -hoE '^(export +)?[A-Za-z_][A-Za-z0-9_]*=' "$HOME/.config/claude-launcher/env" 2>/dev/null |
+    sed -E 's/^export +//; s/=$//' || true; } >"$TMP/envnames"
+  local cv=""
+  if command -v claude >/dev/null; then cv="$(timeout 15 claude --version 2>/dev/null | head -n 1 || true)"; fi
+
+  jq -n --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg host "$(hostname 2>/dev/null || echo unknown)" \
+    --arg user "$(id -un)" --arg home "$HOME" --arg cv "$cv" \
+    --slurpfile repos "$TMP/repos.jsonl" \
+    --argjson other_dirs "$(lines_json "$TMP/other_dirs")" --argjson other_saved "$(lines_json "$TMP/other_saved")" \
+    --argjson vols "$(lines_json "$TMP/docker_volumes")" --argjson cont "$(lines_json "$TMP/docker_containers")" \
+    --argjson units "$(lines_json "$TMP/units")" --argjson envnames "$(lines_json "$TMP/envnames")" \
+    --argjson backed "$(lines_json "$TMP/backed_up")" \
+    --argjson ports "$(jq -Rn '[inputs | tonumber?]' <"$TMP/ports")" \
+    '{version: 1, created: $created, host: $host, user: $user, home: $home}
+     + (if $cv != "" then {claude_version: $cv} else {} end)
+     + {repos: $repos, other_dirs: $other_dirs, other_dirs_saved: $other_saved, docker_volumes: $vols,
+        docker_containers: $cont, systemd_units: $units, listening: $ports, env_var_names: $envnames, backed_up: $backed}' \
+    >"$TMP/manifest.json"
+
+  local targs=(--create --file=- --null --anchored --no-wildcards-match-slash --ignore-failed-read)
+  for rel in "${excl[@]}"; do targs+=("--exclude=$rel"); done
+  # The manifest goes first so `list` only has to read the start of the archive.
+  targs+=(-C "$TMP" manifest.json -C "$HOME" -T "$TMP/list")
+  [[ ! -d "$TMP/docker" ]] || targs+=(-C "$TMP" docker)
+
+  echo "Writing the encrypted archive ..."
+  # tar exits 1 when a file changed while it was read (live sessions write): fine.
+  if ! { { tarrc=0; tar "${targs[@]}" 2>"$TMP/tar.err" || tarrc=$?; [[ "$tarrc" -le 1 ]] || exit "$tarrc"; } |
+    gz |
+    gpg --batch --quiet --no-tty --symmetric --cipher-algo AES256 --s2k-mode 3 --s2k-digest-algo SHA512 \
+      --s2k-count 65011712 --compress-algo none --pinentry-mode loopback --passphrase-file "$PASSFILE" >"$PART" 2>>"$TMP/gpg.err"; }; then
+    die "writing the archive failed: $(tail -n 3 "$TMP/tar.err" "$TMP/gpg.err" 2>/dev/null | tr '\n' ' ')"
+  fi
+  [[ -s "$PART" ]] || die "the archive is empty"
+  chmod 600 "$PART"
+  mv -f -- "$PART" "$out"
+  PART=""
+  # The passphrase must open what was just written.
+  read_manifest "$TMP/check.json" "$out"
+
+  summary "$out" "$all" "$docker" "$slim"
+}
+
+summary() { # summary <out> <all> <docker> <slim>
+  local out="$1" all="$2" docker="$3" size n
+  size="$(du -h -- "$out" | awk '{print $1}')"
+  echo
+  echo "Backup written: $out ($size, mode 600)"
+  echo
+  n="$(jq -r '[.repos[] | select(.rescued)] | length' "$TMP/manifest.json")"
+  echo "Git repos found: $(jq '.repos | length' "$TMP/manifest.json"), stored in the archive: $n"
+  jq -r '.repos[] | "  " + (if .rescued then "STORED   " else "not stored" end) + " " + .path + "  [" + .state + "]"' "$TMP/manifest.json"
+  if [[ -s "$TMP/skipped" ]]; then
+    echo
+    echo "!!! NOT STORED, TOO BIG (copy these yourself or push them) !!!"
+    cat "$TMP/skipped"
+  fi
+  if [[ -s "$TMP/tar.err" ]]; then
+    echo
+    echo "tar warnings (first 10 of $(wc -l <"$TMP/tar.err")):"
+    head -n 10 "$TMP/tar.err" | sed 's/^/  /'
+  fi
+  echo
+  echo "NOT covered:"
+  if ((docker)); then
+    echo "  - docker volumes were copied, but containers/images are not: recreate them (compose files live in your projects)"
+  else
+    echo "  - docker data (volumes: $(jq -r '.docker_volumes | join(", ")' "$TMP/manifest.json" | sed 's/^$/none/')); use --docker"
+  fi
+  echo "  - services such as tailscale, bitcoind, databases, anything under systemd or listening on a port (see: claude-backup list)"
+  if ((all)); then
+    echo "  - non-git folders that were too big (listed above)"
+  else
+    echo "  - non-git folders under the projects folder: $(jq -r '.other_dirs | join(", ")' "$TMP/manifest.json" | sed 's/^$/none/') (use --projects)"
+  fi
+  echo "  - clean, pushed repos are not stored: they are cloned again by import --clone"
+  echo
+  echo "Restore on the new server (after installing cLaudeRC there):"
+  printf "  claude-backup import %q --from %s@<this-server-address> --clone\n" "$out" "$(id -un)"
+  echo "The file holds every secret of this server (encrypted): delete it after the move."
+  if [[ -n "$GEN_PASS" ]]; then
+    echo
+    echo "================================================================"
+    echo "  PASSPHRASE (write this down, it is not saved anywhere):"
+    echo
+    echo "      $GEN_PASS"
+    echo "================================================================"
+  fi
+}
+
+# ---------------------------------------------------------------- list
+cmd_list() {
+  local file=""
+  while (($#)); do
+    case "$1" in
+      --pass-file) (($# >= 2)) || bad_usage "--pass-file needs a file"; PASS_FILE="$2"; shift 2 ;;
+      -*) bad_usage "unknown option for list: $1" ;;
+      *) [[ -z "$file" ]] || bad_usage "list takes one file"; file="$1"; shift ;;
+    esac
+  done
+  [[ -n "$file" ]] || bad_usage "list needs a FILE"
+  file="$(abs "$file")"
+  [[ -f "$file" ]] || die "$file not found"
+  need gpg tar jq gzip
+  TMP="$(mktemp -d)"
+  resolve_pass
+  read_manifest "$TMP/manifest.json" "$file"
+  jq . "$TMP/manifest.json"
+}
+
+# ---------------------------------------------------------------- import
+fetch_from() { # fetch_from <user@host> <remote path>: sets FILE
+  local dest
+  need scp
+  mkdir -p "$HOME/backups"
+  chmod 700 "$HOME/backups"
+  dest="$HOME/backups/$(basename -- "$2")"
+  echo "Fetching $2 from $1 ..."
+  scp -p -o BatchMode=yes -- "$1:$2" "$dest" || die "scp from $1 failed (is this server's key authorized there?)"
+  chmod 600 "$dest"
+  FILE="$dest"
+}
+
+restore_docker() { # restore_docker: volumes found in $TMP/list.txt
+  local vol list=() nonempty
+  while IFS= read -r vol; do
+    vol="${vol#docker/}"
+    vol="${vol%.tar.gz}"
+    if [[ "$vol" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then list+=("$vol"); fi
+  done < <(grep -E '^docker/[^/]+\.tar\.gz$' "$TMP/list.txt" || true)
+  ((${#list[@]} > 0)) || return 0
+  if ! docker_ok; then
+    echo "Docker is not available or not accessible: ${#list[@]} volume(s) in the archive were NOT restored (${list[*]}). Re-run import after fixing docker."
+    return 0
+  fi
+  for vol in "${list[@]}"; do
+    if docker volume inspect "$vol" >/dev/null 2>&1; then
+      nonempty="$(docker run --rm -v "$vol:/v:ro" busybox sh -c 'ls -A /v | head -n 1' 2>/dev/null || echo unknown)"
+      if [[ -n "$nonempty" ]]; then
+        echo "Docker volume $vol exists and is not empty: NOT overwritten."
+        continue
+      fi
+    else
+      docker volume create "$vol" >/dev/null || { echo "Docker volume $vol could not be created."; continue; }
+    fi
+    : >"$TMP/gpg.err"
+    if decrypt "$FILE" | gunz | tar -xOf - "docker/$vol.tar.gz" |
+      docker run --rm -i -v "$vol:/v" busybox tar -C /v -xzf - 2>"$TMP/docker.err"; then
+      echo "Docker volume $vol restored."
+    else
+      echo "Docker volume $vol: restore failed ($(tail -n 1 "$TMP/docker.err" 2>/dev/null))."
+    fi
+  done
+}
+
+clone_repos() { # clone_repos: sets CLONE_FAILED, CLONED, KEPT
+  local path remote branch ok
+  CLONE_FAILED=() CLONED=0 KEPT=0
+  need git
+  while IFS=$'\x1f' read -r path remote branch; do
+    [[ -n "$path" ]] || continue
+    safe_rel "$path" || { CLONE_FAILED+=("$path (unsafe path)"); continue; }
+    if [[ -e "$HOME/$path" ]]; then KEPT=$((KEPT + 1)); continue; fi
+    mkdir -p "$(dirname -- "$HOME/$path")"
+    ok=0
+    export GIT_TERMINAL_PROMPT=0
+    export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
+    if [[ -n "$branch" ]] && git -c protocol.ext.allow=never clone --quiet --branch "$branch" -- "$remote" "$HOME/$path" 2>/dev/null; then ok=1
+    elif git -c protocol.ext.allow=never clone --quiet -- "$remote" "$HOME/$path" 2>"$TMP/clone.err"; then ok=1
+    fi
+    if ((ok)); then CLONED=$((CLONED + 1)); echo "  cloned $path"
+    else CLONE_FAILED+=("$path <- $remote"); fi
+  done < <(jq -r '.repos[] | select(.state == "clean" and (.rescued | not) and ((.remote // "") | length > 0))
+    | [(.path // ("projects/" + .dir)), .remote, (.branch // "")] | join("\u001f")' "$TMP/manifest.json")
+}
+
+fix_permissions() {
+  local f
+  for f in .ssh .config/claude-launcher .claude backups; do
+    if [[ -d "$HOME/$f" ]]; then chmod 700 "$HOME/$f"; fi
+  done
+  for f in .config/claude-launcher/env .git-credentials .npmrc .claude/.credentials.json .aws/credentials \
+    .config/gh/hosts.yml .docker/config.json; do
+    if [[ -f "$HOME/$f" ]]; then chmod 600 "$HOME/$f"; fi
+  done
+  if [[ -d "$HOME/.config/claude-launcher" ]]; then
+    find "$HOME/.config/claude-launcher" -maxdepth 1 -type f -name '*.json' -exec chmod 600 {} + || true
+  fi
+  if [[ -d "$HOME/.ssh" ]]; then
+    find "$HOME/.ssh" -maxdepth 1 -type f ! -name '*.pub' ! -name authorized_keys -exec chmod 600 {} + || true
+  fi
+  for f in claude-setup.sh .local/bin/claude-autostart .local/bin/clauderc-team .local/bin/claude-push \
+    .local/bin/claude-plugin-updates .local/bin/youtube-upload; do
+    if [[ -f "$HOME/$f" ]]; then chmod u+x "$HOME/$f"; fi
+  done
+  if [[ -d "$HOME/bin" ]]; then
+    find "$HOME/bin" -maxdepth 1 -type f -exec chmod u+x {} + || true
+  fi
+}
+
+todo_list() { # still-to-do list from the manifest
+  local n
+  echo
+  echo "Still to do:"
+  while IFS= read -r n; do echo "  - recreate docker container $n (compose files / run commands are in your projects)"; done \
+    < <(jq -r '.docker_containers[]?' "$TMP/manifest.json")
+  while IFS= read -r n; do echo "  - restore service $n (it was enabled on the old server; needs sudo, import does not touch systemd)"; done \
+    < <(jq -r '.systemd_units[]?' "$TMP/manifest.json")
+  n="$(jq -r '(.listening // []) | map(tostring) | join(", ")' "$TMP/manifest.json")"
+  [[ -z "$n" ]] || echo "  - ports that listened on the old server: $n (VPN such as Tailscale, databases, nodes: sign in / restore them)"
+  n="$(jq -r '(.other_dirs // []) - (.other_dirs_saved // []) | join(", ")' "$TMP/manifest.json")"
+  [[ -z "$n" ]] || echo "  - project folders that are not git repos and were not copied: $n"
+  echo "  - worker logins (cLaudeCluster): re-sign in from the app (Claude tab > Accounts > Re-sign in); stop sessions on the old server first, two servers refreshing one login sign it out"
+  echo "  - run 'claude-autostart install' (asks for sudo), then 'claude-autostart restore' or restart sessions from the app"
+  echo "  - delete the backup file (it holds every secret) and the pre-restore folder when all is fine"
+}
+
+cmd_import() {
+  local file="" dry=0 clone=0 from="" host rpath="" top pre ts n=0 p
+  while (($#)); do
+    case "$1" in
+      --pass-file) (($# >= 2)) || bad_usage "--pass-file needs a file"; PASS_FILE="$2"; shift 2 ;;
+      --dry-run) dry=1; shift ;;
+      --clone) clone=1; shift ;;
+      --from) (($# >= 2)) || bad_usage "--from needs USER@HOST"; from="$2"; shift 2 ;;
+      -*) bad_usage "unknown option for import: $1" ;;
+      *) [[ -z "$file" ]] || bad_usage "import takes one file"; file="$1"; shift ;;
+    esac
+  done
+  need gpg tar jq gzip
+  TMP="$(mktemp -d)"
+  if [[ -n "$from" ]]; then
+    [[ "$from" =~ ^([A-Za-z0-9_][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9.-]*)(:(.+))?$ ]] || bad_usage "--from needs USER@HOST (or USER@HOST:PATH)"
+    host="${BASH_REMATCH[1]}"
+    rpath="${BASH_REMATCH[3]}"
+    [[ -n "$file" ]] || file="$rpath"
+    [[ -n "$file" ]] || bad_usage "import needs the file's path on $host"
+    [[ "$file" != -* ]] || bad_usage "file name must not start with -"
+    if ((dry)); then die "--dry-run cannot be combined with --from (it would fetch the file): fetch it first, then dry-run"; fi
+    fetch_from "$host" "$file"
+  else
+    [[ -n "$file" ]] || bad_usage "import needs a FILE"
+    FILE="$(abs "$file")"
+  fi
+  [[ -f "$FILE" ]] || die "$FILE not found"
+  [[ -z "${PASS_FILE:-}" ]] || PASS_FILE="$(abs "$PASS_FILE")"
+  resolve_pass
+
+  echo "Checking the archive (a wrong passphrase or a damaged file stops here, nothing is written) ..."
+  check_archive "$FILE"
+  read_manifest "$TMP/manifest.json" "$FILE"
+
+  echo
+  jq -r '"Backup of " + .user + "@" + .host + " made " + .created + (if .claude_version then " (claude " + .claude_version + ")" else "" end)' "$TMP/manifest.json"
+  echo "Repos in the manifest:"
+  jq -r '.repos[] | "  " + .path + "  [" + .state + "]  " + (if .rescued then "stored in the archive" elif .skipped_reason then "NOT stored: " + .skipped_reason else "not stored, clone with --clone" end)' "$TMP/manifest.json"
+  echo "Paths restored into $HOME:"
+  jq -r '.backed_up[] | "  " + .' "$TMP/manifest.json"
+  top="$(grep -cE '^docker/[^/]+\.tar\.gz$' "$TMP/list.txt" || true)"
+  [[ "$top" == 0 ]] || echo "Docker volumes in the archive: $top"
+
+  if ((dry)); then
+    echo
+    echo "Dry run: $(wc -l <"$TMP/list.txt") archive entries, nothing was written."
+    todo_list
+    return 0
+  fi
+
+  mkdir -p "$HOME/backups"
+  chmod 700 "$HOME/backups"
+  ts="$(date +%Y%m%d-%H%M%S)"
+  pre="$HOME/backups/pre-restore-$ts"
+  cd "$HOME"
+  while IFS= read -r p; do
+    safe_rel "$p" || die "unsafe path in the manifest: $p"
+    if [[ -e "$p" || -L "$p" ]]; then
+      mkdir -p "$pre"
+      cp -a --parents -- "$p" "$pre/" || die "could not copy $p to $pre; nothing was restored"
+      n=$((n + 1))
+    fi
+  done < <(jq -r '.backed_up[]' "$TMP/manifest.json")
+  ((n == 0)) || echo "Saved $n existing path(s) to $pre first."
+
+  echo "Restoring ..."
+  : >"$TMP/gpg.err"
+  if ! (umask 022; decrypt "$FILE" | gunz | tar -xpf - -C "$HOME" --anchored --exclude=manifest.json --exclude=docker); then
+    die "extracting failed half way (older files are in $pre)"
+  fi
+  fix_permissions
+
+  if ((clone)); then
+    echo "Cloning clean repos ..."
+    clone_repos
+    echo "Cloned $CLONED, kept $KEPT that already exist."
+    if ((${#CLONE_FAILED[@]} > 0)); then
+      echo "Could not clone (do it by hand):"
+      printf '  %s\n' "${CLONE_FAILED[@]}"
+    fi
+  fi
+  restore_docker
+  echo
+  echo "Restore finished."
+  todo_list
+}
+
+# ---------------------------------------------------------------- main
+(($# >= 1)) || { usage >&2; exit 2; }
+sub="$1"
+shift
+case "$sub" in
+  -h | --help | help) usage ;;
+  export) cmd_export "$@" ;;
+  import) cmd_import "$@" ;;
+  list) cmd_list "$@" ;;
+  *) bad_usage "unknown command: $sub" ;;
+esac
