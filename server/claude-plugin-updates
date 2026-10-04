@@ -32,6 +32,7 @@ SKILL_LOCK = os.environ.get("CLAUDERC_SKILL_LOCK") or os.path.expanduser("~/.age
 GIT = os.environ.get("CLAUDERC_GIT") or "git"
 API = (os.environ.get("CLAUDERC_GITHUB_API") or "https://api.github.com").rstrip("/")
 DEFAULT_API = "https://api.github.com"
+RAW = (os.environ.get("CLAUDERC_GITHUB_RAW") or "https://raw.githubusercontent.com").rstrip("/")
 CALL_TIMEOUT = 20
 RUN_CAP = 90
 STALE_GOOD = 24 * 3600
@@ -125,6 +126,7 @@ class Net:
         self.heads = {}
         self.compares = {}
         self.commits = {}
+        self.manifests = {}
 
     def budget(self):
         left = self.deadline - time.time()
@@ -197,6 +199,36 @@ class Net:
             if time.time() >= self.deadline - 1:
                 raise OutOfTime()
             raise Fail("github api: %s" % e)
+
+    def manifest_version(self, repo, ref, path):
+        """The `version` a plugin's own .claude-plugin/plugin.json declares at <ref> (None: no manifest or no version)."""
+        key = (repo, ref, path)
+        if key not in self.manifests:
+            try:
+                self.manifests[key] = self._manifest_version(repo, ref, path)
+            except Fail as e:
+                self.manifests[key] = e
+        v = self.manifests[key]
+        if isinstance(v, Exception):
+            raise v
+        return v
+
+    def _manifest_version(self, repo, ref, path):
+        if not REPO_RE.match(repo) or not re.match(r"^[A-Za-z0-9._/-]*$", path + ref) or ".." in path:
+            raise Fail("bad manifest location")
+        url = "%s/%s/%s/%s.claude-plugin/plugin.json" % (RAW, repo, ref, path + "/" if path else "")
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "claude-plugin-updates"}), timeout=self.budget()) as resp:
+                v = as_dict(json.loads(resp.read().decode("utf-8", "replace"))).get("version")
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            raise Fail("manifest: HTTP %s" % e.code)
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            if time.time() >= self.deadline - 1:
+                raise OutOfTime()
+            raise Fail("manifest: %s" % e)
+        return v.strip() if isinstance(v, str) and v.strip() else None
 
     def head_commit(self, repo):
         """(sha, commit date) of a GitHub repo's default branch."""
@@ -304,6 +336,10 @@ class Plugins:
                     verdict = self.compare_sha(sha, self.net.ls_remote(url, ref))
         elif isinstance(src, str):
             verdict = self.check_in_marketplace(mk, src, sha)
+        if verdict and verdict[0] == "available" and version and not SHA_RE.match(version.lower()):
+            # The plugin declares versions (not a sha): `claude plugin update` only moves when the declared version does,
+            # so new commits alone are no update.
+            verdict = self.declared_version(mk, entry, version, verdict)
         if verdict is None:
             cat_version = entry.get("version")
             if isinstance(cat_version, str) and cat_version and version:
@@ -320,6 +356,27 @@ class Plugins:
         """(owner/repo as in the lock, newest updatedAt string, its datetime) when the marketplace repo is a skills source."""
         repo = self.marketplace_repo(mk)[1]
         return sources.get(repo.lower()) if repo else None
+
+    def declared_version(self, mk, entry, version, verdict):
+        """Replace a commit-based "available" by what the plugin's manifest version says."""
+        src, ref, path, repo = entry.get("source"), "HEAD", "", None
+        if isinstance(src, str):
+            repo = self.marketplace_repo(mk)[1]
+            path = src.strip()
+            while path.startswith("./"):
+                path = path[2:]
+            path = path.strip("/")
+        elif isinstance(src, dict):
+            u = self.git_source_url(src)
+            repo = github_repo(u) if u else None
+            path = str(src.get("path") or "").strip("/")
+            ref = str(src.get("sha") or src.get("ref") or "HEAD")
+        if not repo:
+            return "unknown", ""
+        latest = self.net.manifest_version(repo, ref, path)
+        if latest is None:
+            return "unknown", ""
+        return ("current" if latest == version else "available"), latest
 
     @staticmethod
     def compare_sha(have, latest):
