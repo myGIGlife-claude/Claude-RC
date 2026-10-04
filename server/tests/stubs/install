@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Test stub for install: `install -m MODE -o root -g root SRC DST` (what migrate-create-user uses for its root-owned marker
+# file) can't chown in a test, so it copies SRC, sets the mode and records "DST inode" in $STUB_STATE/root-owned (the stat
+# stub then reports root as the owner while that inode is still the file). Everything else is the real install.
+S="${STUB_STATE:-$HOME/.stub-state}"
+real="$(command -p -v install)"
+mode="" owner="" files=() orig=("$@")
+while (($#)); do
+  case "$1" in
+    -m) mode="$2"; shift 2 ;;
+    -o) owner="$2"; shift 2 ;;
+    -g) shift 2 ;;
+    *) files+=("$1"); shift ;;
+  esac
+done
+if [[ "$owner" == root && "$(command -p id -u)" != 0 && ${#files[@]} -eq 2 ]]; then
+  cat -- "${files[0]}" >"${files[1]}" || exit 1
+  chmod "${mode:-755}" "${files[1]}"
+  echo "${files[1]} $(command -p stat -c %i -- "${files[1]}")" >>"$S/root-owned"
+  echo "install -m ${mode:-} -o root ${files[1]}" >>"$S/install-log"
+  exit 0
+fi
+exec "$real" "${orig[@]}"

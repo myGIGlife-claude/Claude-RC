@@ -58,7 +58,8 @@ EOF
     echo '{"repos":[]}' >"$manifest"
     ;;
   receive)
-    name="incoming-$(date +%Y%m%d-%H%M%S).gpg"
+    # ($STUB_STATE/receive-suffix = "-7" plays the real receive's clash name incoming-<time>-7.gpg)
+    name="incoming-$(date +%Y%m%d-%H%M%S)$(cat "$STUB_STATE/receive-suffix" 2>/dev/null || true).gpg"
     mkdir -p "$HOME/backups"
     cat >"$HOME/backups/$name"
     chmod 600 "$HOME/backups/$name"

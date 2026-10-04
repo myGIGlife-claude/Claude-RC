@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Test stub for userdel: records the call and removes the user the adduser stub made (inside $STUB_STATE only).
+S="${STUB_STATE:-$HOME/.stub-state}"
+echo "$*" >>"$S/userdel-log"
+name="${*: -1}"
+[[ "$name" =~ ^[a-z][a-z0-9_-]*$ ]] || { echo "userdel stub: bad name" >&2; exit 1; }
+rm -rf "${S:?}/users/$name" "${S:?}/home/$name"

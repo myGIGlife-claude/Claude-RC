@@ -4,7 +4,7 @@
 #   claude-backup export [--out FILE] [--slim] [--projects] [--docker] [--no-claude-login] [--pass-file F]
 #   claude-backup plan [--json] [--slim] [--projects] [--docker] [--no-claude-login]
 #   claude-backup receive
-#   claude-backup import FILE [--pass-file F] [--dry-run] [--clone] [--from USER@HOST] [--manifest-out OUT]
+#   claude-backup import FILE [--pass-file F] [--dry-run] [--clone] [--with-authorized-keys] [--from USER@HOST] [--manifest-out OUT]
 #   claude-backup list FILE [--pass-file F]
 #
 # Run `claude-backup --help` for the details. The archive is
@@ -14,7 +14,7 @@
 set -euo pipefail
 umask 077
 
-TMP="" PART="" PASSFILE="" GEN_PASS="" WPID="" READ_FD="" EXCL=() TAREX=()
+TMP="" PART="" PASSFILE="" GEN_PASS="" WPID="" READ_FD="" EXCL=() TAREX=() WITHAK=0
 
 usage() {
   cat <<'EOF'
@@ -23,7 +23,7 @@ claude-backup — encrypted backup and restore of a cLaudeRC server user's setup
   claude-backup export [--out FILE] [--slim] [--projects] [--docker] [--no-claude-login] [--pass-file F]
   claude-backup plan [--json] [--slim] [--projects] [--docker] [--no-claude-login]
   claude-backup receive
-  claude-backup import FILE [--pass-file F] [--dry-run] [--clone] [--from USER@HOST] [--manifest-out OUT]
+  claude-backup import FILE [--pass-file F] [--dry-run] [--clone] [--with-authorized-keys] [--from USER@HOST] [--manifest-out OUT]
   claude-backup list FILE [--pass-file F]
   claude-backup --help
 
@@ -71,11 +71,18 @@ import  Restores into $HOME on the new server. The passphrase comes from --pass-
          Existing files are overwritten, but every path about to be overwritten is first copied
          to ~/backups/pre-restore-<time>/. Never uses sudo, never touches systemd, never starts
          anything; prints what is still to do.
+         NOT restored: ~/.ssh/authorized_keys (it would replace this server's phone key line and let the
+         old server's keys in; see --with-authorized-keys) and ~/.config/claude-launcher/config (this
+         server's own file stays; only PROJECTS_DIR is taken from the backup when this one sets none, so
+         re-check ALLOW_RUN/PROJECTS_DIR there). The migrate transfer key is never stored in a backup.
    FILE            local path (with --from: path on the old server)
    --from U@H      first fetch FILE from U@H with scp (key login, no password prompt) into ~/backups.
                    U@H:PATH also works instead of FILE.
    --dry-run       list what would be restored and show the manifest summary; writes nothing
    --clone         git clone every clean, fully pushed repo of the manifest that does not exist yet
+   --with-authorized-keys  also restore ~/.ssh/authorized_keys from the backup (replaces the file): only
+                   for moving the SAME user to a new machine by hand. Afterwards the phone works if its
+                   key was in the old file; otherwise re-run the installer with the phone key.
    --manifest-out OUT  after a successful restore, write the manifest that was restored to OUT (mode 600)
    With env CLAUDE_BACKUP_PROGRESS=1, "PROGRESS <phase> <percent>" lines go to stderr (verify,
    extract, clone).
@@ -355,6 +362,7 @@ docker_vols() { # named docker volumes that export --docker copies
 build_excl() {
   EXCL=(.claude/shell-snapshots .claude/session-env .claude/cache .claude/file-history
     .config/claude-launcher/usage-cache .config/claude-launcher/plugin-updates.json
+    .config/claude-launcher/migrate
     '.config/claude-launcher/workers/*/trees'
     '.config/claude-launcher/workers/*/tasks/*.in' '.config/claude-launcher/workers/*/tasks/*.out'
     '.config/claude-launcher/workers/*/tasks/*.err' '.config/claude-launcher/workers/*/tasks/*.started'
@@ -783,6 +791,20 @@ clone_repos() { # clone_repos: sets CLONE_FAILED, CLONED, KEPT
   progress clone 100
 }
 
+# The launcher config is not restored (it holds ALLOW_RUN, which the new server must set itself). Only a plain
+# PROJECTS_DIR= line of the old file is taken, and only when this server's file has none.
+merge_projects_dir() {
+  local cfg="$HOME/.config/claude-launcher/config" line
+  : >"$TMP/gpg.err"
+  line="$({ decrypt "$FILE" | gunz | tar -xOf - .config/claude-launcher/config 2>/dev/null || true; } | grep -m1 '^PROJECTS_DIR=' || true)"
+  [[ "$line" =~ ^PROJECTS_DIR=(\"[A-Za-z0-9._/\ \$\{\}~-]*\"|\'[A-Za-z0-9._/\ ~-]*\'|[A-Za-z0-9._/\$\{\}~-]*)$ ]] || return 0
+  if [[ -f "$cfg" ]] && grep -q '^[[:space:]]*PROJECTS_DIR=' "$cfg"; then return 0; fi
+  mkdir -p "$(dirname -- "$cfg")"
+  printf '%s\n' "$line" >>"$cfg"
+  chmod 600 "$cfg"
+  echo "Took PROJECTS_DIR from the backup's launcher config (the rest of that file stays as it is here)."
+}
+
 fix_permissions() {
   local f
   for f in .ssh .config/claude-launcher .claude backups; do
@@ -822,18 +844,25 @@ todo_list() { # still-to-do list from the manifest
   if [[ "$(jq -r '.claude_logins_included' "$TMP/manifest.json")" == false ]]; then
     echo "  - Claude logins were NOT stored in this backup (export --no-claude-login): sign in to Claude here again"
   fi
+  echo "  - re-check ALLOW_RUN/PROJECTS_DIR in ~/.config/claude-launcher/config (that file is not restored; this server keeps its own)"
+  if ((WITHAK == 0)); then
+    echo "  - ~/.ssh/authorized_keys was not restored (this server keeps its own keys); for a same-user move by hand use import --with-authorized-keys"
+  else
+    echo "  - ~/.ssh/authorized_keys was replaced by the old server's file: make sure the phone's key line is in it, or re-run the installer with the phone key"
+  fi
   echo "  - worker logins (cLaudeCluster): re-sign in from the app (Claude tab > Accounts > Re-sign in); stop sessions on the old server first, two servers refreshing one login sign it out"
   echo "  - run 'claude-autostart install' (asks for sudo), then 'claude-autostart restore' or restart sessions from the app"
   echo "  - delete the backup file (it holds every secret) and the pre-restore folder when all is fine"
 }
 
 cmd_import() {
-  local file="" dry=0 clone=0 from="" host rpath="" top pre ts n=0 p mout=""
+  local file="" dry=0 clone=0 from="" host rpath="" top pre ts n=0 p mout="" xex=()
   while (($#)); do
     case "$1" in
       --pass-file) (($# >= 2)) || bad_usage "--pass-file needs a file"; PASS_FILE="$2"; shift 2 ;;
       --dry-run) dry=1; shift ;;
       --clone) clone=1; shift ;;
+      --with-authorized-keys) WITHAK=1; shift ;;
       --manifest-out) (($# >= 2)) || bad_usage "--manifest-out needs a file"; mout="$2"; shift 2 ;;
       --from) (($# >= 2)) || bad_usage "--from needs USER@HOST"; from="$2"; shift 2 ;;
       -*) bad_usage "unknown option for import: $1" ;;
@@ -904,12 +933,16 @@ cmd_import() {
   echo "Restoring ..."
   : >"$TMP/gpg.err"
   start_read extract "$FILE"
-  if ! (umask 022; decrypt "$FILE" | gunz | tar -xpf - -C "$HOME" --anchored --exclude=manifest.json --exclude=docker); then
+  # Never restored: this server's own authorized_keys (unless asked), its launcher config (PROJECTS_DIR only, below), the migrate keys.
+  xex=(--exclude=manifest.json --exclude=docker --exclude=.config/claude-launcher/config --exclude=.config/claude-launcher/migrate)
+  ((WITHAK)) || xex+=(--exclude=.ssh/authorized_keys)
+  if ! (umask 022; decrypt "$FILE" | gunz | tar -xpf - -C "$HOME" --anchored "${xex[@]}"); then
     stop_read
     die "extracting failed half way (older files are in $pre)"
   fi
   stop_read
   progress extract 100
+  merge_projects_dir
   fix_permissions
 
   if ((clone)); then

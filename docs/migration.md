@@ -44,6 +44,14 @@ encrypted file and unpacks it on the new server.
    (`claude-backup list FILE` prints just the manifest). Docker volumes in the file go into new volumes;
    a volume that already holds data is never overwritten.
 
+   **What import does not restore:** `~/.ssh/authorized_keys` (the phone's forced-command line on NEW stays,
+   and OLD's keys do not get into NEW's account) and `~/.config/claude-launcher/config` (NEW keeps its own file,
+   only `PROJECTS_DIR` is taken from the backup when NEW sets none; re-check `ALLOW_RUN` and `PROJECTS_DIR`
+   there). The in-app Migrate transfer key is never stored in a backup. NEW's phone key keeps working because
+   NEW's own `authorized_keys` is untouched. If you move the **same user** to a new machine by hand and want
+   OLD's `authorized_keys` too, add `--with-authorized-keys`; then the phone only keeps working if its key
+   was in OLD's file, otherwise re-run the installer with the phone key (step 2 below).
+
 3. Follow the "Still to do" list it prints: recreate Docker containers, bring back services and VPN
    (Tailscale, databases, nodes: `claude-backup` never runs `sudo` or touches systemd), run
    `claude-autostart install` and restart the sessions, and sign the workers in again from the app
@@ -97,7 +105,7 @@ The phone's key is the same for every server. The command also installs the auto
 
 ```bash
 rsync -aH --info=progress2 you@OLD:~/.claude/            ~/.claude/              # settings, plugins, skills, memory, chat history
-rsync -aH --info=progress2 you@OLD:~/.config/claude-launcher/ ~/.config/claude-launcher/   # keys, workers' logins, push config, chat PIN
+rsync -aH --info=progress2 --exclude=/migrate you@OLD:~/.config/claude-launcher/ ~/.config/claude-launcher/   # keys, workers' logins, push config, chat PIN (not the Migrate transfer key)
 rsync -aH --info=progress2 you@OLD:~/.agents/            ~/.agents/              # `npx skills` lock file and skills
 rsync -aH --info=progress2 you@OLD:~/.config/gh/         ~/.config/gh/           # GitHub login
 # only if you use them: ~/.aws ~/.config/glab-cli ~/.config/stripe ~/.config/b2 ~/.gitconfig ~/.docker
