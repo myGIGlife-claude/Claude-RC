@@ -1,12 +1,15 @@
-Last updated: 2026-10-03 01:40 UTC
+Last updated: 2026-10-04 15:50 UTC
 
 ## Goal
 cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage Claude Code sessions on your own server from a phone.
 
 ## Current task
-Shipped #92-#101 (chat: ! and / commands show as typed, session-switch flash/scroll, stuck "queued" fixes incl. tap-to-remove and Enter retry for pasted messages, / suggestions incl. skills/plugins via `chat-commands`, custom key form: _AUTHKEY/_APIKEY + chips + autofill off). SCRIPT_API 29. Next: owner re-tests on phone after Update now (/ suggestions, ! echo, long pasted message, custom key TS_AUTHKEY), then the audit decisions below.
+SAVE POINT before moving to a bigger VPS (2026-10-04). Everything below is merged to main (#92-#117) and CI is green. Next: migrate the server (see docs/migration.md; the owner's private inventory lives outside the repo), then on the new server run the server tests, Update now from the app, re-sign in the CodeWriter worker, restart sessions. After that: Apple developer account (iOS signing/TestFlight), phone-testing the new screens, and the optional "offload to server programs" ideas (output condensers, lint/gitleaks pre-pass, repo index, self-hosted runner + local builds, emulator screenshot QA).
 
 ## Tasks
+- [ ] MIGRATE to the new VPS: follow docs/migration.md. Stop old sessions before copying logins; copy ~/.claude, ~/.config/claude-launcher, ~/.agents, project folders; run install.sh with the phone's key; add the new server in the app and trust its host key; re-sign in workers; check docker volumes/services. Push or copy unpushed work first (owner's private list).
+- [ ] Try on the phone after Update now + new APK: Plugins tab lights (green current / yellow update / red can't check / hollow off, tab dot, Update on `npx skills` plugins runs `skills-update`), Cluster settings card, Apple developer account dialog, instant alerts (done, working).
+- [ ] Cluster: delegate by role (`delegate(role=...)`), failover, `from_task` writer->auditor pipelines, 3 parallel tasks/chat, 5 h + weekly hand-back at 95%: untested with a second real account. CodeWriter was logged out twice by concurrent starts; starts are now 30 s apart. If it happens again consider long-lived worker tokens (loses usage numbers).
 - [ ] Cluster (#105-#109): try on the phone after Update now + new APK: Claude tab › cLaudeCluster › Cluster settings (parallel tasks per chat 1-10, hand back at 50-100% of the 5 h limit). Real test of slots / repo= / file= / usage hand-back needs the updated server scripts. Open: `wait` still polls every ~60 s; iOS has no cluster screen.
 - [ ] Apple developer key in the app (PR apple-developer, SCRIPT_API 31): once the account exists, App Store Connect › Integrations › create key, then + › Apple developer account in the app. Then add signing/TestFlight to ios.yml (secrets via `gh secret set`).
 - [x] iOS port (branch `iOS`, `ios/`): builds green on macOS CI (unsigned IPA artifact, 2nd attempt). Next: sign/TestFlight needs an Apple developer account; port logins, MCP/plugins, cluster, files, push.
@@ -60,4 +63,12 @@ Shipped #92-#101 (chat: ! and / commands show as typed, session-switch flash/scr
 ## Known issues
 - Not fixed from the scan: draft lost after >30 s in a file picker (app re-locks); env/credentials files have no cross-process lock (writes are atomic); login-claude-code can report success when a running session refreshes its token.
 - Notifications vibrate without showing (see Tasks).
+- `wait` still returns about once a minute; a worker run that hits its usage limit mid-task fails (re-delegate by role). The app's own usage bars call the same rate-limited endpoint separately.
+- Server tests don't gate merges (no branch protection): always check CI before merging.
 - Plugin-provided MCP servers can only be removed by disabling their plugin; project-scope MCP servers can't be signed in from the app (use /mcp in that project).
+
+- 2026-10-03: iOS app = native SwiftUI in `ios/` (swift-nio-ssh, XcodeGen, macOS CI `ios.yml`, unsigned IPA); Android untouched. Apple developer key goes in the app (**+ › Apple developer account**, `login-apple`) so every session gets APPLE_* env.
+- 2026-10-03: Cluster: workers run up to 10 tasks at once per account (flock slots), the owner's per-chat limit (1-10, default 3) and hand-back point (50-100%, default 95, applies to 5 h AND weekly usage) are in `cluster.json`, set from the app (`cluster-config`). `delegate(role=)` picks the account with the most room, a named worker near its limit fails over to the same role, `from_task` stacks a task on another task's branch, `review file=` reads big diffs per file, `delegate repo=` branches from a worktree.
+- 2026-10-03: The usage endpoint rate-limits (429): one shared file cache (`usage-cache/`, TTL 120 s), backoff, last good numbers kept 30 min. Worker logins: starts 30 s apart, a run that could outlive its token starts alone.
+- 2026-10-04: Plugin update lights come from `claude-plugin-updates` (pinned sha, git ls-remote, GitHub compare for in-repo plugins, declared manifest version for versioned plugins; 1 h cache); plugins managed by `npx skills` are judged by the skills lock file and updated by `skills-update`.
+- 2026-10-04: README rewritten (hero, contents, features with pictures); screenshots are mock-ups from docs/mockups (never real data), social images in docs/social.
