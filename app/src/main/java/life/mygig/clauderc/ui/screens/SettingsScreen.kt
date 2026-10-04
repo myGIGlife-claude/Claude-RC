@@ -272,6 +272,17 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                     OutlinedButton(onClick = { vm.addServer() }, modifier = Modifier.fillMaxWidth()) { Text("+ Add server") }
                 }
             }
+
+            SectionLabel("Migrate")
+            CardBox {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Migrate")
+                        Text("Move everything from one server to another", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    OutlinedButton(onClick = { vm.migrateOpen() }) { Text("Open") }
+                }
+            }
         }
 
         if (t == 2) {
