@@ -8,6 +8,7 @@ HELPER = os.path.join(os.path.dirname(HERE), "claude-plugin-updates")
 api_calls = []
 api_files = {}  # "old...new" -> list of changed file names
 api_fail = []
+raw_files = {}  # raw.githubusercontent-style path -> plugin.json content
 commit_data = {"sha": "a" * 40, "date": "2026-09-10T12:00:00Z"}  # HEAD of the skills-managed repo
 
 
@@ -19,6 +20,10 @@ class H(http.server.BaseHTTPRequestHandler):
         if self.path == "/repos/demo/skilled/commits/HEAD":
             out = json.dumps({"sha": commit_data["sha"], "commit": {"committer": {"date": commit_data["date"]}}}).encode()
             self.send_response(200); self.end_headers(); self.wfile.write(out); return
+        if self.path.endswith("/.claude-plugin/plugin.json"):
+            if self.path not in raw_files:
+                self.send_response(404); self.end_headers(); return
+            self.send_response(200); self.end_headers(); self.wfile.write(json.dumps(raw_files[self.path]).encode()); return
         rng = self.path.rsplit("/compare/", 1)[-1]
         files = api_files.get(rng)
         if files is None:
@@ -104,7 +109,7 @@ def install(**plugins):
 
 skill_lock = os.path.join(tmp, "skill-lock.json")  # absent until the skills tests write it
 env = dict(os.environ, CLAUDE_PLUGIN_DIR=plugin_dir, XDG_CONFIG_HOME=xdg, CLAUDERC_GIT=wrapper,
-           CLAUDERC_GITHUB_API=base, CLAUDERC_PLUGIN_TTL="0", CLAUDERC_SKILL_LOCK=skill_lock)
+           CLAUDERC_GITHUB_API=base, CLAUDERC_GITHUB_RAW=base, CLAUDERC_PLUGIN_TTL="0", CLAUDERC_SKILL_LOCK=skill_lock)
 fails = 0
 
 
@@ -165,6 +170,32 @@ check("truncated file list -> available", out["inrepo@market"]["state"] == "avai
 install(**{"inrepo@market": {"version": "1.0"}})
 out = run()
 check("in-repo plugin without installed sha -> unknown", out["inrepo@market"]["state"] == "unknown", out)
+
+
+# A plugin that declares versions (not a sha) only has an update when its declared version changes: `claude plugin update`
+# says "already at the latest" otherwise.
+install(**{"inrepo2@market": {"version": "1.0.0", "gitCommitSha": first}})
+api_files["%s...%s" % (first, head)] = ["plugins/inrepo2/skill.md"]
+raw_files["/demo/market/HEAD/plugins/inrepo2/.claude-plugin/plugin.json"] = {"name": "inrepo2", "version": "1.0.0"}
+out = run()
+check("declared version unchanged despite new commits -> current", out["inrepo2@market"] == {"state": "current", "latest": "1.0.0"}, out)
+raw_files["/demo/market/HEAD/plugins/inrepo2/.claude-plugin/plugin.json"] = {"name": "inrepo2", "version": "1.1.0"}
+out = run()
+check("declared version moved -> available with that version", out["inrepo2@market"] == {"state": "available", "latest": "1.1.0"}, out)
+del raw_files["/demo/market/HEAD/plugins/inrepo2/.claude-plugin/plugin.json"]
+out = run()
+check("versioned but no manifest to read -> unknown", out["inrepo2@market"]["state"] == "unknown", out)
+install(**{"remote@market": {"version": "3.0.0", "gitCommitSha": head}})
+raw_files["/demo/other/HEAD/.claude-plugin/plugin.json"] = {"version": "3.0.0"}
+out = run()
+check("git source: declared version unchanged -> current", out["remote@market"] == {"state": "current", "latest": "3.0.0"}, out)
+raw_files["/demo/other/HEAD/.claude-plugin/plugin.json"] = {"version": "3.1.0"}
+out = run()
+check("git source: declared version moved -> available", out["remote@market"] == {"state": "available", "latest": "3.1.0"}, out)
+install(**{"remote@market": {"version": other_head[:12], "gitCommitSha": head}})
+out = run()
+check("a sha as version keeps the commit rule -> available", out["remote@market"] == {"state": "available", "latest": other_head[:12]}, out)
+raw_files.clear()
 
 # Odd data.
 install(**{"rel@selfhosted": {"gitCommitSha": first}, "gone@nowhere": {"gitCommitSha": first},
