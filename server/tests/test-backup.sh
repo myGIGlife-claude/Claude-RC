@@ -109,12 +109,14 @@ echo in >"$L/workers/demo-worker/tasks/x.in"
 echo '{}' >"$L/workers/demo-worker/tasks/keep.json"
 touch "$L/workers/demo-worker/run.lock.1234"
 echo cache >"$L/usage-cache/u.json"
-echo '{"theme":"dark"}' >"$HOME/.claude/settings.json"
+echo "{\"theme\":\"dark\",\"key\":\"$HOME/.config/x.json\"}" >"$HOME/.claude/settings.json"
 echo '{}' >"$HOME/.claude/plugins/installed_plugins.json"
 echo data >"$HOME/.claude/plugins/data/d"
 head -c 1048576 /dev/zero >"$HOME/.claude/plugins/cache/big"
 echo snap >"$HOME/.claude/shell-snapshots/x"
 echo chat >"$HOME/.claude/projects/demo/chat.jsonl"
+OSLUG="$(printf %s "$HOME" | sed 's/[^A-Za-z0-9]/-/g')"; mkdir -p "$HOME/.claude/projects/$OSLUG-projects-app"; echo chat >"$HOME/.claude/projects/$OSLUG-projects-app/c.jsonl"
+
 echo '{"token":"SECRET-MARKER-123"}' >"$HOME/.claude/.credentials.json"
 echo 'ssh-ed25519 AAAA demo' >"$HOME/.ssh/authorized_keys"
 mkdir -p "$L/migrate"   # the Migrate wizard's transfer key and passphrase: never part of a backup
@@ -256,6 +258,10 @@ grep -q SECRET-MARKER "$H2/.claude/.credentials.json" && grep -q SECRET-MARKER "
 [[ -f "$H2/.ssh/id_demo" && -f "$H2/.agents/.skill-lock.json" && -f "$H2/.claude/settings.json" ]]; check "other files restored" $?
 # (changed on purpose: the old version of this check also expected .ssh/authorized_keys to come back, which is the hole fixed in task 6)
 [[ ! -e "$H2/.ssh/authorized_keys" ]]; check "import does NOT restore .ssh/authorized_keys" $?
+NSLUG="$(printf %s "$H2" | sed 's/[^A-Za-z0-9]/-/g')"
+grep -qF "$H2/.config/x.json" "$H2/.claude/settings.json" && ! grep -qF "$OLD" "$H2/.claude/settings.json"; check "old home path rewritten to the new home in settings" $?
+[[ -f "$H2/.claude/projects/$NSLUG-projects-app/c.jsonl" && ! -e "$H2/.claude/projects/$OSLUG-projects-app" ]]; check "chat history folders renamed to the new home" $?
+
 [[ ! -e "$R/migrate" ]]; check "import does not restore the migrate folder" $?
 [[ "$(cat "$R/config")" == 'PROJECTS_DIR="$HOME/projects"' ]]; check "no launcher config here: only PROJECTS_DIR is taken from the backup (no ALLOW_RUN)" $?
 grep -q 're-check ALLOW_RUN/PROJECTS_DIR' <<<"$OUT" && grep -q 'authorized_keys was not restored' <<<"$OUT"; check "to-do list says config and authorized_keys were not restored" $?
