@@ -398,7 +398,7 @@ check "plugins: installed, available, marketplaces, version" "$(jqt '.ok and .da
 check "plugins without the update helper: no update field" "$(jqt '.data.installed[0] | has("update") | not')"
 PD="$HOME/.claude/plugins"; mkdir -p "$PD/marketplaces/market/.claude-plugin"
 echo '{"plugins":[{"name":"demo","source":{"source":"url","url":"https://example.com/demo.git","sha":"abcdef0123456789abcdef0123456789abcdef01"}}]}' >"$PD/marketplaces/market/.claude-plugin/marketplace.json"
-echo '{"version":2,"plugins":{"demo@market":[{"scope":"user","version":"1.0","gitCommitSha":"1111111222222233333334444444555555566666"}]}}' >"$PD/installed_plugins.json"
+echo '{"version":2,"plugins":{"demo@market":[{"scope":"user","version":"111111122222","gitCommitSha":"1111111222222233333334444444555555566666"}]}}' >"$PD/installed_plugins.json"
 cp "$SERVER/claude-plugin-updates" "$HOME/.local/bin/"; chmod +x "$HOME/.local/bin/claude-plugin-updates"
 api "plugins"
 check "plugins: installed plugin carries update and latest" "$(jqt '.ok and .data.installed[0].update=="available" and .data.installed[0].latest=="abcdef012345" and .data.installed[0].enabled and (.data.available|length)==2')"
