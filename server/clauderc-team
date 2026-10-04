@@ -19,7 +19,13 @@ git_lock = threading.Lock()   # one worktree is created at a time
 CLAUDE = os.environ.get("CLAUDERC_CLAUDE", "claude")
 SLOTS = max(1, int(os.environ.get("CLAUDERC_WORKER_SLOTS") or 10))   # hard cap of runs of one worker at once (they share its login like several chats share one); the owner's per-chat limit is lower
 USAGE_URL = os.environ.get("CLAUDERC_USAGE_URL") or "https://api.anthropic.com/api/oauth/usage"
-SLOT_SH = 'b=$1; n=$2; m=$3; shift 3; while :; do i=0; while [ $i -lt $n ]; do exec 9>"$b.$i"; flock -n 9 && { : >"$m"; exec "$@"; }; i=$((i+1)); done; sleep 2; done'
+# A run whose login token expires before it could finish is started ALONE (exclusive lock on <lock>.mode; the others hold
+# it shared): two runs refreshing the same token at once invalidate each other's refresh token and log the worker out.
+SLOT_SH = ('b=$1; n=$2; m=$3; cred=$4; thr=$5; py=$6; shift 6; while :; do i=0; while [ $i -lt $n ]; do exec 9>"$b.$i"; '
+           'flock -n 9 && { left=$(python3 -c "$py" "$cred"); k=s; [ "$left" -lt "$thr" ] && k=x; exec 8>"$b.mode"; flock -$k 8; '
+           ': >"$m"; exec "$@"; }; i=$((i+1)); done; sleep 2; done')
+TOKEN_LEFT_PY = ('import json,sys,time\ntry: print(int(json.load(open(sys.argv[1]))["claudeAiOauth"]["expiresAt"]/1000-time.time()))\n'
+                 'except Exception: print(999999)')
 RUN_TIMEOUT = 1800        # seconds one worker run may take
 NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,29}$")
 ID_RE = re.compile(r"^[0-9a-f]{8}$")
@@ -447,6 +453,7 @@ def launch(t):
     # Up to SLOTS runs of one worker at a time (any chat can use it on demand); more wait for a free slot. The marker
     # file says the run really started, so wait can tell "Queued" from "Still running".
     cmd = ["sh", "-c", SLOT_SH, "slot", str(w / "run.lock"), str(SLOTS), str(d / f"{tid}.started"),
+           str(w / "home" / ".credentials.json"), str(RUN_TIMEOUT + 300), TOKEN_LEFT_PY,
            "timeout", "--kill-after=10", str(RUN_TIMEOUT), CLAUDE, "-p", "--output-format", "json",
            "--permission-mode", mode] + pick + (["--allowed-tools", ",".join(tools)] if tools else []) + (["--resume", t["resume"]] if t.get("resume") else [])
     # The worker must run as its own account: drop the main session's credentials, Claude Code markers and the service tokens.
