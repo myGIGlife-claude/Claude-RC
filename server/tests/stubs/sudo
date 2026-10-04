@@ -1,6 +1,45 @@
 #!/usr/bin/env bash
-# Test stub for sudo -A: asks $SUDO_ASKPASS and runs the command if it says "pw-ok".
-[[ "$1" == -A ]] || { echo "sudo stub: expected -A" >&2; exit 1; }
-shift
-[[ "$("$SUDO_ASKPASS")" == pw-ok ]] || { echo "Sorry, try again."; exit 1; }
-exec "$@"
+# Test stub for sudo. State in $STUB_STATE; every call is recorded in sudo-argv (never a password: those only ever
+# come through $SUDO_ASKPASS). The mode is the first word of $STUB_STATE/sudo-mode:
+#   password (default)  needs -A and an askpass that says "pw-ok" ; -n fails with "a password is required"
+#   nopasswd            runs everything
+#   none                "user may not run sudo"
+# -u USER -H runs the command with HOME=$STUB_STATE/home/USER (nothing outside the test HOME is ever touched), and
+# a login shell (`bash -lc`) becomes `bash -c` so /etc/profile can't replace the stubs on PATH.
+S="${STUB_STATE:-$HOME/.stub-state}"
+mode="$(cat "$S/sudo-mode" 2>/dev/null || echo password)"
+askpass=0 nonint=0 list=0 user=""
+rec="$*"
+while [[ "${1:-}" == -* ]]; do
+  case "$1" in
+    -A) askpass=1 ;;
+    -n) nonint=1 ;;
+    -l) list=1 ;;
+    -k | -S | -H) ;;
+    -u) user="$2"; shift ;;
+    --) shift; break ;;
+    *) echo "sudo stub: unknown option $1" >&2; exit 1 ;;
+  esac
+  shift
+done
+echo "$rec" >>"$S/sudo-argv"
+if [[ "$(id -u)" != 0 ]]; then
+  case "$mode" in
+    none) echo "Sorry, user $(id -un) may not run sudo on this host."; exit 1 ;;
+    nopasswd) ;;
+    *)
+      if ((askpass)); then
+        [[ "$("$SUDO_ASKPASS")" == pw-ok ]] || { echo "Sorry, try again."; exit 1; }
+      elif ((nonint)); then echo "sudo: a password is required"; exit 1
+      else echo "sudo: a terminal is required to read the password"; exit 1; fi ;;
+  esac
+fi
+((list)) && { echo "User may run the following commands on this host: (ALL) ALL"; exit 0; }
+[[ $# -gt 0 ]] || { echo "sudo stub: no command" >&2; exit 1; }
+args=()
+for a in "$@"; do [[ "$a" == -lc ]] && a=-c; args+=("$a"); done
+if [[ -n "$user" ]]; then
+  export HOME="$S/home/$user" USER="$user" LOGNAME="$user"
+  cd "$HOME" 2>/dev/null || true
+fi
+exec "${args[@]}"

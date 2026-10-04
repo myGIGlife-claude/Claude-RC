@@ -2,6 +2,13 @@
 # Test stub: claude-autostart waits for the internet with curl; say it's up.
 # Local file:// downloads (install.sh / self-update tests) use the real curl.
 for a; do [[ "$a" == file://* ]] && exec /usr/bin/curl "$@"; done
+# migrate-create-user: Claude Code's official installer is a script that only records itself (HOME = the new user's).
+for a; do
+  if [[ "$a" == https://claude.ai/install.sh ]]; then
+    printf '#!/bin/sh\necho "claude installer: $HOME" >>"%s/claude-install-log"\nmkdir -p "$HOME/.local/bin" && touch "$HOME/.local/bin/claude" && chmod +x "$HOME/.local/bin/claude"\n' "${STUB_STATE:-/tmp}"
+    exit 0
+  fi
+done
 # cluster: Anthropic's usage endpoint. Keep what curl was given on stdin (the token) for the test to inspect.
 for a; do
   if [[ "$a" == */api/oauth/usage ]]; then

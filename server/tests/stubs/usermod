@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Test stub for usermod: only records the call.
+echo "$*" >>"${STUB_STATE:-$HOME/.stub-state}/usermod-log"
