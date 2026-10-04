@@ -164,9 +164,10 @@ class LauncherApi(
 
     // Team: extra Claude accounts the main Claude can delegate to.
     suspend fun workers(): WorkersData = call("worker-list")
-    suspend fun workerAdd(name: String, role: String): JsonObject {
+    suspend fun workerAdd(name: String, role: String, kind: String = "claude"): JsonObject {
         requireWorker(name)
-        return call("worker-add $name", stdin = role.trim().replace('\n', ' '))
+        require(kind in listOf("claude", "codex", "gemini"))
+        return call("worker-add $name $kind", stdin = role.trim().replace('\n', ' '))
     }
     suspend fun workerSet(name: String, field: String, value: String): JsonObject {
         requireWorker(name)

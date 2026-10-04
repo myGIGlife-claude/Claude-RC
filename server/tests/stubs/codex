@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Test stub for the Codex CLI (`codex exec ... -`): prompt on stdin, answer in the -o file, JSON events on stdout.
+safe() { [[ "$1" == "$HOME"/* && "$HOME" == /tmp/* || "$1" == /tmp/* ]] || { echo "stub codex: refusing to write a login to $1" >&2; exit 1; }; }
+if [[ "${1:-}" == login ]]; then   # device-code sign-in: shows a URL and a code, finishes by itself
+  echo "Open https://auth.openai.com/codex/device and enter the code ABCD-12345"
+  sleep 2; safe "${CODEX_HOME:-$HOME/.codex}"; mkdir -p "$CODEX_HOME" && echo '{"tokens":{"a":"b"}}' >"$CODEX_HOME/auth.json"; echo "Signed in"; exit 0
+fi
+echo "$*" >"${STUB_STATE:-/tmp}/codex-args"
+prompt="$(cat)"
+out=""; a=("$@"); for ((i = 0; i < ${#a[@]}; i++)); do [[ "${a[i]}" == -o ]] && out="${a[i+1]}"; done
+echo '{"type":"thread.started","thread_id":"thr-9"}'
+if [[ "$prompt" == *FAIL* ]]; then echo '{"type":"turn.failed","error":{"message":"stub codex failure"}}'; exit 1; fi
+printf 'codex home=%s key=%s cwd=%s args=%s prompt=%s' "${CODEX_HOME:-none}" "${OPENAI_API_KEY:-unset}" "$PWD" "$*" "$prompt" >"$out"
+echo '{"type":"turn.completed"}'

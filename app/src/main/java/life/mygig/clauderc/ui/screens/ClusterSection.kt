@@ -10,6 +10,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -64,6 +65,7 @@ fun ClusterSection(vm: MainViewModel) {
     var add by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
     var role by remember { mutableStateOf("") }
+    var kind by remember { mutableStateOf("claude") }
     var code by remember { mutableStateOf("") }
     var confirmRemove by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
@@ -102,15 +104,19 @@ fun ClusterSection(vm: MainViewModel) {
             onDismissRequest = { add = false },
             confirmButton = {
                 TextButton(
-                    onClick = { vm.addWorker(name, role); name = ""; role = ""; add = false },
+                    onClick = { vm.addWorker(name, role, kind); name = ""; role = ""; kind = "claude"; add = false },
                     enabled = WORKER_NAME_RE.matches(name) && busy == null,
                 ) { Text("Add and sign in") }
             },
             dismissButton = { TextButton(onClick = { add = false }) { Text("Cancel") } },
-            title = { Text("Add a Claude account") },
+            title = { Text("Add an account") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("It becomes a worker on this server. Next you sign in to the account in your browser.", style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for ((k, label) in listOf("claude" to "Claude", "codex" to "ChatGPT", "gemini" to "Gemini"))
+                            FilterChip(selected = kind == k, onClick = { kind = k }, label = { Text(label) })
+                    }
                     OutlinedTextField(
                         value = name, onValueChange = { name = it.trim() }, label = { Text("Name (research, coding, ui…)") },
                         singleLine = true, modifier = Modifier.fillMaxWidth(), isError = name.isNotEmpty() && !WORKER_NAME_RE.matches(name),
@@ -127,14 +133,20 @@ fun ClusterSection(vm: MainViewModel) {
         AlertDialog(
             onDismissRequest = { vm.closeWorkerLogin(); code = "" },
             confirmButton = {
-                TextButton(onClick = { vm.workerLoginCode(who, code); code = "" }, enabled = code.length >= 4) { Text("Submit code") }
+                TextButton(onClick = { vm.workerLoginCode(who, code); code = "" }, enabled = url.deviceCode != null || code.length >= 4) {
+                    Text(if (url.deviceCode != null) "I've signed in" else "Submit code")
+                }
             },
             dismissButton = { TextButton(onClick = { vm.closeWorkerLogin(); code = "" }) { Text("Cancel") } },
             title = { Text("Sign in $who") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Use the Claude account meant for this worker (sign out of other accounts in your browser first, or use a private tab).")
+                    Text("Use the account meant for this worker (sign out of other accounts in your browser first, or use a private tab).")
                     OutlinedButton(onClick = { openUrl(context, url.url) }, modifier = Modifier.fillMaxWidth()) { Text("Open link") }
+                    if (url.deviceCode != null) {
+                        Text("Enter this code on the page, then tap “I've signed in”:", style = MaterialTheme.typography.bodySmall)
+                        Text(url.deviceCode, style = MaterialTheme.typography.headlineSmall)
+                    } else
                     OutlinedTextField(
                         value = code, onValueChange = { code = it.trim() }, label = { Text("Code") },
                         singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
@@ -220,7 +232,7 @@ private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean
     CardBox {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                (if (worker) a.name else "Main account") + (a.plan?.let { " · $it" } ?: "") + if (a.signedIn) "" else " · not signed in",
+                (if (worker) a.name else "Main account") + (if (a.kind == "codex") " · ChatGPT" else if (a.kind == "gemini") " · Gemini" else "") + (a.plan?.let { " · $it" } ?: "") + if (a.signedIn) "" else " · not signed in",
                 style = MaterialTheme.typography.titleSmall,
             )
             a.email?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -229,7 +241,8 @@ private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean
                 val u = a.usage
                 if (u == null) {
                     Text(
-                        if (a.usageError == "expired") "Usage shows again after this account's next run." else "Usage unavailable.",
+                        if (a.kind != "claude") "No usage numbers for this account."
+                        else if (a.usageError == "expired") "Usage shows again after this account's next run." else "Usage unavailable.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {

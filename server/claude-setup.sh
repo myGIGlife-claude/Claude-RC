@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user.
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster).
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=36
+SCRIPT_API=37
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -131,6 +131,18 @@ session_dir() {
 
 # A credentials file that has a token (a logged-out Claude leaves `{"claudeAiOauth":{}}` behind, which must not count as signed in).
 creds_ok() { jq -e '(.claudeAiOauth.accessToken // empty) | strings | length > 0' "$1" >/dev/null 2>&1; }
+
+# Workers can be other CLIs: kind is claude (default), codex (ChatGPT) or gemini. Each is signed in under its own home folder.
+WORKER_KINDS=" claude codex gemini "
+worker_kind() { jq -r '.kind // "claude"' "$1/meta.json" 2>/dev/null || echo claude; }
+# worker_signed <worker dir>: its login file has something in it.
+worker_signed() {
+  case "$(worker_kind "$1")" in
+    codex) jq -e 'length > 0' "$1/home/auth.json" >/dev/null 2>&1 ;;
+    gemini) jq -e 'length > 0' "$1/home/.gemini/oauth_creds.json" >/dev/null 2>&1 ;;
+    *) creds_ok "$1/home/.credentials.json" ;;
+  esac
+}
 
 claude_logged_in() { [[ -s "${LOGIN_CONFIG_DIR:-$HOME/.claude}/.credentials.json" ]]; }
 
@@ -1243,7 +1255,7 @@ start_login_session() {
   end_login "$name"
   local envs=(-e "LOGIN_BIN=$bin")
   # Team: sign a worker account in to its own config dir.
-  [[ -n "${LOGIN_CONFIG_DIR:-}" ]] && envs+=(-e "CLAUDE_CONFIG_DIR=$LOGIN_CONFIG_DIR")
+  [[ -n "${LOGIN_CONFIG_DIR:-}" ]] && envs+=(-e "CLAUDE_CONFIG_DIR=$LOGIN_CONFIG_DIR" -e "CODEX_HOME=$LOGIN_CONFIG_DIR" -e "GEMINI_CLI_HOME=$LOGIN_CONFIG_DIR" -e NO_BROWSER=true)
   tmux new-session -d -s "$name" -x 1000 -y 60 "${envs[@]}" \
     bash -c 'env -u ANTHROPIC_API_KEY "$LOGIN_BIN" "$@"; echo "[exit $?]"; sleep 900' login "$@" >/dev/null 2>&1
 }
@@ -1342,8 +1354,8 @@ do_worker_list() {
   for d in "$WORKERS_DIR"/*/; do
     [[ -f "$d/meta.json" ]] || continue
     n="$(basename "$d")"; signed=false
-    creds_ok "$d/home/.credentials.json" && signed=true
-    out+="$(jq -c --arg n "$n" --argjson s "$signed" '{name:$n, role:(.role // ""), mode:(.mode // "acceptEdits"), signed_in:$s}' "$d/meta.json")"$'\n'
+    worker_signed "${d%/}" && signed=true
+    out+="$(jq -c --arg n "$n" --argjson s "$signed" '{name:$n, kind:(.kind // "claude"), role:(.role // ""), mode:(.mode // "acceptEdits"), signed_in:$s}' "$d/meta.json")"$'\n'
   done
   api_ok "$(printf '%s' "$out" | jq -sc '{workers:.}')"
 }
@@ -1412,7 +1424,12 @@ do_cluster() {
   for d in "$WORKERS_DIR"/*/; do
     [[ -f "$d/meta.json" ]] || continue
     n="$(basename "$d")"; i=$((i + 1))
-    cluster_account "$n" "$d/home" "$d/home/.claude.json" "$(jq -r '.role // ""' "$d/meta.json")" "$(jq -r '.mode // "acceptEdits"' "$d/meta.json")" >"$tmp/$(printf %02d "$i")" &
+    if [[ "$(worker_kind "${d%/}")" == claude ]]; then
+      cluster_account "$n" "$d/home" "$d/home/.claude.json" "$(jq -r '.role // ""' "$d/meta.json")" "$(jq -r '.mode // "acceptEdits"' "$d/meta.json")" >"$tmp/$(printf %02d "$i")" &
+    else   # no usage numbers or token counts for these
+      jq -c --arg n "$n" --argjson s "$({ worker_signed "${d%/}" && echo true; } || echo false)" \
+        '{name:$n, kind:.kind, email:null, plan:null, signed_in:$s, role:(.role // ""), mode:(.mode // "acceptEdits"), usage:null, usage_error:"unavailable", tokens:null}' "$d/meta.json" >"$tmp/$(printf %02d "$i")"
+    fi
   done
   wait
   f="$(cat "$tmp"/* | jq -sc '{accounts:.}')"
@@ -1456,14 +1473,15 @@ do_cluster_config_set() {
 }
 
 do_worker_add() {
-  local name="${1:-}" role
+  local name="${1:-}" kind="${2:-claude}" role
   role="$(read_secret_line)"
   exec 0</dev/null
   worker_check "$name"
+  [[ "$WORKER_KINDS" == *" $kind "* && $# -le 2 ]] || api_err invalid_name "Kind must be claude, codex or gemini."
   [[ ! -f "$WORKERS_DIR/$name/meta.json" ]] || api_err invalid_name "A worker named '$name' already exists."
   mkdir -p "$WORKERS_DIR/$name/home" "$WORKERS_DIR/$name/tasks"
   chmod 700 "$WORKERS_DIR" "$WORKERS_DIR/$name" "$WORKERS_DIR/$name/home" "$WORKERS_DIR/$name/tasks"
-  jq -cn --arg r "${role:0:200}" '{role:$r, mode:"acceptEdits"}' >"$WORKERS_DIR/$name/meta.json"
+  jq -cn --arg r "${role:0:200}" --arg k "$kind" '{role:$r, mode:"acceptEdits", kind:$k}' >"$WORKERS_DIR/$name/meta.json"
   api_ok "$(jq -cn --arg n "$name" '{added:$n}')"
 }
 
@@ -1526,9 +1544,9 @@ do_cluster_session() {
   for d in "$WORKERS_DIR"/*/; do
     [[ -f "$d/meta.json" ]] || continue
     n="$(basename "$d")"; signed=false
-    creds_ok "$d/home/.credentials.json" && signed=true
+    worker_signed "${d%/}" && signed=true
     out+="$(jq -c --arg n "$n" --argjson s "$signed" --argjson a "$att" \
-      '{name:$n, signed_in:$s, attached:($a | has($n)), role:((try $a[$n].role catch null) // .role // ""), mode:((try $a[$n].mode catch null) // .mode // "acceptEdits")}' "$d/meta.json")"$'\n'
+      '{name:$n, kind:(.kind // "claude"), signed_in:$s, attached:($a | has($n)), role:((try $a[$n].role catch null) // .role // ""), mode:((try $a[$n].mode catch null) // .mode // "acceptEdits")}' "$d/meta.json")"$'\n'
   done
   # Open work for this project: running tasks and branches waiting for the main Claude to merge or discard.
   local tasks f
@@ -1574,8 +1592,96 @@ worker_login_target() {
   CLAUDE_LOGIN_SESSION="worker-login-$1"
   LOGIN_CONFIG_DIR="$WORKERS_DIR/$1/home"
 }
-do_worker_login_start() { worker_login_target "${1:-}"; do_login_claude_start; }
-do_worker_login_code() { worker_login_target "${1:-}"; do_login_claude_code; }
+do_worker_login_start() {
+  worker_login_target "${1:-}"
+  case "$(worker_kind "$WORKERS_DIR/$1")" in
+    codex) do_login_codex_start ;;
+    gemini) do_login_gemini_start ;;
+    *) do_login_claude_start ;;
+  esac
+}
+do_worker_login_code() {
+  worker_login_target "${1:-}"
+  case "$(worker_kind "$WORKERS_DIR/$1")" in
+    codex) do_login_device_wait codex ;;
+    gemini) do_login_gemini_code ;;
+    *) do_login_claude_code ;;
+  esac
+}
+
+# The Codex and Gemini CLIs install on first use (npm into ~/.local, on the sessions' PATH).
+ensure_cli() {  # <binary> <npm package>
+  command -v "$1" >/dev/null 2>&1 && return 0
+  command -v npm >/dev/null 2>&1 || api_err internal "Installing $1 needs npm, which isn't on the server."
+  timeout 300 npm install -g --prefix "$HOME/.local" "$2" >/dev/null 2>&1 || true
+  command -v "$1" >/dev/null 2>&1 || api_err internal "Couldn't install $1 ($2) on the server."
+}
+
+# Waits for the first URL (and optional one-time code) in a login pane. Returns it in LOGIN_URL / LOGIN_CODE.
+login_wait_url() {  # <session> <seconds> [enter-on-pattern]
+  local i text="" k
+  LOGIN_URL=""; LOGIN_CODE=""
+  for ((i = 0; i < $2 * 2; i++)); do
+    sleep 0.5
+    text="$(pane_text "$1")"
+    LOGIN_URL="$(grep -oE 'https://[^[:space:]]+' <<<"$text" | grep -vE 'docs|github\.com|gemini\.google\.com/?$' | head -n 1 | tr -d '\r')"
+    LOGIN_CODE="$(grep -oE '\b[A-Z0-9]{4,5}-[A-Z0-9]{4,6}\b' <<<"$text" | head -n 1)"
+    [[ -n "$LOGIN_URL" ]] && break
+    grep -q '\[exit ' <<<"$text" && break
+    # first-run prompts (trust this folder, pick the Google sign-in): the default answer is the right one
+    [[ -n "${3:-}" ]] && grep -qiE "$3" <<<"$text" && { tmux send-keys -t "=$1:" Enter; sleep 1; }
+  done
+  LOGIN_PANE="$(tail -n 15 <<<"$text")"
+}
+
+# ChatGPT (Codex): `codex login --device-auth` shows a URL and a one-time code and finishes by itself once the code is entered.
+do_login_codex_start() {
+  need tmux; ensure_cli codex @openai/codex
+  start_login_session "$CLAUDE_LOGIN_SESSION" "$(command -v codex)" login --device-auth || api_err internal "Could not start the login session."
+  login_wait_url "$CLAUDE_LOGIN_SESSION" 30
+  if [[ -z "$LOGIN_URL" ]]; then
+    end_login "$CLAUDE_LOGIN_SESSION"
+    api_err internal "No login URL appeared within 30 s." "$(jq -cn --arg t "$LOGIN_PANE" '{pane:$t}')"
+  fi
+  api_ok "$(jq -cn --arg u "$LOGIN_URL" --arg c "$LOGIN_CODE" --arg s "$CLAUDE_LOGIN_SESSION" '{url:$u, device_code:(if $c=="" then null else $c end), session:$s}')"
+}
+
+# Gemini: NO_BROWSER makes the CLI print a Google URL and ask for the code it shows afterwards.
+do_login_gemini_start() {
+  need tmux; ensure_cli gemini @google/gemini-cli
+  start_login_session "$CLAUDE_LOGIN_SESSION" "$(command -v gemini)" --skip-trust || api_err internal "Could not start the login session."
+  login_wait_url "$CLAUDE_LOGIN_SESSION" 40 'login with google|sign in with google|trust'
+  if [[ -z "$LOGIN_URL" ]]; then
+    end_login "$CLAUDE_LOGIN_SESSION"
+    api_err internal "No login URL appeared within 40 s." "$(jq -cn --arg t "$LOGIN_PANE" '{pane:$t}')"
+  fi
+  api_ok "$(jq -cn --arg u "$LOGIN_URL" --arg s "$CLAUDE_LOGIN_SESSION" '{url:$u, session:$s}')"
+}
+
+# Success = the CLI wrote its login file under the worker's home.
+do_login_device_wait() {  # <codex|gemini>
+  local w="${CLAUDE_LOGIN_SESSION#worker-login-}" i text=""
+  exec 0</dev/null
+  for ((i = 0; i < 45; i++)); do
+    worker_signed "$WORKERS_DIR/$w" && { end_login "$CLAUDE_LOGIN_SESSION"; api_ok '{"logged_in":true}'; }
+    tmux has-session -t "=$CLAUDE_LOGIN_SESSION" 2>/dev/null || break
+    sleep 1
+  done
+  text="$(pane_text "$CLAUDE_LOGIN_SESSION")"
+  api_err not_logged_in_claude "Login did not complete. Start the sign-in again." "$(jq -cn --arg t "$(tail -n 15 <<<"$text")" '{pane:$t}')"
+}
+
+do_login_gemini_code() {
+  local code
+  code="$(read_secret_line)"
+  exec 0</dev/null
+  code="${code//[[:space:]]/}"
+  [[ "$code" =~ ^[A-Za-z0-9#_.~=+/-]{4,1024}$ ]] || api_err invalid_name "That doesn't look like a login code."
+  tmux has-session -t "=$CLAUDE_LOGIN_SESSION" 2>/dev/null || api_err not_logged_in_claude "The login session expired. Start the sign-in again."
+  tmux send-keys -t "=$CLAUDE_LOGIN_SESSION:" -l -- "$code"
+  tmux send-keys -t "=$CLAUDE_LOGIN_SESSION:" Enter
+  do_login_device_wait gemini
+}
 
 do_login_github() {
   local token err user need_scopes
@@ -3576,7 +3682,7 @@ do_migrate_verify() {
     [[ "$(jq -r '.claude_logins.main // false' "$mf")" != true ]] || creds_ok "$HOME/.claude/.credentials.json" || rest+=(main)
     while IFS= read -r w; do
       [[ "$w" =~ $WORKER_RE ]] || continue
-      creds_ok "$WORKERS_DIR/$w/home/.credentials.json" || rest+=("$w")
+      worker_signed "$WORKERS_DIR/$w" || rest+=("$w")
     done < <(jq -r '(.claude_logins.workers // [])[]? | strings' "$mf")
     if ((${#rest[@]} == 0)); then migrate_vitem pending_logins true "nothing to sign in"
     else migrate_vitem pending_logins true "still to sign in: $(migrate_names "${rest[@]}")"; fi

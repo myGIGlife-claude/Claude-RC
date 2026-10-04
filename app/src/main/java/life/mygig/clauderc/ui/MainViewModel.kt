@@ -684,8 +684,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _workerRuns = MutableStateFlow<Pair<String, List<WorkerRun>>?>(null)
     val workerRuns = _workerRuns.asStateFlow()
 
-    fun addWorker(name: String, role: String) = action("Adding $name…") {
-        api.workerAdd(name, role)
+    fun addWorker(name: String, role: String, kind: String = "claude") = action("Adding $name…") {
+        api.workerAdd(name, role, kind)
         _cluster.value = clusterGroups()
         _workerLogin.value = name to api.workerLoginStart(name)   // straight on to signing in
     }

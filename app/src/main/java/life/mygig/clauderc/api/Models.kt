@@ -151,7 +151,7 @@ data class StopResult(val session: String, val stopped: Boolean)
 data class TailResult(val session: String, val lines: Int = 0, val text: String = "")
 
 @Serializable
-data class LoginUrl(val url: String, val code: String? = null)
+data class LoginUrl(val url: String, val code: String? = null, @SerialName("device_code") val deviceCode: String? = null)
 
 @Serializable
 data class YoutubeStart(val url: String, val code: String, val interval: Int = 5, @SerialName("expires_in") val expiresIn: Int = 1800)
@@ -293,6 +293,7 @@ data class UploadResult(val path: String = "", val bytes: Long = 0)
 @Serializable
 data class Worker(
     val name: String,
+    val kind: String = "claude",
     val role: String = "",
     val mode: String = "acceptEdits",
     @SerialName("signed_in") val signedIn: Boolean = false,
@@ -315,6 +316,8 @@ data class Tokens(@SerialName("five_hour") val fiveHour: TokenWindow = TokenWind
 @Serializable
 data class ClusterAccount(
     val name: String,
+    /** claude, codex (ChatGPT) or gemini. */
+    val kind: String = "claude",
     val email: String? = null,
     val plan: String? = null,
     @SerialName("signed_in") val signedIn: Boolean = false,

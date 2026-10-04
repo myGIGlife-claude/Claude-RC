@@ -28,7 +28,7 @@ threading.Thread(target=usage_srv.serve_forever, daemon=True).start()
 HERE = Path(__file__).resolve().parent
 tmp = Path(tempfile.mkdtemp())
 cfg = tmp / "cfg" / "claude-launcher" / "workers"
-env = {**os.environ, "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(HERE / "stubs" / "claude"),
+env = {**os.environ, "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(HERE / "stubs" / "claude"), "CLAUDERC_CODEX": str(HERE / "stubs" / "codex"), "CLAUDERC_GEMINI": str(HERE / "stubs" / "gemini"),
        "ANTHROPIC_API_KEY": "secret-should-not-leak", "CLAUDE_CODE_OAUTH_TOKEN": "main-token", "CLAUDECODE": "1", "STUB_STATE": str(tmp / "stub"),
        "CLAUDERC_TEST_SECRET": "service-token", "CLAUDERC_WORKER_SLOTS": "3", "CLAUDERC_USAGE_TTL": "0", "CLAUDERC_START_GAP": "0",
        "CLAUDERC_USAGE_URL": f"http://127.0.0.1:{usage_srv.server_port}/"}
@@ -138,6 +138,40 @@ proc.stdin.write("this is not json\n[]\n{\"method\":\"initialize\",\"id\":1,\"pa
 proc.stdin.flush()
 err, text = tool("list_workers")
 assert not err and "research" in text, text
+
+# Codex (ChatGPT) and Gemini workers: signed in by their own files, no usage numbers, their own CLI and home folder.
+for name, kind_, cred in (("gpt", "codex", "auth.json"), ("gem", "gemini", ".gemini/oauth_creds.json"), ("gem2", "gemini", ".gemini/oauth_creds.json")):
+    (cfg / name / "home").mkdir(parents=True); (cfg / name / "tasks").mkdir()
+    (cfg / name / "meta.json").write_text(json.dumps({"role": "second opinion", "mode": "acceptEdits", "kind": kind_}))
+    if name != "gem2":
+        (cfg / name / "home" / cred).parent.mkdir(parents=True, exist_ok=True)
+        (cfg / name / "home" / cred).write_text('{"tokens":{"x":"y"}}')
+attach(tmp, {**json.loads((cfg.parent / "attach" / (re.sub(r"[^A-Za-z0-9]", "-", str(tmp.resolve())) + ".json")).read_text()), "gpt": {}, "gem": {}, "gem2": {}})
+ws = {w["name"]: w for w in json.loads(tool("list_workers")[1])}
+assert ws["gpt"]["kind"] == "codex" and ws["gpt"]["signed_in"] and "five_hour_pct" not in ws["gpt"] and ws["gem2"]["signed_in"] is False and "kind" not in ws["research"], ws
+err, text = tool("delegate", worker="gem2", task="x")
+assert err and "sign" in text.lower(), text
+err, tid = tool("delegate", worker="gpt", task="ask codex")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and f"home={cfg / 'gpt' / 'home'}" in text and "key=unset" in text and "ask codex" in text and "-s workspace-write" in text, text
+err, tid = tool("reply", task_id=tid, message="more please")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "exec resume thr-9" in (tmp / "stub" / "codex-args").read_text(), text   # follow-ups resume the thread
+err, tid = tool("delegate", worker="gpt", task="please FAIL")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert err and "stub codex failure" in text, text
+err, tid = tool("delegate", worker="gem", task="ask gemini")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and f"home={cfg / 'gem' / 'home'}" in text and "ask gemini" in text and "--approval-mode auto_edit" in text, text
+err, tid = tool("reply", task_id=tid, message="and more")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "and more" in text, text                                  # reply = a new run (gemini has no session ids)
+err, tid = tool("delegate", worker="gem", task="please FAIL")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert err and "stub gemini failure" in text, text
+err, tid = tool("delegate", role="second opinion", task="by role")
+assert not err, tid
+tool("wait", task_id=tid, timeout_s=30)
 proc.stdin.close()
 proc.wait(timeout=5)
 
