@@ -205,6 +205,10 @@ data class InstalledPlugin(
     val version: String = "",
     val enabled: Boolean = false,
     val scope: String = "user",
+    /** "current" | "available" | "unknown" | "error"; empty = not checked (old servers). */
+    val update: String = "",
+    /** Short version or sha of the newest release, when known. */
+    val latest: String = "",
 )
 
 @Serializable
