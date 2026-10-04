@@ -16,11 +16,11 @@ for t in gpg tar jq git gzip; do
 done
 
 WORK="$(mktemp -d)"
-OLD="$WORK/old" H2="$WORK/new2" H3="$WORK/new3" H4="$WORK/new4" H5="$WORK/new5"
+OLD="$WORK/old" H2="$WORK/new2" H3="$WORK/new3" H4="$WORK/new4" H5="$WORK/new5" H6="$WORK/new6" RX="$WORK/rx"
 export GNUPGHOME="$WORK/gnupg" STUB_DOCKER="$WORK/docker" TMPDIR="$WORK/tmp"
-mkdir -p "$GNUPGHOME" "$TMPDIR" "$STUB_DOCKER/vol" "$WORK/stubs" "$WORK/failbin" "$OLD" "$H2" "$H3" "$H4" "$H5"
+mkdir -p "$GNUPGHOME" "$TMPDIR" "$STUB_DOCKER/vol" "$WORK/stubs" "$WORK/failbin" "$WORK/bigdf" "$WORK/smalldf" "$OLD" "$H2" "$H3" "$H4" "$H5" "$H6" "$RX"
 chmod 700 "$GNUPGHOME"
-unset XDG_CONFIG_HOME CLAUDE_BACKUP_PASS_FILE CLAUDE_BACKUP_PROJECTS CLAUDE_BACKUP_RESCUE_MAX_MB
+unset XDG_CONFIG_HOME CLAUDE_BACKUP_PASS_FILE CLAUDE_BACKUP_PROJECTS CLAUDE_BACKUP_RESCUE_MAX_MB CLAUDE_BACKUP_RECEIVE_MAX_MB CLAUDE_BACKUP_PROGRESS SSH_ORIGINAL_COMMAND
 cleanup() { gpgconf --kill gpg-agent 2>/dev/null; rm -rf "$WORK"; }
 trap cleanup EXIT
 
@@ -67,7 +67,10 @@ case "$1 $2" in
 esac
 EOF
 printf '#!/usr/bin/env bash\ncat >/dev/null\nexit 2\n' >"$WORK/failbin/gpg"
-chmod +x "$WORK/stubs/"* "$WORK/failbin/gpg"
+# df stubs for `receive`: 100 GB free / 1 MB free
+printf '#!/usr/bin/env bash\necho "Filesystem 1024-blocks Used Available Capacity Mounted on"\necho "stub 200000000 100000000 100000000 50%% /"\n' >"$WORK/bigdf/df"
+printf '#!/usr/bin/env bash\necho "Filesystem 1024-blocks Used Available Capacity Mounted on"\necho "stub 200000000 199999000 1000 99%% /"\n' >"$WORK/smalldf/df"
+chmod +x "$WORK/stubs/"* "$WORK/failbin/gpg" "$WORK/bigdf/df" "$WORK/smalldf/df"
 export OLD_HOME="$OLD" PATH="$WORK/stubs:$PATH"
 
 pass=0 failn=0 OUT="" RC=0
@@ -98,6 +101,7 @@ L="$HOME/.config/claude-launcher"
 echo "export DEMO_API_KEY='SECRET-MARKER-123'" >"$L/env"
 echo '{"private_key":"SECRET-MARKER-123"}' >"$L/fcm-key.json"
 echo '{"token":"SECRET-MARKER-123"}' >"$L/workers/demo-worker/home/.credentials.json"
+echo '{"theme":"worker"}' >"$L/workers/demo-worker/home/.claude.json"
 echo tree >"$L/workers/demo-worker/trees/t1/file"
 echo out >"$L/workers/demo-worker/tasks/x.out"
 echo in >"$L/workers/demo-worker/tasks/x.in"
@@ -151,6 +155,7 @@ echo "export"
 B="$WORK/out/b.tar.gz.gpg"
 as "$OLD" "$CB" export --out "$B" --pass-file "$PW"
 check "export succeeds" "$RC"
+grep -q PROGRESS <<<"$OUT"; [[ $? -ne 0 ]]; check "no PROGRESS lines by default" $?
 [[ -f "$B" ]]; check "output file exists" $?
 [[ "$(mode "$B")" == 600 ]]; check "output file mode 600" $?
 [[ "$(mode "$WORK/out")" == 700 ]]; check "output folder mode 700" $?
@@ -211,6 +216,7 @@ st() { jq -r --arg d "$1" '.repos[] | select(.dir == $d) | .state + ":" + (.resc
 [[ "$(st demo-noremote)" == no-remote:true ]]; check "state no-remote, rescued" $?
 [[ "$(st 'my project')" == no-remote:true ]]; check "state of a folder with a space" $?
 [[ "$(st demo-token)" == no-upstream:true ]]; check "state no-upstream, rescued" $?
+jq -e '.claude_logins_included == true and .claude_logins == {main: true, workers: ["demo-worker"]}' <<<"$M" >/dev/null; check "manifest: logins included, which exist" $?
 jq -e '.other_dirs == ["demo-plain"]' <<<"$M" >/dev/null; check "other_dirs lists the non-git folder" $?
 jq -e '.env_var_names == ["DEMO_API_KEY"]' <<<"$M" >/dev/null; check "env var names only" $?
 jq -e '.backed_up | index(".claude") and index("projects/demo-dirty")' <<<"$M" >/dev/null; check "backed_up lists top-level paths" $?
@@ -301,6 +307,98 @@ check "export with a tiny size limit succeeds" "$RC"
 grep -q 'NOT STORED' <<<"$OUT"; check "skipped repos are reported loudly" $?
 as "$OLD" "$CB" list "$WORK/out/small.gpg" --pass-file "$PW"
 jq -e '[.repos[] | select(.state != "clean")] | all(.rescued == false and (.skipped_reason | test("larger than")))' <<<"$OUT" >/dev/null; check "manifest records skipped_reason" $?
+
+echo "export --no-claude-login, progress lines, import --manifest-out"
+NC="$WORK/out/nocl.gpg"
+OUT="$(CLAUDE_BACKUP_PROGRESS=1 HOME="$OLD" "$CB" export --out "$NC" --pass-file "$PW" --no-claude-login 2>&1)"; RC=$?
+check "export --no-claude-login succeeds" "$RC"
+dump "$NC" "$PW" | tar -tf - >"$WORK/members-nc.txt"
+grep -qxF '.claude/.credentials.json' "$WORK/members-nc.txt"; [[ $? -ne 0 ]]; check "main credentials file left out" $?
+grep -q 'workers/demo-worker/home/.credentials.json' "$WORK/members-nc.txt"; [[ $? -ne 0 ]]; check "worker credentials file left out" $?
+grep -qxF '.config/claude-launcher/workers/demo-worker/home/.claude.json' "$WORK/members-nc.txt" && grep -qxF '.claude/settings.json' "$WORK/members-nc.txt"; check "rest of the worker home and ~/.claude kept" $?
+grep -qx 'PROGRESS collect 0' <<<"$OUT" && grep -qx 'PROGRESS archive 0' <<<"$OUT" && [[ "$(grep '^PROGRESS' <<<"$OUT" | tail -n 1)" == 'PROGRESS done 100' ]]; check "export progress: collect, archive, done" $?
+grep -qE '^PROGRESS archive (100|[0-9]{3,})' <<<"$OUT"; [[ $? -ne 0 ]]; check "export progress: archive capped at 99" $?
+as "$OLD" "$CB" list "$NC" --pass-file "$PW"
+jq -e '.claude_logins_included == false and .claude_logins == {main: true, workers: ["demo-worker"]}' <<<"$OUT" >/dev/null; check "manifest: logins not included, but which existed" $?
+jq -en --argjson a "$M" --argjson b "$OUT" '$a.repos == $b.repos and $a.other_dirs == $b.other_dirs' >/dev/null; check "manifest repo data is the same" $?
+NCM="$OUT"
+OUT="$(CLAUDE_BACKUP_PROGRESS=1 HOME="$H6" "$CB" import "$NC" --pass-file "$PW" --clone --manifest-out "$WORK/mf/m.json" 2>&1)"; RC=$?
+check "import --manifest-out succeeds" "$RC"
+[[ "$(mode "$WORK/mf/m.json")" == 600 ]] && [[ "$(jq -S . "$WORK/mf/m.json")" == "$(jq -S . <<<"$NCM")" ]]; check "manifest written (mode 600) and equal to the archive's" $?
+[[ ! -e "$H6/.claude/.credentials.json" && ! -e "$H6/.config/claude-launcher/workers/demo-worker/home/.credentials.json" && -f "$H6/.config/claude-launcher/workers/demo-worker/home/.claude.json" && -f "$H6/.claude/settings.json" ]]; check "restore has no logins, keeps the rest" $?
+grep -q 'Claude logins were NOT stored' <<<"$OUT"; check "to-do list says to sign in again" $?
+for x in 'verify 0' 'verify 100' 'extract 0' 'extract 100' 'clone 0' 'clone 100'; do
+  grep -qx "PROGRESS $x" <<<"$OUT"; check "import progress: $x" $?
+done
+as "$H6" "$CB" import "$NC" --pass-file "$PW" --dry-run --manifest-out "$WORK/mf/dry.json"
+[[ "$RC" -eq 0 && ! -e "$WORK/mf/dry.json" ]]; check "dry run writes no manifest" $?
+grep -q PROGRESS <<<"$OUT"; [[ $? -ne 0 ]]; check "import: no PROGRESS lines by default" $?
+as "$H6" "$CB" import "$NC" --pass-file "$WORK/wrong" --manifest-out "$WORK/mf/wrong.json"
+[[ "$RC" -ne 0 && ! -e "$WORK/mf/wrong.json" ]]; check "failed import writes no manifest" $?
+
+echo "plan"
+PJ="$(HOME="$OLD" "$CB" plan --json 2>/dev/null)"; RC=$?
+OUT="$PJ"
+check "plan --json succeeds (no passphrase, no archive)" "$RC"
+jq -e 'type == "object"' <<<"$PJ" >/dev/null && [[ "$(wc -l <<<"$PJ")" == 1 ]]; check "plan --json is ONE JSON object" $?
+pst() { jq -r --arg d "$1" '.repos[] | select(.dir == $d) | .state + ":" + (.rescued | tostring)' <<<"$PJ"; }
+[[ "$(pst demo-clean)" == clean:false && "$(pst demo-unpushed)" == unpushed:true && "$(pst demo-dirty)" == dirty:true ]]; check "plan: repo states" $?
+[[ "$(pst demo-noremote)" == no-remote:true && "$(pst 'my project')" == no-remote:true && "$(pst demo-token)" == no-upstream:true ]]; check "plan: more repo states" $?
+jq -e '.repos | all(.skipped_reason | type == "string")' <<<"$PJ" >/dev/null; check "plan: skipped_reason is always a string" $?
+jq -e '.other_dirs == ["demo-plain"] and .logins == {claude: true, workers: ["demo-worker"]} and .env_var_names == ["DEMO_API_KEY"]' <<<"$PJ" >/dev/null; check "plan: other_dirs, logins, env var names" $?
+jq -e '.docker_volumes == ["demo-data"] and .docker_containers == ["demo-db:postgres:16"] and has("systemd_units") and has("listening")' <<<"$PJ" >/dev/null; check "plan: docker and server facts" $?
+jq -e '(.estimate_mb | type) == "number" and .estimate_mb >= 1 and .estimate_mb == (.estimate_mb | floor)' <<<"$PJ" >/dev/null; check "plan: estimate_mb is a whole number >= 1" $?
+EST="$(jq -r .estimate_mb <<<"$PJ")"
+TARMB=$(($(dump "$B" "$PW" | wc -c) / 1048576 + 1))
+OUT="estimate=$EST MB, real tar=$TARMB MB"
+((TARMB - EST >= -1 && TARMB - EST <= 3)); check "plan: estimate is close to what export archives" $?
+grep -q 'SECRET-MARKER\|TOKEN-SECRET' <<<"$PJ"; [[ $? -ne 0 ]]; check "plan holds no secret values" $?
+empty_dir "$TMPDIR" && [[ "$(find "$OLD/backups" -name 'clauderc-backup-*' | wc -l)" == 0 ]]; check "plan leaves nothing behind" $?
+ESLIM="$(HOME="$OLD" "$CB" plan --json --slim 2>/dev/null | jq -r .estimate_mb)"
+OUT="slim=$ESLIM full=$EST"
+((ESLIM < EST)); check "plan --slim estimates less (plugin cache left out)" $?
+as "$OLD" "$CB" plan --no-claude-login --docker --projects
+[[ "$RC" -eq 0 ]] && grep -q 'demo-unpushed' <<<"$OUT" && grep -q 'demo-plain' <<<"$OUT" && grep -q 'Estimated size' <<<"$OUT"; check "plain plan is readable" $?
+as "$OLD" "$CB" plan --bogus
+[[ "$RC" -eq 2 ]]; check "plan: unknown flag, exit 2" $?
+
+echo "receive"
+head -c 300000 /dev/urandom >"$WORK/stream.bin"
+head -c 41943040 /dev/zero >"$WORK/stream40.bin"
+head -c 2097152 /dev/zero >"$WORK/stream2m.bin"
+head -c 1048576 /dev/urandom >"$WORK/stream1m.bin"
+: >"$WORK/stream0.bin"
+rxcount() { find "$RX/backups" -type f | wc -l; }
+rxrun() { # rxrun <stdin file> [VAR=value ...]: stdout in RXOUT, exit code in RC, stderr in rx.err
+  local in="$1"; shift
+  RXOUT="$(env HOME="$RX" PATH="$WORK/bigdf:$PATH" "$@" "$CB" receive <"$in" 2>"$WORK/rx.err")"; RC=$?
+  OUT="stdout=[$RXOUT] stderr=[$(cat "$WORK/rx.err")]"
+}
+rxrun "$WORK/stream.bin" "SSH_ORIGINAL_COMMAND=touch $WORK/pwned; cat /etc/passwd"
+check "receive succeeds" "$RC"
+[[ "$RXOUT" =~ ^incoming-[0-9]{8}-[0-9]{6}(-[0-9]+)?\.gpg$ ]]; check "prints exactly the file name" $?
+R1="$RX/backups/$RXOUT"
+[[ -f "$R1" && "$(mode "$R1")" == 600 && "$(mode "$RX/backups")" == 700 ]] && cmp -s "$R1" "$WORK/stream.bin"; check "stream stored intact, file 600, folder 700" $?
+[[ ! -e "$WORK/pwned" && ! -s "$WORK/rx.err" ]]; check "SSH_ORIGINAL_COMMAND is ignored" $?
+rxrun "$WORK/stream.bin"
+[[ "$RC" -eq 0 && "$RXOUT" != "$(basename "$R1")" && "$(rxcount)" == 2 ]]; check "a second stream in the same second gets its own name" $?
+rxrun "$WORK/stream40.bin"
+[[ "$RC" -eq 0 ]] && cmp -s "$RX/backups/$RXOUT" "$WORK/stream40.bin"; check "40 MB stream (several chunks) stored intact" $?
+N0="$(rxcount)"
+rxrun "$WORK/stream2m.bin" CLAUDE_BACKUP_RECEIVE_MAX_MB=1
+[[ "$RC" -eq 1 && -z "$RXOUT" && "$(rxcount)" == "$N0" ]]; check "more than the size cap: refused, nothing left behind" $?
+find "$RX/backups" -name '*.part' | grep -q .; [[ $? -ne 0 ]]; check "no .part file after a refusal" $?
+rxrun "$WORK/stream1m.bin" CLAUDE_BACKUP_RECEIVE_MAX_MB=1
+[[ "$RC" -eq 0 ]] && cmp -s "$RX/backups/$RXOUT" "$WORK/stream1m.bin"; check "exactly the cap is accepted" $?
+N0="$(rxcount)"
+rxrun "$WORK/stream.bin" "PATH=$WORK/smalldf:$PATH"
+[[ "$RC" -eq 1 && -z "$RXOUT" && "$(rxcount)" == "$N0" ]] && grep -q 'free disk space' "$WORK/rx.err"; check "not enough free disk space: refused, nothing left behind" $?
+rxrun "$WORK/stream0.bin"
+[[ "$RC" -eq 1 && -z "$RXOUT" && "$(rxcount)" == "$N0" ]]; check "empty stream: refused" $?
+as "$RX" "$CB" receive extra </dev/null
+[[ "$RC" -eq 2 ]]; check "receive takes no arguments" $?
+OUT="$(HOME="$WORK/rx-fresh" PATH="$WORK/bigdf:$PATH" "$CB" receive <"$WORK/stream.bin" 2>&1)"; RC=$?
+[[ "$RC" -eq 0 && "$(mode "$WORK/rx-fresh/backups")" == 700 ]]; check "receive creates ~/backups with mode 700" $?
 
 echo "usage"
 as "$OLD" "$CB" --help
