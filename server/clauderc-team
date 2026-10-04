@@ -21,9 +21,14 @@ SLOTS = max(1, int(os.environ.get("CLAUDERC_WORKER_SLOTS") or 10))   # hard cap 
 USAGE_URL = os.environ.get("CLAUDERC_USAGE_URL") or "https://api.anthropic.com/api/oauth/usage"
 # A run whose login token expires before it could finish is started ALONE (exclusive lock on <lock>.mode; the others hold
 # it shared): two runs refreshing the same token at once invalidate each other's refresh token and log the worker out.
-SLOT_SH = ('b=$1; n=$2; m=$3; cred=$4; thr=$5; py=$6; shift 6; while :; do i=0; while [ $i -lt $n ]; do exec 9>"$b.$i"; '
+SLOT_SH = ('b=$1; n=$2; m=$3; cred=$4; thr=$5; py=$6; gap=$7; shift 7; while :; do i=0; while [ $i -lt $n ]; do exec 9>"$b.$i"; '
            'flock -n 9 && { left=$(python3 -c "$py" "$cred"); k=s; [ "$left" -lt "$thr" ] && k=x; exec 8>"$b.mode"; flock -$k 8; '
+           # Starts of one worker's runs are spaced GAP seconds apart: claude touches the shared login (token, config) when it
+           # starts, and two starting together invalidated each other's refresh token, logging the worker out.
+           'exec 7>"$b.start"; flock 7; now=$(date +%s); last=$(cat "$b.last" 2>/dev/null || echo 0); w=$((last + gap - now)); '
+           '[ $w -gt 0 ] && sleep $w; date +%s >"$b.last"; exec 7>&-; '
            ': >"$m"; exec "$@"; }; i=$((i+1)); done; sleep 2; done')
+START_GAP = int(os.environ.get("CLAUDERC_START_GAP") or 30)   # seconds between the starts of one worker's runs
 TOKEN_LEFT_PY = ('import json,sys,time\ntry: print(int(json.load(open(sys.argv[1]))["claudeAiOauth"]["expiresAt"]/1000-time.time()))\n'
                  'except Exception: print(999999)')
 RUN_TIMEOUT = 1800        # seconds one worker run may take
@@ -453,7 +458,7 @@ def launch(t):
     # Up to SLOTS runs of one worker at a time (any chat can use it on demand); more wait for a free slot. The marker
     # file says the run really started, so wait can tell "Queued" from "Still running".
     cmd = ["sh", "-c", SLOT_SH, "slot", str(w / "run.lock"), str(SLOTS), str(d / f"{tid}.started"),
-           str(w / "home" / ".credentials.json"), str(RUN_TIMEOUT + 300), TOKEN_LEFT_PY,
+           str(w / "home" / ".credentials.json"), str(RUN_TIMEOUT + 300), TOKEN_LEFT_PY, str(START_GAP),
            "timeout", "--kill-after=10", str(RUN_TIMEOUT), CLAUDE, "-p", "--output-format", "json",
            "--permission-mode", mode] + pick + (["--allowed-tools", ",".join(tools)] if tools else []) + (["--resume", t["resume"]] if t.get("resume") else [])
     # The worker must run as its own account: drop the main session's credentials, Claude Code markers and the service tokens.

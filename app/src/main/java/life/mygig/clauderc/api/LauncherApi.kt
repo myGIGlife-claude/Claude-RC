@@ -53,8 +53,10 @@ object Codes {
 /** Same rule as the server: no leading '-', so a name is never read as an option. */
 val PROJECT_NAME_RE = Regex("^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$")
 
-/** Same rule as the server's worker names (Team). */
+/** The server's rule for a `skills` package (owner/repo). */
 val SKILLS_SOURCE_RE = Regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+/** Same rule as the server's worker names (Team). */
 val WORKER_NAME_RE = Regex("^[A-Za-z][A-Za-z0-9_-]{0,29}$")
 
 /** Typed calls to `claude-launcher-api` on the server. */
