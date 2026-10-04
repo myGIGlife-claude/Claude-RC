@@ -117,6 +117,10 @@ echo snap >"$HOME/.claude/shell-snapshots/x"
 echo chat >"$HOME/.claude/projects/demo/chat.jsonl"
 echo '{"token":"SECRET-MARKER-123"}' >"$HOME/.claude/.credentials.json"
 echo 'ssh-ed25519 AAAA demo' >"$HOME/.ssh/authorized_keys"
+mkdir -p "$L/migrate"   # the Migrate wizard's transfer key and passphrase: never part of a backup
+echo 'PRIVATE-MIGRATE-KEY' >"$L/migrate/key"
+echo 'MIGRATE-PASSPHRASE' >"$L/migrate/passphrase"
+printf 'ALLOW_RUN=1\nPROJECTS_DIR="$HOME/projects"\n' >"$L/config"
 echo 'PRIVATE-KEY-DEMO' >"$HOME/.ssh/id_demo"
 chmod 600 "$HOME/.ssh/id_demo" "$HOME/.claude/.credentials.json" "$L/env"
 chmod 755 "$HOME/.ssh" "$L" "$HOME/.claude"   # deliberately loose: import must tighten them
@@ -174,7 +178,7 @@ grep -q '^projects/my project/x.txt$' "$WORK/members.txt"; check "path with a sp
 grep -q 'ignored.log' "$WORK/members.txt"; [[ $? -ne 0 ]]; check "gitignored file left out" $?
 grep -q 'demo-plain' "$WORK/members.txt"; [[ $? -ne 0 ]]; check "non-git folder not stored without --projects" $?
 grep -q 'workers/demo-worker/home/.credentials.json' "$WORK/members.txt"; check "worker login stored" $?
-for x in 'workers/demo-worker/trees' 'usage-cache' 'shell-snapshots' 'session-env' 'tasks/x.out' 'tasks/x.in' 'run.lock'; do
+for x in 'claude-launcher/migrate' 'workers/demo-worker/trees' 'usage-cache' 'shell-snapshots' 'session-env' 'tasks/x.out' 'tasks/x.in' 'run.lock'; do
   grep -q "$x" "$WORK/members.txt"; [[ $? -ne 0 ]]; check "excluded: $x" $?
 done
 grep -q 'tasks/keep.json' "$WORK/members.txt"; check "other task files kept" $?
@@ -249,7 +253,12 @@ grep -q SECRET-MARKER "$H2/.claude/.credentials.json" && grep -q SECRET-MARKER "
 [[ "$(mode "$H2/.ssh")" == 700 && "$(mode "$R")" == 700 && "$(mode "$H2/.claude")" == 700 && "$(mode "$H2/backups")" == 700 ]]; check "folders are mode 700" $?
 [[ "$(mode "$R/env")" == 600 && "$(mode "$R/fcm-key.json")" == 600 && "$(mode "$H2/.ssh/id_demo")" == 600 && "$(mode "$H2/.git-credentials")" == 600 ]]; check "secret files are mode 600" $?
 [[ -x "$H2/claude-setup.sh" && -x "$H2/bin/demo-tool" && -x "$H2/.local/bin/claude-push" ]]; check "scripts are executable" $?
-[[ -f "$H2/.ssh/authorized_keys" && -f "$H2/.agents/.skill-lock.json" && -f "$H2/.claude/settings.json" ]]; check "other files restored" $?
+[[ -f "$H2/.ssh/id_demo" && -f "$H2/.agents/.skill-lock.json" && -f "$H2/.claude/settings.json" ]]; check "other files restored" $?
+# (changed on purpose: the old version of this check also expected .ssh/authorized_keys to come back, which is the hole fixed in task 6)
+[[ ! -e "$H2/.ssh/authorized_keys" ]]; check "import does NOT restore .ssh/authorized_keys" $?
+[[ ! -e "$R/migrate" ]]; check "import does not restore the migrate folder" $?
+[[ "$(cat "$R/config")" == 'PROJECTS_DIR="$HOME/projects"' ]]; check "no launcher config here: only PROJECTS_DIR is taken from the backup (no ALLOW_RUN)" $?
+grep -q 're-check ALLOW_RUN/PROJECTS_DIR' <<<"$OUT" && grep -q 'authorized_keys was not restored' <<<"$OUT"; check "to-do list says config and authorized_keys were not restored" $?
 [[ ! -e "$R/workers/demo-worker/trees" && ! -e "$R/usage-cache" && ! -e "$H2/.claude/shell-snapshots" && ! -e "$R/workers/demo-worker/tasks/x.out" ]]; check "excluded paths are not restored" $?
 [[ ! -e "$H2/docker" && ! -e "$H2/manifest.json" ]]; check "manifest and docker/ are not extracted into HOME" $?
 [[ "$(git -C "$H2/projects/demo-unpushed" log --oneline | wc -l)" == 2 && "$(git -C "$H2/projects/demo-unpushed" rev-list --count '@{u}..HEAD')" == 1 ]]; check "unpushed commit survived" $?
@@ -269,6 +278,37 @@ PRE="$(find "$H2/backups" -maxdepth 1 -name 'pre-restore-*' | head -n 1)"
 [[ -n "$PRE" && "$(cat "$PRE/.config/claude-launcher/env")" == 'export DEMO_API_KEY=CHANGED-LOCALLY' ]]; check "overwritten file saved in pre-restore-<time>" $?
 grep -q SECRET-MARKER "$R/env"; check "overwritten with the backup's version" $?
 [[ -d "$PRE/projects/demo-dirty/.git" ]]; check "existing rescued repo copied too" $?
+
+echo "import: an existing server keeps its authorized_keys and launcher config"
+H7="$WORK/new7" H8="$WORK/new8" H9="$WORK/new9" H10="$WORK/new10"
+mkdir -p "$H7/.ssh" "$H7/.config/claude-launcher" "$H8/.ssh" "$H8/.config/claude-launcher" "$H9/.ssh" "$H10/.config/claude-launcher"
+PHONE='restrict,command="/home/new/bin/claude-launcher-api" ssh-ed25519 PHONEKEY clauderc'
+echo "$PHONE" >"$H7/.ssh/authorized_keys"
+printf 'ALLOW_RUN=0\nDEFAULT_OWNER=newowner\n' >"$H7/.config/claude-launcher/config"
+as "$H7" "$CB" import "$B" --pass-file "$PW"
+check "import over an existing server" "$RC"
+[[ "$(cat "$H7/.ssh/authorized_keys")" == "$PHONE" ]]; check "authorized_keys: the new server's phone line is untouched, OLD's key is not added" $?
+[[ "$(cat "$H7/.config/claude-launcher/config")" == $'ALLOW_RUN=0\nDEFAULT_OWNER=newowner\nPROJECTS_DIR="$HOME/projects"' ]]; check "config: own file kept (ALLOW_RUN=0), only PROJECTS_DIR taken because none was set" $?
+[[ "$(mode "$H7/.config/claude-launcher/config")" == 600 ]]; check "config stays mode 600" $?
+echo "$PHONE" >"$H8/.ssh/authorized_keys"
+printf 'PROJECTS_DIR=/srv/mine\n' >"$H8/.config/claude-launcher/config"
+as "$H8" "$CB" import "$B" --pass-file "$PW"
+[[ "$(cat "$H8/.config/claude-launcher/config")" == 'PROJECTS_DIR=/srv/mine' ]]; check "config: a PROJECTS_DIR the new server sets is not replaced" $?
+echo "$PHONE" >"$H9/.ssh/authorized_keys"
+as "$H9" "$CB" import "$B" --pass-file "$PW" --with-authorized-keys
+check "import --with-authorized-keys" "$RC"
+[[ "$(cat "$H9/.ssh/authorized_keys")" == 'ssh-ed25519 AAAA demo' ]]; check "--with-authorized-keys restores the old file" $?
+grep -q 'authorized_keys was replaced' <<<"$OUT"; check "...and the to-do list says to check the phone key" $?
+claude_help="$("$CB" --help)"
+grep -q -- '--with-authorized-keys' <<<"$claude_help" && grep -q 'NOT restored: ~/.ssh/authorized_keys' <<<"$claude_help"; check "--help documents the flag and what is not restored" $?
+# a PROJECTS_DIR line that is not a plain path is never copied into the new config
+printf 'ALLOW_RUN=1\nPROJECTS_DIR=$(touch %s/pwned)\n' "$WORK" >"$OLD/.config/claude-launcher/config"
+as "$OLD" "$CB" export --out "$WORK/out/evil.gpg" --pass-file "$PW" --slim
+check "export with a hostile PROJECTS_DIR line" "$RC"
+as "$H10" "$CB" import "$WORK/out/evil.gpg" --pass-file "$PW"
+check "import of it" "$RC"
+[[ ! -e "$H10/.config/claude-launcher/config" || -z "$(grep -s PROJECTS_DIR "$H10/.config/claude-launcher/config")" ]]; check "a PROJECTS_DIR with command substitution is not merged" $?
+printf 'ALLOW_RUN=1\nPROJECTS_DIR="$HOME/projects"\n' >"$OLD/.config/claude-launcher/config"
 
 echo "import: --from (scp) and --slim"
 mkdir -p "$OLD/backups"

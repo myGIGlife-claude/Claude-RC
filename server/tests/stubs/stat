@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Test stub for stat: `stat -c '%U %a %F' -- PATH` on a file the install stub "made root-owned" answers
+# "root MODE regular file" while the file is still the same inode; everything else is the real stat.
+S="${STUB_STATE:-$HOME/.stub-state}"
+real="$(command -p -v stat)"
+if [[ "$1" == -c && "${2:-}" == '%U %a %F' && "${3:-}" == -- && $# -eq 4 && -f "$S/root-owned" && -f "$4" && ! -L "$4" ]]; then
+  ino="$("$real" -c %i -- "$4")"
+  if grep -qxF "$4 $ino" "$S/root-owned"; then
+    echo "root $("$real" -c %a -- "$4") regular file"
+    exit 0
+  fi
+fi
+exec "$real" "$@"

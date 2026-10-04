@@ -61,7 +61,7 @@ val WORKER_NAME_RE = Regex("^[A-Za-z][A-Za-z0-9_-]{0,29}$")
 
 /** Same rules as the server's migrate actions (docs/migrate-design.md). */
 val MIGRATE_USER_RE = Regex("^[a-z][a-z0-9_-]{0,30}$")
-val MIGRATE_FILE_RE = Regex("^incoming-[0-9]{8}-[0-9]{6}\\.gpg$")
+val MIGRATE_FILE_RE = Regex("^incoming-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\\.gpg$")
 private val MIGRATE_ITEMS = setOf("claude", "workers", "github", "autostart")
 private val MIGRATE_HOST_RE = Regex("^[A-Za-z0-9._:-]{1,253}$")
 private val MIGRATE_SSH_USER_RE = Regex("^[A-Za-z0-9._][A-Za-z0-9._-]{0,63}$")

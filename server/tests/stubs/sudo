@@ -8,7 +8,7 @@
 # a login shell (`bash -lc`) becomes `bash -c` so /etc/profile can't replace the stubs on PATH.
 S="${STUB_STATE:-$HOME/.stub-state}"
 mode="$(cat "$S/sudo-mode" 2>/dev/null || echo password)"
-askpass=0 nonint=0 list=0 user=""
+askpass=0 nonint=0 list=0 user="" listuser=""
 rec="$*"
 while [[ "${1:-}" == -* ]]; do
   case "$1" in
@@ -17,6 +17,7 @@ while [[ "${1:-}" == -* ]]; do
     -l) list=1 ;;
     -k | -S | -H) ;;
     -u) user="$2"; shift ;;
+    -U) listuser="$2"; shift ;;
     --) shift; break ;;
     *) echo "sudo stub: unknown option $1" >&2; exit 1 ;;
   esac
@@ -33,6 +34,12 @@ if [[ "$(id -u)" != 0 ]]; then
       elif ((nonint)); then echo "sudo: a password is required"; exit 1
       else echo "sudo: a terminal is required to read the password"; exit 1; fi ;;
   esac
+fi
+# `sudo -l -U NAME` (migrate-create-user's check that the new user has no sudo rule): the rules come from the file
+# $STUB_STATE/sudo-rules/NAME, no file = "not allowed to run sudo".
+if ((list)) && [[ -n "$listuser" ]]; then
+  if [[ -e "$S/sudo-rules/$listuser" ]]; then echo "User $listuser may run the following commands on this host: $(cat "$S/sudo-rules/$listuser")"; exit 0; fi
+  echo "User $listuser is not allowed to run sudo on this host."; exit 1
 fi
 ((list)) && { echo "User may run the following commands on this host: (ALL) ALL"; exit 0; }
 [[ $# -gt 0 ]] || { echo "sudo stub: no command" >&2; exit 1; }

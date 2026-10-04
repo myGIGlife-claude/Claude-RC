@@ -144,7 +144,7 @@ case "$sub" in
     ((nargs == 0)) || deny "$sub"   # (authorize and send read their values on stdin)
     ;;
   migrate-restore)
-    ((nargs == 1)) && [[ "${args[0]}" =~ ^incoming-[0-9]{8}-[0-9]{6}\.gpg$ ]] || deny "$sub"
+    ((nargs == 1)) && [[ "${args[0]}" =~ ^incoming-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\.gpg$ ]] || deny "$sub"
     ;;
   migrate-sudo-check | migrate-reboot)
     ((nargs == 0)) || deny "$sub"   # (the sudo password comes on stdin)
