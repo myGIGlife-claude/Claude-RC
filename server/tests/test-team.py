@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Self-check for clauderc-team: drives the MCP server over stdio with a stub `claude`.
 Run: server/tests/test-team.py   (needs jq for the stub)."""
-import json, os, subprocess, sys, tempfile
+import json, os, subprocess, sys, tempfile, time
 from pathlib import Path
 
 import http.server, threading
@@ -400,6 +400,24 @@ assert HITS[0] == before + 1, "after a 429 it backs off instead of asking again"
 ERR[0] = 0
 (cfg.parent / "usage-cache" / "auditor.json").unlink()
 USAGE["auditor-tok"] = [5, 5]
+# Two runs must not refresh the same login at once (that logs the worker out): a token that expires within a run's
+# lifetime makes the run start alone.
+(cfg.parent / "cluster.json").write_text('{"max_parallel": 10, "handback": false, "handback_pct": 95}')
+(cfg / "writer1" / "home" / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {"accessToken": "writer1-tok", "expiresAt": (time.time() + 100) * 1000}}))
+err, a1 = tool("delegate", worker="writer1", task="SLOW token a")
+err, a2 = tool("delegate", worker="writer1", task="token b")
+err, text = tool("wait", task_id=a2, timeout_s=1)
+assert not err and text.startswith("Queued"), text                  # alone: the second waits for the first
+tool("wait", task_id=a1, timeout_s=30)
+err, text = tool("wait", task_id=a2, timeout_s=30)
+assert not err and not text.startswith(("Queued", "Still")), text
+tool("discard", task_id=a1); tool("discard", task_id=a2)
+(cfg / "writer1" / "home" / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {"accessToken": "writer1-tok", "expiresAt": 9_999_999_999_999}}))
+err, a1 = tool("delegate", worker="writer1", task="SLOW fresh a")
+err, a2 = tool("delegate", worker="writer1", task="fresh b")
+err, text = tool("wait", task_id=a2, timeout_s=1)
+assert not err and not text.startswith("Queued"), text              # a fresh token: runs side by side
+tool("wait", task_id=a1, timeout_s=30); tool("wait", task_id=a2, timeout_s=30); tool("discard", task_id=a1); tool("discard", task_id=a2)
 proc.stdin.close()
 proc.wait(timeout=5)
 print("test-team: ok")
