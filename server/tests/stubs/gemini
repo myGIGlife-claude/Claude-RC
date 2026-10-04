@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Test stub for the Gemini CLI (`gemini -p "" -o json`): prompt on stdin, one JSON object on stdout.
+if [[ "${1:-}" == --skip-trust ]]; then   # interactive sign-in with NO_BROWSER: URL, then the code
+  echo "Login with Google"; echo "Please visit: https://accounts.google.com/o/oauth2/v2/auth?client_id=demo"; printf 'Enter the authorization code: '
+  read -r code
+  h="${GEMINI_CLI_HOME:-$HOME}"; [[ "$h" == /tmp/* || "$h" == "$HOME"/* && "$HOME" == /tmp/* ]] || { echo "stub gemini: refusing to write a login to $h" >&2; exit 1; }
+  if [[ "$code" == good* ]]; then mkdir -p "$h/.gemini" && echo '{"refresh_token":"x"}' >"$h/.gemini/oauth_creds.json"; echo "Authenticated"; else echo "Invalid code"; fi
+  exit 0
+fi
+echo "$*" >"${STUB_STATE:-/tmp}/gemini-args"
+prompt="$(cat)"
+if [[ "$prompt" == *FAIL* ]]; then echo '{"error":{"message":"stub gemini failure"}}'; exit 1; fi
+jq -cn --arg r "gemini home=${GEMINI_CLI_HOME:-none} key=${GEMINI_API_KEY:-unset} cwd=$PWD args=$* prompt=$prompt" '{response:$r,stats:{}}'

@@ -17,6 +17,10 @@ DIFF_SHOWN = 20000        # characters of a diff that review returns
 MODES = ("acceptEdits", "plan", "bypassPermissions")
 git_lock = threading.Lock()   # one worktree is created at a time
 CLAUDE = os.environ.get("CLAUDERC_CLAUDE", "claude")
+# Other CLIs a worker can be (meta.json "kind"): ChatGPT's Codex and Gemini, each signed in under its own home folder.
+CLIS = {"codex": os.environ.get("CLAUDERC_CODEX", "codex"), "gemini": os.environ.get("CLAUDERC_GEMINI", "gemini")}
+CODEX_SANDBOX = {"acceptEdits": "workspace-write", "plan": "read-only", "bypassPermissions": "danger-full-access"}
+GEMINI_APPROVAL = {"acceptEdits": "auto_edit", "plan": "plan", "bypassPermissions": "yolo"}
 SLOTS = max(1, int(os.environ.get("CLAUDERC_WORKER_SLOTS") or 10))   # hard cap of runs of one worker at once (they share its login like several chats share one); the owner's per-chat limit is lower
 USAGE_URL = os.environ.get("CLAUDERC_USAGE_URL") or "https://api.anthropic.com/api/oauth/usage"
 # A run whose login token expires before it could finish is started ALONE (exclusive lock on <lock>.mode; the others hold
@@ -101,8 +105,24 @@ def settings(name, att=None):
     return str(o.get("role") or m.get("role") or ""), mode if mode in MODES else "acceptEdits"
 
 
+def kind(name):
+    """claude (default), codex or gemini."""
+    try:
+        k = json.loads((WORKERS / name / "meta.json").read_text()).get("kind")
+    except (OSError, ValueError, AttributeError):
+        return "claude"
+    return k if k in CLIS else "claude"
+
+
 def signed_in(name):
     """The worker's login has a token (a logged-out Claude leaves a credentials file without one)."""
+    k, h = kind(name), WORKERS / name / "home"
+    if k != "claude":
+        try:
+            c = json.loads((h / ("auth.json" if k == "codex" else ".gemini/oauth_creds.json")).read_text())
+        except (OSError, ValueError):
+            return False
+        return isinstance(c, dict) and bool(c)
     try:
         t = json.loads((WORKERS / name / "home" / ".credentials.json").read_text())["claudeAiOauth"]["accessToken"]
     except (OSError, ValueError, KeyError, TypeError):
@@ -135,6 +155,8 @@ def usage(worker):
     undocumented endpoint as the app's usage bars, called at most once per USAGE_TTL for ALL chats (shared file cache);
     after a failure (429 etc.) it backs off and keeps the last good numbers for USAGE_STALE seconds. An expired token is
     left alone (Claude refreshes it when it next runs)."""
+    if kind(worker) != "claude":
+        return (None, None)   # no usage endpoint: never "near the limit"; a limit error fails the task and it can move to another account
     now, f = time.time(), USAGE_CACHE / f"{worker}.json"
     try:
         c = json.loads(f.read_text())
@@ -233,6 +255,8 @@ def list_workers():
         if name in att:
             role, mode = settings(name, att)
             w = {"name": name, "role": role, "mode": mode, "signed_in": signed_in(name)}
+            if kind(name) != "claude":
+                w["kind"] = kind(name)
             u = usage(name)
             for key, pct in zip(("five_hour_pct", "seven_day_pct"), u):
                 if pct is not None:
@@ -476,19 +500,61 @@ def launch(t):
     pick = [a for k in ("model", "effort") if isinstance(meta.get(k), str) and meta[k] for a in (f"--{k}", meta[k])]
     # Up to SLOTS runs of one worker at a time (any chat can use it on demand); more wait for a free slot. The marker
     # file says the run really started, so wait can tell "Queued" from "Still running".
+    k = kind(t["worker"])
+    model = meta.get("model") if isinstance(meta.get("model"), str) and meta.get("model") else None
+    if k == "codex":
+        # prompt on stdin ("-"); the answer is the last message, the session id comes from the JSON events
+        base = [CLIS[k], "exec"] + (["resume", t["resume"]] if t.get("resume") else [])
+        run = base + ["--json", "--skip-git-repo-check", "-o", str(d / f"{tid}.last")] + (["-m", model] if model else []) \
+            + (["-s", CODEX_SANDBOX[mode]] if not t.get("resume") else (["--dangerously-bypass-approvals-and-sandbox"] if mode == "bypassPermissions" else [])) + ["-"]
+    elif k == "gemini":
+        # no session ids to resume by, so a follow-up starts fresh (the prompt carries what it needs)
+        run = [CLIS[k], "-p", "", "-o", "json", "--skip-trust", "--approval-mode", GEMINI_APPROVAL[mode]] + (["-m", model] if model else [])
+    else:
+        run = [CLAUDE, "-p", "--output-format", "json", "--permission-mode", mode] + pick + (["--allowed-tools", ",".join(tools)] if tools else []) + (["--resume", t["resume"]] if t.get("resume") else [])
     cmd = ["sh", "-c", SLOT_SH, "slot", str(w / "run.lock"), str(SLOTS), str(d / f"{tid}.started"),
            str(w / "home" / ".credentials.json"), str(RUN_TIMEOUT + 300), TOKEN_LEFT_PY, str(START_GAP),
-           "timeout", "--kill-after=10", str(RUN_TIMEOUT), CLAUDE, "-p", "--output-format", "json",
-           "--permission-mode", mode] + pick + (["--allowed-tools", ",".join(tools)] if tools else []) + (["--resume", t["resume"]] if t.get("resume") else [])
+           "timeout", "--kill-after=10", str(RUN_TIMEOUT)] + run
     # The worker must run as its own account: drop the main session's credentials, Claude Code markers and the service tokens.
-    drop = mirrored_names() | {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDECODE"}
-    env = {k: v for k, v in os.environ.items() if k not in drop and not k.startswith("CLAUDE_CODE_")}
-    env["CLAUDE_CONFIG_DIR"] = str(w / "home")
+    drop = mirrored_names() | {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDECODE", "OPENAI_API_KEY", "CODEX_HOME", "GEMINI_API_KEY", "GOOGLE_API_KEY", "GEMINI_CLI_HOME"}
+    env = {n: v for n, v in os.environ.items() if n not in drop and not n.startswith("CLAUDE_CODE_")}
+    env[{"codex": "CODEX_HOME", "gemini": "GEMINI_CLI_HOME"}.get(k, "CLAUDE_CONFIG_DIR")] = str(w / "home")
     with open(d / f"{tid}.in") as fin, open(d / f"{tid}.out", "wb") as fo, open(d / f"{tid}.err", "wb") as fe:
         proc = subprocess.Popen(cmd, stdin=fin, stdout=fo, stderr=fe, cwd=t["cwd"], env=env, start_new_session=True)
     t["pid"] = proc.pid
     save(t)
     threading.Thread(target=lambda: (proc.wait(), finalize(tid)), daemon=True).start()
+
+
+def parse_output(k, out_s, last=""):
+    """A finished run's stdout as the dict Claude's JSON output has: result, session_id, is_error (+ usage and timing for Claude)."""
+    if k == "codex":   # JSON lines; the answer is the --output-last-message file
+        sid, err = None, None
+        for line in out_s.splitlines():
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(e, dict):
+                sid = e.get("thread_id") or sid
+                if e.get("type") in ("error", "turn.failed"):
+                    m = e.get("message") or (e["error"].get("message") if isinstance(e.get("error"), dict) else None)
+                    err = m if isinstance(m, str) else err or "The run failed."
+        if last.strip():
+            return {"result": last.strip(), "session_id": sid}
+        return {"result": err, "is_error": True, "session_id": sid} if err else {}
+    try:
+        out = json.loads(out_s)
+    except ValueError:
+        return {}
+    if not isinstance(out, dict):
+        return {}
+    if k == "gemini":
+        if isinstance(out.get("response"), str) and out["response"].strip():
+            return {"result": out["response"].strip(), "session_id": "fresh"}   # nothing to resume by: reply starts a new run on the same branch
+        e = out.get("error")
+        return {"result": (e.get("message") if isinstance(e, dict) else str(e)) if e else None, "is_error": True} if e else {}
+    return out
 
 
 def finalize(tid):
@@ -503,12 +569,7 @@ def finalize(tid):
         d = WORKERS / t["worker"] / "tasks"
         rd = lambda ext: (d / f"{tid}.{ext}").read_text(errors="replace") if (d / f"{tid}.{ext}").is_file() else ""
         out_s, err_s = rd("out"), rd("err")
-        try:
-            out = json.loads(out_s)
-        except ValueError:
-            out = None
-        if not isinstance(out, dict):
-            out = {}
+        out = parse_output(kind(t["worker"]), out_s, rd("last"))
         t["session_id"] = out.get("session_id") or t.get("resume")
         reply = out.get("result") if isinstance(out.get("result"), str) else None
         if out.get("is_error") or reply is None:
@@ -538,7 +599,7 @@ def finalize(tid):
             key = "reply" if t["status"] == "done" else "error"
             t[key] = (t.get(key) or "") + "\n\n[cluster] " + t["note"]
         t["finished"] = time.time()
-        for ext in ("in", "out", "err", "started"):
+        for ext in ("in", "out", "err", "started", "last"):
             (d / f"{tid}.{ext}").unlink(missing_ok=True)
         try:
             save(t)
