@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Test stub for apt-get: only records the call (nothing is installed).
+echo "$*" >>"${STUB_STATE:-$HOME/.stub-state}/apt-log"

@@ -20,6 +20,9 @@ export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 log() { echo "[claude-autostart] $*"; }
 
+# Running as root: no sudo needed (the Migrate wizard installs the boot service for a user who has no sudo of their own).
+sudo() { if [[ $EUID -eq 0 ]]; then "$@"; else command sudo "$@"; fi; }
+
 # ----------------------------------------------------------------------
 save() {
   mkdir -p "$STATE_DIR"
@@ -76,18 +79,25 @@ restore() {
 
 # ----------------------------------------------------------------------
 install() {
+  local user="$USER" home="$HOME" as_root=0
   if [[ $EUID -eq 0 ]]; then
-    echo "Run this as your normal user (not sudo) — it will ask for sudo when needed."
-    exit 1
+    # Only with CLAUDERC_AUTOSTART_USER=<name>, whose copy of this script is already in place (install.sh put it there).
+    user="${CLAUDERC_AUTOSTART_USER:-}"
+    [[ "$user" =~ ^[a-z][a-z0-9_-]{0,30}$ ]] && home="$(getent passwd "$user" | cut -d: -f6)" && [[ -n "$home" ]] ||
+      { echo "Run this as your normal user (not sudo) — it will ask for sudo when needed."; exit 1; }
+    BIN="$home/.local/bin/claude-autostart"
+    [[ -x "$BIN" ]] || { echo "$BIN isn't installed."; exit 1; }
+    as_root=1
   fi
   command -v tmux >/dev/null || { echo "tmux isn't installed — run claude-setup.sh first."; exit 1; }
 
-  mkdir -p "$HOME/.local/bin" "$STATE_DIR"
-  # Run as the installed copy itself: nothing to copy.
-  [[ "$(readlink -f "$0")" == "$(readlink -f "$BIN" 2>/dev/null)" ]] || cp "$(readlink -f "$0")" "$BIN"
-  chmod +x "$BIN"
+  if ((!as_root)); then
+    mkdir -p "$HOME/.local/bin" "$STATE_DIR"
+    # Run as the installed copy itself: nothing to copy.
+    [[ "$(readlink -f "$0")" == "$(readlink -f "$BIN" 2>/dev/null)" ]] || cp "$(readlink -f "$0")" "$BIN"
+    chmod +x "$BIN"
+  fi
 
-  local user="$USER" home="$HOME"
   local envs="Environment=HOME=$home
 Environment=PATH=$home/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
@@ -142,12 +152,14 @@ EOF
     echo '$nrconf{override_rc}{qr(^claude-sessions)} = 0;' | sudo tee /etc/needrestart/conf.d/claude-sessions.conf >/dev/null
   fi
 
-  save
+  ((as_root)) || save
   sudo systemctl daemon-reload
   sudo systemctl enable --now claude-sessions.service claude-sessions-save.timer
   echo
-  echo "Installed. Sessions saved right now:"
-  status_list
+  if ((as_root)); then echo "Installed for $user."; else
+    echo "Installed. Sessions saved right now:"
+    status_list
+  fi
   echo
   echo "Check anytime with:  claude-autostart status"
 }

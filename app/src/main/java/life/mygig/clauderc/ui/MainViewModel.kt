@@ -1551,6 +1551,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Tests [password] on the new server (blank = test without); sets sudoMode. */
     fun migrateCheckSudo(password: String = "") = migrateFlow.sudoCheck(password)
     fun migrateCreateUser(sudoPassword: String) = migrateFlow.createUser(sudoPassword)
+    fun migrateSetLoginKey(on: Boolean) = migrateFlow.setLoginKey(on)
+    /** The login key was saved (or declined): forget it. */
+    fun migrateLoginKeySaved() = migrateFlow.loginKeySaved()
+    /** Takes the first, setup entry of the new server out of the app's list (the new user's entry stays). */
+    fun migrateRemoveSetupEntry() = migrateFlow.removeSetupEntry()
+    fun migrateGithubSignIn(token: String) = migrateFlow.githubSignIn(token)
+    fun migrateCloneMissing() = migrateFlow.cloneMissing()
     /** Sends the backup, then restores it (resumes whatever is already running). */
     fun migrateTransfer() = migrateFlow.transferNow()
 

@@ -59,7 +59,7 @@ for bad in "" "bash" "status; bash" 'status $(id)' "status && id" "rm -rf /" "st
   "migrate-restore /etc/passwd" \
   "migrate-sudo-check x" "migrate-sudo-check --password" "migrate-reboot x" "migrate-reboot now" "migrate-create-user" "migrate-create-user Bad" \
   "migrate-create-user 1abc" "migrate-create-user -x" "migrate-create-user a b" "migrate-create-user ab;id" "migrate-create-user ab/cd" \
-  "migrate-create-user ab pw-ok" "migrate-create-user $(printf 'a%.0s' {1..40})" "migrate-verify a b" "migrate-verify ../x" "migrate-verify .hidden" \
+  "migrate-create-user ab pw-ok" "migrate-create-user $(printf 'a%.0s' {1..40})" "migrate-verify a b" "migrate-clone" "migrate-clone ../x" "migrate-clone a b" "migrate-verify ../x" "migrate-verify .hidden" \
   "migrate-verify a/b" "migrate-verify $(printf 'a%.0s' {1..120})" "migrate-signout-old" "migrate-signout-old bogus" "migrate-signout-old claude claude" \
   "migrate-signout-old claude workers github autostart claude" "migrate-signout-old claude --all" "migrate-signout-old ../claude" "migrate-signout-old claude;id" \
   "migrate-signout-old all"; do
@@ -1012,7 +1012,7 @@ realsnap() { local f; for f in .ssh/authorized_keys .config/claude-launcher/migr
 REAL_BEFORE="$(realsnap)"
 [[ -f "$AK" ]] && cp "$AK" "$WORK/authorized_keys.orig2"
 echo password >"$MS/sudo-mode"; rm -f "$MS/sudo-argv"
-api "status"; check "migrate (2): script_api is 35 or more" "$(jqt '.data.script_api >= 35')"
+api "status"; check "migrate (2): script_api is 36 or more" "$(jqt '.data.script_api >= 36')"
 STUB_ID_U=0 api "migrate-sudo-check"
 check "sudo-check: root" "$(jqt '.ok and .data == {mode:"root"}')"
 [[ ! -s "$MS/sudo-argv" ]]; check "sudo-check: root never calls sudo" $?
@@ -1053,7 +1053,7 @@ check "create-user: refused while Run-a-command is off" "$(jqt '.ok==false and .
 [[ ! -e "$MS/adduser-log" ]]; check "...and nothing was created" $?
 echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
 cu newguy pw-ok "$PUBK"
-check "create-user: ok, home under the stub, autostart left pending" "$(jqt '.ok and .data == {created:true, home:"'"$MS/home/newguy"'", autostart_pending:true}')"
+check "create-user: ok, home under the stub, autostart left pending" "$(jqt '.ok and .data == {created:true, home:"'"$MS/home/newguy"'", autostart_pending:true, shell_key:false}')"
 grep -q -- "^-A adduser --disabled-password --gecos  newguy$" "$MS/sudo-argv"; check "create-user: adduser --disabled-password --gecos \"\" NAME, through the sudo askpass" $?
 [[ "$(cat "$MS/adduser-log")" == "--disabled-password --gecos  newguy" ]]; check "create-user: adduser ran once with those arguments" $?
 [[ ! -e "$MS/usermod-log" ]]; check "create-user: no docker group, no usermod" $?
@@ -1069,10 +1069,20 @@ grep -q -- "^-A sudo -l -U newguy$" "$MS/sudo-argv" || grep -q -- "^-l -U newguy
 [[ ! -e "$MS/userdel-log" ]]; check "create-user: a user without sudo rules is kept (no userdel)" $?
 grep -rq "pw-ok" "$MS/sudo-argv" "$MS/adduser-log" "$MS/installer-log" "$APILOG"; [[ $? -ne 0 ]]; check "create-user: the password is in no argv and not in the api log" $?
 grep -q "$BLOBK" "$MS/sudo-argv"; [[ $? -ne 0 ]]; check "create-user: the key is not on any command line" $?
+grep -q "install -y -qq jq tmux git curl" "$MS/apt-log"; check "create-user: apt installed jq, tmux, git, curl before the user was made" $?
+SK="$(ssh-keygen -q -t ed25519 -N '' -f "$WORK/shell" -C x >/dev/null 2>&1; awk '{print $1" "$2}' "$WORK/shell.pub")"
+cu newguy pw-ok "$PUBK
+$SK"
+check "create-user: a login key is accepted for the user made earlier" "$(jqt '.ok and .data.shell_key == true')"
+grep -qx "ssh-ed25519 $(awk '{print $2}' <<<"$SK") clauderc-shell" "$NH/.ssh/authorized_keys"; check "create-user: the login key is a plain line (no forced command)" $?
+[[ "$(grep -c "restrict,command" "$NH/.ssh/authorized_keys")" == 1 ]]; check "create-user: the phone key line is still the only restricted one" $?
+cu newguy pw-ok "$PUBK
+not-a-key"
+check "create-user: a bad login key is refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
 [[ -z "$(find "$WORK/tmp" -name pw 2>/dev/null)" ]]; check "create-user: no password file is left behind" $?
 cu newguy pw-ok "$PUBK"
 check "create-user: running it again reuses the user it made" "$(jqt '.ok and .data.created and .data.home=="'"$NH"'"')"
-[[ "$(wc -l <"$MS/adduser-log")" == 1 && "$(wc -l <"$NH/.ssh/authorized_keys")" == 1 ]]; check "...no second adduser, still one authorized_keys line" $?
+[[ "$(wc -l <"$MS/adduser-log")" == 1 && "$(grep -c "^restrict" "$NH/.ssh/authorized_keys")" == 1 ]]; check "...no second adduser, still one phone-key line" $?
 # refusals
 cu "ab" pw-ok "$PUBK"; [[ "$(jqt '.ok')" == 0 ]]; check "create-user: a short valid name works" $?
 for bad in Bad 1abc -x "a b" 'a;b' "a/b" "$(printf 'a%.0s' {1..40})"; do
