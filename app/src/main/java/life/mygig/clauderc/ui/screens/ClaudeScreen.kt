@@ -255,7 +255,8 @@ private fun PluginSheet(vm: MainViewModel, pl: InstalledPlugin, p: PluginsData?,
             }
             val toggleLabel = if (pl.enabled) "Disable" else "Enable"
             val toggle = { change(if (pl.enabled) "plugin disable ${pl.id}" else "plugin enable ${pl.id}") }
-            val update = { change("plugin update ${pl.id}") }
+            val viaSkills = pl.via == "skills" && pl.source.isNotBlank()
+            val update = { if (viaSkills) { onClose(); vm.updateSkills(pl.source) } else change("plugin update ${pl.id}") }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (pl.update == "available") {
                     Button(onClick = update, enabled = busy == null, modifier = Modifier.weight(1f)) { Text("Update") }
@@ -265,6 +266,7 @@ private fun PluginSheet(vm: MainViewModel, pl: InstalledPlugin, p: PluginsData?,
                     OutlinedButton(onClick = update, enabled = busy == null, modifier = Modifier.weight(1f)) { Text("Update") }
                 }
             }
+            if (viaSkills) Text("Managed with npx skills add ${pl.source}; Update runs that for you.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             TextButton(onClick = { confirm = true }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) { Text("Uninstall ${pl.name}", color = Color(0xFFF09A9D)) }
         }
     }
