@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot).
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user.
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=35
+SCRIPT_API=36
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -3336,13 +3336,30 @@ do_migrate_sudo_check() {
   api_ok "$(jq -cn --arg m "$MIGRATE_SUDO" '{mode:$m}')"
 }
 
-# migrate-create-user <name>: stdin line 1 = sudo password (empty for root / no-password sudo), line 2 = the phone's public key.
+# migrate_prereqs: the tools the scripts and Claude need (jq tmux git curl gpg flock) and the GitHub CLI, from apt (other distros: the checklist says what is missing).
+migrate_prereqs() {
+  command -v apt-get >/dev/null 2>&1 || return 0
+  export DEBIAN_FRONTEND=noninteractive
+  msudo apt-get update -qq || true
+  msudo apt-get install -y -qq jq tmux git curl ca-certificates gnupg util-linux || return 1
+  command -v gh >/dev/null 2>&1 && return 0
+  msudo apt-get install -y -qq gh && return 0
+  # Older releases don't have gh: GitHub's own apt repository.
+  msudo bash -c 'set -e; mkdir -p -m 755 /etc/apt/keyrings
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg
+    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" >/etc/apt/sources.list.d/github-cli.list
+    apt-get update -qq; apt-get install -y -qq gh'
+}
+
+# migrate-create-user <name>: stdin line 1 = sudo password (empty for root / no-password sudo), line 2 = the phone's public key,
+# line 3 (optional) = a public key for a normal shell login (the app keeps the private half for the user to save).
 # Every step can be repeated: a user an earlier try created (its root-owned marker file is there) is reused.
 do_migrate_create_user() {
   [[ $# -eq 1 ]] || bad_args "usage: migrate-create-user <name> (sudo password, then the phone key, on stdin)"
   migrate_need_run
-  local name="$1" pw key dir home pwent uid mark out blob line url inst akscript pending=true created=0
-  pw="$(read_secret_line)"; key="$(read_secret_line)"
+  local name="$1" pw key shellkey dir home pwent uid mark out blob line url inst akscript pending=true created=0
+  pw="$(read_secret_line)"; key="$(read_secret_line)"; shellkey="$(read_secret_line)"
   exec 0</dev/null
   umask 077
   [[ "$name" =~ $MIGRATE_NAME_RE && ! "$name" =~ $MIGRATE_RESERVED_RE ]] ||
@@ -3351,11 +3368,13 @@ do_migrate_create_user() {
   [[ -z "${CLAUDERC_BASE:-}" || "$CLAUDERC_BASE" =~ ^[A-Za-z0-9:/._@%+=~-]{1,300}$ ]] || api_err internal "CLAUDERC_BASE has characters I won't pass on."
   [[ "$CLAUDERC_RAW" =~ ^[A-Za-z0-9:/._@%+=~-]{1,300}$ && "$CLAUDERC_REPO" =~ ^[A-Za-z0-9._/-]{1,100}$ ]] ||
     api_err internal "CLAUDERC_RAW or CLAUDERC_REPO has characters I won't pass on."
+  [[ -z "$shellkey" || ( "$shellkey" =~ $MIGRATE_PUBKEY_RE && ${#shellkey} -le 300 ) ]] || api_err invalid_name "That isn't a public key line (ssh-ed25519 AAAA…)."
   dir="$(mktemp -d)"
   trap 'rc=$?; rm -rf "$dir"; (exit $rc); on_exit' EXIT
   MIG_LOG="$dir/log"
   migrate_need_sudo "$dir" "$pw"
   unset pw
+  MIGRATE_TMO=600 migrate_step prereqs "install jq, tmux, git, curl and gh" migrate_prereqs
 
   mark=".clauderc-migrate-user"
   pwent="$(getent passwd "$name" 2>/dev/null || true)"
@@ -3406,12 +3425,17 @@ umask 077
 ak="$HOME/.ssh/authorized_keys"
 mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh" || exit 1
 IFS= read -r line || exit 1
-blob="${line##* ssh-ed25519 }"; blob="${blob%% *}"
+blob="$(awk '{ for (i = 1; i < NF; i++) if ($i == "ssh-ed25519") { print $(i + 1); exit } }' <<<"$line")"
+[ -n "$blob" ] || exit 1
 tmp="$(mktemp "$HOME/.ssh/authorized_keys.XXXXXX")" || exit 1
 { awk -v b="$blob" '{ for (i = 1; i <= NF; i++) if ($i == b) next } 1' "$ak" 2>/dev/null; printf '%s\n' "$line"; } >"$tmp" &&
   chmod 600 "$tmp" && mv -f "$tmp" "$ak" || { rm -f "$tmp"; exit 1; }
 EOS
   MIG_STDIN="$dir/ak" migrate_step authorize "authorize the phone key" as_user "$name" bash -c "$akscript"
+  if [[ -n "$shellkey" ]]; then   # a plain login key (no forced command): for ssh from a computer
+    printf 'ssh-ed25519 %s clauderc-shell\n' "$(awk '{print $2}' <<<"$shellkey")" >"$dir/ak2"
+    MIG_STDIN="$dir/ak2" migrate_step authorize_shell "authorize the login key" as_user "$name" bash -c "$akscript"
+  fi
 
   # Claude Code (the official installer), then the cLaudeRC scripts without a key.
   if ! as_user "$name" test -x "$home/.local/bin/claude" >/dev/null 2>&1; then
@@ -3423,9 +3447,12 @@ EOS
   inst+=" curl -fsSL $(printf %q "$url") | bash"
   # (its own sudo step for autostart can't ask anything: no terminal and stdin closed, so it declines)
   MIGRATE_TMO=300 migrate_step installer "install the cLaudeRC scripts" as_user "$name" bash -lc "$inst"
-  # claude-autostart needs the user's own sudo and this user has none: it is left for later.
+  # claude-autostart asks for the user's own sudo and this user has none: write its boot service as root instead (not fatal: no systemd, say).
+  if ! migrate_autostart_enabled "$name" && [[ -x "$home/.local/bin/claude-autostart" ]]; then
+    msudo env "CLAUDERC_AUTOSTART_USER=$name" "$home/.local/bin/claude-autostart" install >"$MIG_LOG" 2>&1 </dev/null || true
+  fi
   ! migrate_autostart_enabled "$name" || pending=false
-  api_ok "$(jq -cn --arg h "$home" --argjson p "$pending" '{created:true, home:$h, autostart_pending:$p}')"
+  api_ok "$(jq -cn --arg h "$home" --argjson p "$pending" --argjson k "$([[ -n "$shellkey" ]] && echo true || echo false)" '{created:true, home:$h, autostart_pending:$p, shell_key:$k}')"
 }
 
 # ---- migrate-verify
@@ -3471,8 +3498,8 @@ do_migrate_verify() {
   done
   if ((${#miss[@]} == 0)); then migrate_vitem scripts_installed true "all in place"
   else migrate_vitem scripts_installed false "missing: $(migrate_names "${miss[@]}"). Run Update now."; fi
-  if ((SCRIPT_API >= 35)); then migrate_vitem script_api_current true "script API $SCRIPT_API"
-  else migrate_vitem script_api_current false "script API $SCRIPT_API is older than 35: run Update now."; fi
+  if ((SCRIPT_API >= 36)); then migrate_vitem script_api_current true "script API $SCRIPT_API"
+  else migrate_vitem script_api_current false "script API $SCRIPT_API is older than 36: run Update now."; fi
 
   # folders and their modes
   if [[ -d "$HOME/.claude" && "$(stat -c %a "$HOME/.claude" 2>/dev/null)" == 700 ]]; then migrate_vitem claude_home true "the .claude folder is there (mode 700)"
@@ -3565,6 +3592,17 @@ do_migrate_verify() {
     migrate_vitem migrate_key_removed true "no transfer key found"
   fi
   api_ok "$(jq -c '{items:., ok:(all(.[]; .ok))}' <<<"$MIGRATE_ITEMS")"
+}
+
+# ---- migrate-clone <manifest file>: clone the repos the restore couldn't (e.g. GitHub wasn't signed in yet).
+do_migrate_clone() {
+  [[ $# -eq 1 && "$1" =~ ^[A-Za-z0-9._-]{1,100}$ && "$1" != .* ]] || bad_args "usage: migrate-clone <manifest file name>"
+  local mf="$MIGRATE_STATE/$1" out rc=0
+  [[ -f "$mf" && ! -L "$mf" ]] || api_err invalid_name "There is no manifest named $1."
+  [[ -x "$HOME/.local/bin/claude-backup" ]] || api_err not_ready "claude-backup isn't installed here: run Update now."
+  out="$(t 580 "$HOME/.local/bin/claude-backup" clone "$mf" </dev/null 2>&1)" || rc=$?
+  ((rc == 0)) || api_err internal "Some repos still can't be cloned: $(migrate_last_lines <(printf '%s\n' "$out"))"
+  api_ok "$(jq -cn --arg m "$(tail -n 1 <<<"$out")" '{message:$m}')"
 }
 
 # ---- migrate-signout-old <claude|workers|github|autostart...>: local files only; nothing is revoked on Anthropic's or GitHub's side.
@@ -3728,6 +3766,7 @@ api_main() {
     migrate-sudo-check)  do_migrate_sudo_check "$@" ;;
     migrate-create-user) do_migrate_create_user "$@" ;;
     migrate-verify)      do_migrate_verify "$@" ;;
+    migrate-clone)       do_migrate_clone "$@" ;;
     migrate-signout-old) do_migrate_signout_old "$@" ;;
     migrate-reboot)      do_migrate_reboot "$@" ;;
     disconnect)         do_disconnect "$@" ;;

@@ -264,11 +264,20 @@ class LauncherApi(
         return call("migrate-restore $file", stdin = passphrase)
     }
     suspend fun migrateSudoCheck(password: String = ""): SudoCheck = call("migrate-sudo-check", stdin = password, timeoutMs = 60_000)
-    suspend fun migrateCreateUser(name: String, sudoPassword: String, phonePublicKey: String): JsonObject {
+    /** [loginPublicKey] (optional) becomes a plain login key for ssh from a computer; the private half stays with the caller. */
+    suspend fun migrateCreateUser(name: String, sudoPassword: String, phonePublicKey: String, loginPublicKey: String? = null): JsonObject {
         requireMigrate(MIGRATE_USER_RE, name, "User names are lowercase letters, digits, '_' and '-', up to 31, starting with a letter.")
         val key = phonePublicKey.trim()
         if (key.isEmpty() || key.any { it == '\n' || it == '\r' }) throw ApiException(Codes.INVALID_NAME, "Bad phone key")
-        return call("migrate-create-user $name", stdin = sudoPassword + "\n" + key, timeoutMs = 600_000)
+        val login = loginPublicKey?.trim().orEmpty()
+        if (login.any { it == '\n' || it == '\r' }) throw ApiException(Codes.INVALID_NAME, "Bad login key")
+        val stdin = sudoPassword + "\n" + key + if (login.isNotEmpty()) "\n" + login else ""
+        return call("migrate-create-user $name", stdin = stdin, timeoutMs = 1_200_000)
+    }
+    /** On the new server: clones the repos of the restored manifest that are still missing (GitHub must be signed in). */
+    suspend fun migrateClone(manifestFile: String): JsonObject {
+        requireMigrate(MIGRATE_MANIFEST_RE, manifestFile, "Bad manifest file name")
+        return call("migrate-clone $manifestFile", timeoutMs = 600_000)
     }
     suspend fun migrateVerify(manifestFile: String? = null): VerifyResult {
         if (manifestFile != null) requireMigrate(MIGRATE_MANIFEST_RE, manifestFile, "Bad manifest file name")

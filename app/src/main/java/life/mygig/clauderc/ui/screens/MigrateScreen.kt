@@ -1,5 +1,7 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -132,6 +134,7 @@ fun MigrateScreen(vm: MainViewModel) {
                         }
                     }
                     ui.error?.let { MigrateError(it, ui.busy) { vm.migrateRetry() } }
+                    ui.loginKeyPem?.let { MigrateLoginKey(vm, it, ui.loginKeyFor) }
                     when (ui.step) {
                         MigrateStep.CHOOSE -> MigrateChoose(vm, ui, servers)
                         MigrateStep.CHECK -> MigrateCheck(vm, ui)
@@ -395,7 +398,40 @@ private fun MigrateCreateUser(vm: MainViewModel, ui: MigrateUi) {
         "Claude will run as ${ui.userName} on $host, and that user doesn't exist there yet. Creating it installs Claude Code and takes a few minutes.",
         style = MaterialTheme.typography.bodyMedium,
     )
+    MigrateCheckRow("Also make a key to log in from a computer (ssh)", ui.makeLoginKey, !ui.busy) { vm.migrateSetLoginKey(it) }
+    MigrateHint(
+        "The app already reaches ${ui.userName} with the phone's own key. This extra key is for your PC: you get the file to save right after the user is made.",
+    )
     MigrateSudo(vm, ui, "Create ${ui.userName} on $host", { pw -> vm.migrateCreateUser(pw) })
+}
+
+/** The private login key made for the new user: the user saves the file (the app keeps no copy). */
+@Composable
+private fun MigrateLoginKey(vm: MainViewModel, pem: String, forWho: String) {
+    val context = LocalContext.current
+    var note by remember { mutableStateOf<String?>(null) }
+    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        if (uri != null) {
+            note = runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(pem.toByteArray()) } ?: error("no output") }
+                .fold({ "Saved." }, { "Couldn't save: ${it.message}" })
+        }
+    }
+    MigrateWarning {
+        Text("Your login key for $forWho", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Save this key file now: it is shown only here and the app doesn't keep it. On your computer: chmod 600 the file, then ssh -i <file> $forWho",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(onClick = { save.launch("clauderc-${forWho.substringBefore('@')}.key") }, modifier = Modifier.weight(1f)) { Text("Save key file") }
+            OutlinedButton(
+                onClick = { copy(context, "ssh key", pem); note = "Copied." },
+                modifier = Modifier.weight(1f),
+            ) { Text("Copy") }
+        }
+        note?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        TextButton(onClick = { vm.migrateLoginKeySaved() }) { Text("I saved it, hide this") }
+    }
 }
 
 // ---- 5. Transfer, 6. Restore -------------------------------------------------------
@@ -584,6 +620,43 @@ private fun MigrateReboot(vm: MainViewModel, ui: MigrateUi) {
 
 // ---- 10. Verify, done --------------------------------------------------------------
 
+/** What can be fixed from here: GitHub on the new server (a token), then the repos that couldn't be cloned. */
+@Composable
+private fun MigrateFixes(vm: MainViewModel, ui: MigrateUi, failed: List<String>) {
+    val github = "gh" in failed
+    val repos = "repos" in failed || "remotes" in failed
+    if (!github && !repos) return
+    var token by rememberSaveable { mutableStateOf("") }
+    CardBox {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (github) {
+                Text("Sign in to GitHub on the new server", style = MaterialTheme.typography.titleSmall)
+                MigrateHint("Paste a GitHub token (the app's Settings has New token). It is sent once and saved on the new server only.")
+                OutlinedTextField(
+                    value = token, onValueChange = { token = it },
+                    label = { Text("GitHub token") }, singleLine = true, enabled = !ui.busy,
+                    modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                )
+                Button(
+                    onClick = { vm.migrateGithubSignIn(token); token = "" },
+                    enabled = !ui.busy && token.isNotBlank(), modifier = Modifier.fillMaxWidth(),
+                ) { Text("Sign in to GitHub") }
+            }
+            if (repos) {
+                MigrateHint(
+                    if (github) "After GitHub works, bring back the repos that couldn't be cloned."
+                    else "Some repos are missing or can't reach GitHub. Try cloning them again.",
+                )
+                OutlinedButton(onClick = { vm.migrateCloneMissing() }, enabled = !ui.busy, modifier = Modifier.fillMaxWidth()) {
+                    Text("Clone the missing repos")
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun MigrateVerify(vm: MainViewModel, ui: MigrateUi) {
     val v = ui.verify
@@ -615,6 +688,18 @@ private fun MigrateVerify(vm: MainViewModel, ui: MigrateUi) {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+    if (v != null) MigrateFixes(vm, ui, v.items.filter { !it.ok }.map { it.id })
+    ui.setupEntry?.let { s ->
+        CardBox {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Two entries for ${s.host}", style = MaterialTheme.typography.titleSmall)
+                MigrateHint("The list now has ${s.user}@${s.host} (the one you set up with) and ${ui.to?.user.orEmpty()}@${s.host} (the new user). Remove the first once you don't need it.")
+                OutlinedButton(onClick = { vm.migrateRemoveSetupEntry() }, enabled = !ui.busy, modifier = Modifier.fillMaxWidth()) {
+                    Text("Remove ${s.user}@${s.host} from the list")
                 }
             }
         }

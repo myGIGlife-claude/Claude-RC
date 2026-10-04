@@ -23,6 +23,7 @@ claude-backup — encrypted backup and restore of a cLaudeRC server user's setup
   claude-backup export [--out FILE] [--slim] [--projects] [--docker] [--no-claude-login] [--pass-file F]
   claude-backup plan [--json] [--slim] [--projects] [--docker] [--no-claude-login]
   claude-backup receive
+  claude-backup clone MANIFEST     clone the manifest's missing clean repos (needs GitHub access)
   claude-backup import FILE [--pass-file F] [--dry-run] [--clone] [--with-authorized-keys] [--from USER@HOST] [--manifest-out OUT]
   claude-backup list FILE [--pass-file F]
   claude-backup --help
@@ -964,6 +965,22 @@ cmd_import() {
   todo_list
 }
 
+# clone MANIFEST: clone the manifest's clean, pushed repos that are missing here (after the GitHub sign-in was fixed).
+cmd_clone() {
+  [[ $# -eq 1 ]] || bad_usage "clone takes one manifest file"
+  need jq git
+  [[ -f "$1" ]] && jq -e 'type == "object"' "$1" >/dev/null 2>&1 || die "$1 isn't a manifest"
+  TMP="$(mktemp -d)"
+  cp -- "$1" "$TMP/manifest.json"
+  clone_repos
+  echo "Cloned $CLONED, kept $KEPT that already exist."
+  if ((${#CLONE_FAILED[@]} > 0)); then
+    echo "Could not clone:"
+    printf '  %s\n' "${CLONE_FAILED[@]}"
+    exit 1
+  fi
+}
+
 # ---------------------------------------------------------------- main
 (($# >= 1)) || { usage >&2; exit 2; }
 sub="$1"
@@ -974,6 +991,7 @@ case "$sub" in
   plan) cmd_plan "$@" ;;
   receive) cmd_receive "$@" ;;
   import) cmd_import "$@" ;;
+  clone) cmd_clone "$@" ;;
   list) cmd_list "$@" ;;
   *) bad_usage "unknown command: $sub" ;;
 esac

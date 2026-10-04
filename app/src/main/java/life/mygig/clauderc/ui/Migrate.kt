@@ -22,7 +22,9 @@ import life.mygig.clauderc.api.MigrateStatus
 import life.mygig.clauderc.api.VerifyResult
 import life.mygig.clauderc.data.Server
 import life.mygig.clauderc.data.SettingsStore
+import life.mygig.clauderc.ssh.Ed25519Identity
 import life.mygig.clauderc.ssh.SshKeyManager
+import java.security.SecureRandom
 
 /** The wizard's steps, in order (docs/migrate-design.md). */
 enum class MigrateStep { CHOOSE, CHECK, STOP_SESSIONS, CREATE_USER, TRANSFER, RESTORE, SIGN_IN, SIGN_OUT, REBOOT, VERIFY, DONE }
@@ -68,6 +70,13 @@ data class MigrateUi(
     val signInPrompt: MigrateSignInPrompt? = null,
     val signOutChoices: MigrateSignOut = MigrateSignOut(),
     val verify: VerifyResult? = null,
+    /** Also make a key for logging in from a computer (the private half is kept here until the user saves it). */
+    val makeLoginKey: Boolean = true,
+    /** The unencrypted OpenSSH private key to save, and the `user@host` it opens; null once saved or when none was made. */
+    val loginKeyPem: String? = null,
+    val loginKeyFor: String = "",
+    /** The entry the new server was reached with before its own user existed (the second, duplicate row in the list). */
+    val setupEntry: Server? = null,
 )
 
 private const val CODE_STEP = "migrate_step"
@@ -199,6 +208,22 @@ class MigrateFlow(
     }
 
     fun setSignOutChoices(c: MigrateSignOut) = _ui.update { it.copy(signOutChoices = c) }
+
+    fun setLoginKey(on: Boolean) = _ui.update { it.copy(makeLoginKey = on) }
+
+    fun loginKeySaved() = _ui.update { it.copy(loginKeyPem = null) }
+
+    /** Removes the setup entry of the new server from the list (not the one of the new user). */
+    fun removeSetupEntry() {
+        val s = _ui.value
+        val setup = s.setupEntry ?: return
+        if (setup.id == s.to?.id) return
+        scope.launch {
+            store.removeServer(setup.id)
+            _ui.update { it.copy(setupEntry = null) }
+            log("Removed ${setup.user}@${setup.host} from the server list.")
+        }
+    }
 
     // ---- 2. Check ----------------------------------------------------------------
 
@@ -356,13 +381,29 @@ class MigrateFlow(
         } else {
             val pw = sudoFor(sudoPassword)
             val phoneKey = withContext(Dispatchers.Default) { keys.publicKey() }
-            log("Creating $name on ${t.host} (installs Claude Code; this takes a few minutes)…")
-            apiFor(t).migrateCreateUser(name, pw, phoneKey)
+            // A new key pair for logging in from a computer: the public half goes to the server, the private half is
+            // shown to the user to save (never stored by the app).
+            var loginPub: String? = null
+            var pem: String? = null
+            if (_ui.value.makeLoginKey) {
+                val seed = ByteArray(32).also { SecureRandom().nextBytes(it) }
+                try {
+                    val id = Ed25519Identity(seed)
+                    loginPub = id.authorizedKey("clauderc-login")
+                    pem = String(id.privatePem())
+                } finally {
+                    seed.fill(0)
+                }
+            }
+            log("Creating $name on ${t.host} (installs tools and Claude Code; this takes a few minutes)…")
+            apiFor(t).migrateCreateUser(name, pw, phoneKey, loginPub)
             log("Created $name.")
+            // Shown only now: the key opens nothing until the server has it.
+            pem?.let { k -> _ui.update { it.copy(loginKeyPem = k, loginKeyFor = "$name@${t.host}") } }
         }
         val entry: Server = existing ?: store.addServerEntry(candidate)
         apiFor(entry).status()   // the new entry must answer before it is used
-        _ui.update { it.copy(to = entry, sudoMode = null) }
+        _ui.update { it.copy(to = entry, sudoMode = null, setupEntry = t.takeIf { s -> s.id != entry.id }) }
         log("${entry.host} as $name is in the server list.")
         setStep(MigrateStep.TRANSFER)
         retryBlock = { transfer() }
@@ -612,6 +653,26 @@ class MigrateFlow(
     // ---- 10. Verify --------------------------------------------------------------
 
     fun verifyNow() = work { verify() }
+
+    /** After the restore: signs GitHub in on the new server with [token], then checks again. */
+    fun githubSignIn(token: String) = work {
+        needStep(MigrateStep.VERIFY, MigrateStep.DONE)
+        val (_, t) = servers()
+        apiFor(t).loginGithub(token)
+        log("Signed in to GitHub on ${t.host}.")
+        verify()
+    }
+
+    /** Clones the repos the restore couldn't, then checks again. */
+    fun cloneMissing() = work {
+        needStep(MigrateStep.VERIFY, MigrateStep.DONE)
+        val (_, t) = servers()
+        if (!restored) throw ApiException(CODE_STEP, "There is no restore to clone from (this wizard didn't run one).")
+        log("Cloning the missing repos on ${t.host}…")
+        apiFor(t).migrateClone(MANIFEST)
+        log("Cloned.")
+        verify()
+    }
 
     private suspend fun verify() {
         needStep(MigrateStep.VERIFY, MigrateStep.DONE)

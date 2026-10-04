@@ -371,6 +371,13 @@ grep -q 'Claude logins were NOT stored' <<<"$OUT"; check "to-do list says to sig
 for x in 'verify 0' 'verify 100' 'extract 0' 'extract 100' 'clone 0' 'clone 100'; do
   grep -qx "PROGRESS $x" <<<"$OUT"; check "import progress: $x" $?
 done
+rm -rf "$H6/projects/demo-clean"
+as "$H6" "$CB" clone "$WORK/mf/m.json"
+[[ "$RC" -eq 0 && -d "$H6/projects/demo-clean/.git" ]]; check "clone MANIFEST brings a missing clean repo back" $?
+as "$H6" "$CB" clone "$WORK/mf/m.json"
+[[ "$RC" -eq 0 ]] && grep -q "kept" <<<"$OUT"; check "clone again: nothing to do, still ok" $?
+as "$H6" "$CB" clone "$WORK/nope.json"
+[[ "$RC" -ne 0 ]]; check "clone: a missing manifest fails" $?
 as "$H6" "$CB" import "$NC" --pass-file "$PW" --dry-run --manifest-out "$WORK/mf/dry.json"
 [[ "$RC" -eq 0 && ! -e "$WORK/mf/dry.json" ]]; check "dry run writes no manifest" $?
 grep -q PROGRESS <<<"$OUT"; [[ $? -ne 0 ]]; check "import: no PROGRESS lines by default" $?
