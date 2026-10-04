@@ -13,7 +13,9 @@ SERVER="$(dirname "$HERE")"
 
 WORK="$(mktemp -d)"
 export HOME="$WORK/home" STUB_STATE="$WORK/stub" TMUX_TMPDIR="$WORK/tmux"
-unset XDG_CONFIG_HOME XDG_STATE_HOME XDG_CACHE_HOME TMUX ANTHROPIC_API_KEY GH_TOKEN GITHUB_TOKEN
+# CLAUDE_CONFIG_DIR must go: a worker that runs this suite has it pointing at its REAL login, and the stub `claude auth
+# login` would overwrite the real credentials (that logged CodeWriter out three times).
+unset XDG_CONFIG_HOME XDG_STATE_HOME XDG_CACHE_HOME TMUX ANTHROPIC_API_KEY GH_TOKEN GITHUB_TOKEN CLAUDE_CONFIG_DIR CLAUDE_CODE_OAUTH_TOKEN
 mkdir -p "$HOME/bin" "$HOME/.local/bin" "$STUB_STATE" "$TMUX_TMPDIR"
 # Stubs go where the real tools live, so the scripts' own PATH setup finds them.
 cp "$HERE"/stubs/* "$HOME/.local/bin/"
@@ -760,6 +762,8 @@ rm -f "$HOME/.config/claude-launcher/push.json" "$HOME/.config/claude-launcher/f
 OUT="$(python3 "$HERE/test-push.py" 2>&1)"; check "claude-push against a fake Google" $?
 
 echo "migrate"
+# Earlier tests run install.sh against this HOME, which installs the REAL claude-backup over the stub: put the stub back.
+cp "$HERE/stubs/claude-backup" "$HOME/.local/bin/claude-backup"; chmod +x "$HOME/.local/bin/claude-backup"
 MIG="$HOME/.config/claude-launcher/migrate"; MST="$HOME/.local/state/claude-launcher/migrate"; AK="$HOME/.ssh/authorized_keys"
 APILOG="$HOME/.local/state/claude-launcher/api.log"
 KB=AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl

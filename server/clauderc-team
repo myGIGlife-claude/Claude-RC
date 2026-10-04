@@ -28,7 +28,7 @@ SLOT_SH = ('b=$1; n=$2; m=$3; cred=$4; thr=$5; py=$6; gap=$7; shift 7; while :; 
            'exec 7>"$b.start"; flock 7; now=$(date +%s); last=$(cat "$b.last" 2>/dev/null || echo 0); w=$((last + gap - now)); '
            '[ $w -gt 0 ] && sleep $w; date +%s >"$b.last"; exec 7>&-; '
            ': >"$m"; exec "$@"; }; i=$((i+1)); done; sleep 2; done')
-START_GAP = int(os.environ.get("CLAUDERC_START_GAP") or 30)   # seconds between the starts of one worker's runs
+START_GAP = int(os.environ.get("CLAUDERC_START_GAP") or 0)   # seconds between the starts of one worker's runs (off: the logouts were a test bug, see CLAUDE.md)
 TOKEN_LEFT_PY = ('import json,sys,time\ntry: print(int(json.load(open(sys.argv[1]))["claudeAiOauth"]["expiresAt"]/1000-time.time()))\n'
                  'except Exception: print(999999)')
 RUN_TIMEOUT = 1800        # seconds one worker run may take

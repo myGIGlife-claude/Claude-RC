@@ -17,6 +17,7 @@ done
 
 WORK="$(mktemp -d)"
 OLD="$WORK/old" H2="$WORK/new2" H3="$WORK/new3" H4="$WORK/new4" H5="$WORK/new5" H6="$WORK/new6" RX="$WORK/rx"
+unset CLAUDE_CONFIG_DIR CLAUDE_CODE_OAUTH_TOKEN   # never let a worker's real login leak into a test
 export GNUPGHOME="$WORK/gnupg" STUB_DOCKER="$WORK/docker" TMPDIR="$WORK/tmp"
 mkdir -p "$GNUPGHOME" "$TMPDIR" "$STUB_DOCKER/vol" "$WORK/stubs" "$WORK/failbin" "$WORK/bigdf" "$WORK/smalldf" "$OLD" "$H2" "$H3" "$H4" "$H5" "$H6" "$RX"
 chmod 700 "$GNUPGHOME"

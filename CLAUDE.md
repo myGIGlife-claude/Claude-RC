@@ -86,11 +86,12 @@ hostnames, IPs, emails, org names, keys. They live in
   SSH is swift-nio-ssh (`Ssh.swift`), same forced-command protocol as Android.
   Not ported yet: logins, MCP/plugins, cluster, file transfer, push (APNs needs
   an Apple developer account). Android code is untouched.
-- Worker logins (`workers/<name>/home`): two `claude` processes starting together on one login can invalidate its
-  refresh token and log the worker out (happened twice). `clauderc-team` spaces run starts 30 s apart and starts a
-  run alone when its token would expire mid-run. Never run `claude` (even `auth status`) with a worker's
-  `CLAUDE_CONFIG_DIR` by hand while it may be running. The usage endpoint rate-limits (429): lookups go through one
-  shared file cache (`usage-cache/`).
+- Worker logins (`workers/<name>/home`): CodeWriter was logged out three times. REAL cause: a worker that runs
+  `server/tests/test-api.sh` inherits its own `CLAUDE_CONFIG_DIR`, and the stub `claude auth login` overwrote the worker's
+  real credentials (`{"claudeAiOauth":{}}`). The tests now unset `CLAUDE_CONFIG_DIR` and the stub refuses to write outside
+  /tmp. (Concurrent token refresh was the first guess: `clauderc-team` still starts a run alone when its token would expire
+  mid-run, and `CLAUDERC_START_GAP` can space starts, off by default.) Never run `claude` with a worker's
+  `CLAUDE_CONFIG_DIR` by hand. The usage endpoint rate-limits (429): lookups go through one shared file cache (`usage-cache/`).
 - Plugins managed by `npx skills` (lock file `~/.agents/.skill-lock.json`) are updated by the `skills-update` action,
   not `claude plugin update`; `claude-plugin-updates` gives each installed plugin an update state for the app's lights.
 - `claude-backup` (server/): `export` = one encrypted file (tar|gzip|gpg AES256, passphrase only via file/tty, printed once) with the Claude/launcher/agents/cloud logins, ssh, scripts, chat history and a rescue copy of git repos that are unpushed/dirty/without a remote; `import [--from user@host:FILE] [--clone]` restores it (pre-restore copies kept), `list` shows the manifest (no secret values). Tests: `server/tests/test-backup.sh`.
