@@ -1520,4 +1520,48 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setAppLock(on: Boolean) = viewModelScope.launch { store.setAppLock(on) }
     fun setTheme(mode: ThemeMode) = viewModelScope.launch { store.setTheme(mode) }
+
+    // ---- Migrate (the logic is in Migrate.kt) ---------------------------------------
+
+    private val migrateFlow = MigrateFlow(viewModelScope, store, keys) { apiFor(it) }
+    val migrate: StateFlow<MigrateUi> = migrateFlow.ui
+
+    fun migrateOpen() = migrateFlow.open()
+    /** Leaves the wizard's screen and stops its running calls; the state stays so it can be resumed. */
+    fun migrateClose() = migrateFlow.close()
+    /** Throws the wizard's state away and starts again at the choice. */
+    fun migrateReset() = migrateFlow.reset()
+    fun migrateSetServers(fromId: String, toId: String) = migrateFlow.setServers(fromId, toId)
+    fun migrateSetUser(name: String) = migrateFlow.setUser(name)
+    /** Runs the same step again after an error. */
+    fun migrateRetry() = migrateFlow.retry()
+    fun migrateSetSignOut(choices: MigrateSignOut) = migrateFlow.setSignOutChoices(choices)
+
+    /** Step CHECK: reads the plan from the old server. */
+    fun migrateStart() = migrateFlow.start()
+    /** Back from CHECK to CHOOSE. */
+    fun migrateEdit() = migrateFlow.edit()
+    /** The plan was seen: on to STOP_SESSIONS (stops idle sessions at once). */
+    fun migrateConfirmPlan() = migrateFlow.confirmPlan()
+
+    fun migrateRefreshSessions() = migrateFlow.refreshSessions()
+    fun migrateStopIdle() = migrateFlow.stopIdle()
+    fun migrateStopSession(name: String) = migrateFlow.stopSession(name)
+
+    /** Tests [password] on the new server (blank = test without); sets sudoMode. */
+    fun migrateCheckSudo(password: String = "") = migrateFlow.sudoCheck(password)
+    fun migrateCreateUser(sudoPassword: String) = migrateFlow.createUser(sudoPassword)
+    /** Sends the backup, then restores it (resumes whatever is already running). */
+    fun migrateTransfer() = migrateFlow.transferNow()
+
+    fun migrateSignInStart(name: String, main: Boolean) = migrateFlow.signInStart(name, main)
+    fun migrateSignInCode(name: String, main: Boolean, code: String) = migrateFlow.signInCode(name, main, code)
+    fun migrateSignInCancel() = migrateFlow.signInCancel()
+    fun migrateSignInFinish(skipPending: Boolean = false) = migrateFlow.signInFinish(skipPending)
+
+    /** [items] from claude, workers, github, autostart; empty skips the step. */
+    fun migrateSignOut(items: List<String>) = migrateFlow.signOut(items)
+    fun migrateReboot(sudoPassword: String) = migrateFlow.reboot(sudoPassword)
+    fun migrateSkipReboot() = migrateFlow.skipReboot()
+    fun migrateVerify() = migrateFlow.verifyNow()
 }

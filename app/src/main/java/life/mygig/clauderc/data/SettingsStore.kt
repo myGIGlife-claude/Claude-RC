@@ -162,6 +162,13 @@ class SettingsStore(private val context: Context) {
     /** Adds a blank server and makes it active, so the setup screen shows. */
     suspend fun addServer() = editServers { list, _ -> Server(newId()).also { list += it }.id }
 
+    /** Adds a filled-in server under a new id (the one passed in is ignored) and keeps the active server as it is. */
+    suspend fun addServerEntry(s: Server): Server {
+        val added = s.copy(id = newId())
+        editServers { list, cur -> list += added; cur }
+        return added
+    }
+
     /** Puts one server in or out of the cluster; [alsoOthers] puts every configured server in too. */
     suspend fun setInCluster(id: String, on: Boolean, alsoOthers: Boolean = false) = editServers { list, cur ->
         list.replaceAll { if (it.id == id || (alsoOthers && it.isConfigured)) it.copy(inCluster = on) else it }

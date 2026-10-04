@@ -59,6 +59,16 @@ val SKILLS_SOURCE_RE = Regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 /** Same rule as the server's worker names (Team). */
 val WORKER_NAME_RE = Regex("^[A-Za-z][A-Za-z0-9_-]{0,29}$")
 
+/** Same rules as the server's migrate actions (docs/migrate-design.md). */
+val MIGRATE_USER_RE = Regex("^[a-z][a-z0-9_-]{0,30}$")
+val MIGRATE_FILE_RE = Regex("^incoming-[0-9]{8}-[0-9]{6}\\.gpg$")
+private val MIGRATE_ITEMS = setOf("claude", "workers", "github", "autostart")
+private val MIGRATE_HOST_RE = Regex("^[A-Za-z0-9._:-]{1,253}$")
+private val MIGRATE_SSH_USER_RE = Regex("^[A-Za-z0-9._][A-Za-z0-9._-]{0,63}$")
+private val MIGRATE_KEY_TYPE_RE = Regex("^[A-Za-z0-9@.-]{1,64}$")
+private val MIGRATE_KEY_BLOB_RE = Regex("^[A-Za-z0-9+/=]{1,8192}$")
+private val MIGRATE_MANIFEST_RE = Regex("^[A-Za-z0-9._-]{1,100}$")
+
 /** Typed calls to `claude-launcher-api` on the server. */
 class LauncherApi(
     private val config: suspend () -> ServerConfig,
@@ -225,6 +235,54 @@ class LauncherApi(
     /** Saves a token service's credential; one value per field, or the whole JSON key. */
     suspend fun loginToken(id: String, values: List<String>): LoginDone =
         call("login-token $id", stdin = values.joinToString("\n") { it.trim() })
+
+    // Migrate: move everything to another server. Secrets go on stdin only.
+    suspend fun migratePlan(): MigratePlan = call("migrate-plan", timeoutMs = 180_000)
+    suspend fun migrateKeygen(): PublicKey = call("migrate-keygen")
+    /** On the new server: lets the old one send its backup ([fromAddress] is the old server's address). */
+    suspend fun migrateAuthorize(publicKey: String, fromAddress: String): JsonObject {
+        val key = publicKey.trim()
+        if (!key.startsWith("ssh-") || key.any { it == '\n' || it == '\r' }) throw ApiException(Codes.INVALID_NAME, "Bad migrate key")
+        requireMigrate(MIGRATE_HOST_RE, fromAddress.trim(), "Bad server address")
+        return call("migrate-authorize", stdin = key + "\n" + fromAddress.trim())
+    }
+    /** On the old server: starts the export + transfer to the new one (the pinned host key, five lines on stdin); returns at once. */
+    suspend fun migrateSend(host: String, port: Int, user: String, hostKeyType: String, hostKeyBlob: String): JsonObject {
+        requireMigrate(MIGRATE_HOST_RE, host, "Bad server address")
+        if (port !in 1..65535) throw ApiException(Codes.INVALID_NAME, "Bad port")
+        requireMigrate(MIGRATE_SSH_USER_RE, user, "Bad user name")
+        requireMigrate(MIGRATE_KEY_TYPE_RE, hostKeyType, "Bad host key type")
+        requireMigrate(MIGRATE_KEY_BLOB_RE, hostKeyBlob, "Bad host key")
+        return call("migrate-send", stdin = listOf(host, port.toString(), user, hostKeyType, hostKeyBlob).joinToString("\n"))
+    }
+    suspend fun migratePassphrase(): Passphrase = call("migrate-passphrase")
+    suspend fun migrateStatus(): MigrateStatus = call("migrate-status")
+    /** On the new server: restores the received [file]; the passphrase goes on stdin; returns at once. */
+    suspend fun migrateRestore(file: String, passphrase: String): JsonObject {
+        requireMigrate(MIGRATE_FILE_RE, file, "Bad backup file name")
+        if (passphrase.isBlank() || passphrase.any { it == '\n' || it == '\r' }) throw ApiException(Codes.INVALID_NAME, "Bad passphrase")
+        return call("migrate-restore $file", stdin = passphrase)
+    }
+    suspend fun migrateSudoCheck(password: String = ""): SudoCheck = call("migrate-sudo-check", stdin = password, timeoutMs = 60_000)
+    suspend fun migrateCreateUser(name: String, sudoPassword: String, phonePublicKey: String): JsonObject {
+        requireMigrate(MIGRATE_USER_RE, name, "User names are lowercase letters, digits, '_' and '-', up to 31, starting with a letter.")
+        val key = phonePublicKey.trim()
+        if (key.isEmpty() || key.any { it == '\n' || it == '\r' }) throw ApiException(Codes.INVALID_NAME, "Bad phone key")
+        return call("migrate-create-user $name", stdin = sudoPassword + "\n" + key, timeoutMs = 600_000)
+    }
+    suspend fun migrateVerify(manifestFile: String? = null): VerifyResult {
+        if (manifestFile != null) requireMigrate(MIGRATE_MANIFEST_RE, manifestFile, "Bad manifest file name")
+        return call("migrate-verify" + if (manifestFile != null) " $manifestFile" else "", timeoutMs = 180_000)
+    }
+    suspend fun migrateSignoutOld(items: List<String>): JsonObject {
+        if (items.isEmpty() || items.any { it !in MIGRATE_ITEMS }) throw ApiException(Codes.INVALID_NAME, "Bad sign-out choice")
+        return call("migrate-signout-old " + items.distinct().joinToString(" "), timeoutMs = 120_000)
+    }
+    suspend fun migrateReboot(sudoPassword: String): JsonObject = call("migrate-reboot", stdin = sudoPassword)
+
+    private fun requireMigrate(re: Regex, value: String, message: String) {
+        if (!re.matches(value)) throw ApiException(Codes.INVALID_NAME, message)
+    }
 
     private fun requireName(name: String) {
         if (!PROJECT_NAME_RE.matches(name)) {
