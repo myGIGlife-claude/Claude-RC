@@ -1,8 +1,66 @@
 # Moving cLaudeRC to a new server
 
 Do this when you change VPS. Replace `OLD` and `NEW` with your hosts and `you` with the
-Linux user Claude runs as. Everything is copied with `rsync` over SSH, so the new server
-needs a way to log in to the old one (a temporary key is fine).
+Linux user Claude runs as.
+
+## The quick way: `claude-backup` (one encrypted file)
+
+`claude-backup` ships with the server scripts (`~/.local/bin/claude-backup`, installed and updated by
+`install.sh` and the app's *Update now*). It packs everything the sections below copy by hand into ONE
+encrypted file and unpacks it on the new server.
+
+1. **On OLD**, stop the Claude sessions first (in the app: stop them, or `tmux kill-server`): sign-in
+   tokens rotate, and if OLD and NEW both refresh the same login, one of them is signed out. Then run
+   (or ask Claude to run it):
+
+   ```bash
+   claude-backup export
+   ```
+
+   It writes `~/backups/clauderc-backup-<host>-<time>.tar.gz.gpg` and prints a passphrase like
+   `K7QD-M2XW-...`. **Write the passphrase down: it is shown once and saved nowhere.** The summary also
+   lists which git repos had work that exists only on OLD (unpushed commits, uncommitted changes, no
+   remote; they are stored inside the file), anything too big to store (over 500 MB), and what is not
+   covered. Options:
+
+   - `--slim` leaves out plugin caches and marketplaces (Claude downloads them again): much smaller.
+   - `--projects` stores ALL project folders, also clean repos and folders that are not git repos
+     (without `node_modules`, `build`, ...), for when you would rather not reclone.
+   - `--docker` also stores every named Docker volume (stop databases first for a consistent copy).
+   - `--pass-file FILE` uses your own passphrase from a file instead of a generated one.
+
+2. **On NEW**, install cLaudeRC with the phone key as in step 2 below (the `curl ... install.sh | bash -s -- 'ssh-ed25519 ...'`
+   command from the app). NEW needs a way to log in to OLD with a key (a temporary one is fine). Then:
+
+   ```bash
+   claude-backup import backups/clauderc-backup-<host>-<time>.tar.gz.gpg --from you@OLD --clone
+   ```
+
+   It asks for the passphrase (typed, not echoed) and checks the whole file before writing anything, so a
+   wrong passphrase or a damaged file changes nothing. Every existing file it is about to overwrite is
+   first saved to `~/backups/pre-restore-<time>/`. It restores logins, keys, settings and chat history with
+   the right permissions, puts the stored repos back into their project folders, and with `--clone` clones
+   every clean repo again from its remote. Run it with `--dry-run` first to see what would be restored
+   (`claude-backup list FILE` prints just the manifest). Docker volumes in the file go into new volumes;
+   a volume that already holds data is never overwritten.
+
+3. Follow the "Still to do" list it prints: recreate Docker containers, bring back services and VPN
+   (Tailscale, databases, nodes: `claude-backup` never runs `sudo` or touches systemd), run
+   `claude-autostart install` and restart the sessions, and sign the workers in again from the app
+   (Claude tab › Accounts › *Re-sign in*). Then continue at step 5 (point the app at NEW) and 6 (check).
+
+The file contains **every secret** of the server (SSH keys, tokens, Claude and worker logins), protected only
+by the passphrase. Keep it out of shared places and **delete it on both servers once the move works**
+(`rm ~/backups/clauderc-backup-*`, and the `pre-restore-*` folder on NEW).
+
+The rest of this page is the manual way with `rsync`, a fallback if `claude-backup` is not an option.
+
+---
+
+# Manual move with rsync
+
+Everything is copied with `rsync` over SSH, so the new server needs a way to log in to the old one
+(a temporary key is fine).
 
 ## 0. Before you start
 
