@@ -434,6 +434,14 @@ assert abs(at[0] - at[1]) >= 2.5, at                            # 3 s gap betwee
 assert by_name()["writer2"]["signed_in"] is False
 err, text = tool("delegate", worker="writer2", task="x")
 assert err and "isn't signed in" in text, text
+# A run whose process died without anyone collecting it must not count against the parallel limit for ever.
+(cfg.parent / "cluster.json").write_text('{"max_parallel": 1, "handback": false, "handback_pct": 95}')
+err, dead = tool("delegate", worker="writer1", task="SLOW then forgotten")
+d = json.loads((cfg / "writer1" / "tasks" / f"{dead}.json").read_text())
+os.kill(d["pid"], 9); time.sleep(0.5)                              # the run dies, nobody called wait
+err, tid = tool("delegate", worker="writer1", task="room again after a dead run")
+assert not err, tid
+tool("wait", task_id=tid, timeout_s=30); tool("discard", task_id=tid); tool("discard", task_id=dead)
 proc.stdin.close()
 proc.wait(timeout=5)
 print("test-team: ok")

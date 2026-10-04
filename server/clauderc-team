@@ -190,29 +190,39 @@ def usage_text(u):
     return ", ".join(f"{label} {'?' if p is None else format(p, '.0f') + '%'}" for label, p in zip(("5h", "7d"), u))
 
 
-def running_here():
-    """Tasks of this chat's project that are running or queued (they count against the parallel limit)."""
-    n = 0
+def live_tasks():
+    """Running tasks (any project), after finishing the ones whose process died without anyone calling wait (a chat that
+    went away): a dead run must not count against the parallel limits for ever."""
+    out = []
     for p in WORKERS.glob("*/tasks/*.json"):
         try:
             t = json.loads(p.read_text())
         except (OSError, ValueError):
             continue
-        if t.get("status") == "running" and t.get("project") == os.getcwd():
-            n += 1
-    return n
+        if t.get("status") != "running":
+            continue
+        if t.get("pid") and not pid_alive(t["pid"]):
+            try:
+                finalize(t["id"])
+                t = json.loads(p.read_text())
+            except Exception:
+                pass
+            if t.get("status") != "running":
+                continue
+        out.append(t)
+    return out
+
+
+def running_here():
+    """Tasks of this chat's project that are running or queued (they count against the parallel limit)."""
+    return sum(1 for t in live_tasks() if t.get("project") == os.getcwd())
 
 
 def running_on():
     """Running tasks per worker (any project: they share the worker's login)."""
     n = {}
-    for p in WORKERS.glob("*/tasks/*.json"):
-        try:
-            t = json.loads(p.read_text())
-        except (OSError, ValueError):
-            continue
-        if t.get("status") == "running":
-            n[t.get("worker")] = n.get(t.get("worker"), 0) + 1
+    for t in live_tasks():
+        n[t.get("worker")] = n.get(t.get("worker"), 0) + 1
     return n
 
 
