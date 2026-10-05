@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # Test stub for the Codex CLI (`codex exec ... -`): prompt on stdin, answer in the -o file, JSON events on stdout.
 safe() { [[ "$1" == "$HOME"/* && "$HOME" == /tmp/* || "$1" == /tmp/* ]] || { echo "stub codex: refusing to write a login to $1" >&2; exit 1; }; }
-if [[ "${1:-}" == login ]]; then   # device-code sign-in: shows a URL and a code, finishes by itself
-  echo "Open https://auth.openai.com/codex/device and enter the code ABCD-12345"
-  sleep 2; safe "${CODEX_HOME:-$HOME/.codex}"; mkdir -p "$CODEX_HOME" && echo '{"tokens":{"a":"b"}}' >"$CODEX_HOME/auth.json"; echo "Signed in"; exit 0
+if [[ "${1:-}" == login ]]; then   # browser sign-in: prints a link, waits for the callback on 127.0.0.1:1455
+  echo "Starting local login server on http://localhost:1455."
+  echo "https://auth.openai.com/oauth/authorize?response_type=code&client_id=demo&redirect_uri=http%3A%2F%2F127.0.0.1%3A1455%2Fauth%2Fcallback"
+  safe "${CODEX_HOME:-$HOME/.codex}"
+  # stand-in for the listener: wait for the paste-back to fetch the callback (the stub curl records it in $STUB_STATE/callback)
+  for _ in $(seq 40); do [[ -s "${STUB_STATE:-/tmp}/callback" ]] && break; sleep 0.5; done
+  grep -q 'code=good' "${STUB_STATE:-/tmp}/callback" 2>/dev/null && { mkdir -p "$CODEX_HOME" && echo '{"tokens":{"a":"b"}}' >"$CODEX_HOME/auth.json"; echo "Signed in"; }
+  exit 0
 fi
 echo "$*" >"${STUB_STATE:-/tmp}/codex-args"
 prompt="$(cat)"

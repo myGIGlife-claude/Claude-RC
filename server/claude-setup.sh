@@ -1603,7 +1603,7 @@ do_worker_login_start() {
 do_worker_login_code() {
   worker_login_target "${1:-}"
   case "$(worker_kind "$WORKERS_DIR/$1")" in
-    codex) do_login_device_wait codex ;;
+    codex) do_login_codex_code ;;
     gemini) do_login_gemini_code ;;
     *) do_login_claude_code ;;
   esac
@@ -1634,16 +1634,30 @@ login_wait_url() {  # <session> <seconds> [enter-on-pattern]
   LOGIN_PANE="$(tail -n 15 <<<"$text")"
 }
 
-# ChatGPT (Codex): `codex login --device-auth` shows a URL and a one-time code and finishes by itself once the code is entered.
+# ChatGPT (Codex): plain `codex login` listens on 127.0.0.1:1455 and prints an OpenAI link. After sign-in the phone's browser is sent to
+# http://127.0.0.1:1455/auth/callback?... which only exists on the server, so the user pastes that address back and we fetch it here.
+# (Device codes are an account setting OpenAI refuses on some accounts, so they are not used.)
 do_login_codex_start() {
   need tmux; ensure_cli codex @openai/codex
-  start_login_session "$CLAUDE_LOGIN_SESSION" "$(command -v codex)" login --device-auth || api_err internal "Could not start the login session."
+  start_login_session "$CLAUDE_LOGIN_SESSION" "$(command -v codex)" login || api_err internal "Could not start the login session."
   login_wait_url "$CLAUDE_LOGIN_SESSION" 30
   if [[ -z "$LOGIN_URL" ]]; then
     end_login "$CLAUDE_LOGIN_SESSION"
     api_err internal "No login URL appeared within 30 s." "$(jq -cn --arg t "$LOGIN_PANE" '{pane:$t}')"
   fi
-  api_ok "$(jq -cn --arg u "$LOGIN_URL" --arg c "$LOGIN_CODE" --arg s "$CLAUDE_LOGIN_SESSION" '{url:$u, device_code:(if $c=="" then null else $c end), session:$s}')"
+  api_ok "$(jq -cn --arg u "$LOGIN_URL" --arg s "$CLAUDE_LOGIN_SESSION" '{url:$u, paste_url:true, session:$s}')"
+}
+
+do_login_codex_code() {
+  local url
+  url="$(read_secret_line)"
+  exec 0</dev/null
+  url="${url//[[:space:]]/}"
+  [[ "$url" =~ ^https?://(localhost|127\.0\.0\.1):1455(/auth/callback\?[A-Za-z0-9%\&=._~+/-]{1,3000})$ ]] ||
+    api_err invalid_name "Paste the whole address of the page that failed to load (it starts with http://localhost:1455/auth/callback)."
+  tmux has-session -t "=$CLAUDE_LOGIN_SESSION" 2>/dev/null || api_err not_logged_in_claude "The login session expired. Start the sign-in again."
+  curl -s --max-time 20 -o /dev/null "http://127.0.0.1:1455${BASH_REMATCH[2]}" || true
+  do_login_device_wait codex
 }
 
 # Gemini: NO_BROWSER makes the CLI print a Google URL and ask for the code it shows afterwards.

@@ -143,12 +143,16 @@ fun ClusterSection(vm: MainViewModel) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Use the account meant for this worker (sign out of other accounts in your browser first, or use a private tab).")
                     OutlinedButton(onClick = { openUrl(context, url.url) }, modifier = Modifier.fillMaxWidth()) { Text("Open link") }
+                    if (url.pasteUrl) Text(
+                        "Sign in on the page. It ends on a page that won't load (localhost): copy its address from the browser bar and paste it below.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                     if (url.deviceCode != null) {
                         Text("Enter this code on the page, then tap “I've signed in”:", style = MaterialTheme.typography.bodySmall)
                         Text(url.deviceCode, style = MaterialTheme.typography.headlineSmall)
                     } else
                     OutlinedTextField(
-                        value = code, onValueChange = { code = it.trim() }, label = { Text("Code") },
+                        value = code, onValueChange = { code = it.trim() }, label = { Text(if (url.pasteUrl) "Address of the page" else "Code") },
                         singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
                     )
                 }
