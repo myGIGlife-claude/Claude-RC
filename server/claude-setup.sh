@@ -1680,7 +1680,7 @@ do_worker_set_key() {
   worker_exists "$name"
   [[ "$(worker_kind "$WORKERS_DIR/$name")" == gemini ]] || api_err invalid_name "Only Gemini workers use an API key."
   key="${key//[[:space:]]/}"
-  [[ "$key" =~ ^[A-Za-z0-9_-]{20,100}$ ]] || api_err invalid_name "That doesn't look like a Gemini API key."
+  [[ "$key" =~ ^[A-Za-z0-9._-]{20,200}$ ]] || api_err invalid_name "That doesn't look like a Gemini API key."
   ensure_cli gemini @google/gemini-cli
   dir="$WORKERS_DIR/$name/home"
   (umask 077; printf '%s\n' "$key" >"$dir/gemini-api-key.new" && mv -f "$dir/gemini-api-key.new" "$dir/gemini-api-key")
