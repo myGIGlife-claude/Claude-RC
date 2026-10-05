@@ -681,13 +681,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _workerLogin = MutableStateFlow<Pair<String, LoginUrl>?>(null)
     val workerLogin = _workerLogin.asStateFlow()
+    /** The Gemini worker whose API key is being asked for. */
+    private val _workerKey = MutableStateFlow<String?>(null)
+    val workerKey = _workerKey.asStateFlow()
+    fun closeWorkerKey() { _workerKey.value = null }
+    fun saveWorkerKey(name: String, key: String) = action("Saving the key for $name…") {
+        api.workerSetKey(name, key)
+        _workerKey.value = null
+        _cluster.value = clusterGroups()
+    }
     private val _workerRuns = MutableStateFlow<Pair<String, List<WorkerRun>>?>(null)
     val workerRuns = _workerRuns.asStateFlow()
 
     fun addWorker(name: String, role: String, kind: String = "claude") = action("Adding $name…") {
         api.workerAdd(name, role, kind)
         _cluster.value = clusterGroups()
-        _workerLogin.value = name to api.workerLoginStart(name)   // straight on to signing in
+        if (kind == "gemini") _workerKey.value = name else _workerLogin.value = name to api.workerLoginStart(name)   // straight on to signing in
     }
     fun setWorker(name: String, field: String, value: String) = action("Saving…") {
         api.workerSet(name, field, value)
@@ -697,7 +706,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         api.workerRemove(name)
         _cluster.value = clusterGroups()
     }
-    fun workerLoginStart(name: String) = action("Starting sign-in for $name…") {
+    fun workerLoginStart(name: String, kind: String = "claude") = action("Starting sign-in for $name…") {
+        if (kind == "gemini") { _workerKey.value = name; return@action }
         _workerLogin.value = name to api.workerLoginStart(name)
     }
     fun workerLoginCode(name: String, code: String) = action("Checking code…") {

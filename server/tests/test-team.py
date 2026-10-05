@@ -140,12 +140,12 @@ err, text = tool("list_workers")
 assert not err and "research" in text, text
 
 # Codex (ChatGPT) and Gemini workers: signed in by their own files, no usage numbers, their own CLI and home folder.
-for name, kind_, cred in (("gpt", "codex", "auth.json"), ("gem", "gemini", ".gemini/oauth_creds.json"), ("gem2", "gemini", ".gemini/oauth_creds.json")):
+for name, kind_, cred in (("gpt", "codex", "auth.json"), ("gem", "gemini", "gemini-api-key"), ("gem2", "gemini", "gemini-api-key")):
     (cfg / name / "home").mkdir(parents=True); (cfg / name / "tasks").mkdir()
     (cfg / name / "meta.json").write_text(json.dumps({"role": "second opinion", "mode": "acceptEdits", "kind": kind_}))
     if name != "gem2":
         (cfg / name / "home" / cred).parent.mkdir(parents=True, exist_ok=True)
-        (cfg / name / "home" / cred).write_text('{"tokens":{"x":"y"}}')
+        (cfg / name / "home" / cred).write_text("AIzaKEY\n" if kind_ == "gemini" else '{"tokens":{"x":"y"}}')
 attach(tmp, {**json.loads((cfg.parent / "attach" / (re.sub(r"[^A-Za-z0-9]", "-", str(tmp.resolve())) + ".json")).read_text()), "gpt": {}, "gem": {}, "gem2": {}})
 ws = {w["name"]: w for w in json.loads(tool("list_workers")[1])}
 assert ws["gpt"]["kind"] == "codex" and ws["gpt"]["signed_in"] and "five_hour_pct" not in ws["gpt"] and ws["gem2"]["signed_in"] is False and "kind" not in ws["research"], ws
@@ -162,7 +162,7 @@ err, text = tool("wait", task_id=tid, timeout_s=30)
 assert err and "stub codex failure" in text, text
 err, tid = tool("delegate", worker="gem", task="ask gemini")
 err, text = tool("wait", task_id=tid, timeout_s=30)
-assert not err and f"home={cfg / 'gem' / 'home'}" in text and "ask gemini" in text and "--approval-mode auto_edit" in text, text
+assert not err and "key=AIzaKEY" in text and "ask gemini" in text and "--approval-mode auto_edit" in text, text
 err, tid = tool("reply", task_id=tid, message="and more")
 err, text = tool("wait", task_id=tid, timeout_s=30)
 assert not err and "and more" in text, text                                  # reply = a new run (gemini has no session ids)

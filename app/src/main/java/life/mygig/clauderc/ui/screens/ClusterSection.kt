@@ -10,6 +10,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -59,6 +60,8 @@ fun ClusterSection(vm: MainViewModel) {
     val groups by vm.cluster.collectAsState()
     val status by vm.status.collectAsState()
     val login by vm.workerLogin.collectAsState()
+    val keyFor by vm.workerKey.collectAsState()
+    var apiKey by remember { mutableStateOf("") }
     val runs by vm.workerRuns.collectAsState()
     val busy by vm.busy.collectAsState()
     val config by vm.clusterConfig.collectAsState()
@@ -124,6 +127,26 @@ fun ClusterSection(vm: MainViewModel) {
                     )
                     OutlinedTextField(value = role, onValueChange = { role = it }, label = { Text("What it's for") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     Text("To use another server's account instead, add that server (top bar) and it offers to join.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+        )
+    }
+
+    keyFor?.let { who ->
+        AlertDialog(
+            onDismissRequest = { vm.closeWorkerKey(); apiKey = "" },
+            confirmButton = { TextButton(onClick = { vm.saveWorkerKey(who, apiKey); apiKey = "" }, enabled = apiKey.length >= 20 && busy == null) { Text("Save key") } },
+            dismissButton = { TextButton(onClick = { vm.closeWorkerKey(); apiKey = "" }) { Text("Cancel") } },
+            title = { Text("Gemini key for $who") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Google no longer lets the Gemini command-line tool sign in with a personal account. Paste an API key from aistudio.google.com/apikey instead.")
+                    OutlinedButton(onClick = { openUrl(context, "https://aistudio.google.com/apikey") }, modifier = Modifier.fillMaxWidth()) { Text("Open Google AI Studio") }
+                    OutlinedTextField(
+                        value = apiKey, onValueChange = { apiKey = it.trim() }, label = { Text("API key") }, singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                    )
                 }
             },
         )
@@ -263,7 +286,7 @@ private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean
             if (worker && canManage) {
                 Text("Mode: ${a.mode} (${modeHint(a.mode)})", style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    OutlinedButton(onClick = { vm.workerLoginStart(a.name) }, enabled = idle) { Text(if (a.signedIn) "Re-sign in" else "Sign in") }
+                    OutlinedButton(onClick = { vm.workerLoginStart(a.name, a.kind) }, enabled = idle) { Text(if (a.kind == "gemini") (if (a.signedIn) "Change key" else "Add key") else if (a.signedIn) "Re-sign in" else "Sign in") }
                     OutlinedButton(onClick = { vm.setWorker(a.name, "mode", MODES[(MODES.indexOf(a.mode) + 1) % MODES.size]) }, enabled = idle) { Text("Mode") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
