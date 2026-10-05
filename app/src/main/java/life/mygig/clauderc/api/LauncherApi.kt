@@ -174,6 +174,8 @@ class LauncherApi(
         if (field != "role" && field != "mode") throw ApiException(Codes.INVALID_NAME, "Bad field")
         return call("worker-set $name $field", stdin = value.trim().replace('\n', ' '))
     }
+    /** Gemini workers sign in with an API key from Google AI Studio (the key travels on stdin only). */
+    suspend fun workerSetKey(name: String, key: String): JsonObject { requireWorker(name); return call("worker-set-key $name", stdin = key.trim(), timeoutMs = 300_000) }
     suspend fun workerRemove(name: String): JsonObject { requireWorker(name); return call("worker-remove $name") }
     suspend fun workerLoginStart(name: String): LoginUrl { requireWorker(name); return call("worker-login-start $name", timeoutMs = 60_000) }
     suspend fun workerLoginCode(name: String, code: String): LoginDone {

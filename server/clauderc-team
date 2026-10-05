@@ -119,7 +119,9 @@ def signed_in(name):
     k, h = kind(name), WORKERS / name / "home"
     if k != "claude":
         try:
-            c = json.loads((h / ("auth.json" if k == "codex" else ".gemini/oauth_creds.json")).read_text())
+            if k == "gemini":   # an API key: Google ended personal-account sign-in for the Gemini CLI
+                return bool((h / "gemini-api-key").read_text().strip())
+            c = json.loads((h / "auth.json").read_text())
         except (OSError, ValueError):
             return False
         return isinstance(c, dict) and bool(c)
@@ -519,6 +521,8 @@ def launch(t):
     drop = mirrored_names() | {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDECODE", "OPENAI_API_KEY", "CODEX_HOME", "GEMINI_API_KEY", "GOOGLE_API_KEY", "GEMINI_CLI_HOME"}
     env = {n: v for n, v in os.environ.items() if n not in drop and not n.startswith("CLAUDE_CODE_")}
     env[{"codex": "CODEX_HOME", "gemini": "GEMINI_CLI_HOME"}.get(k, "CLAUDE_CONFIG_DIR")] = str(w / "home")
+    if k == "gemini":
+        env["GEMINI_API_KEY"] = (w / "home" / "gemini-api-key").read_text().strip()
     with open(d / f"{tid}.in") as fin, open(d / f"{tid}.out", "wb") as fo, open(d / f"{tid}.err", "wb") as fe:
         proc = subprocess.Popen(cmd, stdin=fin, stdout=fo, stderr=fe, cwd=t["cwd"], env=env, start_new_session=True)
     t["pid"] = proc.pid

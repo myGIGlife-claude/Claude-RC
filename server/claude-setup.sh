@@ -17,7 +17,7 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster).
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key).
 # Bump when the app starts needing a new server feature.
 SCRIPT_API=37
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
@@ -139,7 +139,7 @@ worker_kind() { jq -r '.kind // "claude"' "$1/meta.json" 2>/dev/null || echo cla
 worker_signed() {
   case "$(worker_kind "$1")" in
     codex) jq -e 'length > 0' "$1/home/auth.json" >/dev/null 2>&1 ;;
-    gemini) jq -e 'length > 0' "$1/home/.gemini/oauth_creds.json" >/dev/null 2>&1 ;;
+    gemini) [[ -s "$1/home/gemini-api-key" ]] ;;   # Google ended personal-account sign-in for the Gemini CLI: it uses an API key
     *) creds_ok "$1/home/.credentials.json" ;;
   esac
 }
@@ -1596,7 +1596,7 @@ do_worker_login_start() {
   worker_login_target "${1:-}"
   case "$(worker_kind "$WORKERS_DIR/$1")" in
     codex) do_login_codex_start ;;
-    gemini) do_login_gemini_start ;;
+    gemini) api_err invalid_name "Gemini workers sign in with an API key (worker-set-key)." ;;
     *) do_login_claude_start ;;
   esac
 }
@@ -1604,7 +1604,7 @@ do_worker_login_code() {
   worker_login_target "${1:-}"
   case "$(worker_kind "$WORKERS_DIR/$1")" in
     codex) do_login_codex_code ;;
-    gemini) do_login_gemini_code ;;
+    gemini) api_err invalid_name "Gemini workers sign in with an API key (worker-set-key)." ;;
     *) do_login_claude_code ;;
   esac
 }
@@ -1659,18 +1659,6 @@ do_login_codex_code() {
   do_login_device_wait codex
 }
 
-# Gemini: NO_BROWSER makes the CLI print a Google URL and ask for the code it shows afterwards.
-do_login_gemini_start() {
-  need tmux; ensure_cli gemini @google/gemini-cli
-  start_login_session "$CLAUDE_LOGIN_SESSION" "$(command -v gemini)" --skip-trust || api_err internal "Could not start the login session."
-  login_wait_url "$CLAUDE_LOGIN_SESSION" 40 'login with google|sign in with google|trust'
-  if [[ -z "$LOGIN_URL" ]]; then
-    end_login "$CLAUDE_LOGIN_SESSION"
-    api_err internal "No login URL appeared within 40 s." "$(jq -cn --arg t "$LOGIN_PANE" '{pane:$t}')"
-  fi
-  api_ok "$(jq -cn --arg u "$LOGIN_URL" --arg s "$CLAUDE_LOGIN_SESSION" '{url:$u, session:$s}')"
-}
-
 # Success = the CLI wrote its login file under the worker's home.
 do_login_device_wait() {  # <codex|gemini>
   local w="${CLAUDE_LOGIN_SESSION#worker-login-}" i text=""
@@ -1684,16 +1672,23 @@ do_login_device_wait() {  # <codex|gemini>
   api_err not_logged_in_claude "Login did not complete. Start the sign-in again." "$(jq -cn --arg t "$(tail -n 15 <<<"$text")" '{pane:$t}')"
 }
 
-do_login_gemini_code() {
-  local code
-  code="$(read_secret_line)"
+# Gemini: the key (from Google AI Studio) comes on stdin and is kept in the worker's home, mode 600; clauderc-team hands it to the CLI.
+do_worker_set_key() {
+  local name="${1:-}" key dir
+  key="$(read_secret_line)"
   exec 0</dev/null
-  code="${code//[[:space:]]/}"
-  [[ "$code" =~ ^[A-Za-z0-9#_.~=+/-]{4,1024}$ ]] || api_err invalid_name "That doesn't look like a login code."
-  tmux has-session -t "=$CLAUDE_LOGIN_SESSION" 2>/dev/null || api_err not_logged_in_claude "The login session expired. Start the sign-in again."
-  tmux send-keys -t "=$CLAUDE_LOGIN_SESSION:" -l -- "$code"
-  tmux send-keys -t "=$CLAUDE_LOGIN_SESSION:" Enter
-  do_login_device_wait gemini
+  worker_exists "$name"
+  [[ "$(worker_kind "$WORKERS_DIR/$name")" == gemini ]] || api_err invalid_name "Only Gemini workers use an API key."
+  key="${key//[[:space:]]/}"
+  [[ "$key" =~ ^[A-Za-z0-9_-]{20,100}$ ]] || api_err invalid_name "That doesn't look like a Gemini API key."
+  ensure_cli gemini @google/gemini-cli
+  dir="$WORKERS_DIR/$name/home"
+  (umask 077; printf '%s\n' "$key" >"$dir/gemini-api-key.new" && mv -f "$dir/gemini-api-key.new" "$dir/gemini-api-key")
+  # An old Google-account login would be tried first and refused: remove it and pick the key.
+  rm -f "$dir/.gemini/oauth_creds.json"
+  mkdir -p "$dir/.gemini"
+  echo '{"security":{"auth":{"selectedType":"gemini-api-key"}}}' >"$dir/.gemini/settings.json"
+  api_ok "$(jq -cn --arg n "$name" '{saved:$n}')"
 }
 
 do_login_github() {
@@ -3810,7 +3805,7 @@ api_main() {
   shift || true
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | login-apple | youtube-login-start | \
-      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-login-code | cluster-assign | \
+      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
       migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
@@ -3859,6 +3854,7 @@ api_main() {
     worker-list)         [[ $# -eq 0 ]] || bad_args "worker-list takes no arguments"; do_worker_list ;;
     worker-add)          do_worker_add "$@" ;;
     worker-set)          do_worker_set "$@" ;;
+    worker-set-key)      do_worker_set_key "$@" ;;
     cluster-config)      do_cluster_config "$@" ;;
     cluster-config-set)  do_cluster_config_set "$@" ;;
     worker-remove)       do_worker_remove "$@" ;;
