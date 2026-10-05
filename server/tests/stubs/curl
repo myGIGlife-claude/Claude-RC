@@ -9,6 +9,10 @@ for a; do
     exit 0
   fi
 done
+# codex sign-in: the pasted-back callback is fetched from the local listener on 127.0.0.1:1455
+for a; do
+  [[ "$a" == http://127.0.0.1:1455/* ]] && { echo "$a" >"${STUB_STATE:-/tmp}/callback"; exit 0; }
+done
 # cluster: Anthropic's usage endpoint. Keep what curl was given on stdin (the token) for the test to inspect.
 for a; do
   if [[ "$a" == */api/oauth/usage ]]; then

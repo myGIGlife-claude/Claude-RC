@@ -151,7 +151,7 @@ data class StopResult(val session: String, val stopped: Boolean)
 data class TailResult(val session: String, val lines: Int = 0, val text: String = "")
 
 @Serializable
-data class LoginUrl(val url: String, val code: String? = null, @SerialName("device_code") val deviceCode: String? = null)
+data class LoginUrl(val url: String, val code: String? = null, @SerialName("device_code") val deviceCode: String? = null, @SerialName("paste_url") val pasteUrl: Boolean = false)
 
 @Serializable
 data class YoutubeStart(val url: String, val code: String, val interval: Int = 5, @SerialName("expires_in") val expiresIn: Int = 1800)
