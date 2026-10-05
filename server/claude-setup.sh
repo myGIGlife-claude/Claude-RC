@@ -1617,15 +1617,14 @@ ensure_cli() {  # <binary> <npm package>
   command -v "$1" >/dev/null 2>&1 || api_err internal "Couldn't install $1 ($2) on the server."
 }
 
-# Waits for the first URL (and optional one-time code) in a login pane. Returns it in LOGIN_URL / LOGIN_CODE.
+# Waits for the first URL in a login pane. Returns it in LOGIN_URL.
 login_wait_url() {  # <session> <seconds> [enter-on-pattern]
   local i text="" k
-  LOGIN_URL=""; LOGIN_CODE=""
+  LOGIN_URL=""
   for ((i = 0; i < $2 * 2; i++)); do
     sleep 0.5
     text="$(pane_text "$1")"
     LOGIN_URL="$(grep -oE 'https://[^[:space:]]+' <<<"$text" | grep -vE 'docs|github\.com|gemini\.google\.com/?$' | head -n 1 | tr -d '\r')"
-    LOGIN_CODE="$(grep -oE '\b[A-Z0-9]{4,5}-[A-Z0-9]{4,6}\b' <<<"$text" | head -n 1)"
     [[ -n "$LOGIN_URL" ]] && break
     grep -q '\[exit ' <<<"$text" && break
     # first-run prompts (trust this folder, pick the Google sign-in): the default answer is the right one
