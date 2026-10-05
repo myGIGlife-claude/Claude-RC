@@ -153,7 +153,7 @@ err, text = tool("delegate", worker="gem2", task="x")
 assert err and "sign" in text.lower(), text
 err, tid = tool("delegate", worker="gpt", task="ask codex")
 err, text = tool("wait", task_id=tid, timeout_s=30)
-assert not err and f"home={cfg / 'gpt' / 'home'}" in text and "key=unset" in text and "ask codex" in text and "-s workspace-write" in text, text
+assert not err and f"home={cfg / 'gpt' / 'home'}" in text and "key=unset" in text and "ask codex" in text and "sandbox_mode=\"workspace-write\"" in text, text
 err, tid = tool("reply", task_id=tid, message="more please")
 err, text = tool("wait", task_id=tid, timeout_s=30)
 assert not err and "exec resume thr-9" in (tmp / "stub" / "codex-args").read_text(), text   # follow-ups resume the thread

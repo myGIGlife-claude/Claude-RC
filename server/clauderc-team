@@ -508,7 +508,7 @@ def launch(t):
         # prompt on stdin ("-"); the answer is the last message, the session id comes from the JSON events
         base = [CLIS[k], "exec"] + (["resume", t["resume"]] if t.get("resume") else [])
         run = base + ["--json", "--skip-git-repo-check", "-o", str(d / f"{tid}.last")] + (["-m", model] if model else []) \
-            + (["-s", CODEX_SANDBOX[mode]] if not t.get("resume") else (["--dangerously-bypass-approvals-and-sandbox"] if mode == "bypassPermissions" else [])) + ["-"]
+            + ["-c", f'sandbox_mode="{CODEX_SANDBOX[mode]}"', "-"]   # -c, not -s: `exec resume` has no -s and would fall back to read-only
     elif k == "gemini":
         # no session ids to resume by, so a follow-up starts fresh (the prompt carries what it needs)
         run = [CLIS[k], "-p", "", "-o", "json", "--skip-trust", "--approval-mode", GEMINI_APPROVAL[mode]] + (["-m", model] if model else [])
