@@ -137,6 +137,8 @@ class LauncherApi(
     /** Installs a CLI on the server; [sudoPassword] only for installs that need root (docker). */
     /** Saves a custom API key (value on stdin) that every Claude session and MCP server sees. */
     suspend fun setSecret(name: String, value: String): JsonObject = call("set-secret $name", stdin = value.trim())
+    /** Saves a JSON file (base64 on stdin) on the server; the custom key [name] then holds its path. */
+    suspend fun setSecretFile(name: String, fileBase64: String): JsonObject = call("set-secret-file $name", stdin = fileBase64)
     /** Saves an Android signing key: alias, passwords and the file (base64) go on stdin. */
     /** Google device sign-in for YouTube: client ID and secret on stdin; returns the code to enter. */
     suspend fun youtubeStart(clientId: String, clientSecret: String): YoutubeStart =
