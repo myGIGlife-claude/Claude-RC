@@ -906,6 +906,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         refreshStatus()
     }
 
+    fun setSecretFile(name: String, file: ByteArray) = action("Saving $name…") {
+        val b64 = android.util.Base64.encodeToString(file, android.util.Base64.NO_WRAP)
+        api.setSecretFile(name, b64)
+        say("$name saved (it holds the file's path). Restart sessions to use it.")
+        refreshStatus()
+    }
+
     fun removeSecret(name: String) = action("Removing $name…") {
         api.removeSecret(name)
         say("$name removed. Restart sessions to drop it.")

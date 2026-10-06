@@ -385,6 +385,18 @@ fun CustomKeysDialog(vm: MainViewModel) {
     var value by remember { mutableStateOf("") }
     var confirmRemove by remember { mutableStateOf<String?>(null) }
     val nameOk = Updates.CUSTOM_NAME.matches(name) && !name.startsWith("CLAUDE_") && !name.startsWith("ANTHROPIC_")
+    val context = LocalContext.current
+    val pickJson = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+            if (bytes == null || bytes.isEmpty() || bytes.size > 100_000) {
+                vm.say("That file couldn't be read (or it's over 100 KB).")
+            } else {
+                vm.setSecretFile(name, bytes)
+                name = ""
+            }
+        }
+    }
     AlertDialog(
         onDismissRequest = { if (busy == null) vm.showCustomKeys(false) },
         title = { Text("Custom API keys") },
@@ -411,9 +423,9 @@ fun CustomKeysDialog(vm: MainViewModel) {
                 )
                 // Tapping an ending adds it to the name (replacing an ending already there).
                 androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(listOf("_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_USERNAME", "_URL", "_ID", "_HOST", "_SERVER", "_EMAIL", "_REGION", "_PROJECT", "_ENDPOINT", "_ORG", "_ACCOUNT", "_USER", "_AUTHKEY", "_APIKEY")) { e ->
+                    items(listOf("_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_USERNAME", "_URL", "_ID", "_HOST", "_SERVER", "_EMAIL", "_REGION", "_PROJECT", "_ENDPOINT", "_ORG", "_ACCOUNT", "_USER", "_AUTHKEY", "_APIKEY", "_FILE", "_CREDENTIALS")) { e ->
                         androidx.compose.material3.AssistChip(
-                            onClick = { name = Regex("_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT|AUTHKEY|APIKEY)$").replace(name, "").trimEnd('_') + e },
+                            onClick = { name = Regex("_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT|AUTHKEY|APIKEY|FILE|CREDENTIALS)$").replace(name, "").trimEnd('_') + e },
                             label = { Text(e) },
                         )
                     }
@@ -429,6 +441,16 @@ fun CustomKeysDialog(vm: MainViewModel) {
                     enabled = busy == null && nameOk && value.isNotEmpty() && !value.contains('\''),
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Save") }
+                OutlinedButton(
+                    onClick = { pickJson.launch(arrayOf("application/json", "*/*")) },
+                    enabled = busy == null && nameOk,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Upload JSON file") }
+                Text(
+                    "Or upload a JSON file (e.g. a Google service-account key, name it GOOGLE_APPLICATION_CREDENTIALS): " +
+                        "the server keeps it private and the variable then holds the path of the saved file.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         },
         confirmButton = {},
