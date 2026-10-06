@@ -293,6 +293,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val chatPending = _chatPending.asStateFlow()
     /** Pending messages of chats you left: they come back when you reopen that chat (until the conversation shows them). */
     private val queuedBySession = mutableMapOf<String, List<String>>()
+
+    /** Half-typed chat messages, kept per session so leaving the chat or the app doesn't lose them. */
+    private val draftPrefs by lazy { getApplication<Application>().getSharedPreferences("chat_drafts", android.content.Context.MODE_PRIVATE) }
+    fun draft(session: String): String = draftPrefs.getString(session, "").orEmpty()
+    fun setDraft(session: String, text: String) = draftPrefs.edit().apply { if (text.isEmpty()) remove(session) else putString(session, text) }.apply()
     private var chatPoller: Job? = null
 
     /** Claude's full checkup in a session of its own, opened in the chat. */
@@ -1478,6 +1483,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _detail.value = null
         closeChat()
         queuedBySession.clear()   // session names repeat across servers
+        draftPrefs.edit().clear().apply()
         chatPin = null
         pinVault.clear()
     }

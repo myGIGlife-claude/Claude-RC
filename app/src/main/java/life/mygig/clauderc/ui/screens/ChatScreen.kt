@@ -324,7 +324,9 @@ private fun PromptCard(vm: MainViewModel, screen: String, enabled: Boolean) {
 @Composable
 private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
     val context = LocalContext.current
-    var text by rememberSaveable { mutableStateOf("") }
+    val session = vm.chatSession.value.orEmpty()
+    var text by remember(session) { mutableStateOf(vm.draft(session)) }
+    LaunchedEffect(session, text) { if (session.isNotEmpty()) vm.setDraft(session, text) }
     // Attach: the file goes into the project's uploads/ folder; its path goes in the message.
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
