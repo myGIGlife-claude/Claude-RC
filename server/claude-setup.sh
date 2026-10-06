@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key).
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings.
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=37
+SCRIPT_API=38
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -37,9 +37,10 @@ LOCK_FILE="$API_STATE_DIR/api.lock"
 INSTALLED_COMMIT_FILE="$LAUNCHER_CONFIG_DIR/installed-commit"   # written by install.sh
 SERVICES_INFO="$LAUNCHER_CONFIG_DIR/services.json"   # who each token service is logged in as
 CUSTOM_NAMES="$LAUNCHER_CONFIG_DIR/custom-names"   # names added with set-secret
+SECRET_FILES_DIR="$LAUNCHER_CONFIG_DIR/secret-files"   # files saved with set-secret-file
 # A custom key's name: upper case, a credential-like suffix, never something
 # that changes how programs run (PATH, LD_*, CLAUDE_*, …).
-CUSTOM_NAME_RE='^[A-Z][A-Z0-9_]{0,55}_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT|AUTHKEY|APIKEY)$'
+CUSTOM_NAME_RE='^[A-Z][A-Z0-9_]{0,55}_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT|AUTHKEY|APIKEY|FILE|CREDENTIALS)$'
 TOKEN_SERVICES="cloudflare vercel netlify fly railway supabase neon npm stripe huggingface b2 gcp firebase mxroute googleplay youtube"
 
 # A question on Claude's screen: a confirm footer, a y/n, a numbered menu with the cursor on it, or the auto-mode opt-in.
@@ -2032,6 +2033,26 @@ do_set_secret() {
   api_ok "$(jq -cn --arg n "$1" '{saved:$n}')"
 }
 
+# set-secret-file <NAME>: stdin = a JSON file (e.g. a service-account key),
+# base64-encoded. Saved as secret-files/<NAME>.json (mode 600); NAME holds its path.
+do_set_secret_file() {
+  [[ $# -eq 1 ]] && custom_name_ok "$1" || bad_args "usage: set-secret-file <NAME ending in _KEY, _FILE, _CREDENTIALS, …>"
+  local n="$1" dir f
+  dir="$(mktemp -d)" && chmod 700 "$dir"
+  trap 'rc=$?; rm -rf "$dir"; (exit $rc); on_exit' EXIT
+  head -c 200000 | tr -d '[:space:]' | base64 -d >"$dir/f" 2>/dev/null || api_err invalid_name "The file didn't come through."
+  exec 0</dev/null
+  [[ -s "$dir/f" && $(stat -c %s "$dir/f") -le 100000 ]] || api_err invalid_name "The file is empty or too big (100 KB at most)."
+  jq -e . "$dir/f" >/dev/null 2>&1 || api_err invalid_name "That file isn't valid JSON."
+  mkdir -p "$SECRET_FILES_DIR" && chmod 700 "$SECRET_FILES_DIR"
+  f="$SECRET_FILES_DIR/$n.json"
+  install -m 600 "$dir/f" "$f.new" && mv -f "$f.new" "$f"
+  set_env "$n" "$f"
+  { grep -vx "$n" "$CUSTOM_NAMES" 2>/dev/null; echo "$n"; } | sort -u >"$CUSTOM_NAMES.tmp" && mv "$CUSTOM_NAMES.tmp" "$CUSTOM_NAMES"
+  ensure_env_hook
+  api_ok "$(jq -cn --arg n "$n" '{saved:$n, file:true}')"
+}
+
 KEYSTORE_DIR="$LAUNCHER_CONFIG_DIR/keystores"
 
 find_keytool() {
@@ -2185,6 +2206,7 @@ do_remove_secret() {
   [[ $# -eq 1 ]] && custom_name_ok "$1" || bad_args "usage: remove-secret <NAME>"
   grep -qx "$1" "$CUSTOM_NAMES" 2>/dev/null || api_err invalid_name "$1 isn't a custom key."
   set_env "$1" ""
+  rm -f "$SECRET_FILES_DIR/$1.json"
   grep -vx "$1" "$CUSTOM_NAMES" >"$CUSTOM_NAMES.tmp"; mv "$CUSTOM_NAMES.tmp" "$CUSTOM_NAMES"
   ensure_env_hook
   api_ok "$(jq -cn --arg n "$1" '{removed:$n}')"
@@ -3804,7 +3826,7 @@ api_main() {
   local cmd="${1:-}"
   shift || true
   case "$cmd" in
-    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | login-keystore | login-apple | youtube-login-start | \
+    login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | set-secret-file | login-keystore | login-apple | youtube-login-start | \
       chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
       migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot) ;;  # these read stdin
     *) exec 0</dev/null ;;
@@ -3842,6 +3864,7 @@ api_main() {
     restart)             do_restart "$@" ;;
     keys)                do_keys "$@" ;;
     set-secret)          do_set_secret "$@" ;;
+    set-secret-file)     do_set_secret_file "$@" ;;
     remove-secret)       do_remove_secret "$@" ;;
     login-keystore)      do_login_keystore "$@" ;;
     login-apple)         do_login_apple "$@" ;;

@@ -336,6 +336,23 @@ api "set-secret TS_AUTHKEY" "tskey-auth-abc"; check "TS_AUTHKEY accepted" "$(jqt
 api "remove-secret TS_AUTHKEY"; check "TS_AUTHKEY removed" "$(jqt '.ok')"
 grep -q ACME_API_KEY "$HOME/.config/claude-launcher/env" "$HOME/.claude/settings.json"; [[ $? -ne 0 ]]; check "removed from env file and settings" $?
 grep -q abc123 "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "custom key value never logged" $?
+SF="$HOME/.config/claude-launcher/secret-files/GOOGLE_APPLICATION_CREDENTIALS.json"
+api "set-secret-file GOOGLE_APPLICATION_CREDENTIALS" "$(printf '{"type":"service_account","private_key":"sf-secret-xyz"}' | base64 -w 76)"
+check "set-secret-file saves a JSON file" "$(jqt '.ok and .data.saved=="GOOGLE_APPLICATION_CREDENTIALS" and .data.file')"
+[[ "$(stat -c %a "$SF")" == 600 && "$(jq -r .private_key "$SF")" == sf-secret-xyz ]]; check "secret file saved, mode 600" $?
+[[ "$(stat -c %a "${SF%/*}")" == 700 ]]; check "secret-files dir is 700" $?
+jq -e --arg p "$SF" '.env.GOOGLE_APPLICATION_CREDENTIALS==$p' "$HOME/.claude/settings.json" >/dev/null; check "env var holds the file's path" $?
+api "status"; check "status lists the file key with custom keys" "$(jqt '.data.custom|index("GOOGLE_APPLICATION_CREDENTIALS")')"
+api "set-secret-file ACME_KEY_FILE" "$(printf 'not json' | base64)"; check "set-secret-file refuses non-JSON" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+[[ ! -e "$HOME/.config/claude-launcher/secret-files/ACME_KEY_FILE.json" ]]; check "refused file not saved" $?
+api "set-secret-file ACME_KEY_FILE" ""; check "set-secret-file refuses an empty file" "$(jqt '.ok==false')"
+for bad in "set-secret-file CLAUDE_X_FILE" "set-secret-file acme_key_file" "set-secret-file PATH" "set-secret-file"; do
+  api "$bad" "$(printf '{}' | base64)"; check "set-secret-file refuses '$bad'" "$(jqt '.ok==false')"
+done
+api "remove-secret GOOGLE_APPLICATION_CREDENTIALS"; check "file key removed" "$(jqt '.ok')"
+[[ ! -e "$SF" ]]; check "remove-secret deletes the saved file" $?
+grep -q GOOGLE_APPLICATION_CREDENTIALS "$HOME/.config/claude-launcher/env"; [[ $? -ne 0 ]]; check "file key removed from env file" $?
+grep -q sf-secret-xyz "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "secret file contents never logged" $?
 rm -f "$HOME/.config/claude-launcher/env"
 
 echo "signing keys"
