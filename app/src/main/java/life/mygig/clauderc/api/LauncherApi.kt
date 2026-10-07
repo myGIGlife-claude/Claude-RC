@@ -226,6 +226,12 @@ class LauncherApi(
     }
     /** A key pair for [name] (the same one again until it is added); only the public half comes back. */
     suspend fun hostKeygen(name: String): HostKey { requireHost(name); return call("host-keygen $name") }
+    /** The owner's own private key ([keyBase64], one line) as [name]'s pending key, used like [hostKeygen]'s; only the public half comes back. */
+    suspend fun hostKeyImport(name: String, keyBase64: String): HostKey {
+        requireHost(name)
+        if (keyBase64.isEmpty() || keyBase64.any { it == '\n' || it == '\r' }) throw ApiException(Codes.INVALID_NAME, "Bad key")
+        return call("host-keyimport $name", stdin = keyBase64)
+    }
     /** [auth] is "key" (secret = the private key, base64 on one line), "password" (used once, never stored)
      *  or "generated" (the key from [hostKeygen]; secret is a placeholder). */
     suspend fun hostAdd(name: String, address: String, port: Int, user: String, fingerprint: String, auth: String, secret: String): JsonObject {

@@ -34,8 +34,12 @@ All replies are the usual `{ok, data | error}`. Secrets come on stdin one per li
 - `host-keygen <name>` (no stdin) → `{public_key, fingerprint}`: an ed25519 pair (comment `clauderc-host-<name>`) in `hosts/.keygen-<name>/`,
   the same one again if it is already there. Only the public half is returned. Refused if a host with that name exists. For providers
   that ask for a public key when they install the server (e.g. OVH), or to append to the user's `~/.ssh/authorized_keys` by hand.
+- `host-keyimport <name>` (SCRIPT_API 42) stdin: the owner's own private key, base64 on one line → `{public_key:"<type> <base64>", fingerprint}`.
+  Validated like `host-add … key` (base64, `ssh-keygen -y -P ''`; passphrase keys refused). Stored as the pending key
+  `hosts/.keygen-<name>/key` (replacing any), with a marker file `imported` so a later `host-keygen` makes a new key instead of returning it.
+  Refused if a host with that name exists. Only the public half is returned; then `host-add … generated` uses it.
 - `host-add <name>` stdin: address, port, user, fingerprint, auth (`key`|`password`|`generated`), secret.
-  - `generated`: secret is any placeholder (e.g. `-`), ignored. Uses `hosts/.keygen-<name>/key` ("Generate the key first" if missing).
+  - `generated`: secret is any placeholder (e.g. `-`), ignored. Uses `hosts/.keygen-<name>/key` ("Generate or import the key first" if missing).
     If key login fails the pending key stays (the error says to add the public key to authorized_keys), so the owner fixes the server and saves again.
   - `key`: secret is the private key, base64 (one line, no newlines). Reject unless `ssh-keygen -y` can read it; passphrase-protected keys are refused with a clear message.
   - `password`: generate `ed25519` key, install the public key (use `SSH_ASKPASS` with a 600 temp script that prints the password and `SSH_ASKPASS_REQUIRE=force`, or `sshpass -e` if installed; the password must not appear in argv or logs), then verify key login. Discard the password; set `auth:"password"` only to mean "key was installed with a password".
@@ -59,7 +63,7 @@ All replies are the usual `{ok, data | error}`. Secrets come on stdin one per li
 - Cluster tab (ClusterSection): a "Hosting servers" card: list, Test, Remove (confirm; says the key stays authorized on the server until removed there), **+ Add host**.
 - Add host dialog: name, address, port (22), user → **Check** (host-probe) shows the fingerprint to confirm → pick Key (paste, or upload a file; base64 on the wire), Password, or Generate a key (host-keygen; shows the public key with Copy and where to put it) → Save (host-add). Error text from the server is shown in the dialog (not only in a snackbar).
 - Chat 👥 sheet: a "Servers" section with a switch per host (host-session / host-attach).
-- Needs SCRIPT_API 40 (39 without Generate a key): raise `Updates.MIN_SCRIPT_API`.
+- Needs SCRIPT_API 42 (host-keyimport; 40 = Generate a key, 39 = neither): raise `Updates.MIN_SCRIPT_API`.
 
 ## Set up and harden (SCRIPT_API 41)
 
@@ -107,7 +111,7 @@ refuse to close the host's SSH port; `status` returns `ufw status numbered`. Sam
 open only the ports the project needs, publish Docker ports on 127.0.0.1 behind Caddy, ask the owner before opening anything unusual.
 
 ### App
-- Add host dialog: the **public key generator is at the TOP**, right under Name (needs only a valid name): "Need a public key for your provider first (e.g. OVH)?" → Generate → shown with Copy; the address/user fields and Check come after. If a key was generated, the sign-in choice defaults to "Generated key".
+- Add host dialog: the **public key generator is at the TOP**, right under Name (needs only a valid name): "Need a public key for your provider first (e.g. OVH)?" → **Generate new key** or **Use existing key** (paste the private key, hidden, or pick a file → `host-keyimport`) → the public key and fingerprint shown with Copy; the address/user fields and Check come after. Once a key is shown, the sign-in choice defaults to "Key above" (auth `generated`, the pending key). Changing the name clears it.
 - After Save succeeds, the dialog moves to a **Set up this server** step: switch "Harden the server (recommended)" (on), switch "Tune it (time sync, log size, swap)" (on), switch "Install web basics (Caddy, git, build tools)" (off), port checkboxes: SSH (always on, shows the port), HTTP 80 (on), HTTPS 443 (on), plus a "More ports" text field (comma separated, `8080` or `51820/udp`, validated client side). Buttons: **Set up** (runs host-harden; busy indicator; shows the steps list with ✓/–/✗ and details; shows `needs_sudo` / `locked_out_reverted` errors in the dialog) and **Skip**.
 - Each host row also gets a **Set up / harden** button that opens the same step (idempotent re-run).
 - Needs SCRIPT_API 41: `Updates.MIN_SCRIPT_API = 41`.
