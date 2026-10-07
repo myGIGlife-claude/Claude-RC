@@ -156,6 +156,11 @@ data class LoginUrl(val url: String, val code: String? = null, @SerialName("devi
 @Serializable
 data class YoutubeStart(val url: String, val code: String, val interval: Int = 5, @SerialName("expires_in") val expiresIn: Int = 1800)
 
+@Serializable data class DriveLoginStart(val url: String, val code: String, val interval: Int = 5, @SerialName("expires_in") val expiresIn: Int = 1800)
+@Serializable data class DriveBackupStatus(val state: String = "idle", val phase: String = "", val percent: Int? = null, val message: String = "", val started: Long? = null, val finished: Long? = null, val name: String? = null, val size: Long? = null)
+@Serializable data class DriveBackupEntry(val id: String = "", val name: String = "", val size: Long = 0, val time: String = "")
+@Serializable data class DriveStatus(val configured: Boolean = false, val connected: Boolean = false, val schedule: String = "off", @SerialName("last_backup") val lastBackup: DriveBackupEntry? = null, @SerialName("has_passphrase") val hasPassphrase: Boolean = false)
+
 @Serializable
 data class LoginDone(
     @SerialName("logged_in") val loggedIn: Boolean = false,

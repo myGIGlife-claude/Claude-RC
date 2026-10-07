@@ -189,6 +189,18 @@ class SettingsStore(private val context: Context) {
     suspend fun setNotify(on: Boolean) = context.dataStore.edit { it[K.NOTIFY] = on }
     suspend fun setTheme(mode: ThemeMode) = context.dataStore.edit { it[K.THEME] = mode.name }
 
+    /** Replaces backed-up app preferences; transient caches are intentionally cleared. */
+    suspend fun restoreBackup(servers: List<Server>, activeId: String, appLock: Boolean, notify: Boolean, theme: ThemeMode) {
+        context.dataStore.edit { p ->
+            p[K.SERVERS] = json.encodeToString(servers)
+            p[K.ACTIVE] = activeId.takeIf { id -> servers.any { it.id == id } } ?: servers.firstOrNull()?.id.orEmpty()
+            p[K.APP_LOCK] = appLock
+            p[K.NOTIFY] = notify
+            p[K.THEME] = theme.name
+            p.remove(K.REPOS_CACHE); p.remove(K.OWNERS_CACHE)
+        }
+    }
+
     suspend fun reposCache(): String? = context.dataStore.data.first()[K.REPOS_CACHE]
     suspend fun setReposCache(json: String) = context.dataStore.edit { it[K.REPOS_CACHE] = json }
     suspend fun ownersCache(): String? = context.dataStore.data.first()[K.OWNERS_CACHE]

@@ -50,6 +50,26 @@ class SshKeyManager(context: Context) {
         }
     }
 
+    /** Seed for the passphrase-encrypted app backup. Callers must encrypt it and clear the returned bytes. */
+    @Synchronized fun exportSeed(): ByteArray {
+        publicKey()
+        val blob = Base64.decode(prefs.getString(PREF_SEED, null), Base64.NO_WRAP)
+        val iv = blob.copyOfRange(0, IV_LEN)
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.DECRYPT_MODE, wrappingKey(), GCMParameterSpec(128, iv))
+        return cipher.doFinal(blob, IV_LEN, blob.size - IV_LEN)
+    }
+
+    /** Replaces the phone key with a seed restored from an authenticated app backup. */
+    @Synchronized fun importSeed(seed: ByteArray) {
+        require(seed.size == 32)
+        val identity = Ed25519Identity(seed)
+        val enc = try { encrypt(seed, newWrappingKey(unlockedOnly = true)) }
+        catch (e: GeneralSecurityException) { encrypt(seed, newWrappingKey(unlockedOnly = false)) }
+        prefs.edit().putString(PREF_SEED, Base64.encodeToString(enc, Base64.NO_WRAP))
+            .putString(PREF_PUB, identity.authorizedKey(COMMENT)).commit()
+    }
+
     private fun generate(): String {
         val seed = ByteArray(32).also { SecureRandom().nextBytes(it) }
         try {
