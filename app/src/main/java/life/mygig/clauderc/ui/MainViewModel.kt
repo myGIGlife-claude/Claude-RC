@@ -35,6 +35,7 @@ import life.mygig.clauderc.api.ChatTask
 import life.mygig.clauderc.api.ChatWorker
 import life.mygig.clauderc.api.ChatHost
 import life.mygig.clauderc.api.Host
+import life.mygig.clauderc.api.HostHardenResult
 import life.mygig.clauderc.api.HostKey
 import life.mygig.clauderc.api.HostProbe
 import life.mygig.clauderc.api.ClusterAccount
@@ -752,6 +753,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _hostError.value = null
         action("Generating a key…", onError = { _hostError.value = friendly(it).first }) { _hostKey.value = name to api.hostKeygen(name) }
     }
+    fun importHostKey(name: String, keyBase64: String) {
+        _hostKey.value = null
+        _hostError.value = null
+        action("Importing the key…", onError = { _hostError.value = friendly(it).first }) { _hostKey.value = name to api.hostKeyImport(name, keyBase64) }
+    }
     /** Address or port changed after Check: the shown key no longer applies. */
     fun clearHostProbe() { _hostProbe.value = null }
     fun probeHost(address: String, port: Int) {
@@ -764,9 +770,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         action("Adding $name…", onError = { _hostError.value = friendly(it).first }) {
             api.hostAdd(name, address, port, user, fingerprint, auth, secret)
             closeHostAdd()
+            openHostSetup(name, port)
             say("$name added.")
             _hosts.value = api.hostList().hosts
         }
+    }
+    /** The "Set up this server" step: the host (name, SSH port) it is open for, the last result and the server's error shown in it. */
+    private val _hostSetup = MutableStateFlow<Pair<String, Int>?>(null)
+    val hostSetup = _hostSetup.asStateFlow()
+    private val _hostHarden = MutableStateFlow<HostHardenResult?>(null)
+    val hostHarden = _hostHarden.asStateFlow()
+    private val _hostSetupError = MutableStateFlow<String?>(null)
+    val hostSetupError = _hostSetupError.asStateFlow()
+    fun openHostSetup(name: String, sshPort: Int) { _hostHarden.value = null; _hostSetupError.value = null; _hostSetup.value = name to sshPort }
+    fun closeHostSetup() { _hostSetup.value = null; _hostHarden.value = null; _hostSetupError.value = null }
+    fun hardenHost(name: String, ports: List<String>, steps: List<String>) {
+        _hostHarden.value = null
+        _hostSetupError.value = null
+        action("Setting up $name…", onError = {
+            _hostSetupError.value = when (it.code) {
+                "needs_sudo" -> "This user needs passwordless sudo (or use root)"
+                else -> friendly(it).first
+            }
+        }) { _hostHarden.value = api.hostHarden(name, ports, steps) }
     }
     fun testHost(name: String) = action("Testing $name…") { api.hostTest(name); say("$name: connection works.") }
     fun removeHost(name: String) = action("Removing $name…") {

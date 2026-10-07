@@ -852,7 +852,7 @@ for bad in "host-keygen" "host-keygen Gen" "host-keygen ../x" "host-keygen a b";
   api "$bad"; check "forbidden: $bad" "$(jqt '.ok==false and .error.code=="forbidden"')"
 done
 api "host-add gen" "$(add_in web.example.com 22 deploy "$HFP" generated -)"
-check "add generated before host-keygen is refused" "$(jqt '.ok==false and (.error.message | test("Generate the key first"))')"
+check "add generated before host-keygen is refused" "$(jqt '.ok==false and (.error.message | test("Generate or import the key first"))')"
 nothing_new gen; check "...nothing saved" $?
 api "host-keygen web"
 check "keygen for an existing host is refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
@@ -880,6 +880,41 @@ api "host-keygen gen2"
 [[ ! -e "$HD/.keygen-old" && -f "$HD/.keygen-gen2/key" ]]; check "pending keys older than 24 h are cleaned up" $?
 rm -rf "$HD/.keygen-gen2"
 api "host-remove gen"
+# The owner's own key, imported as the pending key (stdin = the private key as base64).
+for bad in "host-keyimport" "host-keyimport Imp" "host-keyimport ../x" "host-keyimport a b"; do
+  api "$bad"; check "forbidden: $bad" "$(jqt '.ok==false and .error.code=="forbidden"')"
+done
+ssh-keygen -q -t rsa -b 2048 -N '' -C 'someone@laptop' -f "$WORK/impkey" </dev/null
+IPRIV="$(sed -n 2p "$WORK/impkey")"
+api "host-keyimport web" "$(base64 -w0 "$WORK/impkey")"
+check "keyimport for an existing host is refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "host-keyimport imp" "$(base64 -w0 "$WORK/lockedkey")"
+check "keyimport: a passphrase key is refused with a clear message" "$(jqt '.ok==false and .error.code=="invalid_key" and (.error.message | test("passphrase"))')"
+api "host-keyimport imp" "$(printf 'not a private key at all' | base64 -w0)"
+check "keyimport: not a key refused" "$(jqt '.ok==false and .error.code=="invalid_key" and (.error.message | test("isn.t a private key"))')"
+api "host-keyimport imp" "not base64!"
+check "keyimport: not base64 refused" "$(jqt '.ok==false and .error.code=="invalid_key"')"
+api "host-keyimport imp" ""
+check "keyimport: no key refused" "$(jqt '.ok==false and .error.code=="invalid_key"')"
+[[ ! -e "$HD/.keygen-imp" && -z "$(find "$HD" -maxdepth 1 -name '.new-*' 2>/dev/null)" ]]; check "...nothing kept after any of those" $?
+api "host-keyimport imp" "$(base64 -w0 "$WORK/impkey")"
+check "keyimport returns the public key and its fingerprint" "$(jqt ".ok and .data.public_key == \"$(ssh-keygen -y -f "$WORK/impkey" | awk '{print $1, $2}')\" and .data.fingerprint == \"$(ssh-keygen -lf "$WORK/impkey.pub" | awk '{print $2}')\"")"
+IPUB="$(jq -r .data.public_key <<<"$OUT")"
+cmp -s "$HD/.keygen-imp/key" "$WORK/impkey" && [[ "$(stat -c %a "$HD/.keygen-imp")" == 700 && "$(stat -c %a "$HD/.keygen-imp/key")" == 600 ]]
+check "...stored as the pending key (folder 700, key 600)" $?
+! grep -qF -e "$IPRIV" -e "PRIVATE KEY" <<<"$OUT" && ! grep -qF -e "$IPRIV" -e "PRIVATE KEY" -e "$(base64 -w0 "$WORK/impkey" | cut -c40-80)" "$ALOG"
+check "no private key text in the reply or api.log" $?
+api "host-keygen imp"
+check "keygen after an import makes a new key" "$(jqt '.ok and (.data.public_key | test("^ssh-ed25519 [A-Za-z0-9+/=]+ clauderc-host-imp$"))')"
+api "host-keyimport imp" "$(base64 -w0 "$WORK/impkey")"
+check "importing again replaces the pending key" "$(jqt ".ok and .data.public_key == \"$IPUB\"")"
+cmp -s "$HD/.keygen-imp/key" "$WORK/impkey"; check "...with the imported key" $?
+echo "$IPUB" >>"$STUB_STATE/remote/.ssh/authorized_keys"
+api "host-add imp" "$(add_in web.example.com 22 deploy "$HFP" generated -)"
+check "add generated uses the imported key" "$(jqt '.ok and .data.saved=="imp"')"
+cmp -s "$HD/imp/key" "$WORK/impkey" && [[ "$(ls -A "$HD/imp" | sort | tr '\n' ' ')" == "key known_hosts meta.json " && ! -e "$HD/.keygen-imp" ]]
+check "...saved with that key, pending folder gone" $?
+api "host-remove imp"
 
 api "host-test web"
 check "host-test ok" "$(jqt '.ok and .data.ok')"
@@ -889,6 +924,101 @@ check "host-test shows ssh's error" "$(jqt '.ok==false and (.error.message | tes
 rm -f "$STUB_STATE/ssh-unreachable"
 api "host-test nosuch"
 check "host-test unknown host" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+
+# host-harden: the remote script never runs here (the ssh stub records it and prints harden-out instead).
+for bad in "host-harden" "host-harden Web" "host-harden ../x" "host-harden web extra" "host-harden -x"; do
+  api "$bad"; check "runner refuses '$bad'" "$(jqt '.ok == false')"
+done
+api "host-harden nosuch" $'80\nharden'; check "harden: unknown host" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+rm -f "$STUB_STATE/ssh-log"
+for bad in "80,abc|" "0|" "70000|" "80/sctp|" "80/tcp/udp|" "-1|" "80;id|" "\$(id)|" "|reboot" "|harden,web,evil" "|harden;id" \
+  "$(seq -s, 1 21)|" "$(seq -s, 8001 8021)|harden"; do
+  api "host-harden web" "$(tr '|' '\n' <<<"$bad")"
+  check "harden refuses '${bad:0:40}'" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+[[ ! -e "$STUB_STATE/ssh-log" ]]; check "harden: bad input never reaches ssh" $?
+echo password >"$STUB_STATE/sudo-mode"
+api "host-harden web" $'80,443\nharden'
+check "harden without passwordless sudo: needs_sudo" "$(jqt '.ok==false and .error.code=="needs_sudo" and (.error.message | test("passwordless sudo"))')"
+[[ "$(wc -l <"$STUB_STATE/ssh-log")" == 1 && ! -e "$STUB_STATE/harden-script" ]]; check "...and nothing ran on the host" $?
+echo nopasswd >"$STUB_STATE/sudo-mode"
+printf '%s\n' "STEP packages ok ufw, fail2ban, unattended-upgrades installed" "DOCKER yes" "noise from apt" "STEP Bad ok x" "STEP x maybe y" \
+  "STEP fail2ban ok sshd jail" "REVERT scheduled" "STEP firewall ok open: 22/tcp (ssh), 80/tcp. Docker is installed: ports it publishes bypass this firewall" \
+  "STEP ssh failed sshd rejected the settings" "STEP swap skipped" >"$STUB_STATE/harden-out"
+rm -f "$STUB_STATE/ssh-log" "$STUB_STATE/systemctl-log"
+api "host-harden web" $' 80, 443,8080/tcp ,51820/udp,80/tcp,\nharden,optimize,harden'
+check "harden: steps parsed, docker reported" "$(jqt '.ok and .data.ssh_port == 2222 and .data.docker == true and ([.data.steps[] | [.name, .status]] == [["packages","ok"],["fail2ban","ok"],["firewall","ok"],["ssh","failed"],["swap","skipped"]]) and .data.steps[4].detail == ""')"
+check "harden: the Docker warning is in a step" "$(jqt '[.data.steps[].detail | select(test("bypass"))] | length == 1')"
+H_ENV="$(grep -E '^CLAUDERC_(SSH_PORT|PORTS|STEPS|USER)=' "$STUB_STATE/harden-env" | tr '\n' ' ')"
+[[ "$H_ENV" == "CLAUDERC_PORTS=80/tcp,443/tcp,8080/tcp,51820/udp CLAUDERC_SSH_PORT=2222 CLAUDERC_STEPS=harden,optimize CLAUDERC_USER=deploy " ]]
+check "harden: validated, normalised settings reach the script through sudo" $?
+mapfile -t HLOG <"$STUB_STATE/ssh-log"
+[[ ${#HLOG[@]} == 3 && "${HLOG[0]}" == *'sudo -n'*' true' && "${HLOG[1]}" == *'$S env '*' bash -s' && "${HLOG[2]}" == *'systemctl stop clauderc-revert.timer'* ]]
+check "harden: sudo check, the script, then a fresh login that cancels the undo" $?
+grep -q ' stop clauderc-revert.timer clauderc-revert.service$' "$STUB_STATE/systemctl-log"; check "...the undo timer was stopped" $?
+RS="$WORK/harden-remote.sh"
+awk '/^host_harden_script\(\) \{/ {f = 1} f && /^REMOTE$/ {exit} f && p {print} f && /cat <<.REMOTE.$/ {p = 1}' "$SERVER/claude-setup.sh" >"$RS"
+[[ -s "$RS" ]] && cmp -s "$RS" "$STUB_STATE/harden-script"; check "harden: the embedded script went to the host on stdin, unexpanded" $?
+bash -n "$RS"; check "harden: the remote script parses (bash -n)" $?
+if command -v shellcheck >/dev/null; then shellcheck -s bash -S warning - <"$RS"; check "harden: the remote script is shellcheck clean" $?; fi
+# Safety-audit fixes (the script only runs as root on a host, so these check its text).
+! grep -q 'ufw_do limit' "$RS"; check "harden: ssh ports are allowed, never rate-limited (would drop this server)" $?
+grep -q '^ignoreip = 127.0.0.1/8 ::1${client_ip:+ $client_ip}$' "$RS" && grep -q 'client_ip="${client_ip%% \*}"' "$RS"
+check "harden: fail2ban ignores this server's address" $?
+grep -q "ufw status 2>/dev/null | grep -q '^Status: active' && ufw_was=active" "$RS" &&
+  grep -q "\[\[ \"\$ufw_was\" == inactive \]\] && revert+=' ufw disable;'" "$RS" && ! grep -q "^revert=.*ufw disable" "$RS"
+check "harden: the undo turns ufw off only when it was off before" $?
+grep -q "done < <(sshd -T 2>/dev/null | awk '/^port /{print \$2}')" "$RS" &&
+  (($(grep -n 'add_sshd_port "\$p"; done < <(sshd -T' "$RS" | cut -d: -f1) < $(grep -n 'ufw_do --force enable' "$RS" | cut -d: -f1)))
+check "harden: every sshd port is allowed before ufw is enabled" $?
+(($(grep -n 'systemd-run .*clauderc-revert' "$RS" | cut -d: -f1) < $(grep -n 'ufw_do allow "\$p/tcp"' "$RS" | cut -d: -f1)))
+check "harden: the undo is scheduled before any ufw change" $?
+grep -q "'kbdinteractiveauthentication no' \"permitrootlogin \$root_login\" 'pubkeyauthentication yes'" "$RS"
+check "harden: every sshd setting is confirmed with sshd -T" $?
+! grep -q autoremove "$RS"; check "harden: no apt autoremove" $?
+grep -q 'docker0 bridge' "$RS"; check "harden: the Docker warning mentions the docker0 bridge" $?
+# Its own input checks (it stops before touching anything; never run as root here).
+if [[ "$(command -p id -u)" != 0 ]]; then
+  rs() { env -i PATH=/usr/bin:/bin CLAUDERC_SSH_PORT=22 CLAUDERC_PORTS=80/tcp CLAUDERC_STEPS=harden CLAUDERC_USER=deploy "$@" bash "$RS" 2>&1 | head -n 3; }
+  for bad in CLAUDERC_SSH_PORT=0 CLAUDERC_SSH_PORT=x "CLAUDERC_PORTS=80/tcp;id" CLAUDERC_PORTS=80 CLAUDERC_STEPS=evil "CLAUDERC_USER=a b" CLAUDERC_USER=-x; do
+    [[ "$(rs "$bad")" == "STEP input failed bad "* ]]; check "remote script refuses $bad" $?
+  done
+  [[ "$(rs)" == "STEP input failed not running as root" ]]; check "remote script needs root" $?
+fi
+# The fresh login fails: the host undoes everything by itself; the server waits for that and says so.
+export CLAUDERC_HARDEN_WAIT=0
+echo once >"$STUB_STATE/harden-lockout"; rm -f "$STUB_STATE/ssh-log" "$STUB_STATE/systemctl-log"
+api "host-harden web" $'80\nharden'
+check "harden: locked out → locked_out_reverted" "$(jqt '.ok==false and .error.code=="locked_out_reverted" and (.error.message | test("Nothing was left locked"))')"
+mapfile -t HLOG <"$STUB_STATE/ssh-log"
+[[ ${#HLOG[@]} == 4 && "${HLOG[2]}" == *clauderc-revert* && "${HLOG[3]}" == true ]]; check "...after a failed check it waited and signed in again" $?
+! grep -q 'stop clauderc-revert' "$STUB_STATE/systemctl-log" 2>/dev/null; check "...and never cancelled the undo" $?
+echo forever >"$STUB_STATE/harden-lockout"
+api "host-harden web" $'80\nharden'
+check "harden: still locked after the undo → host_failed with what to check" "$(jqt '.ok==false and .error.code=="host_failed" and (.error.message | test("console"))')"
+rm -f "$STUB_STATE/harden-lockout" "$STUB_STATE/ssh-locked"
+unset CLAUDERC_HARDEN_WAIT
+touch "$STUB_STATE/revert-stuck"
+api "host-harden web" $'\n'
+check "harden: an undo that won't stop is reported" "$(jqt '.ok and (.data.steps | map(select(.name=="safety" and .status=="failed")) | length == 1)')"
+rm -f "$STUB_STATE/revert-stuck"
+# The undo is running right now: never stopped halfway, reported as undone.
+touch "$STUB_STATE/revert-running"; rm -f "$STUB_STATE/ssh-log" "$STUB_STATE/systemctl-log"
+api "host-harden web" $'\n'
+check "harden: an undo already running is reported as undone" "$(jqt '.ok and (.data.steps | map(select(.name=="safety" and .status=="failed" and (.detail | test("undo ran")))) | length == 1)')"
+! grep -q 'stop clauderc-revert' "$STUB_STATE/systemctl-log"; check "...and was not cancelled" $?
+mapfile -t HLOG <"$STUB_STATE/ssh-log"
+[[ ${#HLOG[@]} == 4 && "${HLOG[3]}" == true ]]; check "...after a fresh login" $?
+rm -f "$STUB_STATE/revert-running"
+printf '%s\n' "STEP packages ok ufw installed" "STEP safety failed couldn't schedule the automatic undo" >"$STUB_STATE/harden-out"
+rm -f "$STUB_STATE/ssh-log"
+api "host-harden web" $'\nweb'
+check "harden: no undo scheduled → no check, steps returned" "$(jqt '.ok and .data.docker == false and ([.data.steps[].name] == ["packages","safety"])')"
+[[ "$(wc -l <"$STUB_STATE/ssh-log")" == 2 ]]; check "...in two logins" $?
+echo "nothing useful" >"$STUB_STATE/harden-out"
+api "host-harden web" $'\n'; check "harden: a run that printed nothing is an error" "$(jqt '.ok==false and .error.code=="host_failed"')"
+rm -f "$STUB_STATE/harden-out" "$STUB_STATE/harden-env" "$STUB_STATE/harden-script"
+echo password >"$STUB_STATE/sudo-mode"
 
 HATT="$HOME/.config/claude-launcher/attach/${PD//[^A-Za-z0-9]/-}.hosts.json"
 api "host-session demo-app2"

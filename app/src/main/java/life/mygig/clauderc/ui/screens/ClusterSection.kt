@@ -8,6 +8,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import life.mygig.clauderc.api.HOST_NAME_RE
 import life.mygig.clauderc.api.HOST_USER_RE
 import life.mygig.clauderc.api.hostAddressOk
+import life.mygig.clauderc.api.HOST_MAX_PORTS
+import life.mygig.clauderc.api.parseHostPorts
+import androidx.compose.material3.Switch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -86,6 +89,7 @@ fun ClusterSection(vm: MainViewModel) {
     val context = LocalContext.current
     val ready = (status?.scriptApi ?: 0) >= Updates.MIN_SCRIPT_API
     val hostAddOpen by vm.hostAddOpen.collectAsState()
+    val hostSetup by vm.hostSetup.collectAsState()
     var confirmRemoveHost by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(ready) { if (ready) { vm.loadCluster(); vm.loadHosts() } }
 
@@ -117,7 +121,9 @@ fun ClusterSection(vm: MainViewModel) {
         if (ready) HostsCard(vm, idle = busy == null, onRemove = { confirmRemoveHost = it })
     }
 
-    if (hostAddOpen) HostAddDialog(vm)
+    val setup = hostSetup
+    if (setup != null) HostSetupDialog(vm, setup.first, setup.second)
+    else if (hostAddOpen) HostAddDialog(vm)
 
     confirmRemoveHost?.let { who ->
         AlertDialog(
@@ -301,6 +307,7 @@ private fun HostsCard(vm: MainViewModel, idle: Boolean, onRemove: (String) -> Un
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextButton(onClick = { vm.testHost(h.name) }, enabled = idle) { Text("Test") }
+                        TextButton(onClick = { vm.openHostSetup(h.name, h.port) }, enabled = idle) { Text("Set up / harden") }
                         TextButton(onClick = { onRemove(h.name) }, enabled = idle) { Text("Remove") }
                     }
                 }
@@ -309,7 +316,8 @@ private fun HostsCard(vm: MainViewModel, idle: Boolean, onRemove: (String) -> Un
     }
 }
 
-/** Add host: Check reads the host key to confirm, then a private key (pasted or a file) or a one-time password. */
+/** Add host: an optional public key to generate first (for providers), Check reads the host key to confirm, then a private key
+ *  (pasted or a file), a one-time password or the generated key. Save moves on to [HostSetupDialog]. */
 @Composable
 private fun HostAddDialog(vm: MainViewModel) {
     val busy by vm.busy.collectAsState()
@@ -326,28 +334,53 @@ private fun HostAddDialog(vm: MainViewModel) {
     var keyFile by remember { mutableStateOf<String?>(null) }   // base64 of a picked key file
     var password by remember { mutableStateOf("") }
     var fileError by remember { mutableStateOf<String?>(null) }
+    // "Use existing key" at the top: the owner's own key, imported as the pending key (shown like a generated one).
+    var importOpen by remember { mutableStateOf(false) }
+    var importText by remember { mutableStateOf("") }
+    var importFile by remember { mutableStateOf<String?>(null) }
+    var importFileError by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val pickKey = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
-            if (bytes == null || bytes.isEmpty() || bytes.size > 20_000) {
+            val b64 = keyFileBase64(context, uri)
+            if (b64 == null) {
                 fileError = "That file couldn't be read (or it's over 20 KB)."
             } else {
-                keyFile = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                keyFile = b64
                 keyText = ""
                 fileError = null
+            }
+        }
+    }
+    val pickImport = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val b64 = keyFileBase64(context, uri)
+            if (b64 == null) {
+                importFileError = "That file couldn't be read (or it's over 20 KB)."
+            } else {
+                importFile = b64
+                importText = ""
+                importFileError = null
             }
         }
     }
     val portNum = port.toIntOrNull()
     val addressOk = hostAddressOk(address) && portNum != null && portNum in 1..65535
     val p = probe
-    val generated = hostKey?.takeIf { it.first == name }?.second   // made for this name only
+    val generated = hostKey?.takeIf { it.first == name }?.second   // made (or imported) for this name only
+    LaunchedEffect(generated) {
+        if (generated != null) { auth = "generated"; importOpen = false; importText = ""; importFile = null; importFileError = null }
+    }
+    val importSecret = when {
+        importFile != null -> importFile!!
+        importText.isNotBlank() -> keyTextBase64(importText)
+        else -> ""
+    }
     val secret = when {
         auth == "generated" -> if (generated != null) "-" else ""
         auth == "password" -> password
         keyFile != null -> keyFile!!
-        keyText.isNotBlank() -> Base64.encodeToString((keyText.trim() + "\n").toByteArray(), Base64.NO_WRAP)
+        keyText.isNotBlank() -> keyTextBase64(keyText)
         else -> ""
     }
     val canSave = p != null && confirmed && HOST_NAME_RE.matches(name) && HOST_USER_RE.matches(user) && secret.isNotEmpty() && busy == null
@@ -367,6 +400,48 @@ private fun HostAddDialog(vm: MainViewModel) {
                     singleLine = true, modifier = Modifier.fillMaxWidth(), isError = name.isNotEmpty() && !HOST_NAME_RE.matches(name),
                     keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
                 )
+                if (generated == null) {
+                    Text(
+                        "Need a public key for your provider first (e.g. OVH)? Generate a new key or use one you have, copy its public key, then fill in the rest.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { importOpen = false; vm.generateHostKey(name) }, enabled = HOST_NAME_RE.matches(name) && busy == null, modifier = Modifier.weight(1f)) {
+                            Text("Generate new key")
+                        }
+                        OutlinedButton(onClick = { importOpen = !importOpen }, enabled = busy == null, modifier = Modifier.weight(1f)) {
+                            Text("Use existing key")
+                        }
+                    }
+                    if (importOpen) {
+                        OutlinedTextField(
+                            value = importText, onValueChange = { importText = it; importFile = null }, label = { Text("Your private key (paste)") },
+                            maxLines = 4, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                        )
+                        OutlinedButton(onClick = { pickImport.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (importFile != null) "Key file chosen ✓" else "Or choose a key file")
+                        }
+                        importFileError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                        Text("Keys with a passphrase aren't supported. The key is kept on this server only and never shown again.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Button(
+                            onClick = { vm.importHostKey(name, importSecret) },
+                            enabled = HOST_NAME_RE.matches(name) && importSecret.isNotEmpty() && busy == null, modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Use this key") }
+                    }
+                } else {
+                    SelectionContainer(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)).padding(8.dp)) {
+                        Text(generated.publicKey, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(generated.fingerprint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { copy(context, "Public key", generated.publicKey) }) { Text("Copy") }
+                    }
+                    Text(
+                        "Paste this into your provider's 'public SSH key' field (e.g. OVH when you install the server), or append it to ~/.ssh/authorized_keys for that user. Then fill in the rest, Check and Save.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 OutlinedTextField(
                     value = address, onValueChange = { address = it.trim(); confirmed = false; vm.clearHostProbe() }, label = { Text("Address") },
                     singleLine = true, modifier = Modifier.fillMaxWidth(), isError = address.isNotEmpty() && !hostAddressOk(address),
@@ -397,27 +472,14 @@ private fun HostAddDialog(vm: MainViewModel) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilterChip(selected = auth == "key", onClick = { auth = "key" }, label = { Text("Key") })
                             FilterChip(selected = auth == "password", onClick = { auth = "password" }, label = { Text("Password") })
-                            FilterChip(selected = auth == "generated", onClick = { auth = "generated" }, label = { Text("Generate a key") })
+                            FilterChip(selected = auth == "generated", onClick = { auth = "generated" }, label = { Text("Key above") })
                         }
                         if (auth == "generated") {
-                            if (generated == null) {
-                                OutlinedButton(onClick = { vm.generateHostKey(name) }, enabled = HOST_NAME_RE.matches(name) && busy == null, modifier = Modifier.fillMaxWidth()) {
-                                    Text("Generate key")
-                                }
-                                Text("This server makes a key pair for $name and shows you the public half. Enter the name first.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            } else {
-                                SelectionContainer(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)).padding(8.dp)) {
-                                    Text(generated.publicKey, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
-                                }
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(generated.fingerprint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-                                    TextButton(onClick = { copy(context, "Public key", generated.publicKey) }) { Text("Copy") }
-                                }
-                                Text(
-                                    "Paste this into your provider's 'public SSH key' field (e.g. OVH when you install the server), or append it to ~/.ssh/authorized_keys for that user. Then press Check and Save.",
-                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
+                            Text(
+                                if (generated == null) "Generate a new key or use an existing one at the top first."
+                                else "Signs in with the key shown above. Put its public key on the server before you Save.",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         } else if (auth == "key") {
                             OutlinedTextField(
                                 value = keyText, onValueChange = { keyText = it; keyFile = null }, label = { Text("Private key (paste)") },
@@ -443,6 +505,101 @@ private fun HostAddDialog(vm: MainViewModel) {
             }
         },
     )
+}
+
+/** A picked private key file as base64 on one line, or null if it can't be read or is over 20 KB. */
+private fun keyFileBase64(context: android.content.Context, uri: android.net.Uri): String? {
+    val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+    if (bytes == null || bytes.isEmpty() || bytes.size > 20_000) return null
+    return Base64.encodeToString(bytes, Base64.NO_WRAP)
+}
+
+/** A pasted private key as base64 on one line (ssh wants the final newline). */
+private fun keyTextBase64(text: String): String = Base64.encodeToString((text.trim() + "\n").toByteArray(), Base64.NO_WRAP)
+
+/** "Set up this server": host-harden opens the ports and runs the chosen steps (idempotent, safe to re-run). */
+@Composable
+private fun HostSetupDialog(vm: MainViewModel, name: String, sshPort: Int) {
+    val busy by vm.busy.collectAsState()
+    val result by vm.hostHarden.collectAsState()
+    val error by vm.hostSetupError.collectAsState()
+    var harden by remember { mutableStateOf(true) }
+    var tune by remember { mutableStateOf(true) }
+    var web by remember { mutableStateOf(false) }
+    var http by remember { mutableStateOf(true) }
+    var https by remember { mutableStateOf(true) }
+    var more by remember { mutableStateOf("") }
+    val extra = parseHostPorts(more)
+    val ports = ((if (http) listOf("80") else emptyList()) + (if (https) listOf("443") else emptyList()) + extra.orEmpty()).distinct()
+    val portsOk = extra != null && ports.size <= HOST_MAX_PORTS
+    val steps = listOfNotNull(if (harden) "harden" else null, if (tune) "optimize" else null, if (web) "web" else null)
+    val r = result
+    AlertDialog(
+        onDismissRequest = { if (busy == null) vm.closeHostSetup() },
+        confirmButton = {
+            if (r != null) TextButton(onClick = { vm.closeHostSetup() }) { Text("Done") }
+            else TextButton(onClick = { vm.hardenHost(name, ports, steps) }, enabled = portsOk && busy == null) { Text("Set up") }
+        },
+        dismissButton = { if (r == null) TextButton(onClick = { vm.closeHostSetup() }, enabled = busy == null) { Text("Skip") } },
+        title = { Text("Set up $name") },
+        text = {
+            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (r == null) {
+                    SetupSwitch("Harden the server (recommended)", harden, busy == null) { harden = it }
+                    SetupSwitch("Tune it (time sync, log size, swap)", tune, busy == null) { tune = it }
+                    SetupSwitch("Install web basics (Caddy, git, build tools)", web, busy == null) { web = it }
+                    Text("Open ports", style = MaterialTheme.typography.labelLarge)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = true, onCheckedChange = null, enabled = false)
+                        Text("SSH $sshPort (always)")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = http, onCheckedChange = { http = it }, enabled = busy == null)
+                        Text("HTTP 80")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = https, onCheckedChange = { https = it }, enabled = busy == null)
+                        Text("HTTPS 443")
+                    }
+                    OutlinedTextField(
+                        value = more, onValueChange = { more = it.replace("\n", "") }, label = { Text("More ports (8080, 51820/udp)") },
+                        singleLine = true, modifier = Modifier.fillMaxWidth(), isError = !portsOk, enabled = busy == null,
+                        keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                    )
+                    if (!portsOk) Text("Comma separated, 1-65535, optional /tcp or /udp, up to $HOST_MAX_PORTS in all.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    if (busy != null) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        Text("Setting up… this can take a few minutes. If the new settings would lock the app out, the server undoes them.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    r.steps.forEach { s ->
+                        val (mark, color) = when (s.status) {
+                            "ok" -> "✓" to MaterialTheme.colorScheme.primary
+                            "failed" -> "✗" to MaterialTheme.colorScheme.error
+                            else -> "–" to MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                        Column {
+                            Text("$mark ${s.name}", style = MaterialTheme.typography.labelLarge, color = color)
+                            if (s.detail.isNotBlank()) Text(s.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    if (r.docker) Text(
+                        "Docker is installed: its published ports bypass the firewall. Publish container ports on 127.0.0.1 (behind Caddy).",
+                        style = MaterialTheme.typography.bodySmall, color = WarnAmber,
+                    )
+                }
+                error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+    )
+}
+
+@Composable
+private fun SetupSwitch(label: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
+    }
 }
 
 /** A minus button, a label and a plus button in a row. */

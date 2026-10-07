@@ -4,9 +4,18 @@
 #   host_password   the account's password (password sign-in, via SSH_ASKPASS only)
 #   remote/         the account's home: authorized keys in remote/.ssh/authorized_keys, commands run there with sh -c
 #   ssh-unreachable nothing answers
+#   ssh-connection  the remote commands' SSH_CONNECTION (none = unset)
 #   ssh-argv        the last call's arguments, one per line; ssh-env-askpass: whether a password came through askpass
+#   ssh-log         every call's remote command, one per line ("-" = none)
+#   ssh-locked      logins fail with a timeout; removed by the first failed login (the host's automatic undo ran)
+#                   unless it says "forever"
+# host-harden's script (a command ending in "bash -s") is never run: the stub records its CLAUDERC_* settings in
+# harden-env and the script in harden-script (through the real sudo/env prefix, so the sudo stub's mode applies), then
+# prints harden-out (default: a short successful run). harden-lockout: its content goes to ssh-locked after the run.
+# Remote commands find the other stubs (sudo, systemctl, ufw, id) first on PATH.
 S="${STUB_STATE:-$HOME/.stub-state}"; mkdir -p "$S/remote"
 printf '%s\n' "$@" >"$S/ssh-argv"
+PATH="$(cd "$(dirname "$0")" && pwd):$PATH"
 key="" kh="" strict="" batch=""
 while (($#)); do
   case "$1" in
@@ -26,7 +35,12 @@ while (($#)); do
 done
 host="${1:-}"; shift
 [[ -n "$host" ]] || { echo "usage: ssh host" >&2; exit 255; }
+printf '%s\n' "${*:--}" | head -n 1 >>"$S/ssh-log"
 [[ -e "$S/ssh-unreachable" ]] && { echo "ssh: connect to host $host port 22: Connection refused" >&2; exit 255; }
+if [[ -e "$S/ssh-locked" ]]; then
+  [[ "$(cat "$S/ssh-locked")" == forever ]] || rm -f "$S/ssh-locked"
+  echo "ssh: connect to host $host port 22: Connection timed out" >&2; exit 255
+fi
 blob="$(awk '{print $2}' "$S/host_key.pub" 2>/dev/null)"
 [[ "$strict" == yes && -n "$blob" && -f "$kh" ]] && grep -qF " $blob" "$kh" ||
   { echo "Host key verification failed." >&2; exit 255; }
@@ -41,5 +55,15 @@ else
     { echo "user@$host: Permission denied (publickey)." >&2; exit 255; }
 fi
 cd "$S/remote" || exit 255
+[[ -f "$S/ssh-connection" ]] && { SSH_CONNECTION="$(cat "$S/ssh-connection")"; export SSH_CONNECTION; }
 (($#)) || exit 0
+if [[ "$*" == *" bash -s" ]]; then
+  export STUB_HARDEN="$S"
+  # shellcheck disable=SC2016  # expanded by the inner sh
+  sh -c "${*% bash -s}"' sh -c '\''env | grep ^CLAUDERC_ | sort >"$STUB_HARDEN/harden-env"; cat >"$STUB_HARDEN/harden-script"'\' || exit
+  [[ -f "$S/harden-lockout" ]] && cp "$S/harden-lockout" "$S/ssh-locked"
+  if [[ -f "$S/harden-out" ]]; then cat "$S/harden-out"
+  else printf '%s\n' "STEP packages ok ufw installed" "REVERT scheduled" "STEP firewall ok open: 22/tcp (ssh)"; fi
+  exit 0
+fi
 exec sh -c "$*"

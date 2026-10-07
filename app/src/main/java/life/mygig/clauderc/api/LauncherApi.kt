@@ -66,6 +66,16 @@ val HOST_IPV6_RE = Regex("^[0-9A-Fa-f:.]{2,45}$")
 val HOST_USER_RE = Regex("^[a-z_][a-z0-9_-]{0,31}$")
 val HOST_FINGERPRINT_RE = Regex("^SHA256:[A-Za-z0-9+/]{43}$")
 fun hostAddressOk(address: String) = HOST_ADDRESS_RE.matches(address) || (':' in address && HOST_IPV6_RE.matches(address))
+/** A port for host-harden to open: `8080` or `51820/udp`, 1-65535; at most [HOST_MAX_PORTS] per call. */
+val HOST_PORT_RE = Regex("^[0-9]{1,5}(/(tcp|udp))?$")
+const val HOST_MAX_PORTS = 20
+val HOST_HARDEN_STEPS = setOf("harden", "optimize", "web")
+fun hostPortOk(port: String) = HOST_PORT_RE.matches(port) && port.substringBefore('/').toInt() in 1..65535
+/** "8080, 51820/udp" as a list (blank = empty); null if any entry is bad. */
+fun parseHostPorts(text: String): List<String>? {
+    val ports = text.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+    return if (ports.all { hostPortOk(it) }) ports else null
+}
 
 /** Same rules as the server's migrate actions (docs/migrate-design.md). */
 val MIGRATE_USER_RE = Regex("^[a-z][a-z0-9_-]{0,30}$")
@@ -216,6 +226,12 @@ class LauncherApi(
     }
     /** A key pair for [name] (the same one again until it is added); only the public half comes back. */
     suspend fun hostKeygen(name: String): HostKey { requireHost(name); return call("host-keygen $name") }
+    /** The owner's own private key ([keyBase64], one line) as [name]'s pending key, used like [hostKeygen]'s; only the public half comes back. */
+    suspend fun hostKeyImport(name: String, keyBase64: String): HostKey {
+        requireHost(name)
+        if (keyBase64.isEmpty() || keyBase64.any { it == '\n' || it == '\r' }) throw ApiException(Codes.INVALID_NAME, "Bad key")
+        return call("host-keyimport $name", stdin = keyBase64)
+    }
     /** [auth] is "key" (secret = the private key, base64 on one line), "password" (used once, never stored)
      *  or "generated" (the key from [hostKeygen]; secret is a placeholder). */
     suspend fun hostAdd(name: String, address: String, port: Int, user: String, fingerprint: String, auth: String, secret: String): JsonObject {
@@ -228,6 +244,13 @@ class LauncherApi(
         return call("host-add $name", stdin = listOf(address, port.toString(), user, fingerprint, auth, secret).joinToString("\n"), timeoutMs = 120_000)
     }
     suspend fun hostTest(name: String): JsonObject { requireHost(name); return call("host-test $name", timeoutMs = 60_000) }
+    /** Opens [ports] in the host's firewall and runs [steps] (harden, optimize, web) over its ssh with sudo. */
+    suspend fun hostHarden(name: String, ports: List<String>, steps: List<String>): HostHardenResult {
+        requireHost(name)
+        if (ports.size > HOST_MAX_PORTS || !ports.all { hostPortOk(it) }) throw ApiException(Codes.INVALID_NAME, "Ports are like 8080 or 51820/udp (1-65535), up to $HOST_MAX_PORTS.")
+        if (!steps.all { it in HOST_HARDEN_STEPS }) throw ApiException(Codes.INVALID_NAME, "Bad setup step")
+        return call("host-harden $name", stdin = ports.joinToString(",") + "\n" + steps.joinToString(","), timeoutMs = 600_000)
+    }
     suspend fun hostRemove(name: String): JsonObject { requireHost(name); return call("host-remove $name") }
     suspend fun hostSession(project: String): ChatHostsData { requireName(project); return call("host-session $project") }
     suspend fun hostAttach(project: String, name: String, on: Boolean): JsonObject {
