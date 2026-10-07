@@ -847,6 +847,39 @@ mkdir -p "$HD/.new-old.stale" && touch -d '30 minutes ago' "$HD/.new-old.stale"
 api "host-add moved2" "$(add_in web.example.com 22 deploy "$HFP" key "$UK64")"
 [[ ! -e "$HD/.new-old.stale" ]]; check "stale half-made host folders are cleaned up" $?
 api "host-remove moved2"
+# A key this server generates; the owner puts the public half on the host (e.g. the provider's install form).
+for bad in "host-keygen" "host-keygen Gen" "host-keygen ../x" "host-keygen a b"; do
+  api "$bad"; check "forbidden: $bad" "$(jqt '.ok==false and .error.code=="forbidden"')"
+done
+api "host-add gen" "$(add_in web.example.com 22 deploy "$HFP" generated -)"
+check "add generated before host-keygen is refused" "$(jqt '.ok==false and (.error.message | test("Generate the key first"))')"
+nothing_new gen; check "...nothing saved" $?
+api "host-keygen web"
+check "keygen for an existing host is refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "host-keygen gen"
+check "keygen returns a public key and its fingerprint" "$(jqt '.ok and (.data.public_key | test("^ssh-ed25519 [A-Za-z0-9+/=]+ clauderc-host-gen$")) and (.data.fingerprint | test("^SHA256:[A-Za-z0-9+/]{43}$"))')"
+GPUB="$(jq -r .data.public_key <<<"$OUT")"; GFP="$(jq -r .data.fingerprint <<<"$OUT")"
+[[ "$(ssh-keygen -lf /dev/stdin <<<"$GPUB" | awk '{print $2}')" == "$GFP" ]]; check "...the fingerprint is the key's" $?
+GPRIV="$(sed -n 2p "$HD/.keygen-gen/key")"
+[[ -n "$GPRIV" && "$(stat -c %a "$HD/.keygen-gen")" == 700 && "$(stat -c %a "$HD/.keygen-gen/key")" == 600 ]]; check "pending key folder 700, key 600" $?
+! grep -qF -e "$GPRIV" -e "PRIVATE KEY" <<<"$OUT" && ! grep -qF -e "$GPRIV" -e "PRIVATE KEY" "$ALOG"; check "no private key text in the reply or api.log" $?
+api "host-keygen gen"
+check "keygen again shows the same key" "$(jqt ".ok and .data.public_key == \"$GPUB\"")"
+api "host-add gen" "$(add_in web.example.com 22 deploy "$HFP" generated -)"
+check "add generated: a key the host doesn't know yet is refused with a hint" "$(jqt '.ok==false and .error.code=="auth_failed" and (.error.message | test("authorized_keys"))')"
+[[ ! -e "$HD/gen" && -f "$HD/.keygen-gen/key" ]]; check "...nothing saved, the pending key stays" $?
+echo "$GPUB" >>"$STUB_STATE/remote/.ssh/authorized_keys"
+api "host-add gen" "$(add_in web.example.com 22 deploy "$HFP" generated -)"
+check "add generated once the host has the key" "$(jqt '.ok and .data.saved=="gen"')"
+[[ "$(jq -r .auth "$HD/gen/meta.json")" == generated && "$(ls -A "$HD/gen" | sort | tr '\n' ' ')" == "key known_hosts meta.json " ]]; check "...saved as generated" $?
+[[ "$(ssh-keygen -y -f "$HD/gen/key" | awk '{print $2}')" == "$(awk '{print $2}' <<<"$GPUB")" && "$(stat -c %a "$HD/gen/key")" == 600 ]]; check "...with the generated key (600)" $?
+[[ ! -e "$HD/.keygen-gen" ]]; check "...and the pending folder is gone" $?
+api "host-list"; check "host-list shows auth generated" "$(jqt '[.data.hosts[] | select(.name=="gen") | .auth] == ["generated"]')"
+mkdir -p "$HD/.keygen-old" && touch -d '25 hours ago' "$HD/.keygen-old"
+api "host-keygen gen2"
+[[ ! -e "$HD/.keygen-old" && -f "$HD/.keygen-gen2/key" ]]; check "pending keys older than 24 h are cleaned up" $?
+rm -rf "$HD/.keygen-gen2"
+api "host-remove gen"
 
 api "host-test web"
 check "host-test ok" "$(jqt '.ok and .data.ok')"

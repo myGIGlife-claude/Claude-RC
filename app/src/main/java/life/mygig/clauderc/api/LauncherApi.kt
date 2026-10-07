@@ -214,13 +214,16 @@ class LauncherApi(
         requireHostAddress(address, port)
         return call("host-probe", stdin = address + "\n" + port, timeoutMs = 30_000)
     }
-    /** [auth] is "key" (secret = the private key, base64 on one line) or "password" (used once, never stored). */
+    /** A key pair for [name] (the same one again until it is added); only the public half comes back. */
+    suspend fun hostKeygen(name: String): HostKey { requireHost(name); return call("host-keygen $name") }
+    /** [auth] is "key" (secret = the private key, base64 on one line), "password" (used once, never stored)
+     *  or "generated" (the key from [hostKeygen]; secret is a placeholder). */
     suspend fun hostAdd(name: String, address: String, port: Int, user: String, fingerprint: String, auth: String, secret: String): JsonObject {
         requireHost(name)
         requireHostAddress(address, port)
         requireMigrate(HOST_USER_RE, user, "User names are lowercase letters, digits, '_' and '-', up to 32.")
         requireMigrate(HOST_FINGERPRINT_RE, fingerprint, "Bad host key fingerprint")
-        if (auth != "key" && auth != "password") throw ApiException(Codes.INVALID_NAME, "Bad sign-in method")
+        if (auth != "key" && auth != "password" && auth != "generated") throw ApiException(Codes.INVALID_NAME, "Bad sign-in method")
         if (secret.isEmpty() || secret.any { it == '\n' || it == '\r' }) throw ApiException(Codes.INVALID_NAME, "Bad key or password")
         return call("host-add $name", stdin = listOf(address, port.toString(), user, fingerprint, auth, secret).joinToString("\n"), timeoutMs = 120_000)
     }
