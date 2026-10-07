@@ -890,6 +890,77 @@ rm -f "$STUB_STATE/ssh-unreachable"
 api "host-test nosuch"
 check "host-test unknown host" "$(jqt '.ok==false and .error.code=="invalid_name"')"
 
+# host-harden: the remote script never runs here (the ssh stub records it and prints harden-out instead).
+for bad in "host-harden" "host-harden Web" "host-harden ../x" "host-harden web extra" "host-harden -x"; do
+  api "$bad"; check "runner refuses '$bad'" "$(jqt '.ok == false')"
+done
+api "host-harden nosuch" $'80\nharden'; check "harden: unknown host" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+rm -f "$STUB_STATE/ssh-log"
+for bad in "80,abc|" "0|" "70000|" "80/sctp|" "80/tcp/udp|" "-1|" "80;id|" "\$(id)|" "|reboot" "|harden,web,evil" "|harden;id" \
+  "$(seq -s, 1 21)|" "$(seq -s, 8001 8021)|harden"; do
+  api "host-harden web" "$(tr '|' '\n' <<<"$bad")"
+  check "harden refuses '${bad:0:40}'" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+[[ ! -e "$STUB_STATE/ssh-log" ]]; check "harden: bad input never reaches ssh" $?
+echo password >"$STUB_STATE/sudo-mode"
+api "host-harden web" $'80,443\nharden'
+check "harden without passwordless sudo: needs_sudo" "$(jqt '.ok==false and .error.code=="needs_sudo" and (.error.message | test("passwordless sudo"))')"
+[[ "$(wc -l <"$STUB_STATE/ssh-log")" == 1 && ! -e "$STUB_STATE/harden-script" ]]; check "...and nothing ran on the host" $?
+echo nopasswd >"$STUB_STATE/sudo-mode"
+printf '%s\n' "STEP packages ok ufw, fail2ban, unattended-upgrades installed" "DOCKER yes" "noise from apt" "STEP Bad ok x" "STEP x maybe y" \
+  "STEP fail2ban ok sshd jail" "REVERT scheduled" "STEP firewall ok open: 22/tcp (ssh), 80/tcp. Docker is installed: ports it publishes bypass this firewall" \
+  "STEP ssh failed sshd rejected the settings" "STEP swap skipped" >"$STUB_STATE/harden-out"
+rm -f "$STUB_STATE/ssh-log" "$STUB_STATE/systemctl-log"
+api "host-harden web" $' 80, 443,8080/tcp ,51820/udp,80/tcp,\nharden,optimize,harden'
+check "harden: steps parsed, docker reported" "$(jqt '.ok and .data.ssh_port == 2222 and .data.docker == true and ([.data.steps[] | [.name, .status]] == [["packages","ok"],["fail2ban","ok"],["firewall","ok"],["ssh","failed"],["swap","skipped"]]) and .data.steps[4].detail == ""')"
+check "harden: the Docker warning is in a step" "$(jqt '[.data.steps[].detail | select(test("bypass"))] | length == 1')"
+H_ENV="$(grep -E '^CLAUDERC_(SSH_PORT|PORTS|STEPS|USER)=' "$STUB_STATE/harden-env" | tr '\n' ' ')"
+[[ "$H_ENV" == "CLAUDERC_PORTS=80/tcp,443/tcp,8080/tcp,51820/udp CLAUDERC_SSH_PORT=2222 CLAUDERC_STEPS=harden,optimize CLAUDERC_USER=deploy " ]]
+check "harden: validated, normalised settings reach the script through sudo" $?
+mapfile -t HLOG <"$STUB_STATE/ssh-log"
+[[ ${#HLOG[@]} == 3 && "${HLOG[0]}" == *'sudo -n'*' true' && "${HLOG[1]}" == *'$S env '*' bash -s' && "${HLOG[2]}" == *'systemctl stop clauderc-revert.timer'* ]]
+check "harden: sudo check, the script, then a fresh login that cancels the undo" $?
+grep -q ' stop clauderc-revert.timer clauderc-revert.service$' "$STUB_STATE/systemctl-log"; check "...the undo timer was stopped" $?
+RS="$WORK/harden-remote.sh"
+awk '/^host_harden_script\(\) \{/ {f = 1} f && /^REMOTE$/ {exit} f && p {print} f && /cat <<.REMOTE.$/ {p = 1}' "$SERVER/claude-setup.sh" >"$RS"
+[[ -s "$RS" ]] && cmp -s "$RS" "$STUB_STATE/harden-script"; check "harden: the embedded script went to the host on stdin, unexpanded" $?
+bash -n "$RS"; check "harden: the remote script parses (bash -n)" $?
+if command -v shellcheck >/dev/null; then shellcheck -s bash -S warning - <"$RS"; check "harden: the remote script is shellcheck clean" $?; fi
+# Its own input checks (it stops before touching anything; never run as root here).
+if [[ "$(command -p id -u)" != 0 ]]; then
+  rs() { env -i PATH=/usr/bin:/bin CLAUDERC_SSH_PORT=22 CLAUDERC_PORTS=80/tcp CLAUDERC_STEPS=harden CLAUDERC_USER=deploy "$@" bash "$RS" 2>&1 | head -n 3; }
+  for bad in CLAUDERC_SSH_PORT=0 CLAUDERC_SSH_PORT=x "CLAUDERC_PORTS=80/tcp;id" CLAUDERC_PORTS=80 CLAUDERC_STEPS=evil "CLAUDERC_USER=a b" CLAUDERC_USER=-x; do
+    [[ "$(rs "$bad")" == "STEP input failed bad "* ]]; check "remote script refuses $bad" $?
+  done
+  [[ "$(rs)" == "STEP input failed not running as root" ]]; check "remote script needs root" $?
+fi
+# The fresh login fails: the host undoes everything by itself; the server waits for that and says so.
+export CLAUDERC_HARDEN_WAIT=0
+echo once >"$STUB_STATE/harden-lockout"; rm -f "$STUB_STATE/ssh-log" "$STUB_STATE/systemctl-log"
+api "host-harden web" $'80\nharden'
+check "harden: locked out → locked_out_reverted" "$(jqt '.ok==false and .error.code=="locked_out_reverted" and (.error.message | test("Nothing was left locked"))')"
+mapfile -t HLOG <"$STUB_STATE/ssh-log"
+[[ ${#HLOG[@]} == 4 && "${HLOG[2]}" == *clauderc-revert* && "${HLOG[3]}" == true ]]; check "...after a failed check it waited and signed in again" $?
+! grep -q 'stop clauderc-revert' "$STUB_STATE/systemctl-log" 2>/dev/null; check "...and never cancelled the undo" $?
+echo forever >"$STUB_STATE/harden-lockout"
+api "host-harden web" $'80\nharden'
+check "harden: still locked after the undo → host_failed with what to check" "$(jqt '.ok==false and .error.code=="host_failed" and (.error.message | test("console"))')"
+rm -f "$STUB_STATE/harden-lockout" "$STUB_STATE/ssh-locked"
+unset CLAUDERC_HARDEN_WAIT
+touch "$STUB_STATE/revert-stuck"
+api "host-harden web" $'\n'
+check "harden: an undo that won't stop is reported" "$(jqt '.ok and (.data.steps | map(select(.name=="safety" and .status=="failed")) | length == 1)')"
+rm -f "$STUB_STATE/revert-stuck"
+printf '%s\n' "STEP packages ok ufw installed" "STEP safety failed couldn't schedule the automatic undo" >"$STUB_STATE/harden-out"
+rm -f "$STUB_STATE/ssh-log"
+api "host-harden web" $'\nweb'
+check "harden: no undo scheduled → no check, steps returned" "$(jqt '.ok and .data.docker == false and ([.data.steps[].name] == ["packages","safety"])')"
+[[ "$(wc -l <"$STUB_STATE/ssh-log")" == 2 ]]; check "...in two logins" $?
+echo "nothing useful" >"$STUB_STATE/harden-out"
+api "host-harden web" $'\n'; check "harden: a run that printed nothing is an error" "$(jqt '.ok==false and .error.code=="host_failed"')"
+rm -f "$STUB_STATE/harden-out" "$STUB_STATE/harden-env" "$STUB_STATE/harden-script"
+echo password >"$STUB_STATE/sudo-mode"
+
 HATT="$HOME/.config/claude-launcher/attach/${PD//[^A-Za-z0-9]/-}.hosts.json"
 api "host-session demo-app2"
 check "host-session lists hosts, none attached" "$(jqt '.ok and (.data.hosts | map(.name) == ["pw","web"]) and (.data.hosts | map(select(.attached)) == []) and (.data.hosts[0] | keys == ["address","attached","name","user"])')"

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Test stub for ufw (a host's firewall, reached through the ssh stub): rules in $STUB_STATE/ufw-rules, one per line;
+# every call is recorded in $STUB_STATE/ufw-log.
+S="${STUB_STATE:-$HOME/.stub-state}"; f="$S/ufw-rules"
+touch "$f"
+echo "$*" >>"$S/ufw-log"
+case "${1:-}" in
+  allow) grep -qxF "$2" "$f" || echo "$2" >>"$f"; echo "Rule added" ;;
+  delete)
+    if [[ "${2:-}" == allow ]] && grep -qxF "$3" "$f"; then grep -vxF "$3" "$f" >"$f.n"; mv "$f.n" "$f"; echo "Rule deleted"
+    else echo "Could not delete non-existent rule"; fi ;;
+  status)
+    echo "Status: active"; echo
+    n=1; while read -r r; do printf '[%2d] %-20s ALLOW IN    Anywhere\n' "$n" "$r"; n=$((n + 1)); done <"$f" ;;
+  *) echo "ufw stub: unsupported: $*" >&2; exit 1 ;;
+esac
