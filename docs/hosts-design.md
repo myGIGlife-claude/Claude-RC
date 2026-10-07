@@ -12,6 +12,7 @@ working in **its own folder** on the host. Nothing is installed on the host and 
   fingerprint it sees now differs. All later ssh uses `StrictHostKeyChecking=yes` with the host's own `known_hosts`.
 - Every ssh uses `BatchMode=yes`, `IdentitiesOnly=yes`, `PasswordAuthentication=no`, `-i <that host's key>` and a connect timeout.
 - Names/addresses/users are validated (see below); no value ever goes through a shell: argv lists only.
+- Attach is a convenience filter, not isolation: any session can read `hosts/<name>/key` itself.
 - Attach is a guardrail, not a sandbox: sessions run as the same Unix user as the launcher. Say so in docs; do not claim isolation.
 - Public repo: no personal values (addresses, users, key material) in code, tests or docs.
 
@@ -32,7 +33,7 @@ All replies are the usual `{ok, data | error}`. Secrets come on stdin one per li
 - `host-add <name>` stdin: address, port, user, fingerprint, auth (`key`|`password`), secret.
   - `key`: secret is the private key, base64 (one line, no newlines). Reject unless `ssh-keygen -y` can read it; passphrase-protected keys are refused with a clear message.
   - `password`: generate `ed25519` key, install the public key (use `SSH_ASKPASS` with a 600 temp script that prints the password and `SSH_ASKPASS_REQUIRE=force`, or `sshpass -e` if installed; the password must not appear in argv or logs), then verify key login. Discard the password; set `auth:"password"` only to mean "key was installed with a password".
-  - Both: pin the host key from probe (must match fingerprint), verify `ssh <host> true` works, then write the files. Nothing is saved if verification fails. Replace if the name exists.
+  - Both: pin the host key from probe (must match fingerprint), verify `ssh <host> true` works, then write the files. Nothing is saved if verification fails. An existing name is refused (remove it first), so attachments never silently point at a different server.
   → `{saved:name}`.
 - `host-test <name>` → `{ok:true}` or error with ssh's last line. `host-remove <name>` → deletes `hosts/<name>` and every project's attachment (does not touch the remote's authorized_keys: say so in the app).
 - `host-session <project>` → `{hosts:[{name,address,user,attached}]}`; `host-attach <project> <name> on|off` → `{host,state}`.

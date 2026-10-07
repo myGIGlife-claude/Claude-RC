@@ -841,8 +841,12 @@ api "host-add bad" "$(add_in web.example.com 22 deploy "$HFP" password "")"
 check "add refuses: no password" "$(jqt '.ok==false and .error.code=="invalid_name"')"
 nothing_new bad; check "...nothing saved" $?
 api "host-add web" "$(add_in web.example.com 22 deploy "$HFP" key "$UK64")"
-[[ "$(jqt '.ok')" == 0 && "$(jq -r .port "$HD/web/meta.json")" == 22 && "$(cat "$HD/web/known_hosts")" == "web.example.com "* ]]
-check "add again replaces the host (new port and host key line)" $?
+check "add again is refused (remove it first)" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+[[ "$(jq -r .port "$HD/web/meta.json")" == 2222 ]]; check "...the existing host is untouched" $?
+mkdir -p "$HD/.new-old.stale" && touch -d '30 minutes ago' "$HD/.new-old.stale"
+api "host-add moved2" "$(add_in web.example.com 22 deploy "$HFP" key "$UK64")"
+[[ ! -e "$HD/.new-old.stale" ]]; check "stale half-made host folders are cleaned up" $?
+api "host-remove moved2"
 
 api "host-test web"
 check "host-test ok" "$(jqt '.ok and .data.ok')"

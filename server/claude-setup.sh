@@ -1668,8 +1668,12 @@ do_host_add() {
   need ssh; need ssh-keyscan; need ssh-keygen
   umask 077
   mkdir -p "$HOSTS_DIR" && chmod 700 "$HOSTS_DIR" || api_err internal "Couldn't create the hosts folder."
+  [[ ! -e "$HOSTS_DIR/$name" ]] || api_err invalid_name "A host named $name already exists. Remove it first (projects attached to it would otherwise get a different server)."
+  find "$HOSTS_DIR" -maxdepth 1 -name '.new-*' -mmin +10 -exec rm -rf -- {} + 2>/dev/null || true   # left by an interrupted add (may hold a password)
   HOST_TMP="$(mktemp -d "$HOSTS_DIR/.new-$name.XXXXXX")" || api_err internal "Couldn't create a temporary folder."
   tmp="$HOST_TMP"
+  trap 'rc=$?; [[ -n "${HOST_TMP:-}" ]] && rm -rf -- "$HOST_TMP"; (exit $rc); on_exit' EXIT
+  trap 'exit 1' HUP INT TERM
 
   # The host key the owner confirmed, and only that one.
   host_scan "$tmp/scan"
@@ -1719,8 +1723,7 @@ do_host_add() {
   jq -cn --arg a "$HOST_ADDR" --argjson p "$HOST_PORT" --arg u "$HOST_USER" --arg f "$fp" --arg au "$auth" \
     '{address:$a, port:$p, user:$u, fingerprint:$f, auth:$au, added:(now | floor)}' >"$tmp/meta.json" || host_fail internal "Couldn't save the host."
   chmod 600 "$tmp/key" "$tmp/known_hosts" "$tmp/meta.json"
-  rm -rf -- "${HOSTS_DIR:?}/$name"
-  mv -f "$tmp" "$HOSTS_DIR/$name" || host_fail internal "Couldn't save the host."
+  mv -T "$tmp" "$HOSTS_DIR/$name" || host_fail internal "Couldn't save the host."
   chmod 700 "$HOSTS_DIR/$name"
   api_ok "$(jq -cn --arg n "$name" '{saved:$n}')"
 }
