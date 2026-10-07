@@ -11,17 +11,17 @@ class AppBackupTest {
         assertArrayEquals(plain, AppBackup.decrypt(AppBackup.encrypt(plain, "correct horse".toCharArray()), "correct horse".toCharArray()))
     }
     @Test fun wrongPassphraseFails() {
-        val file = AppBackup.encrypt(byteArrayOf(1, 2, 3), "passphrase".toCharArray())
-        assertThrows(Exception::class.java) { AppBackup.decrypt(file, "wrongphrase".toCharArray()) }
+        val file = AppBackup.encrypt(byteArrayOf(1, 2, 3), "long enough passphrase".toCharArray())
+        assertThrows(Exception::class.java) { AppBackup.decrypt(file, "another long wrong phrase".toCharArray()) }
     }
     @Test fun tamperedCiphertextFails() {
-        val file = AppBackup.encrypt(byteArrayOf(1, 2, 3), "passphrase".toCharArray())
+        val file = AppBackup.encrypt(byteArrayOf(1, 2, 3), "long enough passphrase".toCharArray())
         file[file.lastIndex] = (file.last().toInt() xor 1).toByte()
-        assertThrows(Exception::class.java) { AppBackup.decrypt(file, "passphrase".toCharArray()) }
+        assertThrows(Exception::class.java) { AppBackup.decrypt(file, "long enough passphrase".toCharArray()) }
     }
     @Test fun headerMagicChecked() {
-        val file = AppBackup.encrypt(byteArrayOf(1), "passphrase".toCharArray())
+        val file = AppBackup.encrypt(byteArrayOf(1), "long enough passphrase".toCharArray())
         file[0] = 0
-        assertThrows(IllegalArgumentException::class.java) { AppBackup.decrypt(file, "passphrase".toCharArray()) }
+        assertThrows(IllegalArgumentException::class.java) { AppBackup.decrypt(file, "long enough passphrase".toCharArray()) }
     }
 }

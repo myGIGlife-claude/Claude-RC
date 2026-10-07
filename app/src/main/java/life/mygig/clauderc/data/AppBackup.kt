@@ -17,7 +17,7 @@ object AppBackup {
     private const val ITERATIONS = 210_000
 
     fun encrypt(plain: ByteArray, passphrase: CharArray): ByteArray {
-        require(passphrase.size >= 8) { "Passphrase must be at least 8 characters." }
+        require(passphrase.size >= 12) { "Passphrase must be at least 12 characters." }
         val salt = ByteArray(SALT_SIZE).also(SecureRandom()::nextBytes)
         val iv = ByteArray(IV_SIZE).also(SecureRandom()::nextBytes)
         val key = derive(passphrase, salt)
@@ -29,7 +29,7 @@ object AppBackup {
     }
 
     fun decrypt(file: ByteArray, passphrase: CharArray): ByteArray {
-        require(passphrase.size >= 8) { "Passphrase must be at least 8 characters." }
+        require(passphrase.size >= 12) { "Passphrase must be at least 12 characters." }
         try {
             require(file.size >= magic.size + SALT_SIZE + IV_SIZE + 16) { "Backup file is incomplete." }
             require(file.copyOfRange(0, magic.size).contentEquals(magic)) { "This is not a cLaudeRC app backup." }

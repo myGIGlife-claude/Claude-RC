@@ -52,7 +52,7 @@ printf '%s' "$cfg" >>"$D/config"
 field() { sed -n "s/^data-urlencode = \"$1=\(.*\)\"$/\1/p" <<<"$cfg" | tail -n 1; }
 reply() {  # reply <http code> <body>
   if [[ -n "$out" ]]; then printf '%s' "$2" >"$out"; else printf '%s' "$2"; fi
-  [[ "$wfmt" == '%{http_code}' ]] && printf '%s' "$1"
+  [[ "$wfmt" == *'%{http_code}'* ]] && printf '%b' "${wfmt//'%{http_code}'/$1}"   # \n in the format works like real curl
   [[ "$1" == 2* ]] && exit 0
   exit 22
 }
@@ -78,7 +78,11 @@ grep -qx 'header = "Authorization: Bearer ya29.stub-access-SECRET"' <<<"$cfg" ||
 case "$url" in
   https://www.googleapis.com/upload/drive/v3/files\?uploadType=resumable)
     printf '%s' "$body" >"$D/upload-meta"
-    [[ -n "$hdr_out" ]] && printf 'HTTP/2 200\r\nlocation: https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=stub-session-1\r\n\r\n' >"$hdr_out"
+    if [[ "$hdr_out" == - ]]; then   # like real curl: -D - puts the headers on stdout, ahead of the -w output
+      printf 'HTTP/2 200\r\nlocation: https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=stub-session-1\r\n\r\n'
+    elif [[ -n "$hdr_out" ]]; then
+      printf 'HTTP/2 200\r\nlocation: https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=stub-session-1\r\n\r\n' >"$hdr_out"
+    fi
     reply 200 '' ;;
   https://www.googleapis.com/upload/drive/v3/files\?uploadType=resumable\&upload_id=*)
     echo x >>"$D/put-count"

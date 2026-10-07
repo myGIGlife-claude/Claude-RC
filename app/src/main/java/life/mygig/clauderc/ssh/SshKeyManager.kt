@@ -66,8 +66,9 @@ class SshKeyManager(context: Context) {
         val identity = Ed25519Identity(seed)
         val enc = try { encrypt(seed, newWrappingKey(unlockedOnly = true)) }
         catch (e: GeneralSecurityException) { encrypt(seed, newWrappingKey(unlockedOnly = false)) }
-        prefs.edit().putString(PREF_SEED, Base64.encodeToString(enc, Base64.NO_WRAP))
+        val saved = prefs.edit().putString(PREF_SEED, Base64.encodeToString(enc, Base64.NO_WRAP))
             .putString(PREF_PUB, identity.authorizedKey(COMMENT)).commit()
+        check(saved) { "Couldn't save the restored key." }
     }
 
     private fun generate(): String {

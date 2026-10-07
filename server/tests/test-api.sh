@@ -451,13 +451,16 @@ api "drive-passphrase" "$DPASS"; check "drive: passphrase saved" "$(jqt '.ok and
 [[ "$(stat -c %a "$DCFG/drive-backup-pass")" == 600 && "$(cat "$DCFG/drive-backup-pass")" == "$DPASS" ]]; check "drive: passphrase file 600" $?
 [[ "$OUT" != *horse* ]]; check "drive: passphrase not echoed" $?
 mkdir -p "$DS/files"
+THOST="$(uname -n)"; THOST="${THOST%%.*}"; THOST="${THOST//[^A-Za-z0-9-]/-}"; THOST="${THOST:0:40}"
+# a backup from ANOTHER server sharing the same Drive folder: never deleted by this server's cleanup
+jq -cn '{id:"otherhost01", name:"clauderc-another-server-20260101-000000Z.tar.gz.gpg", size:"4", createdTime:"2025-12-31T00:00:00Z"}' >"$DS/files/otherhost01.json"; echo x >"$DS/files/otherhost01.bin"
 for k in 1 2 3; do
-  jq -cn --arg i "old000000$k" --arg n "clauderc-old-$k.tar.gz.gpg" --arg t "2026-01-0${k}T00:00:00Z" '{id:$i, name:$n, size:"4", createdTime:$t}' >"$DS/files/old000000$k.json"
+  jq -cn --arg i "old000000$k" --arg n "clauderc-$THOST-old-$k.tar.gz.gpg" --arg t "2026-01-0${k}T00:00:00Z" '{id:$i, name:$n, size:"4", createdTime:$t}' >"$DS/files/old000000$k.json"
   echo "old$k" >"$DS/files/old000000$k.bin"
 done
 jq -cn '{id:"otherfile01", name:"notes.txt", size:"1", createdTime:"2025-01-01T00:00:00Z"}' >"$DS/files/otherfile01.json"
 api "drive-list"
-check "drive: list = our backups, newest first" "$(jqt '.ok and (.data | map(.id)) == ["old0000003","old0000002","old0000001"] and .data[0] == {id:"old0000003", name:"clauderc-old-3.tar.gz.gpg", size:4, time:"2026-01-03T00:00:00Z"}')"
+check "drive: list = our backups, newest first" "$(jqt '.ok and (.data | map(.id)) == ["old0000003","old0000002","old0000001","otherhost01"] and .data[0] == {id:"old0000003", name:"clauderc-'"$THOST"'-old-3.tar.gz.gpg", size:4, time:"2026-01-03T00:00:00Z"}')"
 grep -qx "spaces=appDataFolder" "$DS/list-args"; check "drive: list asks appDataFolder only" $?
 api "drive-backup-status"; check "drive: backup status idle" "$(jqt '.ok and .data == {state:"idle"}')"
 echo 1 >"$STUB_STATE/backup-sleep"; echo 1 >"$DS/fail-put"; rm -f "$STUB_STATE/backup-argv"
@@ -472,11 +475,12 @@ cmp -s "$STUB_STATE/backup-export-pass" "$DCFG/drive-backup-pass"; check "drive:
 jq -e --arg n "$DNAME" '. == {name:$n, parents:["appDataFolder"]}' "$DS/upload-meta" >/dev/null; check "drive: resumable upload with the right metadata" $?
 [[ "$(wc -l <"$DS/put-count")" == 2 ]]; check "drive: a failed PUT is retried once" $?
 [[ "$(cat "$DS/deleted")" == old0000001 && -f "$DS/files/otherfile01.json" ]]; check "drive: only the oldest of ours beyond 3 deleted, other files untouched" $?
+[[ -f "$DS/files/otherhost01.json" ]]; check "drive: another server's backup in the same folder is never deleted" $?
 [[ -z "$(find "$DWORK" -name '*.gpg' 2>/dev/null)" ]]; check "drive: temp file removed" $?
 ! grep -rq "SECRET\|stub-session" "$DWORK"; check "drive: no token or upload session left on disk" $?
 [[ "$(stat -c %a "$DWORK")" == 700 ]]; check "drive: work folder 700" $?
 api "drive-status"; check "drive: status shows the last backup" "$(jqa --arg n "$DNAME" '.data.last_backup.name==$n and .data.last_backup.size==3000000 and .data.has_passphrase')"
-api "drive-list"; check "drive: the new backup is listed first" "$(jqa --arg n "$DNAME" '(.data | length)==3 and .data[0].name==$n')"
+api "drive-list"; check "drive: the new backup is listed first" "$(jqa --arg n "$DNAME" '(.data | length)==4 and .data[0].name==$n')"
 DNEW="$(jq -r '.data[0].id' <<<"$OUT")"
 echo 0 >"$STUB_STATE/backup-sleep"; touch "$STUB_STATE/backup-fail-export"
 api "drive-backup"; dwait

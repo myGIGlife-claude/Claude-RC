@@ -2910,7 +2910,10 @@ drive_schedule_state() {
 # drive_cron_set on|off: exactly one marked line in the user's crontab, or none. Leaves every other line alone.
 drive_cron_set() {
   local cur rest line n
-  cur="$(crontab -l 2>/dev/null || true)"
+  if ! cur="$(crontab -l 2>&1)"; then
+    # Only "no crontab" means empty; any other failure must not end with our line replacing the owner's crontab.
+    grep -qi 'no crontab' <<<"$cur" && cur="" || api_err internal "Couldn't read your crontab, so the schedule was not changed: ${cur:0:150}"
+  fi
   n="$(grep -cF -- "$DRIVE_CRON_MARK" <<<"$cur" || true)"
   if [[ "$1" == off ]]; then
     ((n == 0)) && return 0
@@ -2963,14 +2966,16 @@ drive_backup_exit() {
 # drive_upload <file> <name> <size>: one resumable upload into appDataFolder (initiate, then PUT the file, streamed from
 # disk). Sets DRIVE_FILE_ID, or DRIVE_ERR.
 drive_upload() {
-  local f="$1" name="$2" size="$3" meta code loc fd pos pct
+  local f="$1" name="$2" size="$3" meta code loc fd pos pct hdrs
   meta="$(jq -cn --arg n "$name" '{name:$n, parents:["appDataFolder"]}')"
-  code="$(printf 'header = "Authorization: Bearer %s"\n' "$DRIVE_AT" | curl -sS --max-time 60 -K - -X POST -D "$DRIVE_WORK/headers" \
-    -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json; charset=UTF-8' \
+  # Headers (with the session URL) come back on stdout, ahead of the status code: nothing is written to disk.
+  hdrs="$(printf 'header = "Authorization: Bearer %s"\n' "$DRIVE_AT" | curl -sS --max-time 60 -K - -X POST -D - \
+    -o /dev/null -w '\n%{http_code}' -H 'Content-Type: application/json; charset=UTF-8' \
     -H 'X-Upload-Content-Type: application/octet-stream' -H "X-Upload-Content-Length: $size" \
     --data-binary "$meta" "$DRIVE_UPLOAD" 2>/dev/null)"
-  loc="$(tr -d '\r' <"$DRIVE_WORK/headers" 2>/dev/null | awk 'tolower($1) == "location:" {print $2}' | tail -n 1)"
-  rm -f "$DRIVE_WORK/headers"
+  code="$(tail -n 1 <<<"$hdrs")"
+  loc="$(tr -d '\r' <<<"$hdrs" | awk 'tolower($1) == "location:" {print $2}' | tail -n 1)"
+  unset hdrs
   [[ "$code" == 200 && "$loc" =~ $DRIVE_LOC_RE ]] || { DRIVE_ERR="Google Drive didn't start the upload (HTTP ${code:-none})."; return 1; }
   # The session URL is as good as a token while it lasts: curl's config on stdin, like the token (nothing on disk or in argv).
   printf 'url = "%s"\nheader = "Authorization: Bearer %s"\n' "$loc" "$DRIVE_AT" |
@@ -3059,7 +3064,7 @@ drive_backup_run() {
     while IFS= read -r id; do
       drive_id_ok "$id" || continue
       drive_delete_file "$id" || kept=0
-    done < <(jq -r --argjson k "$DRIVE_KEEP" '.[$k:][] | .id' <<<"$old")
+    done < <(jq -r --argjson k "$DRIVE_KEEP" --arg p "clauderc-${host:-server}-" '[.[] | select(.name | startswith($p))] | .[$k:][] | .id' <<<"$old")   # only THIS server's: another server may share the folder
   else
     kept=0
   fi
