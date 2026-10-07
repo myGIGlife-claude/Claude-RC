@@ -162,6 +162,17 @@ class LauncherApi(
     suspend fun youtubeStart(clientId: String, clientSecret: String): YoutubeStart =
         call("youtube-login-start", stdin = clientId.trim() + "\n" + clientSecret.trim())
     suspend fun youtubePoll(): JsonObject = call("youtube-login-poll")
+    suspend fun driveStatus(): DriveStatus = call("drive-status")
+    suspend fun driveLoginStart(): DriveLoginStart = call("drive-login-start")
+    suspend fun driveLoginPoll(): JsonObject = call("drive-login-poll")
+    suspend fun drivePassphrase(value: String): JsonObject = call("drive-passphrase", stdin = value)
+    suspend fun driveBackup(): JsonObject = call("drive-backup")
+    suspend fun driveBackupStatus(): DriveBackupStatus = call("drive-backup-status")
+    suspend fun driveList(): List<DriveBackupEntry> = call("drive-list")
+    suspend fun driveDelete(id: String): JsonObject = call("drive-delete $id")
+    suspend fun driveSchedule(on: Boolean): JsonObject = call("drive-schedule ${if (on) "on" else "off"}")
+    suspend fun driveLogout(): JsonObject = call("drive-logout")
+    suspend fun driveRestore(id: String): JsonObject = call("drive-restore $id")
     suspend fun mcp(): McpData = call("mcp")
     suspend fun pushConfig(): PushConfig = call("push-config")
     /** Saves the Firebase service-account key (stdin); the server registers the app and returns its ids. */
