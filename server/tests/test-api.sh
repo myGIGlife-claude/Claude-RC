@@ -897,8 +897,16 @@ check "keyimport: not base64 refused" "$(jqt '.ok==false and .error.code=="inval
 api "host-keyimport imp" ""
 check "keyimport: no key refused" "$(jqt '.ok==false and .error.code=="invalid_key"')"
 [[ ! -e "$HD/.keygen-imp" && -z "$(find "$HD" -maxdepth 1 -name '.new-*' 2>/dev/null)" ]]; check "...nothing kept after any of those" $?
-echo "DEBUG-CI keyimport (temporary)"; ssh -V 2>&1; ( time ssh-keygen -y -P '' -f "$WORK/impkey" ) 2>&1 | tail -5
-( time timeout 25 bash -x "$HOME/bin/claude-setup.sh" --api host-keyimport imp <<<"$(base64 -w0 "$WORK/impkey")" ) 2>&1 | tail -45 | cut -c1-200
+echo "DEBUG-CI keyimport (temporary)"
+base64 -w0 "$WORK/impkey" >"$WORK/imp.b64"
+bash -x "$HOME/bin/claude-setup.sh" --api host-keyimport imp <"$WORK/imp.b64" >"$WORK/imp.out" 2>"$WORK/imp.trace" &
+IMPPID=$!
+sleep 6
+echo "DEBUG-CI after 6s: pid alive? $(kill -0 $IMPPID 2>&1 && echo yes || echo no)"
+tail -30 "$WORK/imp.trace" | cut -c1-200
+echo "DEBUG-CI out: $(head -c 300 "$WORK/imp.out")"
+ps -eo pid,ppid,pgid,etimes,args 2>/dev/null | grep -E "ssh|keygen|claude-setup|sleep" | grep -v grep | cut -c1-160 | head -15
+kill $IMPPID 2>/dev/null; wait $IMPPID 2>/dev/null
 rm -rf "$HD/.keygen-imp"
 api "host-keyimport imp" "$(base64 -w0 "$WORK/impkey")"
 check "keyimport returns the public key and its fingerprint" "$(jqt ".ok and .data.public_key == \"$(ssh-keygen -y -f "$WORK/impkey" | awk '{print $1, $2}')\" and .data.fingerprint == \"$(ssh-keygen -lf "$WORK/impkey.pub" | awk '{print $2}')\"")"
