@@ -739,6 +739,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val hostAddOpen = _hostAddOpen.asStateFlow()
     private val _hostProbe = MutableStateFlow<HostProbe?>(null)
     val hostProbe = _hostProbe.asStateFlow()
+    /** The server's own words for a host problem: its auth_failed means the HOST refused our key, not this phone's key (friendly() says the latter). */
+    private fun hostMessage(e: ApiException) = if (e.code == Codes.AUTH_FAILED) e.message else friendly(e).first
     private val _hostError = MutableStateFlow<String?>(null)
     val hostError = _hostError.asStateFlow()
     /** "Generate a key": the host name it was made for and its public half. */
@@ -751,23 +753,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun generateHostKey(name: String) {
         _hostKey.value = null
         _hostError.value = null
-        action("Generating a key…", onError = { _hostError.value = friendly(it).first }) { _hostKey.value = name to api.hostKeygen(name) }
+        action("Generating a key…", onError = { _hostError.value = hostMessage(it) }) { _hostKey.value = name to api.hostKeygen(name) }
     }
     fun importHostKey(name: String, keyBase64: String) {
         _hostKey.value = null
         _hostError.value = null
-        action("Importing the key…", onError = { _hostError.value = friendly(it).first }) { _hostKey.value = name to api.hostKeyImport(name, keyBase64) }
+        action("Importing the key…", onError = { _hostError.value = hostMessage(it) }) { _hostKey.value = name to api.hostKeyImport(name, keyBase64) }
     }
     /** Address or port changed after Check: the shown key no longer applies. */
     fun clearHostProbe() { _hostProbe.value = null }
     fun probeHost(address: String, port: Int) {
         _hostProbe.value = null
         _hostError.value = null
-        action("Checking $address…", onError = { _hostError.value = friendly(it).first }) { _hostProbe.value = api.hostProbe(address, port) }
+        action("Checking $address…", onError = { _hostError.value = hostMessage(it) }) { _hostProbe.value = api.hostProbe(address, port) }
     }
     fun addHost(name: String, address: String, port: Int, user: String, fingerprint: String, auth: String, secret: String) {
         _hostError.value = null
-        action("Adding $name…", onError = { _hostError.value = friendly(it).first }) {
+        action("Adding $name…", onError = { _hostError.value = hostMessage(it) }) {
             api.hostAdd(name, address, port, user, fingerprint, auth, secret)
             closeHostAdd()
             openHostSetup(name, port)
@@ -790,7 +792,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         action("Setting up $name…", onError = {
             _hostSetupError.value = when (it.code) {
                 "needs_sudo" -> "This user needs passwordless sudo (or use root)"
-                else -> friendly(it).first
+                else -> hostMessage(it)
             }
         }) { _hostHarden.value = api.hostHarden(name, ports, steps) }
     }

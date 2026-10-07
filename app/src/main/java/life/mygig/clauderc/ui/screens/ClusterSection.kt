@@ -384,6 +384,8 @@ private fun HostAddDialog(vm: MainViewModel) {
         else -> ""
     }
     val canSave = p != null && confirmed && HOST_NAME_RE.matches(name) && HOST_USER_RE.matches(user) && secret.isNotEmpty() && busy == null
+    val scroll = rememberScrollState()
+    LaunchedEffect(error) { if (error != null) scroll.animateScrollTo(scroll.maxValue) }   // the message is at the bottom of a tall dialog: bring it into view
     AlertDialog(
         onDismissRequest = { if (busy == null) vm.closeHostAdd() },
         confirmButton = {
@@ -393,7 +395,7 @@ private fun HostAddDialog(vm: MainViewModel) {
         dismissButton = { TextButton(onClick = { vm.closeHostAdd() }) { Text("Cancel") } },
         title = { Text("Add a server") },
         text = {
-            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.heightIn(max = 520.dp).verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 NoAutofill()
                 OutlinedTextField(
                     value = name, onValueChange = { if (it.trim() != name) vm.clearHostKey(); name = it.trim() }, label = { Text("Name (shop, blog…)") },
