@@ -747,18 +747,38 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _hostKey = MutableStateFlow<Pair<String, HostKey>?>(null)
     val hostKey = _hostKey.asStateFlow()
     fun loadHosts() = action("Loading servers…") { _hosts.value = api.hostList().hosts }
-    fun openHostAdd() { _hostProbe.value = null; _hostError.value = null; _hostKey.value = null; _hostAddOpen.value = true }
-    fun closeHostAdd() { _hostAddOpen.value = false; _hostProbe.value = null; _hostError.value = null; _hostKey.value = null }
+    /** What the Add server dialog keeps on the phone while you go and fetch things elsewhere: no secrets, only the plain fields and the PUBLIC key. */
+    data class HostDraft(val name: String = "", val address: String = "", val port: String = "22", val user: String = "", val auth: String = "key")
+    private val hostDraftPrefs by lazy { getApplication<Application>().getSharedPreferences("host_draft", android.content.Context.MODE_PRIVATE) }
+    fun hostDraft() = hostDraftPrefs.run {
+        HostDraft(getString("name", "").orEmpty(), getString("address", "").orEmpty(), getString("port", "22").orEmpty(), getString("user", "").orEmpty(), getString("auth", "key").orEmpty())
+    }
+    fun saveHostDraft(d: HostDraft) = hostDraftPrefs.edit().putString("name", d.name).putString("address", d.address).putString("port", d.port)
+        .putString("user", d.user).putString("auth", d.auth).apply()
+    private fun rememberHostKey(name: String, key: HostKey) {
+        _hostKey.value = name to key
+        hostDraftPrefs.edit().putString("key_name", name).putString("key_pub", key.publicKey).putString("key_fp", key.fingerprint).apply()
+    }
+    fun openHostAdd() {
+        _hostProbe.value = null; _hostError.value = null; _hostAddOpen.value = true
+        // The key made earlier is still waiting on the server (kept 24 h): show it again.
+        _hostKey.value = hostDraftPrefs.getString("key_name", null)?.let { n -> n to HostKey(hostDraftPrefs.getString("key_pub", "").orEmpty(), hostDraftPrefs.getString("key_fp", "").orEmpty()) }
+    }
+    /** [keepDraft]: tapping outside the dialog keeps what was typed; Cancel and a finished add clear it. */
+    fun closeHostAdd(keepDraft: Boolean = false) {
+        _hostAddOpen.value = false; _hostProbe.value = null; _hostError.value = null; _hostKey.value = null
+        if (!keepDraft) hostDraftPrefs.edit().clear().apply()
+    }
     fun clearHostKey() { _hostKey.value = null }
     fun generateHostKey(name: String) {
         _hostKey.value = null
         _hostError.value = null
-        action("Generating a key…", onError = { _hostError.value = hostMessage(it) }) { _hostKey.value = name to api.hostKeygen(name) }
+        action("Generating a key…", onError = { _hostError.value = hostMessage(it) }) { rememberHostKey(name, api.hostKeygen(name)) }
     }
     fun importHostKey(name: String, keyBase64: String) {
         _hostKey.value = null
         _hostError.value = null
-        action("Importing the key…", onError = { _hostError.value = hostMessage(it) }) { _hostKey.value = name to api.hostKeyImport(name, keyBase64) }
+        action("Importing the key…", onError = { _hostError.value = hostMessage(it) }) { rememberHostKey(name, api.hostKeyImport(name, keyBase64)) }
     }
     /** Address or port changed after Check: the shown key no longer applies. */
     fun clearHostProbe() { _hostProbe.value = null }
