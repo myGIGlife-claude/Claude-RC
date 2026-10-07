@@ -60,3 +60,51 @@ All replies are the usual `{ok, data | error}`. Secrets come on stdin one per li
 - Add host dialog: name, address, port (22), user → **Check** (host-probe) shows the fingerprint to confirm → pick Key (paste, or upload a file; base64 on the wire), Password, or Generate a key (host-keygen; shows the public key with Copy and where to put it) → Save (host-add). Error text from the server is shown in the dialog (not only in a snackbar).
 - Chat 👥 sheet: a "Servers" section with a switch per host (host-session / host-attach).
 - Needs SCRIPT_API 40 (39 without Generate a key): raise `Updates.MIN_SCRIPT_API`.
+
+## Set up and harden (SCRIPT_API 41)
+
+Researched sources: Ubuntu sshd drop-ins are read in lexical order and the FIRST value wins, and cloud images ship
+`50-cloud-init.conf` with `PasswordAuthentication yes`, so ours must sort first (`00-clauderc.conf`) and be checked with
+`sshd -T`; Docker's published ports bypass UFW (they go through FORWARD, never INPUT), the supported hook is the
+`DOCKER-USER` chain, and the simple rule for sessions is to publish container ports on `127.0.0.1` behind Caddy.
+
+### API: `host-harden <name>`
+stdin: line 1 = ports to open (comma separated, e.g. `80,443,8080/tcp,51820/udp`, may be empty; each `^[0-9]{1,5}(/(tcp|udp))?$`, 1-65535,
+max 20; default proto tcp), line 2 = steps (comma separated from `harden`, `optimize`, `web`; may be empty = only open the ports).
+Runs over the host's pinned ssh as `sudo -n bash -s` with a script embedded in claude-setup.sh (a heredoc function; do NOT add
+files to install.sh). Needs passwordless sudo or root: check `sudo -n true` first, else error `needs_sudo` ("this user needs
+passwordless sudo, or use root"). Server timeout 540 s. Reply `{ssh_port, docker, steps:[{name, status:"ok"|"skipped"|"failed", detail}]}`.
+The remote script prints `STEP <name> <ok|skipped|failed> <detail>` lines which the server parses; idempotent (safe to re-run).
+
+**Lock-out protection (required):** before touching sshd/ufw, the script schedules a revert with `systemd-run --on-active=120 --unit=clauderc-revert`
+(removes the sshd drop-in, reloads ssh, `ufw disable`). After the apply call returns, the server opens a NEW ssh login with the host's key
+(like host-test); only if that works does it cancel the revert (`systemctl stop clauderc-revert.timer clauderc-revert.service`) in a second call.
+If the new login fails, wait for the revert (about 2 minutes), re-test, and return error `locked_out_reverted` explaining nothing was left locked.
+
+**Steps (order matters):**
+- always: ports. `ufw allow <ssh_port>/tcp` FIRST (the port the app connects on), then the requested ports, then `ufw --force enable`.
+- `harden`: apt update; install ufw fail2ban unattended-upgrades; `ufw default deny incoming`, `default allow outgoing`, `ufw limit <ssh_port>/tcp`, IPv6 on (`IPV6=yes` in /etc/default/ufw);
+  sshd drop-in `/etc/ssh/sshd_config.d/00-clauderc.conf`: `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PubkeyAuthentication yes`,
+  `PermitRootLogin no` (use `prohibit-password` if the login user IS root), `MaxAuthTries 3`, `LoginGraceTime 30`, `X11Forwarding no`, `AllowAgentForwarding no`,
+  `ClientAliveInterval 300`, `ClientAliveCountMax 2`; validate with `sshd -t` (remove the file and report failed if invalid), confirm with `sshd -T`,
+  reload (`systemctl reload ssh || systemctl reload sshd`); `/etc/fail2ban/jail.d/clauderc.local` ([sshd] enabled, `backend = systemd`, `port = <ssh_port>`,
+  `maxretry = 4`, `findtime = 10m`, `bantime = 1h`, `bantime.increment = true`) then restart fail2ban; unattended-upgrades enabled for security
+  (`/etc/apt/apt.conf.d/20auto-upgrades`, no automatic reboot); `/etc/sysctl.d/99-clauderc.conf` with only Docker/Caddy-safe values (tcp_syncookies=1,
+  rp_filter=1 all/default, accept_redirects=0, send_redirects=0, accept_source_route=0, log_martians=1, icmp_echo_ignore_broadcasts=1, kernel.dmesg_restrict=1,
+  kernel.kptr_restrict=2, fs.protected_hardlinks=1, fs.protected_symlinks=1) — never touch `net.ipv4.ip_forward`; `sysctl --system`.
+  If Docker is installed, return `docker:true` and a step detail warning that published ports bypass UFW (publish on 127.0.0.1).
+- `optimize`: time sync on (`timedatectl set-ntp true`), journald cap (`/etc/systemd/journald.conf.d/clauderc.conf` SystemMaxUse=200M), swap file only when there is
+  no swap and RAM <= 2 GB (1 GB `/swapfile`, mode 600, fstab entry, `vm.swappiness=10`), `apt-get -y autoremove`.
+- `web`: Caddy from its official apt repo (keyring in /usr/share/keyrings, `deb ... stable main` list, apt install caddy) plus git, curl, unzip, build-essential; ports 80/443 are NOT opened unless requested.
+- Non-interactive apt: `DEBIAN_FRONTEND=noninteractive`, `-y -o Dpkg::Options::=--force-confold`. Never use `ufw reset`, never change the SSH port, never lock the root password.
+
+### Session tool: `host_firewall(host, action, port?, proto?)` in clauderc-team
+`action` status|open|close. open/close run `sudo -n ufw allow|delete allow <port>/<proto>` over the host's ssh (validated port 1-65535, proto tcp|udp);
+refuse to close the host's SSH port; `status` returns `ufw status numbered`. Same attach gate as host_run. Mention in the hosts instructions paragraph:
+open only the ports the project needs, publish Docker ports on 127.0.0.1 behind Caddy, ask the owner before opening anything unusual.
+
+### App
+- Add host dialog: the **public key generator is at the TOP**, right under Name (needs only a valid name): "Need a public key for your provider first (e.g. OVH)?" → Generate → shown with Copy; the address/user fields and Check come after. If a key was generated, the sign-in choice defaults to "Generated key".
+- After Save succeeds, the dialog moves to a **Set up this server** step: switch "Harden the server (recommended)" (on), switch "Tune it (time sync, log size, swap)" (on), switch "Install web basics (Caddy, git, build tools)" (off), port checkboxes: SSH (always on, shows the port), HTTP 80 (on), HTTPS 443 (on), plus a "More ports" text field (comma separated, `8080` or `51820/udp`, validated client side). Buttons: **Set up** (runs host-harden; busy indicator; shows the steps list with ✓/–/✗ and details; shows `needs_sudo` / `locked_out_reverted` errors in the dialog) and **Skip**.
+- Each host row also gets a **Set up / harden** button that opens the same step (idempotent re-run).
+- Needs SCRIPT_API 41: `Updates.MIN_SCRIPT_API = 41`.
