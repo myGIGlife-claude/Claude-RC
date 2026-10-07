@@ -1695,7 +1695,7 @@ do_host_keyimport() {
   host_keygen_cleanup
   secret="${secret//[[:space:]]/}"
   [[ -n "$secret" ]] || api_err invalid_key "The key is missing."
-  [[ "$secret" =~ ^[A-Za-z0-9+/=]{20,30000}$ ]] || api_err invalid_key "The key must be sent as base64."
+  [[ ${#secret} -ge 20 && ${#secret} -le 30000 && "$secret" =~ ^[A-Za-z0-9+/=]+$ ]] || api_err invalid_key "The key must be sent as base64."
   HOST_TMP="$(mktemp -d "$HOSTS_DIR/.new-$name.XXXXXX")" || api_err internal "Couldn't create a temporary folder."
   tmp="$HOST_TMP"
   trap 'rc=$?; [[ -n "${HOST_TMP:-}" ]] && rm -rf -- "$HOST_TMP"; (exit $rc); on_exit' EXIT
@@ -1764,7 +1764,7 @@ do_host_add() {
     cp "$HOSTS_DIR/.keygen-$name/key" "$tmp/key" && chmod 600 "$tmp/key" || host_fail internal "Couldn't read the pending key."
   elif [[ "$auth" == key ]]; then
     secret="${secret//[[:space:]]/}"
-    [[ "$secret" =~ ^[A-Za-z0-9+/=]{20,30000}$ ]] || host_fail invalid_key "The key must be sent as base64."
+    [[ ${#secret} -ge 20 && ${#secret} -le 30000 && "$secret" =~ ^[A-Za-z0-9+/=]+$ ]] || host_fail invalid_key "The key must be sent as base64."
     printf '%s' "$secret" | base64 -d >"$tmp/key" 2>/dev/null || host_fail invalid_key "The key isn't valid base64."
     unset secret
     [[ -z "$(tail -c 1 "$tmp/key")" ]] || echo >>"$tmp/key"
