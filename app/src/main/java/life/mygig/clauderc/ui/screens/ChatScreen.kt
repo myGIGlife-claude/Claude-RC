@@ -279,7 +279,6 @@ private fun forSpeech(t: String) = t
     .replace(Regex("```[\\s\\S]*?```"), " (code) ")
     .replace(URL_RE, " link ")
     .replace(Regex("[*#_`>|]"), "")
-    .take(1500)
 
 private val URL_RE = Regex("""https?://[^\s<>"')\]]+""")
 
