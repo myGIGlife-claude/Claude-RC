@@ -255,6 +255,11 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
         }
 
         if (t == 0 && !firstRun) {
+            val status by vm.status.collectAsState()
+            if ((status?.scriptApi ?: 0) >= 43) {
+                SectionLabel("Backup")
+                DriveSection(vm)
+            }
             SectionLabel("Servers")
             CardBox {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -339,6 +344,8 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
         }
 
         if (t == 2) {
+            SectionLabel("Backup")
+            AppBackupSection(vm)
             SectionLabel("Theme")
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 ThemeMode.entries.forEachIndexed { i, m ->

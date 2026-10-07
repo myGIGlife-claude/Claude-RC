@@ -21,4 +21,88 @@ for a; do
     exit 0
   fi
 done
-exit 0
+
+# Google Drive backup: OAuth device flow + Drive v3, only when the secrets come in a curl config (-K). State in
+# $STUB_STATE/drive: files/<id>.json (+ .bin), poll-pending (next device poll is pending), fail-put (PUTs to fail),
+# argv (every call's arguments), config (every config given), upload-meta, deleted, revoked, list-args, put-count.
+cfg="" url="" method="" out="" hdr_out="" wfmt="" upload="" body="" query=()
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  a="${args[$i]}" n="${args[$((i + 1))]:-}"
+  case "$a" in
+    -K | --config) if [[ "$n" == - ]]; then cfg+="$(cat)"$'\n'; else cfg+="$(cat "$n")"$'\n'; fi; ((i++)) ;;
+    -X) method="$n"; ((i++)) ;;
+    -o) out="$n"; ((i++)) ;;
+    -D) hdr_out="$n"; ((i++)) ;;
+    -w) wfmt="$n"; ((i++)) ;;
+    -T | --upload-file) upload="$n"; ((i++)) ;;
+    --data-binary) body="$n"; ((i++)) ;;
+    --data-urlencode) query+=("$n"); ((i++)) ;;
+    -H | --max-time) ((i++)) ;;
+    https://*) url="$a" ;;
+  esac
+done
+[[ -n "$cfg" ]] || exit 0
+[[ -n "$url" ]] || url="$(sed -n 's/^url = "\(.*\)"$/\1/p' <<<"$cfg" | tail -n 1)"
+[[ "$url" == https://oauth2.googleapis.com/* || "$url" == https://www.googleapis.com/*drive/v3/* ]] || exit 0
+D="${STUB_STATE:-/tmp}/drive"
+mkdir -p "$D/files"
+echo "$*" >>"$D/argv"
+printf '%s' "$cfg" >>"$D/config"
+field() { sed -n "s/^data-urlencode = \"$1=\(.*\)\"$/\1/p" <<<"$cfg" | tail -n 1; }
+reply() {  # reply <http code> <body>
+  if [[ -n "$out" ]]; then printf '%s' "$2" >"$out"; else printf '%s' "$2"; fi
+  [[ "$wfmt" == *'%{http_code}'* ]] && printf '%b' "${wfmt//'%{http_code}'/$1}"   # \n in the format works like real curl
+  [[ "$1" == 2* ]] && exit 0
+  exit 22
+}
+case "$url" in
+  https://oauth2.googleapis.com/device/code)
+    field scope >"$D/scope"
+    reply 200 '{"device_code":"stub-device-code","user_code":"ABCD-EFGH","verification_url":"https://www.google.com/device","expires_in":1800,"interval":5}' ;;
+  https://oauth2.googleapis.com/token)
+    case "$(field grant_type)" in
+      urn:ietf:params:oauth:grant-type:device_code)
+        [[ "$(field device_code)" == stub-device-code && -n "$(field client_secret)" ]] || reply 400 '{"error":"invalid_grant"}'
+        [[ -e "$D/poll-pending" ]] && { rm -f "$D/poll-pending"; reply 428 '{"error":"authorization_pending"}'; }
+        reply 200 '{"access_token":"ya29.stub-access-SECRET","refresh_token":"1//stub-refresh-SECRET","expires_in":3599,"scope":"https://www.googleapis.com/auth/drive.appdata"}' ;;
+      refresh_token)
+        [[ "$(field refresh_token)" == 1//stub-refresh-SECRET ]] || reply 400 '{"error":"invalid_grant","error_description":"Token has been expired or revoked."}'
+        reply 200 '{"access_token":"ya29.stub-access-SECRET","expires_in":3599}' ;;
+    esac
+    reply 400 '{"error":"unsupported_grant_type"}' ;;
+  https://oauth2.googleapis.com/revoke)
+    field token >>"$D/revoked"; reply 200 '{}' ;;
+esac
+grep -qx 'header = "Authorization: Bearer ya29.stub-access-SECRET"' <<<"$cfg" || reply 401 '{"error":{"code":401,"message":"Invalid Credentials"}}'
+case "$url" in
+  https://www.googleapis.com/upload/drive/v3/files\?uploadType=resumable)
+    printf '%s' "$body" >"$D/upload-meta"
+    if [[ "$hdr_out" == - ]]; then   # like real curl: -D - puts the headers on stdout, ahead of the -w output
+      printf 'HTTP/2 200\r\nlocation: https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=stub-session-1\r\n\r\n'
+    elif [[ -n "$hdr_out" ]]; then
+      printf 'HTTP/2 200\r\nlocation: https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=stub-session-1\r\n\r\n' >"$hdr_out"
+    fi
+    reply 200 '' ;;
+  https://www.googleapis.com/upload/drive/v3/files\?uploadType=resumable\&upload_id=*)
+    echo x >>"$D/put-count"
+    f="$(cat "$D/fail-put" 2>/dev/null || echo 0)"
+    if ((f > 0)); then echo $((f - 1)) >"$D/fail-put"; reply 503 '{"error":{"code":503}}'; fi
+    id="bk$(date +%s%N)"
+    cp "$upload" "$D/files/$id.bin"
+    jq -c --arg i "$id" --arg s "$(stat -c %s "$upload")" --arg t "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" '{id:$i, name:.name, size:$s, createdTime:$t}' \
+      "$D/upload-meta" >"$D/files/$id.json"
+    reply 200 "{\"id\":\"$id\"}" ;;
+  https://www.googleapis.com/drive/v3/files)
+    printf '%s\n' "${query[@]}" >"$D/list-args"
+    reply 200 "$(cat "$D"/files/*.json 2>/dev/null | jq -sc '{files: .}')" ;;
+  https://www.googleapis.com/drive/v3/files/*)
+    id="${url#https://www.googleapis.com/drive/v3/files/}"; id="${id%%\?*}"
+    [[ -f "$D/files/$id.json" ]] || reply 404 '{"error":{"code":404}}'
+    if [[ "$method" == DELETE ]]; then
+      rm -f "$D/files/$id.json" "$D/files/$id.bin"; echo "$id" >>"$D/deleted"; reply 204 ''
+    fi
+    [[ "$url" == *'?alt=media' && -n "$out" ]] || reply 400 '{}'
+    cp "$D/files/$id.bin" "$out"; exit 0 ;;
+esac
+reply 404 '{"error":{"code":404}}'

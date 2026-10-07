@@ -41,6 +41,7 @@ api() {
   RC=$?
 }
 jqt() { jq -e "$1" >/dev/null 2>&1 <<<"$OUT"; echo $?; }
+jqa() { jq -e "$@" >/dev/null 2>&1 <<<"$OUT"; echo $?; }   # jqa [jq options] <filter>
 
 echo "runner allowlist"
 for bad in "" "bash" "status; bash" 'status $(id)' "status && id" "rm -rf /" "start ../etc" \
@@ -401,6 +402,135 @@ api "youtube-login-start extra"; check "youtube-login-start takes no arguments" 
 python3 -m py_compile "$SERVER/youtube-upload"; check "youtube-upload is valid Python" $?
 OUT="$(env -u YOUTUBE_CLIENT_ID python3 "$SERVER/youtube-upload" /etc/hostname --title t 2>&1)"
 [[ "$OUT" == *"connect YouTube in the cLaudeRC app"* ]]; check "youtube-upload explains missing credentials" $?
+
+echo "google drive backup"
+# Stubs: curl (Google OAuth + Drive, state in $STUB_STATE/drive), claude-backup, crontab ($STUB_STATE/crontab).
+unset GOOGLE_DRIVE_CLIENT_ID GOOGLE_DRIVE_CLIENT_SECRET
+export CLAUDERC_DRIVE_RETRY_WAIT=0
+APILOG_D="$HOME/.local/state/claude-launcher/api.log"
+DS="$STUB_STATE/drive" DCFG="$HOME/.config/claude-launcher" DWORK="$HOME/.local/state/claude-launcher/drive"
+DPASS="correct horse battery staple"
+dwait() { for _ in $(seq 1 80); do api "drive-backup-status"; [[ "$(jq -r .data.state <<<"$OUT")" == running ]] || return 0; sleep 0.25; done; }
+for bad in "drive-status x" "drive-login-start x" "drive-login-poll x" "drive-passphrase secret-pass" "drive-backup now" "drive-backup-status x" \
+  "drive-list x" "drive-logout x" "drive-delete" "drive-delete short" "drive-delete ../../etc/passwd" "drive-delete abcdefghij;id" \
+  "drive-delete abcdefghij extra" "drive-delete $(printf 'a%.0s' {1..81})" "drive-delete abcdefghij.x" "drive-restore" "drive-restore abc/defghijk" \
+  "drive-restore -abcdefghij.." "drive-schedule" "drive-schedule maybe" "drive-schedule on off" "drive-schedule ON"; do
+  api "$bad"
+  check "drive forbidden: '${bad:0:30}'" "$(jqt '.ok==false and .error.code=="forbidden"')"
+done
+api "drive-status"
+check "drive: status before setup" "$(jqt '.ok and .data == {configured:false, connected:false, schedule:"off", last_backup:null, has_passphrase:false}')"
+api "drive-login-start"
+check "drive: not configured names both variables" "$(jqt '.error.code=="not_configured" and (.error.message | contains("GOOGLE_DRIVE_CLIENT_ID") and contains("GOOGLE_DRIVE_CLIENT_SECRET")) and .error.variables==["GOOGLE_DRIVE_CLIENT_ID","GOOGLE_DRIVE_CLIENT_SECRET"]')"
+api "drive-list"; check "drive: list needs the setup too" "$(jqt '.error.code=="not_configured"')"
+api "set-secret GOOGLE_DRIVE_CLIENT_ID" "123456-abcdef.apps.googleusercontent.com"
+api "set-secret GOOGLE_DRIVE_CLIENT_SECRET" "GOCSPX-stub-client-SECRET"
+api "drive-status"; check "drive: configured from the env file, not connected" "$(jqt '.data.configured and (.data.connected|not)')"
+api "drive-backup"; check "drive: backup refused when not connected" "$(jqt '.error.code=="not_logged_in"')"
+api "drive-login-poll"; check "drive: poll without a sign-in in progress" "$(jqt '.error.code=="not_logged_in"')"
+api "drive-login-start"
+check "drive: login start gives url, code, interval, expiry" "$(jqt '.ok and .data == {url:"https://www.google.com/device", code:"ABCD-EFGH", interval:5, expires_in:1800}')"
+[[ "$(cat "$DS/scope")" == https://www.googleapis.com/auth/drive.appdata ]]; check "drive: asks for drive.appdata only" $?
+touch "$DS/poll-pending"
+api "drive-login-poll"; check "drive: poll pending" "$(jqt '.ok and .data.pending')"
+api "drive-login-poll"; check "drive: poll connected" "$(jqt '.ok and .data == {connected:true}')"
+[[ "$(stat -c %a "$DCFG/drive-token.json")" == 600 ]] && jq -e '.refresh_token == "1//stub-refresh-SECRET"' "$DCFG/drive-token.json" >/dev/null
+check "drive: refresh token kept, mode 600" $?
+[[ ! -e "$HOME/.local/state/claude-launcher/drive-login.json" ]]; check "drive: pending sign-in removed" $?
+grep -q "client_secret=GOCSPX-stub-client-SECRET" "$DS/config" && grep -q "device_code=stub-device-code" "$DS/config"
+check "drive: secrets went to curl through its config" $?
+! grep -q SECRET "$DS/argv"; check "drive: no secret in curl's argv" $?
+! grep -q "access_token\|stub-access\|stub-refresh" "$DCFG/env" "$DCFG/services.json" 2>/dev/null; check "drive: no token in the env file" $?
+api "drive-status"; check "drive: status connected" "$(jqt '.data.connected and .data.has_passphrase==false and .data.schedule=="off"')"
+api "drive-backup"; check "drive: backup refused without a passphrase" "$(jqt '.error.code=="not_ready"')"
+api "drive-schedule on"; check "drive: schedule refused without a passphrase" "$(jqt '.error.code=="not_ready"')"
+api "drive-passphrase" "too-short"; check "drive: short passphrase refused" "$(jqt '.error.code=="invalid_name"')"
+api "drive-passphrase" "$(printf 'p%.0s' {1..201})"; check "drive: long passphrase refused" "$(jqt '.error.code=="invalid_name"')"
+[[ ! -e "$DCFG/drive-backup-pass" ]]; check "drive: ...and nothing saved" $?
+api "drive-passphrase" "$DPASS"; check "drive: passphrase saved" "$(jqt '.ok and .data == {saved:true}')"
+[[ "$(stat -c %a "$DCFG/drive-backup-pass")" == 600 && "$(cat "$DCFG/drive-backup-pass")" == "$DPASS" ]]; check "drive: passphrase file 600" $?
+[[ "$OUT" != *horse* ]]; check "drive: passphrase not echoed" $?
+mkdir -p "$DS/files"
+THOST="$(uname -n)"; THOST="${THOST%%.*}"; THOST="${THOST//[^A-Za-z0-9-]/-}"; THOST="${THOST:0:40}"
+# a backup from ANOTHER server sharing the same Drive folder: never deleted by this server's cleanup
+jq -cn '{id:"otherhost01", name:"clauderc-another-server-20260101-000000Z.tar.gz.gpg", size:"4", createdTime:"2025-12-31T00:00:00Z"}' >"$DS/files/otherhost01.json"; echo x >"$DS/files/otherhost01.bin"
+for k in 1 2 3; do
+  jq -cn --arg i "old000000$k" --arg n "clauderc-$THOST-old-$k.tar.gz.gpg" --arg t "2026-01-0${k}T00:00:00Z" '{id:$i, name:$n, size:"4", createdTime:$t}' >"$DS/files/old000000$k.json"
+  echo "old$k" >"$DS/files/old000000$k.bin"
+done
+jq -cn '{id:"otherfile01", name:"notes.txt", size:"1", createdTime:"2025-01-01T00:00:00Z"}' >"$DS/files/otherfile01.json"
+api "drive-list"
+check "drive: list = our backups, newest first" "$(jqt '.ok and (.data | map(.id)) == ["old0000003","old0000002","old0000001","otherhost01"] and .data[0] == {id:"old0000003", name:"clauderc-'"$THOST"'-old-3.tar.gz.gpg", size:4, time:"2026-01-03T00:00:00Z"}')"
+grep -qx "spaces=appDataFolder" "$DS/list-args"; check "drive: list asks appDataFolder only" $?
+api "drive-backup-status"; check "drive: backup status idle" "$(jqt '.ok and .data == {state:"idle"}')"
+echo 1 >"$STUB_STATE/backup-sleep"; echo 1 >"$DS/fail-put"; rm -f "$STUB_STATE/backup-argv"
+api "drive-backup"; check "drive: backup started" "$(jqt '.ok and .data == {started:true}')"
+api "drive-backup-status"; check "drive: status running" "$(jqt '.data.state=="running" and .data.finished==null')"
+api "drive-backup"; check "drive: second backup refused while one runs" "$(jqt '.error.code=="busy"')"
+dwait
+check "drive: backup done" "$(jqt '.data.state=="done" and .data.percent==100 and .data.size==3000000 and (.data.name | test("^clauderc-[A-Za-z0-9-]+-[0-9]{8}-[0-9]{6}Z\\.tar\\.gz\\.gpg$")) and (.data.finished >= .data.started)')"
+DNAME="$(jq -r .data.name <<<"$OUT")"
+grep -q -- "^export --slim --out $DWORK/$DNAME --pass-file $DCFG/drive-backup-pass$" "$STUB_STATE/backup-argv"; check "drive: claude-backup export --slim with --pass-file (logins kept)" $?
+cmp -s "$STUB_STATE/backup-export-pass" "$DCFG/drive-backup-pass"; check "drive: export read the saved passphrase" $?
+jq -e --arg n "$DNAME" '. == {name:$n, parents:["appDataFolder"]}' "$DS/upload-meta" >/dev/null; check "drive: resumable upload with the right metadata" $?
+[[ "$(wc -l <"$DS/put-count")" == 2 ]]; check "drive: a failed PUT is retried once" $?
+[[ "$(cat "$DS/deleted")" == old0000001 && -f "$DS/files/otherfile01.json" ]]; check "drive: only the oldest of ours beyond 3 deleted, other files untouched" $?
+[[ -f "$DS/files/otherhost01.json" ]]; check "drive: another server's backup in the same folder is never deleted" $?
+[[ -z "$(find "$DWORK" -name '*.gpg' 2>/dev/null)" ]]; check "drive: temp file removed" $?
+! grep -rq "SECRET\|stub-session" "$DWORK"; check "drive: no token or upload session left on disk" $?
+[[ "$(stat -c %a "$DWORK")" == 700 ]]; check "drive: work folder 700" $?
+api "drive-status"; check "drive: status shows the last backup" "$(jqa --arg n "$DNAME" '.data.last_backup.name==$n and .data.last_backup.size==3000000 and .data.has_passphrase')"
+api "drive-list"; check "drive: the new backup is listed first" "$(jqa --arg n "$DNAME" '(.data | length)==4 and .data[0].name==$n')"
+DNEW="$(jq -r '.data[0].id' <<<"$OUT")"
+echo 0 >"$STUB_STATE/backup-sleep"; touch "$STUB_STATE/backup-fail-export"
+api "drive-backup"; dwait
+check "drive: a failed export is reported" "$(jqt '.data.state=="failed" and .data.phase=="export" and (.data.message | contains("out of disk space"))')"
+[[ -z "$(find "$DWORK" -name '*.gpg' 2>/dev/null)" ]]; check "drive: ...and its temp file removed" $?
+rm -f "$STUB_STATE/backup-fail-export"
+"$HOME/bin/claude-setup.sh" --drive-backup-run >/dev/null 2>&1
+api "drive-backup-status"; check "drive: the cron entry point runs a backup" "$(jqt '.data.state=="done"')"
+grep -rq "SECRET\|horse\|stub-session" "$APILOG_D"; [[ $? -ne 0 ]]; check "drive: no token, secret or passphrase in api.log" $?
+! grep -q "horse\|stub-session" "$DS/argv"; check "drive: passphrase and upload session not in curl's argv" $?
+api "drive-delete otherfile01"; check "drive: a file that isn't ours can't be deleted" "$(jqt '.error.code=="invalid_name"')"
+[[ -f "$DS/files/otherfile01.json" ]]; check "drive: ...and is still there" $?
+api "drive-delete $DNEW"; check "drive: delete" "$(jqt '.ok and .data.deleted')"
+[[ ! -e "$DS/files/$DNEW.json" ]]; check "drive: ...gone from Drive" $?
+api "drive-list"; DID="$(jq -r '.data[0].id' <<<"$OUT")"; DIDNAME="$(jq -r '.data[0].name' <<<"$OUT")"
+had_backups=0; [[ -d "$HOME/backups" ]] && had_backups=1
+api "drive-restore $DID"
+DP1="$(jq -r .data.path <<<"$OUT")"
+check "drive: restore replies the path and the command" "$(jqa --arg p "$HOME/backups/$DIDNAME" --arg f "$DCFG/drive-backup-pass" '.ok and .data.path==$p and .data.command==("claude-backup import " + $p + " --pass-file " + $f)')"
+[[ "$(stat -c %a "$HOME/backups")" == 700 && "$(stat -c %a "$DP1")" == 600 ]] && cmp -s "$DP1" "$DS/files/$DID.bin"; check "drive: download 700/600 with the right content" $?
+api "drive-restore $DID"; DP2="$(jq -r .data.path <<<"$OUT")"
+[[ "$DP2" == "$HOME/backups/${DIDNAME%.tar.gz.gpg}-1.tar.gz.gpg" && -f "$DP1" && -f "$DP2" ]]; check "drive: a second restore never overwrites" $?
+[[ -z "$(find "$HOME/backups" -name '.drive-download.*')" ]]; check "drive: no partial download left" $?
+rm -f "$DP1" "$DP2"; ((had_backups)) || rmdir "$HOME/backups"
+api "drive-restore otherfile01"; check "drive: restore only our files" "$(jqt '.error.code=="invalid_name"')"
+echo "0 1 * * * echo mine" >"$STUB_STATE/crontab"
+api "drive-schedule on"; check "drive: schedule on" "$(jqt '.ok and .data.schedule=="daily"')"
+cp "$STUB_STATE/crontab" "$WORK/crontab.1"
+api "drive-schedule on"; check "drive: schedule on again" "$(jqt '.data.schedule=="daily"')"
+cmp -s "$STUB_STATE/crontab" "$WORK/crontab.1" && [[ "$(grep -c '# clauderc-drive-backup$' "$STUB_STATE/crontab")" == 1 ]] && grep -qx "0 1 \* \* \* echo mine" "$STUB_STATE/crontab"
+check "drive: exactly one marked crontab line, others kept, idempotent" $?
+grep -q "^[0-9]* 3 \* \* \* '$HOME/bin/claude-setup.sh' --drive-backup-run >/dev/null 2>&1 # clauderc-drive-backup$" "$STUB_STATE/crontab"; check "drive: the line runs the backup daily at 3" $?
+api "drive-status"; check "drive: status schedule daily" "$(jqt '.data.schedule=="daily"')"
+api "drive-schedule off"; api "drive-schedule off"; check "drive: schedule off (twice)" "$(jqt '.ok and .data.schedule=="off"')"
+[[ "$(cat "$STUB_STATE/crontab")" == "0 1 * * * echo mine" ]]; check "drive: off removes only our line" $?
+rm -f "$STUB_STATE/crontab"
+api "drive-schedule off"; check "drive: off without a crontab" "$(jqt '.ok and .data.schedule=="off"')"
+[[ ! -e "$STUB_STATE/crontab" ]]; check "drive: ...doesn't create one" $?
+api "drive-schedule on"; [[ "$(grep -c clauderc-drive-backup "$STUB_STATE/crontab")" == 1 ]]; check "drive: on creates a missing crontab" $?
+api "drive-logout"; check "drive: logout" "$(jqt '.ok and .data.disconnected')"
+[[ "$(cat "$DS/revoked")" == "1//stub-refresh-SECRET" && ! -e "$DCFG/drive-token.json" ]]; check "drive: token revoked and removed" $?
+! grep -q clauderc-drive-backup "$STUB_STATE/crontab"; check "drive: logout turns the schedule off" $?
+api "drive-status"; check "drive: disconnected, passphrase kept" "$(jqt '(.data.connected|not) and .data.has_passphrase and .data.schedule=="off"')"
+echo '{"refresh_token":"1//revoked-one"}' >"$DCFG/drive-token.json"
+api "drive-list"; check "drive: a revoked login asks to connect again" "$(jqt '.error.code=="not_logged_in" and (.error.message | contains("connect Google Drive again"))')"
+rm -f "$DCFG/drive-token.json"
+api "drive-passphrase" ""; check "drive: empty passphrase forgets it" "$(jqt '.ok and .data.removed')"
+[[ ! -e "$DCFG/drive-backup-pass" ]]; check "drive: ...file deleted" $?
+api "remove-secret GOOGLE_DRIVE_CLIENT_ID"; api "remove-secret GOOGLE_DRIVE_CLIENT_SECRET"
+unset CLAUDERC_DRIVE_RETRY_WAIT
 
 echo "mcp, plugins, disconnect"
 mkdir -p "$HOME/.cache/claude-launcher"
