@@ -33,6 +33,9 @@ import kotlinx.serialization.json.jsonPrimitive
 import life.mygig.clauderc.api.ApiException
 import life.mygig.clauderc.api.ChatTask
 import life.mygig.clauderc.api.ChatWorker
+import life.mygig.clauderc.api.ChatHost
+import life.mygig.clauderc.api.Host
+import life.mygig.clauderc.api.HostProbe
 import life.mygig.clauderc.api.ClusterAccount
 import life.mygig.clauderc.api.ClusterConfig
 import life.mygig.clauderc.data.Server
@@ -347,6 +350,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _chatPinNeeded.value = null
         _chatWorkers.value = null
         _chatTasks.value = emptyList()
+        _chatHosts.value = null
     }
 
     /** App went to the background: forget the PIN; the chat asks again on return. */
@@ -724,6 +728,53 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun closeWorkerLogin() { _workerLogin.value = null }
     fun showWorkerRuns(name: String) = action("Loading runs…") { _workerRuns.value = name to api.workerRuns(name).runs }
     fun closeWorkerRuns() { _workerRuns.value = null }
+
+    // Hosts: web servers chats can work on (docs/hosts-design.md).
+    private val _hosts = MutableStateFlow<List<Host>?>(null)
+    val hosts = _hosts.asStateFlow()
+    /** The Add host dialog: open, the probed host key to confirm, and the server's last error shown in it. */
+    private val _hostAddOpen = MutableStateFlow(false)
+    val hostAddOpen = _hostAddOpen.asStateFlow()
+    private val _hostProbe = MutableStateFlow<HostProbe?>(null)
+    val hostProbe = _hostProbe.asStateFlow()
+    private val _hostError = MutableStateFlow<String?>(null)
+    val hostError = _hostError.asStateFlow()
+    fun loadHosts() = action("Loading servers…") { _hosts.value = api.hostList().hosts }
+    fun openHostAdd() { _hostProbe.value = null; _hostError.value = null; _hostAddOpen.value = true }
+    fun closeHostAdd() { _hostAddOpen.value = false; _hostProbe.value = null; _hostError.value = null }
+    /** Address or port changed after Check: the shown key no longer applies. */
+    fun clearHostProbe() { _hostProbe.value = null }
+    fun probeHost(address: String, port: Int) {
+        _hostProbe.value = null
+        _hostError.value = null
+        action("Checking $address…", onError = { _hostError.value = friendly(it).first }) { _hostProbe.value = api.hostProbe(address, port) }
+    }
+    fun addHost(name: String, address: String, port: Int, user: String, fingerprint: String, auth: String, secret: String) {
+        _hostError.value = null
+        action("Adding $name…", onError = { _hostError.value = friendly(it).first }) {
+            api.hostAdd(name, address, port, user, fingerprint, auth, secret)
+            closeHostAdd()
+            say("$name added.")
+            _hosts.value = api.hostList().hosts
+        }
+    }
+    fun testHost(name: String) = action("Testing $name…") { api.hostTest(name); say("$name: connection works.") }
+    fun removeHost(name: String) = action("Removing $name…") {
+        api.hostRemove(name)
+        _hosts.value = api.hostList().hosts
+    }
+
+    /** The open chat's hosts (attached or not); null until loaded. */
+    private val _chatHosts = MutableStateFlow<List<ChatHost>?>(null)
+    val chatHosts = _chatHosts.asStateFlow()
+    fun loadChatHosts() {
+        val s = _chatSession.value ?: return
+        action("Loading servers…") { _chatHosts.value = api.hostSession(s).hosts }
+    }
+    fun attachHost(name: String, on: Boolean) {
+        val s = _chatSession.value ?: return
+        action("Saving…") { api.hostAttach(s, name, on); _chatHosts.value = api.hostSession(s).hosts }
+    }
 
 
     fun disconnect(id: String, name: String) = action("Disconnecting $name…") {

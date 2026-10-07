@@ -167,7 +167,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                     val st by vm.status.collectAsState()
                     var showCluster by remember { mutableStateOf(false) }
                     if ((st?.scriptApi ?: 0) >= life.mygig.clauderc.api.Updates.MIN_SCRIPT_API && pinNeeded == null) {
-                        TextButton(onClick = { showCluster = true; vm.loadChatWorkers() }) { Text("👥", fontSize = 20.sp) }
+                        TextButton(onClick = { showCluster = true; vm.loadChatWorkers(); vm.loadChatHosts() }) { Text("👥", fontSize = 20.sp) }
                     }
                     if (showCluster) ChatClusterSheet(vm, onClose = { showCluster = false })
                     TextButton(onClick = { speak = !speak }) { Text(if (speak) "🔊" else "🔈", fontSize = 20.sp) }
