@@ -334,29 +334,53 @@ private fun HostAddDialog(vm: MainViewModel) {
     var keyFile by remember { mutableStateOf<String?>(null) }   // base64 of a picked key file
     var password by remember { mutableStateOf("") }
     var fileError by remember { mutableStateOf<String?>(null) }
+    // "Use existing key" at the top: the owner's own key, imported as the pending key (shown like a generated one).
+    var importOpen by remember { mutableStateOf(false) }
+    var importText by remember { mutableStateOf("") }
+    var importFile by remember { mutableStateOf<String?>(null) }
+    var importFileError by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val pickKey = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
-            if (bytes == null || bytes.isEmpty() || bytes.size > 20_000) {
+            val b64 = keyFileBase64(context, uri)
+            if (b64 == null) {
                 fileError = "That file couldn't be read (or it's over 20 KB)."
             } else {
-                keyFile = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                keyFile = b64
                 keyText = ""
                 fileError = null
+            }
+        }
+    }
+    val pickImport = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val b64 = keyFileBase64(context, uri)
+            if (b64 == null) {
+                importFileError = "That file couldn't be read (or it's over 20 KB)."
+            } else {
+                importFile = b64
+                importText = ""
+                importFileError = null
             }
         }
     }
     val portNum = port.toIntOrNull()
     val addressOk = hostAddressOk(address) && portNum != null && portNum in 1..65535
     val p = probe
-    val generated = hostKey?.takeIf { it.first == name }?.second   // made for this name only
-    LaunchedEffect(generated) { if (generated != null) auth = "generated" }
+    val generated = hostKey?.takeIf { it.first == name }?.second   // made (or imported) for this name only
+    LaunchedEffect(generated) {
+        if (generated != null) { auth = "generated"; importOpen = false; importText = ""; importFile = null; importFileError = null }
+    }
+    val importSecret = when {
+        importFile != null -> importFile!!
+        importText.isNotBlank() -> keyTextBase64(importText)
+        else -> ""
+    }
     val secret = when {
         auth == "generated" -> if (generated != null) "-" else ""
         auth == "password" -> password
         keyFile != null -> keyFile!!
-        keyText.isNotBlank() -> Base64.encodeToString((keyText.trim() + "\n").toByteArray(), Base64.NO_WRAP)
+        keyText.isNotBlank() -> keyTextBase64(keyText)
         else -> ""
     }
     val canSave = p != null && confirmed && HOST_NAME_RE.matches(name) && HOST_USER_RE.matches(user) && secret.isNotEmpty() && busy == null
@@ -378,11 +402,32 @@ private fun HostAddDialog(vm: MainViewModel) {
                 )
                 if (generated == null) {
                     Text(
-                        "Need a public key for your provider first (e.g. OVH)? Generate it, copy it, then fill in the rest.",
+                        "Need a public key for your provider first (e.g. OVH)? Generate a new key or use one you have, copy its public key, then fill in the rest.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    OutlinedButton(onClick = { vm.generateHostKey(name) }, enabled = HOST_NAME_RE.matches(name) && busy == null, modifier = Modifier.fillMaxWidth()) {
-                        Text("Generate public key")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { importOpen = false; vm.generateHostKey(name) }, enabled = HOST_NAME_RE.matches(name) && busy == null, modifier = Modifier.weight(1f)) {
+                            Text("Generate new key")
+                        }
+                        OutlinedButton(onClick = { importOpen = !importOpen }, enabled = busy == null, modifier = Modifier.weight(1f)) {
+                            Text("Use existing key")
+                        }
+                    }
+                    if (importOpen) {
+                        OutlinedTextField(
+                            value = importText, onValueChange = { importText = it; importFile = null }, label = { Text("Your private key (paste)") },
+                            maxLines = 4, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                        )
+                        OutlinedButton(onClick = { pickImport.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (importFile != null) "Key file chosen ✓" else "Or choose a key file")
+                        }
+                        importFileError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                        Text("Keys with a passphrase aren't supported. The key is kept on this server only and never shown again.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Button(
+                            onClick = { vm.importHostKey(name, importSecret) },
+                            enabled = HOST_NAME_RE.matches(name) && importSecret.isNotEmpty() && busy == null, modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Use this key") }
                     }
                 } else {
                     SelectionContainer(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)).padding(8.dp)) {
@@ -427,12 +472,12 @@ private fun HostAddDialog(vm: MainViewModel) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilterChip(selected = auth == "key", onClick = { auth = "key" }, label = { Text("Key") })
                             FilterChip(selected = auth == "password", onClick = { auth = "password" }, label = { Text("Password") })
-                            FilterChip(selected = auth == "generated", onClick = { auth = "generated" }, label = { Text("Generated key") })
+                            FilterChip(selected = auth == "generated", onClick = { auth = "generated" }, label = { Text("Key above") })
                         }
                         if (auth == "generated") {
                             Text(
-                                if (generated == null) "Generate the public key at the top first (this server makes a key pair for $name)."
-                                else "Signs in with the key generated above. Put its public key on the server before you Save.",
+                                if (generated == null) "Generate a new key or use an existing one at the top first."
+                                else "Signs in with the key shown above. Put its public key on the server before you Save.",
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         } else if (auth == "key") {
@@ -461,6 +506,16 @@ private fun HostAddDialog(vm: MainViewModel) {
         },
     )
 }
+
+/** A picked private key file as base64 on one line, or null if it can't be read or is over 20 KB. */
+private fun keyFileBase64(context: android.content.Context, uri: android.net.Uri): String? {
+    val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+    if (bytes == null || bytes.isEmpty() || bytes.size > 20_000) return null
+    return Base64.encodeToString(bytes, Base64.NO_WRAP)
+}
+
+/** A pasted private key as base64 on one line (ssh wants the final newline). */
+private fun keyTextBase64(text: String): String = Base64.encodeToString((text.trim() + "\n").toByteArray(), Base64.NO_WRAP)
 
 /** "Set up this server": host-harden opens the ports and runs the chosen steps (idempotent, safe to re-run). */
 @Composable

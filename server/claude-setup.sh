@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden.
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport.
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=41
+SCRIPT_API=42
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -1665,7 +1665,7 @@ do_host_keygen() {
   [[ ! -e "$HOSTS_DIR/$name" ]] || api_err invalid_name "A host named $name already exists. Remove it first, or pick another name."
   host_keygen_cleanup
   d="$HOSTS_DIR/.keygen-$name"
-  if [[ -f "$d/key" ]] && pub="$(ssh-keygen -y -P '' -f "$d/key" 2>/dev/null)" && [[ -n "$pub" ]]; then
+  if [[ -f "$d/key" && ! -e "$d/imported" ]] && pub="$(ssh-keygen -y -P '' -f "$d/key" 2>/dev/null)" && [[ -n "$pub" ]]; then
     touch "$d"   # still in use: not cleaned up for another 24 h
   else
     rm -rf -- "$d"
@@ -1680,8 +1680,50 @@ do_host_keygen() {
   api_ok "$(jq -cn --arg k "$pub" --arg f "$fp" '{public_key:$k, fingerprint:$f}')"
 }
 
+# host-keyimport <name>: stdin = the owner's own private key (base64, one line). Stored as the pending key, like host-keygen's
+# (marked imported, so host-keygen makes a new one instead of returning it); host-add ... generated uses it. Returns only the public half.
+do_host_keyimport() {
+  local name="${1:-}" secret tmp d pub fp
+  secret="$(read_secret_line)"
+  exec 0</dev/null
+  [[ $# -eq 1 ]] || bad_args "usage: host-keyimport <name>"
+  host_check "$name"
+  need ssh-keygen
+  umask 077
+  mkdir -p "$HOSTS_DIR" && chmod 700 "$HOSTS_DIR" || api_err internal "Couldn't create the hosts folder."
+  [[ ! -e "$HOSTS_DIR/$name" ]] || api_err invalid_name "A host named $name already exists. Remove it first, or pick another name."
+  host_keygen_cleanup
+  secret="${secret//[[:space:]]/}"
+  [[ -n "$secret" ]] || api_err invalid_key "The key is missing."
+  [[ "$secret" =~ ^[A-Za-z0-9+/=]{20,30000}$ ]] || api_err invalid_key "The key must be sent as base64."
+  HOST_TMP="$(mktemp -d "$HOSTS_DIR/.new-$name.XXXXXX")" || api_err internal "Couldn't create a temporary folder."
+  tmp="$HOST_TMP"
+  trap 'rc=$?; [[ -n "${HOST_TMP:-}" ]] && rm -rf -- "$HOST_TMP"; (exit $rc); on_exit' EXIT
+  trap 'exit 1' HUP INT TERM
+  printf '%s' "$secret" | base64 -d >"$tmp/key" 2>/dev/null || host_fail invalid_key "The key isn't valid base64."
+  unset secret
+  [[ -z "$(tail -c 1 "$tmp/key")" ]] || echo >>"$tmp/key"
+  chmod 600 "$tmp/key"
+  if ! pub="$(ssh-keygen -y -P '' -f "$tmp/key" 2>"$tmp/err")"; then
+    grep -qi passphrase "$tmp/err" &&
+      host_fail invalid_key "That key is protected with a passphrase. Use a key without one (or remove it: ssh-keygen -p)."
+    host_fail invalid_key "That isn't a private key ssh can read."
+  fi
+  pub="$(awk 'NR == 1 {print $1, $2}' <<<"$pub")"
+  fp="$(ssh-keygen -lf /dev/stdin <<<"$pub" 2>/dev/null | awk 'NR == 1 {print $2}')"
+  [[ "$pub" =~ ^[a-z0-9@.-]+[[:space:]][A-Za-z0-9+/=]+$ && "$fp" =~ $HOST_FP_RE ]] || host_fail invalid_key "That isn't a private key ssh can read."
+  rm -f "$tmp/err"
+  : >"$tmp/imported"
+  d="$HOSTS_DIR/.keygen-$name"
+  rm -rf -- "$d"
+  mv -T "$tmp" "$d" || host_fail internal "Couldn't save the key."
+  HOST_TMP=""
+  chmod 700 "$d"; chmod 600 "$d/key"
+  api_ok "$(jq -cn --arg k "$pub" --arg f "$fp" '{public_key:$k, fingerprint:$f}')"
+}
+
 # host-add <name>: stdin = address, port, user, fingerprint, auth (key|password|generated), secret (base64 private key, the
-# password, or any placeholder for generated: the key from host-keygen). A password is only used to install a key this server
+# password, or any placeholder for generated: the key from host-keygen or host-keyimport). A password is only used to install a key this server
 # makes; nothing stores it. Nothing is saved unless key login works; a generated key stays pending until it does.
 do_host_add() {
   local name="${1:-}" addr port user fp auth secret tmp line l
@@ -1701,7 +1743,7 @@ do_host_add() {
   [[ ! -e "$HOSTS_DIR/$name" ]] || api_err invalid_name "A host named $name already exists. Remove it first (projects attached to it would otherwise get a different server)."
   find "$HOSTS_DIR" -maxdepth 1 -name '.new-*' -mmin +10 -exec rm -rf -- {} + 2>/dev/null || true   # left by an interrupted add (may hold a password)
   host_keygen_cleanup
-  [[ "$auth" != generated || -f "$HOSTS_DIR/.keygen-$name/key" ]] || api_err invalid_name "Generate the key first."
+  [[ "$auth" != generated || -f "$HOSTS_DIR/.keygen-$name/key" ]] || api_err invalid_name "Generate or import the key first."
   HOST_TMP="$(mktemp -d "$HOSTS_DIR/.new-$name.XXXXXX")" || api_err internal "Couldn't create a temporary folder."
   tmp="$HOST_TMP"
   trap 'rc=$?; [[ -n "${HOST_TMP:-}" ]] && rm -rf -- "$HOST_TMP"; (exit $rc); on_exit' EXIT
@@ -1719,7 +1761,7 @@ do_host_add() {
 
   if [[ "$auth" == generated ]]; then
     unset secret
-    cp "$HOSTS_DIR/.keygen-$name/key" "$tmp/key" && chmod 600 "$tmp/key" || host_fail internal "Couldn't read the generated key."
+    cp "$HOSTS_DIR/.keygen-$name/key" "$tmp/key" && chmod 600 "$tmp/key" || host_fail internal "Couldn't read the pending key."
   elif [[ "$auth" == key ]]; then
     secret="${secret//[[:space:]]/}"
     [[ "$secret" =~ ^[A-Za-z0-9+/=]{20,30000}$ ]] || host_fail invalid_key "The key must be sent as base64."
@@ -4367,7 +4409,7 @@ api_main() {
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | set-secret-file | login-keystore | login-apple | youtube-login-start | \
       chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
-      migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | host-probe | host-add | host-harden) ;;  # these read stdin
+      migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | host-probe | host-add | host-keyimport | host-harden) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -4427,6 +4469,7 @@ api_main() {
     host-list)           [[ $# -eq 0 ]] || bad_args "host-list takes no arguments"; do_host_list ;;
     host-probe)          [[ $# -eq 0 ]] || bad_args "host-probe reads the address on stdin"; do_host_probe ;;
     host-keygen)         do_host_keygen "$@" ;;
+    host-keyimport)      do_host_keyimport "$@" ;;
     host-add)            do_host_add "$@" ;;
     host-test)           do_host_test "$@" ;;
     host-harden)         do_host_harden "$@" ;;

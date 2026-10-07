@@ -753,6 +753,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _hostError.value = null
         action("Generating a key…", onError = { _hostError.value = friendly(it).first }) { _hostKey.value = name to api.hostKeygen(name) }
     }
+    fun importHostKey(name: String, keyBase64: String) {
+        _hostKey.value = null
+        _hostError.value = null
+        action("Importing the key…", onError = { _hostError.value = friendly(it).first }) { _hostKey.value = name to api.hostKeyImport(name, keyBase64) }
+    }
     /** Address or port changed after Check: the shown key no longer applies. */
     fun clearHostProbe() { _hostProbe.value = null }
     fun probeHost(address: String, port: Int) {

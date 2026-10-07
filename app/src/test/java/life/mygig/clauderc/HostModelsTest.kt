@@ -6,6 +6,7 @@ import life.mygig.clauderc.api.HOST_FINGERPRINT_RE
 import life.mygig.clauderc.api.HOST_NAME_RE
 import life.mygig.clauderc.api.HOST_USER_RE
 import life.mygig.clauderc.api.HostHardenResult
+import life.mygig.clauderc.api.HostKey
 import life.mygig.clauderc.api.HostProbe
 import life.mygig.clauderc.api.HostsData
 import life.mygig.clauderc.api.hostAddressOk
@@ -36,6 +37,12 @@ class HostModelsTest {
         val s = json.decodeFromString<ChatHostsData>("""{"hosts":[{"name":"shop","address":"example.com","user":"deploy","attached":true},{"name":"blog"}]}""")
         assertTrue(s.hosts[0].attached)
         assertFalse(s.hosts[1].attached)
+    }
+
+    @Test fun parsesImportedKey() {   // host-keyimport: the key's own type, no comment
+        val k = json.decodeFromString<HostKey>("""{"public_key":"ssh-rsa AAAAB3NzaC1yc2E","fingerprint":"SHA256:abc"}""")
+        assertEquals("ssh-rsa AAAAB3NzaC1yc2E", k.publicKey)
+        assertEquals("SHA256:abc", k.fingerprint)
     }
 
     @Test fun parsesHardenResult() {

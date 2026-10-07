@@ -852,7 +852,7 @@ for bad in "host-keygen" "host-keygen Gen" "host-keygen ../x" "host-keygen a b";
   api "$bad"; check "forbidden: $bad" "$(jqt '.ok==false and .error.code=="forbidden"')"
 done
 api "host-add gen" "$(add_in web.example.com 22 deploy "$HFP" generated -)"
-check "add generated before host-keygen is refused" "$(jqt '.ok==false and (.error.message | test("Generate the key first"))')"
+check "add generated before host-keygen is refused" "$(jqt '.ok==false and (.error.message | test("Generate or import the key first"))')"
 nothing_new gen; check "...nothing saved" $?
 api "host-keygen web"
 check "keygen for an existing host is refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
@@ -880,6 +880,41 @@ api "host-keygen gen2"
 [[ ! -e "$HD/.keygen-old" && -f "$HD/.keygen-gen2/key" ]]; check "pending keys older than 24 h are cleaned up" $?
 rm -rf "$HD/.keygen-gen2"
 api "host-remove gen"
+# The owner's own key, imported as the pending key (stdin = the private key as base64).
+for bad in "host-keyimport" "host-keyimport Imp" "host-keyimport ../x" "host-keyimport a b"; do
+  api "$bad"; check "forbidden: $bad" "$(jqt '.ok==false and .error.code=="forbidden"')"
+done
+ssh-keygen -q -t rsa -b 2048 -N '' -C 'someone@laptop' -f "$WORK/impkey" </dev/null
+IPRIV="$(sed -n 2p "$WORK/impkey")"
+api "host-keyimport web" "$(base64 -w0 "$WORK/impkey")"
+check "keyimport for an existing host is refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "host-keyimport imp" "$(base64 -w0 "$WORK/lockedkey")"
+check "keyimport: a passphrase key is refused with a clear message" "$(jqt '.ok==false and .error.code=="invalid_key" and (.error.message | test("passphrase"))')"
+api "host-keyimport imp" "$(printf 'not a private key at all' | base64 -w0)"
+check "keyimport: not a key refused" "$(jqt '.ok==false and .error.code=="invalid_key" and (.error.message | test("isn.t a private key"))')"
+api "host-keyimport imp" "not base64!"
+check "keyimport: not base64 refused" "$(jqt '.ok==false and .error.code=="invalid_key"')"
+api "host-keyimport imp" ""
+check "keyimport: no key refused" "$(jqt '.ok==false and .error.code=="invalid_key"')"
+[[ ! -e "$HD/.keygen-imp" && -z "$(find "$HD" -maxdepth 1 -name '.new-*' 2>/dev/null)" ]]; check "...nothing kept after any of those" $?
+api "host-keyimport imp" "$(base64 -w0 "$WORK/impkey")"
+check "keyimport returns the public key and its fingerprint" "$(jqt ".ok and .data.public_key == \"$(ssh-keygen -y -f "$WORK/impkey" | awk '{print $1, $2}')\" and .data.fingerprint == \"$(ssh-keygen -lf "$WORK/impkey.pub" | awk '{print $2}')\"")"
+IPUB="$(jq -r .data.public_key <<<"$OUT")"
+cmp -s "$HD/.keygen-imp/key" "$WORK/impkey" && [[ "$(stat -c %a "$HD/.keygen-imp")" == 700 && "$(stat -c %a "$HD/.keygen-imp/key")" == 600 ]]
+check "...stored as the pending key (folder 700, key 600)" $?
+! grep -qF -e "$IPRIV" -e "PRIVATE KEY" <<<"$OUT" && ! grep -qF -e "$IPRIV" -e "PRIVATE KEY" -e "$(base64 -w0 "$WORK/impkey" | cut -c40-80)" "$ALOG"
+check "no private key text in the reply or api.log" $?
+api "host-keygen imp"
+check "keygen after an import makes a new key" "$(jqt '.ok and (.data.public_key | test("^ssh-ed25519 [A-Za-z0-9+/=]+ clauderc-host-imp$"))')"
+api "host-keyimport imp" "$(base64 -w0 "$WORK/impkey")"
+check "importing again replaces the pending key" "$(jqt ".ok and .data.public_key == \"$IPUB\"")"
+cmp -s "$HD/.keygen-imp/key" "$WORK/impkey"; check "...with the imported key" $?
+echo "$IPUB" >>"$STUB_STATE/remote/.ssh/authorized_keys"
+api "host-add imp" "$(add_in web.example.com 22 deploy "$HFP" generated -)"
+check "add generated uses the imported key" "$(jqt '.ok and .data.saved=="imp"')"
+cmp -s "$HD/imp/key" "$WORK/impkey" && [[ "$(ls -A "$HD/imp" | sort | tr '\n' ' ')" == "key known_hosts meta.json " && ! -e "$HD/.keygen-imp" ]]
+check "...saved with that key, pending folder gone" $?
+api "host-remove imp"
 
 api "host-test web"
 check "host-test ok" "$(jqt '.ok and .data.ok')"
