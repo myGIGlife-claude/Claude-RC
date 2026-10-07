@@ -81,7 +81,8 @@ def tool(name, **args):
 r = rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}})["result"]
 assert r["serverInfo"]["name"] == "clauderc-team" and "list_workers" in r["instructions"], r
 assert {t["name"] for t in rpc("tools/list")["result"]["tools"]} == {"list_workers", "delegate", "wait", "reply", "review", "merge", "discard",
-                                                                       "list_hosts", "host_run", "host_put", "host_get"}
+                                                                       "list_hosts", "host_run", "host_put", "host_get", "host_firewall"}
+assert "host_firewall" in r["instructions"] and "127.0.0.1" in r["instructions"], r["instructions"]
 
 # Nothing is attached to this project yet: no workers visible, none usable.
 err, text = tool("list_workers")
@@ -256,6 +257,34 @@ for bad in ("../outside", "/etc/passwd", "escape/passwd", str(tmp / "repo")):
     assert err and "inside this project" in text, (bad, text)
 err, text = tool("host_put", host="other", local_path="index.html", remote_path="x")
 assert err and "isn't attached" in text, text
+# Firewall: ufw through sudo -n on the host (the ufw and sudo stubs; rules in $STUB_STATE/ufw-rules).
+for h in ("other", "ghost", None):
+    err, text = tool("host_firewall", host=h, action="status")
+    assert err and "isn't attached" in text, (h, text)
+err, text = tool("host_firewall", host="web", action="status")
+assert err and "passwordless sudo" in text, text                 # the sudo stub asks for a password by default
+(stub / "sudo-mode").write_text("nopasswd\n")
+err, text = tool("host_firewall", host="web", action="open", port=8080)
+assert not err and "Status: active" in text and "8080/tcp" in text, text
+err, text = tool("host_firewall", host="web", action="open", port="51820", proto="udp")
+assert not err and "51820/udp" in text, text
+assert (stub / "ufw-rules").read_text().split() == ["8080/tcp", "51820/udp"], (stub / "ufw-rules").read_text()
+assert "ufw allow 8080/tcp" in (stub / "sudo-argv").read_text(), (stub / "sudo-argv").read_text()
+err, text = tool("host_firewall", host="web", action="close", port=8080)
+assert not err and "8080/tcp" not in text and "51820/udp" in text, text
+err, text = tool("host_firewall", host="web", action="status")
+assert not err and text.startswith("Status: active") and "51820/udp" in text, text
+err, text = tool("host_firewall", host="web", action="close", port=22)
+assert err and "SSH port" in text, text
+for bad in ({"action": "open"}, {"action": "open", "port": 0}, {"action": "open", "port": 70000}, {"action": "open", "port": "80;id"},
+            {"action": "open", "port": True}, {"action": "open", "port": 80, "proto": "sctp"}, {"action": "open", "port": 80, "proto": "tcp;id"},
+            {"action": "reset"}, {}):
+    before = (stub / "ufw-log").read_text()
+    err, text = tool("host_firewall", host="web", **bad)
+    assert err and ("port" in text or "proto" in text or "action" in text), (bad, text)
+    assert (stub / "ufw-log").read_text() == before, bad
+assert "22/tcp" not in (stub / "ufw-rules").read_text()
+(stub / "sudo-mode").unlink()
 # Broken settings never reach ssh.
 (hosts / "web" / "meta.json").write_text(json.dumps({"address": "-oProxyCommand=x", "port": 22, "user": "deploy"}))
 err, text = tool("host_run", host="web", command="true")

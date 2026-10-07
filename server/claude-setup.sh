@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated.
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden.
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=40
+SCRIPT_API=41
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -1782,6 +1782,308 @@ do_host_test() {
   fi
   rm -f "$err"
   api_ok '{"ok":true}'
+}
+
+# host-harden <name>: stdin = ports to open (e.g. 80,443,8080/tcp,51820/udp; may be empty), steps (harden,optimize,web; may
+# be empty). Runs host_harden_script on the host as root (sudo -n), then proves a NEW key login still works before it cancels
+# the automatic undo the script scheduled (docs/hosts-design.md "Set up and harden").
+HOST_HARDEN_WAIT="${CLAUDERC_HARDEN_WAIT:-130}"   # seconds to wait for the undo after a failed check (it fires 120 s after it was set)
+do_host_harden() {
+  local name="${1:-}" pline sline p n proto ports="" steps="" s count=0 tmp rc cmd pre root_or_sudo
+  pline="$(read_secret_line)"; sline="$(read_secret_line)"
+  exec 0</dev/null
+  [[ $# -eq 1 ]] || bad_args "usage: host-harden <name>"
+  host_exists "$name"
+  host_meta_target "$name"
+  pline="${pline//[[:space:]]/}" sline="${sline//[[:space:]]/}"
+  local -A pseen=()
+  local -a plist=() slist=()
+  if [[ -n "$pline" ]]; then
+    IFS=, read -ra plist <<<"$pline"
+    for p in "${plist[@]}"; do
+      [[ -n "$p" ]] || continue
+      [[ "$p" =~ ^([0-9]{1,5})(/(tcp|udp))?$ ]] && n=$((10#${BASH_REMATCH[1]})) && ((n >= 1 && n <= 65535)) ||
+        api_err invalid_name "'${p:0:20}' isn't a port: use a number 1-65535, optionally /tcp or /udp (e.g. 8080 or 51820/udp)."
+      proto="${BASH_REMATCH[3]:-tcp}"
+      [[ -n "${pseen[$n/$proto]:-}" ]] && continue
+      pseen[$n/$proto]=1; ports+="${ports:+,}$n/$proto"; count=$((count + 1))
+      ((count <= 20)) || api_err invalid_name "At most 20 ports at a time."
+    done
+  fi
+  if [[ -n "$sline" ]]; then
+    IFS=, read -ra slist <<<"$sline"
+    for s in "${slist[@]}"; do
+      [[ -n "$s" ]] || continue
+      [[ "$s" == harden || "$s" == optimize || "$s" == web ]] || api_err invalid_name "Unknown step '${s:0:20}' (use harden, optimize, web)."
+      [[ ",$steps," == *",$s,"* ]] || steps+="${steps:+,}$s"
+    done
+  fi
+  need ssh
+  tmp="$(mktemp -d)" || api_err internal "Couldn't create a temporary folder."
+  HOST_TMP="$tmp"
+  trap 'rc=$?; [[ -n "${HOST_TMP:-}" ]] && rm -rf -- "$HOST_TMP"; (exit $rc); on_exit' EXIT
+  trap 'exit 1' HUP INT TERM
+  host_ssh_opts "$HOSTS_DIR/$name/key" "$HOSTS_DIR/$name/known_hosts"
+  # As root no sudo is needed (and may not be installed).
+  root_or_sudo='if [ "$(id -u)" = 0 ]; then S=; else S="sudo -n"; fi;'
+
+  timeout 30 ssh "${HOST_SSH[@]}" "$HOST_ADDR" "$root_or_sudo \$S true" </dev/null >/dev/null 2>"$tmp/err"
+  rc=$?
+  ((rc == 255 || rc == 124)) && host_fail host_failed "Couldn't sign in to $name: $(host_last_line "$tmp/err")"
+  ((rc == 0)) || host_fail needs_sudo "This user needs passwordless sudo, or use root."
+
+  # Only validated values reach the remote command line: numbers, ports, step names, the user name from meta.json.
+  pre="CLAUDERC_SSH_PORT=$HOST_PORT CLAUDERC_PORTS=$ports CLAUDERC_STEPS=$steps CLAUDERC_USER=$HOST_USER"
+  cmd="$root_or_sudo exec \$S env $pre CLAUDERC_CONN=\"\${SSH_CONNECTION:-}\" bash -s"
+  host_harden_script | timeout 540 ssh "${HOST_SSH[@]}" "$HOST_ADDR" "$cmd" >"$tmp/out" 2>"$tmp/err"
+  rc=$?
+  local steps_json docker=false extra='[]'
+  steps_json="$(jq -Rn '[inputs | select(test("^STEP [a-z0-9-]{1,30} (ok|skipped|failed)( |$)"))
+    | capture("^STEP (?<name>[^ ]+) (?<status>[^ ]+) ?(?<detail>.*)$") | .detail |= .[0:300]]' "$tmp/out" 2>/dev/null)" || steps_json='[]'
+  grep -qx 'DOCKER yes' "$tmp/out" && docker=true
+  if ! grep -qx 'REVERT scheduled' "$tmp/out"; then
+    # The firewall and sshd were not touched: nothing to check or undo.
+    if [[ "$steps_json" == '[]' ]]; then
+      ((rc == 124)) && host_fail host_failed "The set-up on $name timed out."
+      host_fail host_failed "The set-up on $name didn't run: $(host_last_line "$tmp/err")"
+    fi
+    ((rc == 124)) && extra='[{"name":"finish","status":"failed","detail":"timed out after 540 s"}]'
+  else
+    ((rc == 124)) && extra='[{"name":"finish","status":"failed","detail":"timed out after 540 s (the firewall and SSH changes were checked anyway)"}]'
+    # A fresh login with the host's key (not the session the script ran in) must still work; only then is the undo cancelled.
+    local check out2
+    check="$root_or_sudo if [ -e /run/clauderc-reverted ]; then echo REVERTED; exit 0; fi; \$S systemctl stop clauderc-revert.timer clauderc-revert.service; ! systemctl is-active --quiet clauderc-revert.timer && echo CANCELLED"
+    out2="$(timeout 30 ssh "${HOST_SSH[@]}" "$HOST_ADDR" "$check" </dev/null 2>"$tmp/err")"
+    rc=$?
+    if ((rc == 255 || rc == 124)); then
+      sleep "$HOST_HARDEN_WAIT"
+      if timeout 30 ssh "${HOST_SSH[@]}" "$HOST_ADDR" true </dev/null >/dev/null 2>"$tmp/err"; then
+        host_fail locked_out_reverted "After the changes a new SSH login to $name didn't work, so the server undid them by itself after 2 minutes (firewall off, the SSH settings file removed). Nothing was left locked: check the ports and try again."
+      fi
+      host_fail host_failed "After the changes a new SSH login to $name didn't work, and it still doesn't after the automatic undo should have run ($(host_last_line "$tmp/err")). Use your provider's console to check the firewall (ufw disable) and /etc/ssh/sshd_config.d/00-clauderc.conf."
+    fi
+    if [[ "$out2" == *REVERTED* ]]; then
+      extra="$(jq -c '. + [{name:"safety", status:"failed", detail:"the automatic undo ran before the check (the set-up took too long): the firewall is off and the SSH settings were removed; run Set up again"}]' <<<"$extra")"
+    elif [[ "$out2" != *CANCELLED* ]]; then
+      extra="$(jq -c '. + [{name:"safety", status:"failed", detail:"couldn'"'"'t cancel the automatic undo: the firewall and SSH changes will be undone in 2 minutes"}]' <<<"$extra")"
+    fi
+  fi
+  api_ok "$(jq -cn --argjson p "$HOST_PORT" --argjson d "$docker" --argjson s "$steps_json" --argjson x "$extra" '{ssh_port:$p, docker:$d, steps:($s + $x)}')"
+}
+
+# host_harden_script: the script host-harden runs on the host as root (bash -s, settings in CLAUDERC_* from the command
+# line). Prints "STEP <name> <ok|skipped|failed> <detail>", "DOCKER yes" and "REVERT scheduled" lines; safe to run again.
+host_harden_script() {
+  cat <<'REMOTE'
+set -u
+export DEBIAN_FRONTEND=noninteractive LC_ALL=C
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+step() { printf 'STEP %s %s %s\n' "$1" "$2" "$(printf '%s' "${3:-}" | tr '\n\t' '  ' | cut -c1-300)"; }
+fail_exit() { step "$1" failed "$2"; exit 0; }
+port_ok() { [[ "$1" =~ ^[0-9]{1,5}$ ]] && ((10#$1 >= 1 && 10#$1 <= 65535)); }
+
+# The values were checked by the server; check again, nothing unchecked reaches a command.
+SSH_PORT="${CLAUDERC_SSH_PORT:-}" PORTS="${CLAUDERC_PORTS:-}" STEPS="${CLAUDERC_STEPS:-}" LOGIN_USER="${CLAUDERC_USER:-}"
+port_ok "$SSH_PORT" || fail_exit input "bad ssh port"
+SSH_PORT=$((10#$SSH_PORT))
+[[ "$PORTS" =~ ^([0-9]{1,5}/(tcp|udp))?(,[0-9]{1,5}/(tcp|udp)){0,19}$ ]] || fail_exit input "bad port list"
+[[ "$STEPS" =~ ^((harden|optimize|web)(,(harden|optimize|web)){0,2})?$ ]] || fail_exit input "bad step list"
+[[ "$LOGIN_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || fail_exit input "bad user name"
+[[ "$(id -u)" == 0 ]] || fail_exit input "not running as root"
+# The port sshd itself answered on (differs from the app's port behind a port forward): both stay open.
+SSHD_PORTS=("$SSH_PORT")
+conn_port="${CLAUDERC_CONN:-}"; conn_port="${conn_port##* }"
+if port_ok "$conn_port" && ((10#$conn_port != SSH_PORT)); then SSHD_PORTS+=("$((10#$conn_port))"); fi
+has() { [[ ",$STEPS," == *",$1,"* ]]; }
+
+exec 9>/run/clauderc-harden.lock
+flock -n 9 || fail_exit lock "another set-up is running on this server"
+rm -f /run/clauderc-reverted
+LOG="$(mktemp)"
+trap 'rm -f "$LOG" "$LOG.key"' EXIT
+last() { grep -v '^[[:space:]]*$' "$LOG" | tail -n 1 | cut -c1-200; }
+
+APT_OPTS=(-y -q -o DPkg::Lock::Timeout=180 -o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-confdef)
+apt_fresh=0
+apt_install() {
+  command -v apt-get >/dev/null || { echo "apt-get not found (needs Debian or Ubuntu)" >"$LOG"; return 1; }
+  if ((apt_fresh == 0)); then apt-get -q -o DPkg::Lock::Timeout=180 update >"$LOG" 2>&1 || return 1; apt_fresh=1; fi
+  apt-get "${APT_OPTS[@]}" install "$@" >"$LOG" 2>&1
+}
+write_file() {  # <path> <mode>: stdin → path, only rewritten when it changed
+  local t; t="$(mktemp)"; cat >"$t"
+  if [[ -f "$1" ]] && cmp -s "$t" "$1"; then rm -f "$t"; return 0; fi
+  install -D -m "$2" "$t" "$1"; local rc=$?; rm -f "$t"; return $rc
+}
+
+docker_on=0
+if command -v docker >/dev/null 2>&1 || [[ -S /var/run/docker.sock ]]; then docker_on=1; echo "DOCKER yes"; fi
+
+# ---- Slow parts first: nothing here can lock anyone out, and the undo timer below only has 2 minutes ----
+pkgs_ok=1
+if has harden; then
+  if apt_install ufw fail2ban python3-systemd unattended-upgrades; then step packages ok "ufw, fail2ban, unattended-upgrades installed"
+  else pkgs_ok=0; step packages failed "apt: $(last)"; fi
+elif ! command -v ufw >/dev/null; then
+  if apt_install ufw; then step packages ok "ufw installed"; else pkgs_ok=0; step packages failed "apt: $(last)"; fi
+fi
+
+if has harden && ((pkgs_ok)); then
+  f2b_ports="$(IFS=,; echo "${SSHD_PORTS[*]}")"
+  write_file /etc/fail2ban/jail.d/clauderc.local 644 <<EOF
+[sshd]
+enabled = true
+backend = systemd
+port = $f2b_ports
+maxretry = 4
+findtime = 10m
+bantime = 1h
+bantime.increment = true
+EOF
+  if { systemctl enable fail2ban && systemctl restart fail2ban; } >"$LOG" 2>&1; then step fail2ban ok "sshd jail: 4 tries in 10 min, banned 1 h (longer for repeat offenders)"
+  else step fail2ban failed "$(last)"; fi
+
+  if write_file /etc/apt/apt.conf.d/20auto-upgrades 644 <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+  then
+    write_file /etc/apt/apt.conf.d/52clauderc-unattended 644 <<<'Unattended-Upgrade::Automatic-Reboot "false";'
+    step updates ok "security updates install automatically (no automatic reboot)"
+  else step updates failed "couldn't write /etc/apt/apt.conf.d/20auto-upgrades"; fi
+elif has harden; then
+  step fail2ban skipped "its package didn't install"
+  step updates skipped "its package didn't install"
+fi
+
+if has harden; then
+  # Docker/Caddy-safe values only: net.ipv4.ip_forward is never touched.
+  write_file /etc/sysctl.d/99-clauderc.conf 644 <<'EOF'
+net.ipv4.tcp_syncookies = 1
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.default.accept_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.conf.default.accept_source_route = 0
+net.ipv6.conf.all.accept_source_route = 0
+net.ipv4.conf.all.log_martians = 1
+net.ipv4.conf.default.log_martians = 1
+net.ipv4.icmp_echo_ignore_broadcasts = 1
+kernel.dmesg_restrict = 1
+kernel.kptr_restrict = 2
+fs.protected_hardlinks = 1
+fs.protected_symlinks = 1
+EOF
+  if sysctl --system >"$LOG" 2>&1; then step sysctl ok "kernel network settings hardened"; else step sysctl failed "$(last)"; fi
+fi
+
+if has optimize; then
+  if [[ "$(timedatectl show -p NTP --value 2>/dev/null)" == yes ]]; then step timesync ok "already on"
+  elif timedatectl set-ntp true >"$LOG" 2>&1; then step timesync ok "on"
+  elif ! command -v chronyd >/dev/null && ! command -v ntpd >/dev/null && apt_install systemd-timesyncd && timedatectl set-ntp true >"$LOG" 2>&1; then
+    step timesync ok "systemd-timesyncd installed and on"
+  else step timesync failed "$(last)"; fi
+
+  if write_file /etc/systemd/journald.conf.d/clauderc.conf 644 <<<$'[Journal]\nSystemMaxUse=200M' &&
+    systemctl restart systemd-journald >"$LOG" 2>&1; then step journald ok "logs capped at 200 MB"
+  else step journald failed "$(last)"; fi
+
+  mem_kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
+  if [[ -n "$(swapon --show --noheadings 2>/dev/null)" ]]; then step swap skipped "already has swap"
+  elif ((${mem_kb:-0} > 2097152)); then step swap skipped "more than 2 GB of memory"
+  elif [[ -e /swapfile ]]; then step swap skipped "/swapfile exists but isn't in use; left alone"
+  elif { fallocate -l 1G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=1024; } >"$LOG" 2>&1 &&
+    chmod 600 /swapfile && mkswap /swapfile >"$LOG" 2>&1 && swapon /swapfile >"$LOG" 2>&1; then
+    grep -qE '^/swapfile[[:space:]]' /etc/fstab || echo '/swapfile none swap sw 0 0' >>/etc/fstab
+    write_file /etc/sysctl.d/99-clauderc-swap.conf 644 <<<'vm.swappiness = 10'
+    sysctl -q -w vm.swappiness=10 >/dev/null 2>&1
+    step swap ok "1 GB /swapfile, swappiness 10"
+  else
+    step swap failed "$(last)"; swapoff /swapfile >/dev/null 2>&1; rm -f /swapfile
+  fi
+
+  if apt-get "${APT_OPTS[@]}" autoremove >"$LOG" 2>&1; then step autoremove ok "unused packages removed"; else step autoremove failed "$(last)"; fi
+fi
+
+if has web; then
+  kr=/usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  if command -v caddy >/dev/null; then step caddy ok "already installed"
+  elif apt_install ca-certificates curl gnupg &&
+    curl -1sSLf --max-time 60 -o "$LOG.key" https://dl.cloudsmith.io/public/caddy/stable/gpg.key >"$LOG" 2>&1 &&
+    gpg --batch --yes --dearmor -o "$kr" "$LOG.key" >"$LOG" 2>&1 && chmod 644 "$kr" &&
+    write_file /etc/apt/sources.list.d/caddy-stable.list 644 <<<"deb [signed-by=$kr] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" &&
+    { apt_fresh=0; apt_install caddy; }; then step caddy ok "installed from Caddy's apt repository"
+  else step caddy failed "$(last)"; fi
+  if apt_install git curl unzip build-essential; then step web-tools ok "git, curl, unzip, build-essential"; else step web-tools failed "apt: $(last)"; fi
+fi
+
+# ---- Firewall and sshd: undone automatically in 2 minutes unless the server's fresh login check cancels it ----
+command -v ufw >/dev/null || fail_exit firewall "ufw isn't installed; the firewall and SSH were not changed"
+systemctl stop clauderc-revert.timer clauderc-revert.service >/dev/null 2>&1
+systemctl reset-failed clauderc-revert.timer clauderc-revert.service >/dev/null 2>&1
+revert='rm -f /etc/ssh/sshd_config.d/00-clauderc.conf; systemctl reload ssh || systemctl reload sshd; ufw disable; touch /run/clauderc-reverted'
+systemd-run --quiet --on-active=120 --unit=clauderc-revert /bin/sh -c "$revert" >"$LOG" 2>&1 ||
+  fail_exit safety "couldn't schedule the automatic undo ($(last)); the firewall and SSH were not changed"
+echo "REVERT scheduled"
+
+fw_ok=1 opened=()
+ufw_do() { ufw "$@" >>"$LOG" 2>&1 || fw_ok=0; }
+: >"$LOG"
+if has harden; then
+  if grep -q '^IPV6=' /etc/default/ufw 2>/dev/null; then sed -i 's/^IPV6=.*/IPV6=yes/' /etc/default/ufw; else echo 'IPV6=yes' >>/etc/default/ufw; fi
+fi
+# The port the app connects on goes in FIRST.
+for p in "${SSHD_PORTS[@]}"; do ufw_do allow "$p/tcp"; opened+=("$p/tcp (ssh)"); done
+if has harden; then
+  ufw_do default deny incoming
+  ufw_do default allow outgoing
+  for p in "${SSHD_PORTS[@]}"; do ufw_do limit "$p/tcp"; done
+fi
+if [[ -n "$PORTS" ]]; then
+  IFS=, read -ra plist <<<"$PORTS"
+  for p in "${plist[@]}"; do ufw_do allow "$p"; opened+=("$p"); done
+fi
+ufw_do --force enable
+has harden && ufw_do reload
+detail="$(printf '%s, ' "${opened[@]}")"; detail="open: ${detail%, }"
+((docker_on)) && detail+=". Docker is installed: ports it publishes bypass this firewall, so publish containers on 127.0.0.1 and put Caddy in front"
+if ((fw_ok)) && ufw status 2>/dev/null | grep -q '^Status: active'; then step firewall ok "$detail"; else step firewall failed "$(last)"; fi
+
+if has harden; then
+  dropin=/etc/ssh/sshd_config.d/00-clauderc.conf root_login=no
+  [[ "$LOGIN_USER" == root ]] && root_login=prohibit-password
+  if ! grep -qiE '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/' /etc/ssh/sshd_config 2>/dev/null; then
+    step ssh failed "/etc/ssh/sshd_config doesn't read sshd_config.d (an old system?); not changed"
+  else
+    write_file "$dropin" 644 <<EOF
+# Written by cLaudeRC (host set-up). Sorts first: the first value sshd reads wins.
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+PermitRootLogin $root_login
+MaxAuthTries 3
+LoginGraceTime 30
+X11Forwarding no
+AllowAgentForwarding no
+ClientAliveInterval 300
+ClientAliveCountMax 2
+EOF
+    if ! sshd -t >"$LOG" 2>&1; then
+      rm -f "$dropin"; step ssh failed "sshd rejected the settings ($(last)); removed them"
+    elif ! sshd -T 2>/dev/null | grep -qx 'passwordauthentication no'; then
+      step ssh failed "another sshd setting still allows passwords (check /etc/ssh/sshd_config.d)"
+    elif systemctl reload ssh >"$LOG" 2>&1 || systemctl reload sshd >"$LOG" 2>&1 || systemctl is-active --quiet ssh.socket; then
+      step ssh ok "key login only, root login $root_login, 3 tries, idle sessions closed after 10 min"
+    else step ssh failed "couldn't reload sshd: $(last)"; fi
+  fi
+fi
+exit 0
+REMOTE
 }
 
 # Removes the key and every project's attachment. The key stays authorized on the host until removed there.
@@ -4065,7 +4367,7 @@ api_main() {
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | set-secret-file | login-keystore | login-apple | youtube-login-start | \
       chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
-      migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | host-probe | host-add) ;;  # these read stdin
+      migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | host-probe | host-add | host-harden) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -4127,6 +4429,7 @@ api_main() {
     host-keygen)         do_host_keygen "$@" ;;
     host-add)            do_host_add "$@" ;;
     host-test)           do_host_test "$@" ;;
+    host-harden)         do_host_harden "$@" ;;
     host-remove)         do_host_remove "$@" ;;
     host-session)        do_host_session "$@" ;;
     host-attach)         do_host_attach "$@" ;;

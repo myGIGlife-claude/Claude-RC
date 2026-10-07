@@ -62,7 +62,9 @@ INSTRUCTIONS = (
     "check it, then merge it or discard it; nothing reaches your branch until you merge. A failed task keeps its partial work on its branch, so review or discard it too. Runs keep going if your session restarts; call wait again to collect them. Use reply to continue a worker's conversation.\n\n"
     "Hosts: list_hosts shows the servers (e.g. web servers) the owner attached to this chat. host_run, host_put and host_get work "
     "in this project's own folder on the host (~/sites/<project>); stay in it, use the account you were given (no root, no sudo "
-    "unless the owner asks), and tell the owner what you changed on the server."
+    "unless the owner asks), and tell the owner what you changed on the server. host_firewall opens or closes ports in the host's "
+    "firewall (ufw): open only the ports the project needs, publish Docker container ports on 127.0.0.1 behind Caddy (Docker's "
+    "published ports bypass the firewall), and ask the owner before opening anything unusual."
 )
 
 TOOLS = [
@@ -101,6 +103,11 @@ TOOLS = [
      "inputSchema": {"type": "object", "required": ["host", "remote_path", "local_path"], "properties": {
          "host": {"type": "string"}, "remote_path": {"type": "string", "description": "Relative to the workspace folder; no absolute paths or '..'."},
          "local_path": {"type": "string", "description": "Inside this project's folder."}}}},
+    {"name": "host_firewall", "description": "Show, open or close a port in an attached host's firewall (ufw, needs passwordless sudo there). The host's SSH port can't be closed. Returns `ufw status numbered`.",
+     "inputSchema": {"type": "object", "required": ["host", "action"], "properties": {
+         "host": {"type": "string"}, "action": {"type": "string", "enum": ["status", "open", "close"]},
+         "port": {"type": "integer", "description": "1-65535; needed for open and close."},
+         "proto": {"type": "string", "enum": ["tcp", "udp"], "description": "Default tcp."}}}},
 ]
 
 
@@ -878,7 +885,38 @@ def host_get(a):
     return f"Copied {h['name']}:~/{rel} to {a['local_path']}"
 
 
+def host_firewall(a):
+    h, action = host(a.get("host")), a.get("action")
+    sudo = 'if [ "$(id -u)" = 0 ]; then S=; else S="sudo -n"; fi; '   # root needs no sudo (and may not have it)
+    status = "$S ufw status numbered"
+    if action == "status":
+        script = sudo + status
+    elif action in ("open", "close"):
+        port, proto = a.get("port"), a.get("proto") or "tcp"
+        if isinstance(port, str) and port.isdigit():
+            port = int(port)
+        if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+            raise ToolError("port must be a number 1-65535.")
+        if proto not in ("tcp", "udp"):
+            raise ToolError("proto must be tcp or udp.")
+        if action == "close" and port == h["port"] and proto == "tcp":
+            raise ToolError(f"{port}/tcp is the SSH port of {h['name']}: closing it would lock everyone out.")
+        script = sudo + f"$S ufw {'allow' if action == 'open' else 'delete allow'} {port}/{proto} && " + status
+    else:
+        raise ToolError("action must be status, open or close.")
+    rc, out, err = ssh_run(h, script, 60)
+    if rc == 255 and not out:
+        raise ToolError(f"Couldn't connect to {h['name']}: {cap(err).strip()[-500:] or 'ssh failed'}")
+    if rc:
+        msg = (cap(err) + cap(out)).strip()[-500:]
+        hint = " The host's user needs passwordless sudo (or set the server up in the app first)." if "sudo" in msg or "password" in msg else ""
+        raise ToolError(f"ufw failed on {h['name']}: {msg or f'exit {rc}'}.{hint}")
+    return cap(out)
+
+
 def call_tool(name, a):
+    if name == "host_firewall":
+        return host_firewall(a)
     if name == "list_hosts":
         return json.dumps(list_hosts())
     if name == "host_run":

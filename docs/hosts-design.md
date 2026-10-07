@@ -80,6 +80,9 @@ The remote script prints `STEP <name> <ok|skipped|failed> <detail>` lines which 
 (removes the sshd drop-in, reloads ssh, `ufw disable`). After the apply call returns, the server opens a NEW ssh login with the host's key
 (like host-test); only if that works does it cancel the revert (`systemctl stop clauderc-revert.timer clauderc-revert.service`) in a second call.
 If the new login fails, wait for the revert (about 2 minutes), re-test, and return error `locked_out_reverted` explaining nothing was left locked.
+As built: the settings go after sudo (`sudo -n env CLAUDERC_…=… bash -s`, sudo resets the environment; root runs without sudo); the slow
+apt/optimize/web work runs BEFORE the timer is set, so only the quick ufw/sshd part is inside the 2 minutes; the fresh login itself stops the
+timer; the port sshd answered on (`SSH_CONNECTION`, differs behind a port forward) is allowed too. Bad ports/steps → `invalid_name`.
 
 **Steps (order matters):**
 - always: ports. `ufw allow <ssh_port>/tcp` FIRST (the port the app connects on), then the requested ports, then `ufw --force enable`.
