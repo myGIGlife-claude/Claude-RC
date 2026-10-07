@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport.
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore).
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=42
+SCRIPT_API=43
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -2806,6 +2806,464 @@ do_youtube_login_poll() {
   api_ok "$(jq -cn --arg c "$chan" '{logged_in:true, user:$c}')"
 }
 
+# ---- Google Drive backup (docs/drive-backup-design.md): the same device flow, scope drive.appdata only (the hidden
+# per-app folder). The OAuth client is two custom keys; the refresh token lives in drive-token.json (600) and access
+# tokens only in a variable. Every secret reaches curl through its config (stdin or a 600 file), never argv.
+DRIVE_SCOPE="https://www.googleapis.com/auth/drive.appdata"
+DRIVE_TOKEN="$LAUNCHER_CONFIG_DIR/drive-token.json"
+DRIVE_PASS="$LAUNCHER_CONFIG_DIR/drive-backup-pass"
+DRIVE_PENDING="$API_STATE_DIR/drive-login.json"
+DRIVE_WORK="$API_STATE_DIR/drive"                 # 700: the backup's temp file, its lock, the upload's curl config
+DRIVE_LOCK="$DRIVE_WORK/backup.lock"
+DRIVE_STATUS="$STATE_DIR/drive-backup.json"
+DRIVE_LAST="$STATE_DIR/drive-last.json"
+DRIVE_FILES="https://www.googleapis.com/drive/v3/files"
+DRIVE_UPLOAD="https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable"
+DRIVE_LOC_RE='^https://www\.googleapis\.com/upload/drive/v3/files\?[A-Za-z0-9=&._%~-]+$'
+DRIVE_CRON_MARK="# clauderc-drive-backup"
+DRIVE_KEEP=3
+
+# drive_safe <value>: fits between the quotes of a curl config line (tokens, codes, secrets).
+drive_safe() { [[ -n "$1" && ${#1} -le 4000 && "$1" =~ ^[A-Za-z0-9._~+/=:-]+$ ]]; }
+# drive_id_ok <id>: a Drive file id.
+drive_id_ok() { [[ ${#1} -ge 10 && ${#1} -le 80 && "$1" =~ ^[A-Za-z0-9_-]+$ ]]; }
+
+# drive_env_value <NAME>: the value from the environment, else from the env file (SSH and cron don't get it).
+drive_env_value() {
+  local line v="${!1:-}"
+  if [[ -z "$v" && -f "$SERVICES_ENV" ]]; then
+    while IFS= read -r line; do
+      [[ "$line" =~ ^export\ ([A-Z_][A-Z0-9_]*)=\'(.*)\'$ && "${BASH_REMATCH[1]}" == "$1" ]] && v="${BASH_REMATCH[2]}"
+    done <"$SERVICES_ENV"
+  fi
+  printf '%s' "$v"
+}
+
+# drive_client: DRIVE_CID / DRIVE_CSECRET; fails when either is missing or malformed.
+drive_client() {
+  DRIVE_CID="$(drive_env_value GOOGLE_DRIVE_CLIENT_ID)"; DRIVE_CSECRET="$(drive_env_value GOOGLE_DRIVE_CLIENT_SECRET)"
+  [[ "$DRIVE_CID" =~ ^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$ && ${#DRIVE_CSECRET} -ge 10 && ${#DRIVE_CSECRET} -le 100 &&
+    "$DRIVE_CSECRET" =~ ^[A-Za-z0-9_-]+$ ]]
+}
+
+drive_need_client() {
+  drive_client && return 0
+  local vars='{"variables":["GOOGLE_DRIVE_CLIENT_ID","GOOGLE_DRIVE_CLIENT_SECRET"]}'
+  [[ -z "$DRIVE_CID" || -z "$DRIVE_CSECRET" ]] &&
+    api_err not_configured "Google Drive backup isn't set up: add GOOGLE_DRIVE_CLIENT_ID and GOOGLE_DRIVE_CLIENT_SECRET (a Google OAuth client of type 'TVs and Limited Input devices') under + › Custom API key." "$vars"
+  api_err not_configured "GOOGLE_DRIVE_CLIENT_ID or GOOGLE_DRIVE_CLIENT_SECRET doesn't look right (the ID ends in .apps.googleusercontent.com)." "$vars"
+}
+
+drive_connected() { jq -e '(.refresh_token // empty) | strings | length > 0' "$DRIVE_TOKEN" >/dev/null 2>&1; }
+
+# drive_access_token: a fresh access token in DRIVE_AT (never written anywhere); DRIVE_ERR says why not.
+drive_access_token() {
+  local rt resp err
+  DRIVE_AT="" DRIVE_ERR=""
+  drive_client || { DRIVE_ERR="Google Drive backup isn't set up (GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET)."; return 1; }
+  rt="$(jq -r '.refresh_token // empty' "$DRIVE_TOKEN" 2>/dev/null)"
+  drive_safe "$rt" || { DRIVE_ERR="Google Drive isn't connected."; return 1; }
+  resp="$(printf 'data-urlencode = "client_id=%s"\ndata-urlencode = "client_secret=%s"\ndata-urlencode = "refresh_token=%s"\ndata-urlencode = "grant_type=refresh_token"\n' \
+    "$DRIVE_CID" "$DRIVE_CSECRET" "$rt" | curl -sS --max-time 20 -K - https://oauth2.googleapis.com/token 2>/dev/null)"
+  unset rt
+  DRIVE_AT="$(jq -r '.access_token // empty' <<<"$resp" 2>/dev/null)"
+  drive_safe "$DRIVE_AT" && return 0
+  DRIVE_AT=""
+  err="$(jq -r '.error // empty' <<<"$resp" 2>/dev/null)"
+  case "$err" in
+    invalid_grant) DRIVE_ERR="Google no longer accepts this login (revoked or expired): connect Google Drive again." ;;
+    "") DRIVE_ERR="Google didn't answer. Try again later." ;;
+    *) DRIVE_ERR="Google says: $(jq -r '.error_description // .error' <<<"$resp" 2>/dev/null)" ;;
+  esac
+  return 1
+}
+
+# The API's checks: set up, connected, and a working access token.
+drive_need_token() {
+  drive_need_client
+  drive_connected || api_err not_logged_in "Google Drive isn't connected."
+  drive_access_token || api_err not_logged_in "$DRIVE_ERR"
+}
+
+# drive_bearer [curl args…]: a Drive call with DRIVE_AT in curl's config on stdin; fails on an HTTP error.
+drive_bearer() { printf 'header = "Authorization: Bearer %s"\n' "$DRIVE_AT" | curl -fsS -K - "$@" 2>/dev/null; }
+
+# drive_list_json: our backups in appDataFolder as [{id,name,size,time}], newest first. Anything else is never listed
+# (and so can never be deleted or downloaded).
+drive_list_json() {
+  local resp
+  resp="$(drive_bearer --max-time 30 -G --data-urlencode spaces=appDataFolder \
+    --data-urlencode "q=name contains 'clauderc-' and trashed = false" \
+    --data-urlencode 'fields=files(id,name,size,createdTime)' --data-urlencode 'orderBy=createdTime desc' \
+    --data-urlencode pageSize=100 "$DRIVE_FILES")" || return 1
+  jq -ce '.files | map(select((.name | type) == "string" and (.name | startswith("clauderc-"))
+      and (.id | type) == "string" and (.id | test("^[A-Za-z0-9_-]+$")) and (.id | length) >= 10 and (.id | length) <= 80)
+    | {id, name, size:((.size // "0") | tonumber? // 0), time:.createdTime}) | sort_by(.time) | reverse' <<<"$resp" 2>/dev/null
+}
+
+drive_delete_file() { drive_bearer --max-time 30 -X DELETE -o /dev/null "$DRIVE_FILES/$1"; }
+
+drive_schedule_state() {
+  if command -v crontab >/dev/null 2>&1 && crontab -l 2>/dev/null | grep -qF -- "$DRIVE_CRON_MARK"; then echo daily; else echo off; fi
+}
+
+# drive_cron_set on|off: exactly one marked line in the user's crontab, or none. Leaves every other line alone.
+drive_cron_set() {
+  local cur rest line n
+  cur="$(crontab -l 2>/dev/null || true)"
+  n="$(grep -cF -- "$DRIVE_CRON_MARK" <<<"$cur" || true)"
+  if [[ "$1" == off ]]; then
+    ((n == 0)) && return 0
+  else
+    ((n == 1)) && return 0
+  fi
+  rest="$(grep -vF -- "$DRIVE_CRON_MARK" <<<"$cur" || true)"
+  if [[ "$1" == on ]]; then
+    # A quiet hour; the minute spreads servers out.
+    line="$((RANDOM % 60)) 3 * * * '$SCRIPT_PATH' --drive-backup-run >/dev/null 2>&1 $DRIVE_CRON_MARK"
+    if [[ -n "$rest" ]]; then rest+=$'\n'"$line"; else rest="$line"; fi
+  fi
+  printf '%s\n' "$rest" | crontab -
+}
+
+# drive_status_write <state> <phase> <percent|null> <message>: the run's progress for drive-backup-status.
+drive_status_write() {
+  local tmp fin=null
+  [[ "$1" == running ]] || fin="$(date +%s)"
+  tmp="$(mktemp "$DRIVE_STATUS.XXXXXX")" || return 1
+  if jq -cn --arg s "$1" --arg p "$2" --argjson pct "$3" --arg m "$4" --argjson st "${DRIVE_STARTED:-null}" --argjson fin "$fin" \
+    --arg n "${DRIVE_NAME:-}" --argjson sz "${DRIVE_SIZE:-null}" \
+    '{state:$s, phase:$p, percent:$pct, message:$m, started:$st, finished:$fin, name:(if $n == "" then null else $n end), size:$sz}' >"$tmp"; then
+    mv -f "$tmp" "$DRIVE_STATUS"
+  else
+    rm -f "$tmp"; return 1
+  fi
+}
+
+# 0 while a backup run holds the lock.
+drive_backup_busy() {
+  local r=1
+  [[ -e "$DRIVE_LOCK" ]] || return 1
+  exec 7>>"$DRIVE_LOCK"
+  flock -n 7 || r=0
+  exec 7>&-
+  return "$r"
+}
+
+drive_fail() { DRIVE_FAILMSG="$1"; exit 1; }
+
+drive_backup_exit() {
+  local rc=$?
+  [[ -n "${DRIVE_CHILD:-}" ]] && kill "$DRIVE_CHILD" 2>/dev/null
+  [[ -n "${DRIVE_TMP:-}" ]] && rm -f -- "$DRIVE_TMP"
+  rm -f -- "$DRIVE_WORK/headers" "$DRIVE_WORK/resp" "$DRIVE_WORK/code" "$DRIVE_WORK/err"
+  [[ "${DRIVE_DONE:-0}" == 1 ]] || drive_status_write failed "${DRIVE_PHASE:-export}" null "${DRIVE_FAILMSG:-The backup stopped unexpectedly ($rc).}"
+}
+
+# drive_upload <file> <name> <size>: one resumable upload into appDataFolder (initiate, then PUT the file, streamed from
+# disk). Sets DRIVE_FILE_ID, or DRIVE_ERR.
+drive_upload() {
+  local f="$1" name="$2" size="$3" meta code loc fd pos pct
+  meta="$(jq -cn --arg n "$name" '{name:$n, parents:["appDataFolder"]}')"
+  code="$(printf 'header = "Authorization: Bearer %s"\n' "$DRIVE_AT" | curl -sS --max-time 60 -K - -X POST -D "$DRIVE_WORK/headers" \
+    -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json; charset=UTF-8' \
+    -H 'X-Upload-Content-Type: application/octet-stream' -H "X-Upload-Content-Length: $size" \
+    --data-binary "$meta" "$DRIVE_UPLOAD" 2>/dev/null)"
+  loc="$(tr -d '\r' <"$DRIVE_WORK/headers" 2>/dev/null | awk 'tolower($1) == "location:" {print $2}' | tail -n 1)"
+  rm -f "$DRIVE_WORK/headers"
+  [[ "$code" == 200 && "$loc" =~ $DRIVE_LOC_RE ]] || { DRIVE_ERR="Google Drive didn't start the upload (HTTP ${code:-none})."; return 1; }
+  # The session URL is as good as a token while it lasts: curl's config on stdin, like the token (nothing on disk or in argv).
+  printf 'url = "%s"\nheader = "Authorization: Bearer %s"\n' "$loc" "$DRIVE_AT" |
+    curl -sS --max-time 86400 -K - -H 'Content-Type: application/octet-stream' --upload-file "$f" \
+      -o "$DRIVE_WORK/resp" -w '%{http_code}' >"$DRIVE_WORK/code" 2>/dev/null &
+  DRIVE_CHILD=$!
+  while kill -0 "$DRIVE_CHILD" 2>/dev/null; do
+    # How far curl has read the file: its fd's offset.
+    pos=""
+    for fd in /proc/"$DRIVE_CHILD"/fd/*; do
+      [[ "$(readlink "$fd" 2>/dev/null)" == "$f" ]] || continue
+      pos="$(awk '/^pos:/ {print $2}' "/proc/$DRIVE_CHILD/fdinfo/${fd##*/}" 2>/dev/null)"; break
+    done
+    if [[ "$pos" =~ ^[0-9]+$ ]] && ((size > 0)); then
+      ((pos > size)) && pos="$size"
+      pct=$((45 + 50 * pos / size))
+      drive_status_write running upload "$pct" "Uploading to Google Drive: $((pos / 1048576)) of $((size / 1048576)) MB"
+    fi
+    sleep 1
+  done
+  wait "$DRIVE_CHILD"
+  DRIVE_CHILD=""
+  code="$(cat "$DRIVE_WORK/code" 2>/dev/null)"
+  DRIVE_FILE_ID="$(jq -r '.id // empty' "$DRIVE_WORK/resp" 2>/dev/null)"
+  rm -f "$DRIVE_WORK/code" "$DRIVE_WORK/resp"
+  [[ ( "$code" == 200 || "$code" == 201 ) ]] && drive_id_ok "$DRIVE_FILE_ID" && return 0
+  DRIVE_ERR="The upload to Google Drive failed (HTTP ${code:-none})."
+  return 1
+}
+
+# --drive-backup-run [started]: the backup itself. drive-backup starts it with the lock already held (fd 8); the daily
+# cron line runs it directly and quietly gives way to a run in progress.
+drive_backup_run() {
+  umask 077
+  mkdir -p "$DRIVE_WORK" && chmod 700 "$DRIVE_WORK" || exit 1
+  [[ -e /dev/fd/8 ]] || exec 8>>"$DRIVE_LOCK"
+  flock -n 8 || exit 0
+  DRIVE_STARTED="${1:-}"
+  [[ "$DRIVE_STARTED" =~ ^[0-9]+$ ]] || DRIVE_STARTED="$(date +%s)"
+  DRIVE_PHASE=export DRIVE_DONE=0 DRIVE_CHILD="" DRIVE_TMP="" DRIVE_NAME="" DRIVE_SIZE=""
+  trap drive_backup_exit EXIT
+  trap 'exit 143' TERM INT HUP
+  drive_status_write running export 0 "Packing up this server"
+  [[ -x "$(migrate_backup_bin)" ]] || drive_fail "claude-backup is missing: run Update now."
+  [[ -s "$DRIVE_PASS" ]] || drive_fail "No backup passphrase is set."
+  drive_connected || drive_fail "Google Drive isn't connected."
+  drive_client || drive_fail "Google Drive backup isn't set up (GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET)."
+
+  local host line rc err="$DRIVE_WORK/err" try old id kept=1
+  host="$(uname -n 2>/dev/null)"; host="${host%%.*}"; host="${host//[^A-Za-z0-9-]/-}"; host="${host:0:40}"
+  DRIVE_NAME="clauderc-${host:-server}-$(date -u +%Y%m%d-%H%M%SZ).tar.gz.gpg"
+  DRIVE_TMP="$DRIVE_WORK/$DRIVE_NAME"
+  rm -f -- "$DRIVE_TMP"
+  : >"$err"
+  CLAUDE_BACKUP_PROGRESS=1 "$(migrate_backup_bin)" export --slim --out "$DRIVE_TMP" --pass-file "$DRIVE_PASS" </dev/null 2>&1 >/dev/null |
+    while IFS= read -r line; do
+      if [[ "$line" =~ ^PROGRESS\ ([a-z_]+)\ ([0-9]+) ]]; then
+        drive_status_write running export $((BASH_REMATCH[2] * 45 / 100)) "Packing up this server (${BASH_REMATCH[1]})"
+      elif [[ -n "$line" ]]; then
+        printf '%s\n' "$line" >>"$err"
+      fi
+    done
+  rc="${PIPESTATUS[0]}"
+  ((rc == 0)) || drive_fail "The export failed: $(migrate_last_lines "$err")"
+  [[ -s "$DRIVE_TMP" ]] || drive_fail "The export produced no file."
+  DRIVE_SIZE="$(stat -c %s "$DRIVE_TMP")"
+
+  DRIVE_PHASE=upload
+  drive_status_write running upload 45 "Uploading to Google Drive"
+  drive_access_token || drive_fail "$DRIVE_ERR"
+  # On failure the whole upload starts over once (a new session).
+  for try in 1 2; do
+    drive_upload "$DRIVE_TMP" "$DRIVE_NAME" "$DRIVE_SIZE" && break
+    ((try == 2)) && drive_fail "$DRIVE_ERR"
+    sleep "${CLAUDERC_DRIVE_RETRY_WAIT:-5}"
+    drive_access_token || drive_fail "$DRIVE_ERR"
+  done
+  rm -f -- "$DRIVE_TMP"; DRIVE_TMP=""
+  jq -cn --arg n "$DRIVE_NAME" --argjson s "$DRIVE_SIZE" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{name:$n, size:$s, time:$t}' >"$DRIVE_LAST.new" &&
+    mv -f "$DRIVE_LAST.new" "$DRIVE_LAST"
+
+  # Keep the newest DRIVE_KEEP of ours; nothing else in Drive is ever touched.
+  DRIVE_PHASE=cleanup
+  drive_status_write running cleanup 96 "Removing older backups"
+  if drive_access_token && old="$(drive_list_json)"; then
+    while IFS= read -r id; do
+      drive_id_ok "$id" || continue
+      drive_delete_file "$id" || kept=0
+    done < <(jq -r --argjson k "$DRIVE_KEEP" '.[$k:][] | .id' <<<"$old")
+  else
+    kept=0
+  fi
+  DRIVE_DONE=1
+  if ((kept)); then
+    drive_status_write "done" cleanup 100 "Backed up to Google Drive"
+  else
+    drive_status_write "done" cleanup 100 "Backed up to Google Drive (older backups couldn't be removed)"
+  fi
+}
+
+# drive-login-start: the code to enter at Google's page; the app then polls drive-login-poll.
+do_drive_login_start() {
+  [[ $# -eq 0 ]] || bad_args "drive-login-start takes no arguments"
+  drive_need_client
+  need curl
+  local resp dc
+  resp="$(printf 'data-urlencode = "client_id=%s"\ndata-urlencode = "scope=%s"\n' "$DRIVE_CID" "$DRIVE_SCOPE" |
+    curl -sS --max-time 20 -K - https://oauth2.googleapis.com/device/code 2>/dev/null)"
+  dc="$(jq -r '.device_code // empty' <<<"$resp" 2>/dev/null)"
+  drive_safe "$dc" ||
+    api_err not_logged_in "Google didn't start the sign-in: $(jq -r '.error_description // .error // "no answer"' <<<"$resp" 2>/dev/null). The client must be type 'TVs and Limited Input devices'."
+  ( umask 077; jq -c '{device_code, interval:(.interval // 5)}' <<<"$resp" >"$DRIVE_PENDING" ) || api_err internal "Couldn't save the sign-in."
+  api_ok "$(jq -c '{url:(.verification_url // .verification_uri), code:.user_code, interval:(.interval // 5), expires_in}' <<<"$resp")"
+}
+
+# drive-login-poll: {pending:true} until approved, then keeps the refresh token (drive-token.json, 600).
+do_drive_login_poll() {
+  [[ $# -eq 0 ]] || bad_args "drive-login-poll takes no arguments"
+  drive_need_client
+  [[ -f "$DRIVE_PENDING" ]] || api_err not_logged_in "No Google Drive sign-in in progress. Start it again."
+  local dc resp err rt tmp
+  dc="$(jq -r '.device_code // empty' "$DRIVE_PENDING" 2>/dev/null)"
+  drive_safe "$dc" || { rm -f "$DRIVE_PENDING"; api_err not_logged_in "The sign-in got lost. Start it again."; }
+  resp="$(printf 'data-urlencode = "client_id=%s"\ndata-urlencode = "client_secret=%s"\ndata-urlencode = "device_code=%s"\ndata-urlencode = "grant_type=urn:ietf:params:oauth:grant-type:device_code"\n' \
+    "$DRIVE_CID" "$DRIVE_CSECRET" "$dc" | curl -sS --max-time 20 -K - https://oauth2.googleapis.com/token 2>/dev/null)"
+  err="$(jq -r '.error // empty' <<<"$resp" 2>/dev/null)"
+  case "$err" in
+    authorization_pending | slow_down) api_ok '{"pending":true}' ;;
+    "") ;;
+    access_denied) rm -f "$DRIVE_PENDING"; api_err not_logged_in "Access wasn't allowed at Google. Start the sign-in again." ;;
+    expired_token) rm -f "$DRIVE_PENDING"; api_err not_logged_in "The code expired. Start the sign-in again." ;;
+    *) rm -f "$DRIVE_PENDING"; api_err not_logged_in "Google says: $(jq -r '.error_description // .error' <<<"$resp"). Start the sign-in again." ;;
+  esac
+  rt="$(jq -r '.refresh_token // empty' <<<"$resp" 2>/dev/null)"
+  drive_safe "$rt" || { rm -f "$DRIVE_PENDING"; api_err not_logged_in "Google didn't return a lasting login. Start again."; }
+  mkdir -p "$LAUNCHER_CONFIG_DIR"
+  tmp="$(umask 077; mktemp "$DRIVE_TOKEN.XXXXXX")" || api_err internal "Couldn't save the login."
+  if jq -cn --arg r "$rt" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{refresh_token:$r, connected:$t}' >"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$DRIVE_TOKEN"; then
+    unset rt resp
+    rm -f "$DRIVE_PENDING"
+    api_ok '{"connected":true}'
+  fi
+  rm -f "$tmp"
+  api_err internal "Couldn't save the login."
+}
+
+# drive-status: what the card shows (no secrets).
+do_drive_status() {
+  [[ $# -eq 0 ]] || bad_args "drive-status takes no arguments"
+  local configured=false connected=false pass=false last=null
+  drive_client && configured=true
+  drive_connected && connected=true
+  [[ -s "$DRIVE_PASS" ]] && pass=true
+  jq -e 'type == "object"' "$DRIVE_LAST" >/dev/null 2>&1 && last="$(jq -c '{name, size, time}' "$DRIVE_LAST")"
+  api_ok "$(jq -cn --argjson c "$configured" --argjson n "$connected" --arg s "$(drive_schedule_state)" --argjson l "$last" --argjson p "$pass" \
+    '{configured:$c, connected:$n, schedule:$s, last_backup:$l, has_passphrase:$p}')"
+}
+
+# drive-passphrase: stdin = the passphrase (12-200 characters, one line); empty = forget the saved one.
+do_drive_passphrase() {
+  [[ $# -eq 0 ]] || bad_args "drive-passphrase reads the passphrase on stdin"
+  local p tmp
+  p="$(read_secret_line)"
+  exec 0</dev/null
+  if [[ -z "$p" ]]; then
+    rm -f "$DRIVE_PASS"
+    api_ok '{"saved":false,"removed":true}'
+  fi
+  if ((${#p} < 12 || ${#p} > 200)) || [[ ! "$p" =~ ^[[:print:]]+$ ]]; then
+    unset p
+    api_err invalid_name "The passphrase must be one line of 12 to 200 characters."
+  fi
+  mkdir -p "$LAUNCHER_CONFIG_DIR"
+  tmp="$(umask 077; mktemp "$DRIVE_PASS.XXXXXX")" || api_err internal "Couldn't save the passphrase."
+  if printf '%s\n' "$p" >"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$DRIVE_PASS"; then
+    unset p
+    api_ok '{"saved":true}'
+  fi
+  unset p
+  rm -f "$tmp"
+  api_err internal "Couldn't save the passphrase."
+}
+
+# drive-backup: starts a run in the background; the app polls drive-backup-status.
+do_drive_backup() {
+  [[ $# -eq 0 ]] || bad_args "drive-backup takes no arguments"
+  drive_need_client
+  drive_connected || api_err not_logged_in "Google Drive isn't connected."
+  [[ -s "$DRIVE_PASS" ]] || api_err not_ready "Set a backup passphrase first."
+  [[ -x "$(migrate_backup_bin)" ]] || api_err not_configured "claude-backup is missing: run Update now"
+  mkdir -p "$DRIVE_WORK" && chmod 700 "$DRIVE_WORK" || api_err internal "Couldn't create $DRIVE_WORK."
+  # The run inherits fd 8 and with it the lock, which goes when it exits.
+  exec 8>>"$DRIVE_LOCK"
+  flock -n 8 || api_err busy "A backup is already running."
+  local started; started="$(date +%s)"
+  DRIVE_STARTED="$started" DRIVE_NAME="" DRIVE_SIZE=""
+  drive_status_write running export 0 "Starting the backup" || api_err internal "Couldn't write the status."
+  setsid "$SCRIPT_PATH" --drive-backup-run "$started" </dev/null >/dev/null 2>&1 3>&- 9>&- &
+  api_ok '{"started":true}'
+}
+
+# drive-backup-status: the current or last run; a run that died without finishing is reported (and recorded) as failed.
+do_drive_backup_status() {
+  [[ $# -eq 0 ]] || bad_args "drive-backup-status takes no arguments"
+  jq -e 'type == "object" and has("state")' "$DRIVE_STATUS" >/dev/null 2>&1 || api_ok '{"state":"idle"}'
+  if [[ "$(jq -r .state "$DRIVE_STATUS")" == running ]] && ! drive_backup_busy; then
+    jq -c '.state = "failed" | .message = "The backup stopped unexpectedly." | .finished = (now | floor)' "$DRIVE_STATUS" >"$DRIVE_STATUS.new" &&
+      mv -f "$DRIVE_STATUS.new" "$DRIVE_STATUS"
+  fi
+  api_ok "$(jq -c . "$DRIVE_STATUS")"
+}
+
+do_drive_list() {
+  [[ $# -eq 0 ]] || bad_args "drive-list takes no arguments"
+  drive_need_token
+  local list
+  list="$(drive_list_json)" || api_err internal "Couldn't list the backups in Google Drive."
+  api_ok "$list"
+}
+
+# drive_find <id>: DRIVE_ENTRY = the backup's entry from our own list (so only our files are ever deleted or fetched).
+drive_find() {
+  local list
+  list="$(drive_list_json)" || api_err internal "Couldn't list the backups in Google Drive."
+  DRIVE_ENTRY="$(jq -c --arg i "$1" 'map(select(.id == $i)) | .[0] // empty' <<<"$list")"
+  [[ -n "$DRIVE_ENTRY" ]] || api_err invalid_name "There is no such backup in Google Drive."
+}
+
+do_drive_delete() {
+  [[ $# -eq 1 ]] && drive_id_ok "$1" || bad_args "usage: drive-delete <id>"
+  drive_need_token
+  drive_find "$1"
+  drive_delete_file "$1" || api_err internal "Google Drive didn't delete the backup."
+  api_ok '{"deleted":true}'
+}
+
+do_drive_schedule() {
+  [[ $# -eq 1 && ( "$1" == on || "$1" == off ) ]] || bad_args "usage: drive-schedule on|off"
+  if [[ "$1" == on ]]; then
+    need crontab
+    drive_need_client
+    drive_connected || api_err not_logged_in "Google Drive isn't connected."
+    [[ -s "$DRIVE_PASS" ]] || api_err not_ready "Set a backup passphrase first."
+    [[ "$SCRIPT_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]] || api_err internal "The script's path can't go in a crontab line."
+    drive_cron_set on || api_err internal "Couldn't update your crontab."
+  elif command -v crontab >/dev/null 2>&1; then
+    drive_cron_set off || api_err internal "Couldn't update your crontab."
+  fi
+  api_ok "$(jq -cn --arg s "$(drive_schedule_state)" '{schedule:$s}')"
+}
+
+# drive-logout: revoke at Google (best effort), forget the token, stop the schedule. The passphrase stays.
+do_drive_logout() {
+  [[ $# -eq 0 ]] || bad_args "drive-logout takes no arguments"
+  local rt
+  rt="$(jq -r '.refresh_token // empty' "$DRIVE_TOKEN" 2>/dev/null)"
+  if drive_safe "$rt"; then
+    printf 'data-urlencode = "token=%s"\n' "$rt" | curl -sS --max-time 15 -K - -o /dev/null https://oauth2.googleapis.com/revoke 2>/dev/null || true
+  fi
+  unset rt
+  rm -f "$DRIVE_TOKEN" "$DRIVE_PENDING"
+  if command -v crontab >/dev/null 2>&1; then drive_cron_set off || true; fi
+  api_ok '{"disconnected":true}'
+}
+
+# drive-restore <id>: download into ~/backups (700, file 600, never overwriting). It does not import: the reply has the
+# command that does (import replaces files).
+do_drive_restore() {
+  [[ $# -eq 1 ]] && drive_id_ok "$1" || bad_args "usage: drive-restore <id>"
+  drive_need_token
+  local name tmp dest base i=0 cmd
+  drive_find "$1"
+  name="$(jq -r .name <<<"$DRIVE_ENTRY")"
+  [[ ${#name} -le 120 && "$name" =~ ^clauderc-[A-Za-z0-9._-]+$ ]] || name="clauderc-drive-$1.tar.gz.gpg"
+  umask 077
+  mkdir -p "$MIGRATE_BACKUPS" && chmod 700 "$MIGRATE_BACKUPS" || api_err internal "Couldn't create ~/backups."
+  tmp="$(mktemp "$MIGRATE_BACKUPS/.drive-download.XXXXXX")" || api_err internal "Couldn't write to ~/backups."
+  if ! drive_bearer --max-time 1800 -o "$tmp" "$DRIVE_FILES/$1?alt=media" || [[ ! -s "$tmp" ]]; then
+    rm -f "$tmp"; api_err internal "Couldn't download the backup from Google Drive."
+  fi
+  chmod 600 "$tmp"
+  # A hard link never replaces an existing file: name.tar.gz.gpg, then name-1.tar.gz.gpg, …
+  base="${name%.tar.gz.gpg}"; dest="$MIGRATE_BACKUPS/$name"
+  until ln -- "$tmp" "$dest" 2>/dev/null; do
+    ((++i > 99)) && { rm -f "$tmp"; api_err internal "Couldn't find a free file name in ~/backups."; }
+    if [[ "$base" == "$name" ]]; then dest="$MIGRATE_BACKUPS/$name-$i"; else dest="$MIGRATE_BACKUPS/$base-$i.tar.gz.gpg"; fi
+  done
+  rm -f "$tmp"
+  cmd="claude-backup import $dest"
+  [[ -s "$DRIVE_PASS" ]] && cmd+=" --pass-file $DRIVE_PASS"
+  api_ok "$(jq -cn --arg p "$dest" --arg c "$cmd" '{path:$p, command:$c}')"
+}
+
 # remove-secret <NAME>: only names added with set-secret.
 do_remove_secret() {
   [[ $# -eq 1 ]] && custom_name_ok "$1" || bad_args "usage: remove-secret <NAME>"
@@ -4433,7 +4891,7 @@ api_main() {
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | set-secret-file | login-keystore | login-apple | youtube-login-start | \
       chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
-      migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | host-probe | host-add | host-keyimport | host-harden) ;;  # these read stdin
+      migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | host-probe | host-add | host-keyimport | host-harden | drive-passphrase) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -4476,6 +4934,17 @@ api_main() {
     remove-apple)        do_remove_apple "$@" ;;
     youtube-login-start) do_youtube_login_start "$@" ;;
     youtube-login-poll)  do_youtube_login_poll "$@" ;;
+    drive-login-start)   do_drive_login_start "$@" ;;
+    drive-login-poll)    do_drive_login_poll "$@" ;;
+    drive-status)        do_drive_status "$@" ;;
+    drive-passphrase)    do_drive_passphrase "$@" ;;
+    drive-backup)        do_drive_backup "$@" ;;
+    drive-backup-status) do_drive_backup_status "$@" ;;
+    drive-list)          do_drive_list "$@" ;;
+    drive-delete)        do_drive_delete "$@" ;;
+    drive-schedule)      do_drive_schedule "$@" ;;
+    drive-logout)        do_drive_logout "$@" ;;
+    drive-restore)       do_drive_restore "$@" ;;
     repo-edit)           do_repo_edit "$@" ;;
     doctor-start)        do_doctor_start "$@" ;;
     cluster)             [[ $# -eq 0 ]] || bad_args "cluster takes no arguments"; do_cluster ;;
@@ -4548,6 +5017,7 @@ main() {
     --api) shift; api_main "$@" ;;
     --clone-worker) shift; clone_worker "$@" ;;
     --migrate-worker) shift; migrate_worker "$@" ;;
+    --drive-backup-run) shift; drive_backup_run "$@" ;;
     --mcp-refresh) mcp_refresh_now ;;
     --version) echo "$SCRIPT_API" ;;
     -h | --help) sed -n '2,10p' "$SCRIPT_PATH" | sed 's/^# \{0,1\}//' ;;

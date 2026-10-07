@@ -32,7 +32,8 @@ EOF
   export)
     [[ -f "$pass_file" && "$(stat -c %a "$pass_file")" == 600 ]] || { echo "stub: pass file missing or not 600" >&2; exit 2; }
     cp "$pass_file" "$STUB_STATE/backup-export-pass"
-    [[ " $* " == *" --no-claude-login "* && -n "$out" ]] || { echo "stub: bad export arguments" >&2; exit 2; }
+    # Migrate leaves the Claude logins out; the Drive backup keeps them but drops plugin caches.
+    [[ ( " $* " == *" --no-claude-login "* || " $* " == *" --slim "* ) && -n "$out" ]] || { echo "stub: bad export arguments" >&2; exit 2; }
     progress pack 0; nap; progress pack 50; nap
     if [[ -e "$STUB_STATE/backup-fail-export" ]]; then
       echo "half" >"$out"

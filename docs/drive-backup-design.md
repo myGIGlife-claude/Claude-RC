@@ -32,6 +32,12 @@ actions through the env (read them like the other services do: `${GOOGLE_DRIVE_C
   to finish: `claude-backup import <path> --pass-file ...`. It does NOT import by itself (import replaces files; the owner runs it, or the migrate wizard does).
 All long calls must not block the API for more than ~30 s except where noted; the app polls drive-backup-status.
 
+As built (server): the client variables are read from the env or, failing that, from `~/.config/claude-launcher/env` (SSH and
+cron sessions don't get the settings env); `not_configured` errors carry `variables:[…]`. `drive-list` replies a bare array.
+`drive-passphrase ""` replies `{saved:false, removed:true}`. `drive-restore` downloads synchronously (up to 30 min) and replies
+`{path, command}`. The cron line is `M 3 * * * '<claude-setup.sh>' --drive-backup-run … # clauderc-drive-backup`. Error codes:
+`not_configured`, `not_logged_in` (not connected / token revoked), `not_ready` (no passphrase), `busy`, `invalid_name`.
+
 ## App
 - Settings (or Connection) > "Google Drive backup" card: not configured -> shows the two variable names and a button to open Custom API keys;
   configured -> Connect (shows the link + code like the YouTube sign-in, polls drive-login-poll), then: Backup passphrase (set/change), Back up now with live progress,
