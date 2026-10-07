@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Test stub: the user's crontab is $STUB_STATE/crontab (the real one is never touched).
+[[ -n "${STUB_STATE:-}" && -d "$STUB_STATE" ]] || { echo "crontab stub: no STUB_STATE" >&2; exit 1; }
+f="$STUB_STATE/crontab"
+case "${1:-}" in
+  -l) [[ -f "$f" ]] || { echo "no crontab for user" >&2; exit 1; }; cat "$f" ;;
+  -r) rm -f "$f" ;;
+  -) cat >"$f" ;;
+  *) echo "crontab stub: unsupported $*" >&2; exit 1 ;;
+esac

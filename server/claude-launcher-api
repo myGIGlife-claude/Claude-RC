@@ -20,7 +20,7 @@ PROJECT_RE='^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$'
 REPO_RE='^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._][A-Za-z0-9._-]*$'
 OWNER_RE='^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'
 WORKER_RE='^[A-Za-z][A-Za-z0-9_-]{0,29}$'
-KNOWN="status owners repos sessions new open clone-status start stop tail login-claude-start login-claude-code login-claude-cancel login-github login-aws-keys login-aws-sso-start login-gitlab login-docker self-update install-cli run claude-cmd restart login-token keys set-secret set-secret-file remove-secret login-keystore remove-keystore login-apple remove-apple youtube-login-start youtube-login-poll mcp mcp-refresh plugins disconnect chat-pin-status chat-pin-set chat-open chat-history chat-send chat-interrupt chat-commands upload chat-log doctor-start mcp-auth-start mcp-auth-finish mcp-auth-cancel repo-edit chat-file cluster worker-list worker-add worker-set worker-set-key worker-remove worker-runs worker-login-start worker-login-code cluster-config cluster-config-set cluster-session cluster-attach cluster-assign push-config push-setup push-register push-session push-test skills-update migrate-plan migrate-keygen migrate-authorize migrate-send migrate-passphrase migrate-status migrate-restore migrate-sudo-check migrate-create-user migrate-verify migrate-signout-old migrate-reboot migrate-clone host-list host-probe host-keygen host-keyimport host-add host-test host-remove host-session host-attach host-harden"
+KNOWN="status owners repos sessions new open clone-status start stop tail login-claude-start login-claude-code login-claude-cancel login-github login-aws-keys login-aws-sso-start login-gitlab login-docker self-update install-cli run claude-cmd restart login-token keys set-secret set-secret-file remove-secret login-keystore remove-keystore login-apple remove-apple youtube-login-start youtube-login-poll mcp mcp-refresh plugins disconnect chat-pin-status chat-pin-set chat-open chat-history chat-send chat-interrupt chat-commands upload chat-log doctor-start mcp-auth-start mcp-auth-finish mcp-auth-cancel repo-edit chat-file cluster worker-list worker-add worker-set worker-set-key worker-remove worker-runs worker-login-start worker-login-code cluster-config cluster-config-set cluster-session cluster-attach cluster-assign push-config push-setup push-register push-session push-test skills-update migrate-plan migrate-keygen migrate-authorize migrate-send migrate-passphrase migrate-status migrate-restore migrate-sudo-check migrate-create-user migrate-verify migrate-signout-old migrate-reboot migrate-clone host-list host-probe host-keygen host-keyimport host-add host-test host-remove host-session host-attach host-harden drive-login-start drive-login-poll drive-status drive-passphrase drive-backup drive-backup-status drive-list drive-delete drive-schedule drive-logout drive-restore"
 HOST_RE='^[a-z][a-z0-9-]{0,29}$'
 TOKEN_RE='^[A-Za-z0-9._/=-]{1,200}$'
 
@@ -211,6 +211,15 @@ case "$sub" in
     ;;
   host-attach)
     ((nargs == 3)) && [[ "${args[0]}" =~ $PROJECT_RE && "${args[1]}" =~ $HOST_RE && ( "${args[2]}" == on || "${args[2]}" == off ) ]] || deny "$sub"
+    ;;
+  drive-login-start | drive-login-poll | drive-status | drive-passphrase | drive-backup | drive-backup-status | drive-list | drive-logout)
+    ((nargs == 0)) || deny "$sub"   # (drive-passphrase reads the passphrase on stdin)
+    ;;
+  drive-delete | drive-restore)   # a Drive file id
+    ((nargs == 1 && ${#args[0]} >= 10 && ${#args[0]} <= 80)) && [[ "${args[0]}" =~ ^[A-Za-z0-9_-]+$ ]] || deny "$sub"
+    ;;
+  drive-schedule)
+    ((nargs == 1)) && [[ "${args[0]}" == on || "${args[0]}" == off ]] || deny "$sub"
     ;;
   push-register)
     ((nargs == 1)) && [[ "${args[0]}" =~ ^[A-Za-z0-9:_-]{20,200}$ ]] || deny "$sub"
