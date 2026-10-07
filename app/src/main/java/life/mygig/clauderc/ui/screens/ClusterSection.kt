@@ -8,6 +8,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import life.mygig.clauderc.api.HOST_NAME_RE
 import life.mygig.clauderc.api.HOST_USER_RE
 import life.mygig.clauderc.api.hostAddressOk
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -311,6 +315,7 @@ private fun HostAddDialog(vm: MainViewModel) {
     val busy by vm.busy.collectAsState()
     val probe by vm.hostProbe.collectAsState()
     val error by vm.hostError.collectAsState()
+    val hostKey by vm.hostKey.collectAsState()
     var name by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("") }
     var port by remember { mutableStateOf("22") }
@@ -337,7 +342,9 @@ private fun HostAddDialog(vm: MainViewModel) {
     val portNum = port.toIntOrNull()
     val addressOk = hostAddressOk(address) && portNum != null && portNum in 1..65535
     val p = probe
+    val generated = hostKey?.takeIf { it.first == name }?.second   // made for this name only
     val secret = when {
+        auth == "generated" -> if (generated != null) "-" else ""
         auth == "password" -> password
         keyFile != null -> keyFile!!
         keyText.isNotBlank() -> Base64.encodeToString((keyText.trim() + "\n").toByteArray(), Base64.NO_WRAP)
@@ -356,7 +363,7 @@ private fun HostAddDialog(vm: MainViewModel) {
             Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 NoAutofill()
                 OutlinedTextField(
-                    value = name, onValueChange = { name = it.trim() }, label = { Text("Name (shop, blog…)") },
+                    value = name, onValueChange = { if (it.trim() != name) vm.clearHostKey(); name = it.trim() }, label = { Text("Name (shop, blog…)") },
                     singleLine = true, modifier = Modifier.fillMaxWidth(), isError = name.isNotEmpty() && !HOST_NAME_RE.matches(name),
                     keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
                 )
@@ -390,8 +397,28 @@ private fun HostAddDialog(vm: MainViewModel) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilterChip(selected = auth == "key", onClick = { auth = "key" }, label = { Text("Key") })
                             FilterChip(selected = auth == "password", onClick = { auth = "password" }, label = { Text("Password") })
+                            FilterChip(selected = auth == "generated", onClick = { auth = "generated" }, label = { Text("Generate a key") })
                         }
-                        if (auth == "key") {
+                        if (auth == "generated") {
+                            if (generated == null) {
+                                OutlinedButton(onClick = { vm.generateHostKey(name) }, enabled = HOST_NAME_RE.matches(name) && busy == null, modifier = Modifier.fillMaxWidth()) {
+                                    Text("Generate key")
+                                }
+                                Text("This server makes a key pair for $name and shows you the public half. Enter the name first.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            } else {
+                                SelectionContainer(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)).padding(8.dp)) {
+                                    Text(generated.publicKey, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(generated.fingerprint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                                    TextButton(onClick = { copy(context, "Public key", generated.publicKey) }) { Text("Copy") }
+                                }
+                                Text(
+                                    "Paste this into your provider's 'public SSH key' field (e.g. OVH when you install the server), or append it to ~/.ssh/authorized_keys for that user. Then press Check and Save.",
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        } else if (auth == "key") {
                             OutlinedTextField(
                                 value = keyText, onValueChange = { keyText = it; keyFile = null }, label = { Text("Private key (paste)") },
                                 maxLines = 4, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(),

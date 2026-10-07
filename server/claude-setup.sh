@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach).
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated.
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=39
+SCRIPT_API=40
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -1651,8 +1651,38 @@ do_host_probe() {
   api_ok "$(jq -cn --arg f "${fp%% *}" --arg t "${fp#* }" '{fingerprint:$f, keytype:$t}')"
 }
 
-# host-add <name>: stdin = address, port, user, fingerprint, auth (key|password), secret (base64 private key, or the password).
-# A password is only used to install a key this server makes; nothing stores it. Nothing is saved unless key login works.
+host_keygen_cleanup() { find "$HOSTS_DIR" -maxdepth 1 -name '.keygen-*' -mmin +1440 -exec rm -rf -- {} + 2>/dev/null || true; }
+
+# host-keygen <name>: a key pair for a host not added yet, in hosts/.keygen-<name>/ (the same one again if it is there).
+# Returns only the public half: the owner gives it to the provider or puts it in authorized_keys, then host-add ... generated.
+do_host_keygen() {
+  [[ $# -eq 1 ]] || bad_args "usage: host-keygen <name>"
+  local name="$1" d pub fp
+  host_check "$name"
+  need ssh-keygen
+  umask 077
+  mkdir -p "$HOSTS_DIR" && chmod 700 "$HOSTS_DIR" || api_err internal "Couldn't create the hosts folder."
+  [[ ! -e "$HOSTS_DIR/$name" ]] || api_err invalid_name "A host named $name already exists. Remove it first, or pick another name."
+  host_keygen_cleanup
+  d="$HOSTS_DIR/.keygen-$name"
+  if [[ -f "$d/key" ]] && pub="$(ssh-keygen -y -P '' -f "$d/key" 2>/dev/null)" && [[ -n "$pub" ]]; then
+    touch "$d"   # still in use: not cleaned up for another 24 h
+  else
+    rm -rf -- "$d"
+    mkdir -m 700 "$d" || api_err internal "Couldn't create a folder for the key."
+    ssh-keygen -q -t ed25519 -N '' -C "clauderc-host-$name" -f "$d/key" </dev/null >/dev/null 2>&1 || { rm -rf -- "$d"; api_err internal "Couldn't create a key."; }
+    chmod 600 "$d/key"; rm -f "$d/key.pub"
+    pub="$(ssh-keygen -y -P '' -f "$d/key" 2>/dev/null)" || api_err internal "Couldn't read the new key."
+  fi
+  pub="$(awk 'NR == 1 {print $1, $2}' <<<"$pub") clauderc-host-$name"
+  fp="$(ssh-keygen -lf /dev/stdin <<<"$pub" 2>/dev/null | awk 'NR == 1 {print $2}')"
+  [[ "$pub" =~ ^ssh-ed25519[[:space:]][A-Za-z0-9+/=]+[[:space:]]clauderc-host- && "$fp" =~ $HOST_FP_RE ]] || api_err internal "Couldn't read the new key."
+  api_ok "$(jq -cn --arg k "$pub" --arg f "$fp" '{public_key:$k, fingerprint:$f}')"
+}
+
+# host-add <name>: stdin = address, port, user, fingerprint, auth (key|password|generated), secret (base64 private key, the
+# password, or any placeholder for generated: the key from host-keygen). A password is only used to install a key this server
+# makes; nothing stores it. Nothing is saved unless key login works; a generated key stays pending until it does.
 do_host_add() {
   local name="${1:-}" addr port user fp auth secret tmp line l
   addr="$(read_secret_line)"; port="$(read_secret_line)"; user="$(read_secret_line)"
@@ -1663,13 +1693,15 @@ do_host_add() {
   host_target "$addr" "$port" "$user"
   fp="${fp//[[:space:]]/}"
   [[ "$fp" =~ $HOST_FP_RE ]] || api_err invalid_name "That isn't a host key fingerprint (SHA256:…)."
-  [[ "$auth" == key || "$auth" == password ]] || api_err invalid_name "Sign-in must be key or password."
+  [[ "$auth" == key || "$auth" == password || "$auth" == generated ]] || api_err invalid_name "Sign-in must be key, password or generated."
   [[ -n "$secret" ]] || api_err invalid_name "The $auth is missing."
   need ssh; need ssh-keyscan; need ssh-keygen
   umask 077
   mkdir -p "$HOSTS_DIR" && chmod 700 "$HOSTS_DIR" || api_err internal "Couldn't create the hosts folder."
   [[ ! -e "$HOSTS_DIR/$name" ]] || api_err invalid_name "A host named $name already exists. Remove it first (projects attached to it would otherwise get a different server)."
   find "$HOSTS_DIR" -maxdepth 1 -name '.new-*' -mmin +10 -exec rm -rf -- {} + 2>/dev/null || true   # left by an interrupted add (may hold a password)
+  host_keygen_cleanup
+  [[ "$auth" != generated || -f "$HOSTS_DIR/.keygen-$name/key" ]] || api_err invalid_name "Generate the key first."
   HOST_TMP="$(mktemp -d "$HOSTS_DIR/.new-$name.XXXXXX")" || api_err internal "Couldn't create a temporary folder."
   tmp="$HOST_TMP"
   trap 'rc=$?; [[ -n "${HOST_TMP:-}" ]] && rm -rf -- "$HOST_TMP"; (exit $rc); on_exit' EXIT
@@ -1685,7 +1717,10 @@ do_host_add() {
   [[ -n "$line" ]] || host_fail fingerprint_mismatch "The server's host key changed since you checked it (it isn't $fp). Check the server, then try again."
   printf '%s\n' "$line" >"$tmp/known_hosts"; rm -f "$tmp/scan"
 
-  if [[ "$auth" == key ]]; then
+  if [[ "$auth" == generated ]]; then
+    unset secret
+    cp "$HOSTS_DIR/.keygen-$name/key" "$tmp/key" && chmod 600 "$tmp/key" || host_fail internal "Couldn't read the generated key."
+  elif [[ "$auth" == key ]]; then
     secret="${secret//[[:space:]]/}"
     [[ "$secret" =~ ^[A-Za-z0-9+/=]{20,30000}$ ]] || host_fail invalid_key "The key must be sent as base64."
     printf '%s' "$secret" | base64 -d >"$tmp/key" 2>/dev/null || host_fail invalid_key "The key isn't valid base64."
@@ -1716,8 +1751,11 @@ do_host_add() {
   rm -f "$tmp/key.pub"
 
   host_ssh_opts "$tmp/key" "$tmp/known_hosts"
-  timeout 30 ssh "${HOST_SSH[@]}" "$HOST_ADDR" true </dev/null >/dev/null 2>"$tmp/err" ||
+  if ! timeout 30 ssh "${HOST_SSH[@]}" "$HOST_ADDR" true </dev/null >/dev/null 2>"$tmp/err"; then
+    [[ "$auth" == generated ]] &&
+      host_fail auth_failed "Key login didn't work: $(host_last_line "$tmp/err"). Add the public key to ~/.ssh/authorized_keys of $HOST_USER on the server (or in your provider's panel), then Save again."
     host_fail auth_failed "Key login didn't work: $(host_last_line "$tmp/err")"
+  fi
   rm -f "$tmp/err"
 
   jq -cn --arg a "$HOST_ADDR" --argjson p "$HOST_PORT" --arg u "$HOST_USER" --arg f "$fp" --arg au "$auth" \
@@ -1725,6 +1763,7 @@ do_host_add() {
   chmod 600 "$tmp/key" "$tmp/known_hosts" "$tmp/meta.json"
   mv -T "$tmp" "$HOSTS_DIR/$name" || host_fail internal "Couldn't save the host."
   chmod 700 "$HOSTS_DIR/$name"
+  rm -rf -- "${HOSTS_DIR:?}/.keygen-$name"
   api_ok "$(jq -cn --arg n "$name" '{saved:$n}')"
 }
 # host_fail <code> <message>: host-add's error exit; nothing of the half-made host stays.
@@ -4085,6 +4124,7 @@ api_main() {
     cluster-assign)      do_cluster_assign "$@" ;;
     host-list)           [[ $# -eq 0 ]] || bad_args "host-list takes no arguments"; do_host_list ;;
     host-probe)          [[ $# -eq 0 ]] || bad_args "host-probe reads the address on stdin"; do_host_probe ;;
+    host-keygen)         do_host_keygen "$@" ;;
     host-add)            do_host_add "$@" ;;
     host-test)           do_host_test "$@" ;;
     host-remove)         do_host_remove "$@" ;;

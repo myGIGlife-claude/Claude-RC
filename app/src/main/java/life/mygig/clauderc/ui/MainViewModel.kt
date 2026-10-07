@@ -35,6 +35,7 @@ import life.mygig.clauderc.api.ChatTask
 import life.mygig.clauderc.api.ChatWorker
 import life.mygig.clauderc.api.ChatHost
 import life.mygig.clauderc.api.Host
+import life.mygig.clauderc.api.HostKey
 import life.mygig.clauderc.api.HostProbe
 import life.mygig.clauderc.api.ClusterAccount
 import life.mygig.clauderc.api.ClusterConfig
@@ -739,9 +740,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val hostProbe = _hostProbe.asStateFlow()
     private val _hostError = MutableStateFlow<String?>(null)
     val hostError = _hostError.asStateFlow()
+    /** "Generate a key": the host name it was made for and its public half. */
+    private val _hostKey = MutableStateFlow<Pair<String, HostKey>?>(null)
+    val hostKey = _hostKey.asStateFlow()
     fun loadHosts() = action("Loading servers…") { _hosts.value = api.hostList().hosts }
-    fun openHostAdd() { _hostProbe.value = null; _hostError.value = null; _hostAddOpen.value = true }
-    fun closeHostAdd() { _hostAddOpen.value = false; _hostProbe.value = null; _hostError.value = null }
+    fun openHostAdd() { _hostProbe.value = null; _hostError.value = null; _hostKey.value = null; _hostAddOpen.value = true }
+    fun closeHostAdd() { _hostAddOpen.value = false; _hostProbe.value = null; _hostError.value = null; _hostKey.value = null }
+    fun clearHostKey() { _hostKey.value = null }
+    fun generateHostKey(name: String) {
+        _hostKey.value = null
+        _hostError.value = null
+        action("Generating a key…", onError = { _hostError.value = friendly(it).first }) { _hostKey.value = name to api.hostKeygen(name) }
+    }
     /** Address or port changed after Check: the shown key no longer applies. */
     fun clearHostProbe() { _hostProbe.value = null }
     fun probeHost(address: String, port: Int) {

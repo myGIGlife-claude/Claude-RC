@@ -367,7 +367,7 @@ data class Host(
     val address: String = "",
     val port: Int = 22,
     val user: String = "",
-    /** "key", or "password" (the server's own key was installed with a password). */
+    /** "key", "password" (the server's own key was installed with a password) or "generated" (the server's key, installed by the owner). */
     val auth: String = "key",
     val fingerprint: String = "",
 )
@@ -378,6 +378,10 @@ data class HostsData(val hosts: List<Host> = emptyList())
 /** A host's key before it is added, to confirm with the owner. */
 @Serializable
 data class HostProbe(val fingerprint: String = "", val keytype: String = "")
+
+/** A key the server made for a host not added yet: only the public half, for the owner to put on the host. */
+@Serializable
+data class HostKey(@SerialName("public_key") val publicKey: String = "", val fingerprint: String = "")
 
 /** A host as one chat sees it: attached or not. */
 @Serializable
