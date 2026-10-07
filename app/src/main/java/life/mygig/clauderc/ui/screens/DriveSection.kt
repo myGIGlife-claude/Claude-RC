@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import life.mygig.clauderc.ui.MainViewModel
+import life.mygig.clauderc.ui.openUrl
 
 @Composable
 fun DriveSection(vm: MainViewModel) {
@@ -34,11 +35,16 @@ fun DriveSection(vm: MainViewModel) {
                 }
                 status?.connected != true -> {
                     Button(onClick = { vm.driveLoginStart() }) { Text("Connect Google Drive") }
-                    login?.let { Text("Open ${it.url} and enter code ${it.code}", style = MaterialTheme.typography.bodyMedium) }
+                    login?.let {
+                        Text("Open the Google page, enter this code and approve:", style = MaterialTheme.typography.bodySmall)
+                        Text(it.code, style = MaterialTheme.typography.headlineSmall)
+                        OutlinedButton(onClick = { openUrl(context, it.url) }) { Text("Open Google") }
+                    }
                 }
                 else -> {
                     Text("Connected to Google Drive")
-                    OutlinedTextField(phrase, { phrase = it }, label = { Text("Backup passphrase (12–200 characters)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(phrase, { phrase = it }, label = { Text("Backup passphrase (12–200 characters)") }, singleLine = true, modifier = Modifier.fillMaxWidth(), visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
+                    Text("You need this passphrase to restore a backup. It is stored on your server only so scheduled backups can run.", style = MaterialTheme.typography.bodySmall)
                     OutlinedButton(onClick = { if (phrase.length in 12..200) { vm.driveSetPassphrase(phrase); phrase = "" } }, enabled = phrase.length in 12..200) { Text("Save passphrase") }
                     Button(onClick = vm::driveBackup) { Text("Back up now") }
                     progress?.takeIf { it.state == "running" }?.let { Text("${it.phase}: ${it.percent ?: 0}% — ${it.message}") }

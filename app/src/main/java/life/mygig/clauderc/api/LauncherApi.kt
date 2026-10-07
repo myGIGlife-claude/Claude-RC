@@ -172,7 +172,7 @@ class LauncherApi(
     suspend fun driveDelete(id: String): JsonObject = call("drive-delete $id")
     suspend fun driveSchedule(on: Boolean): JsonObject = call("drive-schedule ${if (on) "on" else "off"}")
     suspend fun driveLogout(): JsonObject = call("drive-logout")
-    suspend fun driveRestore(id: String): JsonObject = call("drive-restore $id")
+    suspend fun driveRestore(id: String): JsonObject = call("drive-restore $id", timeoutMs = 1_800_000)   // the server downloads before it answers (up to 30 min)
     suspend fun mcp(): McpData = call("mcp")
     suspend fun pushConfig(): PushConfig = call("push-config")
     /** Saves the Firebase service-account key (stdin); the server registers the app and returns its ids. */
