@@ -18,7 +18,7 @@ object Updates {
     const val REPO = "myGIGlife-claude/Claude-RC"
 
     /** Oldest server script API this app works with (claude-setup.sh SCRIPT_API). */
-    const val MIN_SCRIPT_API = 38
+    const val MIN_SCRIPT_API = 39
 
     /** What the server accepts as a custom key name (claude-setup.sh CUSTOM_NAME_RE). */
     val CUSTOM_NAME = Regex("^[A-Z][A-Z0-9_]{0,55}_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT|AUTHKEY|APIKEY|FILE|CREDENTIALS)$")

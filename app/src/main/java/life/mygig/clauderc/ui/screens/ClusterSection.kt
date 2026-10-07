@@ -1,5 +1,13 @@
 package life.mygig.clauderc.ui.screens
 
+import android.util.Base64
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.Checkbox
+import androidx.compose.ui.text.input.KeyboardType
+import life.mygig.clauderc.api.HOST_NAME_RE
+import life.mygig.clauderc.api.HOST_USER_RE
+import life.mygig.clauderc.api.hostAddressOk
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -73,7 +81,9 @@ fun ClusterSection(vm: MainViewModel) {
     var confirmRemove by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val ready = (status?.scriptApi ?: 0) >= Updates.MIN_SCRIPT_API
-    LaunchedEffect(ready) { if (ready) vm.loadCluster() }
+    val hostAddOpen by vm.hostAddOpen.collectAsState()
+    var confirmRemoveHost by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(ready) { if (ready) { vm.loadCluster(); vm.loadHosts() } }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -100,6 +110,24 @@ fun ClusterSection(vm: MainViewModel) {
             }
             if (!g.active) TextButton(onClick = { vm.removeFromCluster(g.serverId) }) { Text("Remove ${g.host} from cluster") }
         }
+        if (ready) HostsCard(vm, idle = busy == null, onRemove = { confirmRemoveHost = it })
+    }
+
+    if (hostAddOpen) HostAddDialog(vm)
+
+    confirmRemoveHost?.let { who ->
+        AlertDialog(
+            onDismissRequest = { confirmRemoveHost = null },
+            confirmButton = { TextButton(onClick = { vm.removeHost(who); confirmRemoveHost = null }) { Text("Remove") } },
+            dismissButton = { TextButton(onClick = { confirmRemoveHost = null }) { Text("Keep") } },
+            title = { Text("Remove $who?") },
+            text = {
+                Text(
+                    "Forgets $who here and detaches it from every chat. The key stays authorized on that server " +
+                        "until you remove it there (~/.ssh/authorized_keys).",
+                )
+            },
+        )
     }
 
     if (add) {
@@ -242,6 +270,154 @@ private fun ClusterSettingsCard(vm: MainViewModel, c: ClusterConfig, idle: Boole
     }
 }
 
+/** Hosting servers: web servers chats can work on (docs/hosts-design.md). */
+@Composable
+private fun HostsCard(vm: MainViewModel, idle: Boolean, onRemove: (String) -> Unit) {
+    val hosts by vm.hosts.collectAsState()
+    CardBox {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Hosting servers", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                OutlinedButton(onClick = { vm.openHostAdd() }, enabled = idle) { Text("+ Add host") }
+            }
+            Text(
+                "Web servers chats can work on: attach one with 👥 in a chat. Claude runs commands there in its own folder; nothing is installed.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            val hs = hosts
+            if (hs == null) Text("Loading…", style = MaterialTheme.typography.bodySmall)
+            else if (hs.isEmpty()) Text("No servers yet.", style = MaterialTheme.typography.bodySmall)
+            hs?.forEach { h ->
+                Column {
+                    Text(h.name, style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        "${h.user}@${h.address}" + (if (h.port != 22) ":${h.port}" else "") +
+                            if (h.auth == "password") " · key installed with a password" else "",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = { vm.testHost(h.name) }, enabled = idle) { Text("Test") }
+                        TextButton(onClick = { onRemove(h.name) }, enabled = idle) { Text("Remove") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Add host: Check reads the host key to confirm, then a private key (pasted or a file) or a one-time password. */
+@Composable
+private fun HostAddDialog(vm: MainViewModel) {
+    val busy by vm.busy.collectAsState()
+    val probe by vm.hostProbe.collectAsState()
+    val error by vm.hostError.collectAsState()
+    var name by remember { mutableStateOf("") }
+    var address by remember { mutableStateOf("") }
+    var port by remember { mutableStateOf("22") }
+    var user by remember { mutableStateOf("") }
+    var confirmed by remember { mutableStateOf(false) }
+    var auth by remember { mutableStateOf("key") }
+    var keyText by remember { mutableStateOf("") }
+    var keyFile by remember { mutableStateOf<String?>(null) }   // base64 of a picked key file
+    var password by remember { mutableStateOf("") }
+    var fileError by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val pickKey = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+            if (bytes == null || bytes.isEmpty() || bytes.size > 20_000) {
+                fileError = "That file couldn't be read (or it's over 20 KB)."
+            } else {
+                keyFile = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                keyText = ""
+                fileError = null
+            }
+        }
+    }
+    val portNum = port.toIntOrNull()
+    val addressOk = hostAddressOk(address) && portNum != null && portNum in 1..65535
+    val p = probe
+    val secret = when {
+        auth == "password" -> password
+        keyFile != null -> keyFile!!
+        keyText.isNotBlank() -> Base64.encodeToString((keyText.trim() + "\n").toByteArray(), Base64.NO_WRAP)
+        else -> ""
+    }
+    val canSave = p != null && confirmed && HOST_NAME_RE.matches(name) && HOST_USER_RE.matches(user) && secret.isNotEmpty() && busy == null
+    AlertDialog(
+        onDismissRequest = { if (busy == null) vm.closeHostAdd() },
+        confirmButton = {
+            if (p == null) TextButton(onClick = { vm.probeHost(address, portNum ?: 22) }, enabled = addressOk && busy == null) { Text("Check") }
+            else TextButton(onClick = { vm.addHost(name, address, portNum ?: 22, user, p.fingerprint, auth, secret) }, enabled = canSave) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = { vm.closeHostAdd() }) { Text("Cancel") } },
+        title = { Text("Add a server") },
+        text = {
+            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                NoAutofill()
+                OutlinedTextField(
+                    value = name, onValueChange = { name = it.trim() }, label = { Text("Name (shop, blog…)") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(), isError = name.isNotEmpty() && !HOST_NAME_RE.matches(name),
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                )
+                OutlinedTextField(
+                    value = address, onValueChange = { address = it.trim(); confirmed = false; vm.clearHostProbe() }, label = { Text("Address") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(), isError = address.isNotEmpty() && !hostAddressOk(address),
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                )
+                OutlinedTextField(
+                    value = port, onValueChange = { port = it.filter { c -> c.isDigit() }.take(5); confirmed = false; vm.clearHostProbe() }, label = { Text("Port") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(), isError = portNum == null || portNum !in 1..65535,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+                OutlinedTextField(
+                    value = user, onValueChange = { user = it.trim() }, label = { Text("User (a deploy user, not root)") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(), isError = user.isNotEmpty() && !HOST_USER_RE.matches(user),
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                )
+                if (p != null) {
+                    Text("Host key (${p.keytype}):", style = MaterialTheme.typography.labelLarge)
+                    Text(p.fingerprint, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "Compare it with `ssh-keygen -lf` of the host key on that server. A different key means you're not talking to your server.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = confirmed, onCheckedChange = { confirmed = it })
+                        Text("This is my server's key")
+                    }
+                    if (confirmed) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(selected = auth == "key", onClick = { auth = "key" }, label = { Text("Key") })
+                            FilterChip(selected = auth == "password", onClick = { auth = "password" }, label = { Text("Password") })
+                        }
+                        if (auth == "key") {
+                            OutlinedTextField(
+                                value = keyText, onValueChange = { keyText = it; keyFile = null }, label = { Text("Private key (paste)") },
+                                maxLines = 4, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                            )
+                            OutlinedButton(onClick = { pickKey.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
+                                Text(if (keyFile != null) "Key file chosen ✓" else "Or choose a key file")
+                            }
+                            fileError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                            Text("Keys with a passphrase aren't supported. The key is kept on this server only and never shown again.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        } else {
+                            OutlinedTextField(
+                                value = password, onValueChange = { password = it.replace("\n", "") }, label = { Text("Password") },
+                                singleLine = true, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Password),
+                            )
+                            Text("Used once to install this server's own key, then forgotten.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+                error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+    )
+}
+
 /** A minus button, a label and a plus button in a row. */
 @Composable
 private fun Stepper(label: String, enabled: Boolean, canDown: Boolean, canUp: Boolean, onDown: () -> Unit, onUp: () -> Unit) {
@@ -327,6 +503,7 @@ private val MODE_LABELS = listOf("acceptEdits" to "Edit files", "plan" to "Read-
 fun ChatClusterSheet(vm: MainViewModel, onClose: () -> Unit) {
     val workers by vm.chatWorkers.collectAsState()
     val tasks by vm.chatTasks.collectAsState()
+    val hosts by vm.chatHosts.collectAsState()
     val busy by vm.busy.collectAsState()
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onClose,
@@ -386,6 +563,25 @@ fun ChatClusterSheet(vm: MainViewModel, onClose: () -> Unit) {
                             }
                             Text(modeHint(w.mode), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                    }
+                }
+            }
+            Text("Servers", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "Web servers this chat's Claude may run commands on, in its own folder there.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            val hs = hosts
+            if (hs == null) Text("Loading…", style = MaterialTheme.typography.bodySmall)
+            else if (hs.isEmpty()) Text("No servers yet. Add one in the Claude tab › Hosting servers.", style = MaterialTheme.typography.bodySmall)
+            hs?.forEach { h ->
+                CardBox {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(h.name, style = MaterialTheme.typography.titleSmall)
+                            Text("${h.user}@${h.address}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        androidx.compose.material3.Switch(checked = h.attached, onCheckedChange = { vm.attachHost(h.name, it) }, enabled = busy == null)
                     }
                 }
             }
