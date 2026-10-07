@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Test stub for ssh: plays one remote host (a "hosts" server). State lives in $STUB_STATE:
+#   host_key.pub    the host's public key (also what the ssh-keyscan stub reports)
+#   host_password   the account's password (password sign-in, via SSH_ASKPASS only)
+#   remote/         the account's home: authorized keys in remote/.ssh/authorized_keys, commands run there with sh -c
+#   ssh-unreachable nothing answers
+#   ssh-argv        the last call's arguments, one per line; ssh-env-askpass: whether a password came through askpass
+S="${STUB_STATE:-$HOME/.stub-state}"; mkdir -p "$S/remote"
+printf '%s\n' "$@" >"$S/ssh-argv"
+key="" kh="" strict="" batch=""
+while (($#)); do
+  case "$1" in
+    -F | -p | -l) shift 2 ;;
+    -i) key="$2"; shift 2 ;;
+    -o)
+      case "$2" in
+        UserKnownHostsFile=*) kh="${2#*=}" ;;
+        StrictHostKeyChecking=*) strict="${2#*=}" ;;
+        BatchMode=*) batch="${2#*=}" ;;
+      esac
+      shift 2 ;;
+    -T | -q) shift ;;
+    -*) echo "ssh stub: unknown option $1" >&2; exit 255 ;;
+    *) break ;;
+  esac
+done
+host="${1:-}"; shift
+[[ -n "$host" ]] || { echo "usage: ssh host" >&2; exit 255; }
+[[ -e "$S/ssh-unreachable" ]] && { echo "ssh: connect to host $host port 22: Connection refused" >&2; exit 255; }
+blob="$(awk '{print $2}' "$S/host_key.pub" 2>/dev/null)"
+[[ "$strict" == yes && -n "$blob" && -f "$kh" ]] && grep -qF " $blob" "$kh" ||
+  { echo "Host key verification failed." >&2; exit 255; }
+if [[ "${SSH_ASKPASS_REQUIRE:-}" == force && -n "${SSH_ASKPASS:-}" ]]; then
+  pw="$("$SSH_ASKPASS")"
+  [[ -f "$S/host_password" && "$pw" == "$(cat "$S/host_password")" ]] || { echo "user@$host: Permission denied (publickey,password)." >&2; exit 255; }
+  : >"$S/ssh-env-askpass"
+else
+  [[ "$batch" == yes && -f "$key" ]] || { echo "ssh stub: key login needs -i and BatchMode=yes" >&2; exit 255; }
+  pub="$(ssh-keygen -y -P '' -f "$key" 2>/dev/null | awk '{print $2}')"
+  [[ -n "$pub" ]] && grep -qF " $pub" "$S/remote/.ssh/authorized_keys" 2>/dev/null ||
+    { echo "user@$host: Permission denied (publickey)." >&2; exit 255; }
+fi
+cd "$S/remote" || exit 255
+(($#)) || exit 0
+exec sh -c "$*"

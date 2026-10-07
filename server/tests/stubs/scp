@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Test stub for scp: copies to and from the ssh stub's remote home ($STUB_STATE/remote). host:path is relative to it.
+S="${STUB_STATE:-$HOME/.stub-state}"; mkdir -p "$S/remote"
+printf '%s\n' "$@" >"$S/scp-argv"
+while (($#)); do
+  case "$1" in
+    -F | -i | -o | -P) shift 2 ;;
+    -q | -r | -T | -p) shift ;;
+    *) break ;;
+  esac
+done
+(($# == 2)) || { echo "scp stub: want src dst" >&2; exit 1; }
+map() {  # host:path (or [v6]:path) -> the stub's remote folder
+  local p="$1"
+  if [[ "$p" == \[*\]:* ]]; then p="${p#*]:}"; elif [[ "$p" == [!/]*:* ]]; then p="${p#*:}"; else printf '%s' "$p"; return; fi
+  printf '%s/%s' "$S/remote" "$p"
+}
+cp -r -- "$(map "$1")" "$(map "$2")"

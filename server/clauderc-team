@@ -8,7 +8,7 @@ project it runs in its own worktree on its own branch (cluster/<worker>/<task>);
 Claude reviews the diff and merges or discards. Elsewhere it runs in the project folder.
 State lives in <workers>/<name>/tasks/<id>.json.
 """
-import json, os, re, shutil, signal, subprocess, sys, threading, time, urllib.error, urllib.request, uuid
+import json, os, posixpath, re, shlex, shutil, signal, subprocess, sys, threading, time, urllib.error, urllib.request, uuid
 from pathlib import Path
 
 CFG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "claude-launcher"
@@ -42,6 +42,16 @@ LIMIT_RE = re.compile(r"usage limit|limit (reached|exceeded)|rate.?limit", re.I)
 fin_lock = threading.Lock()
 WAIT_SLICE = 60           # one wait call returns after this long so the request loop is never stuck
 # Runs are detached (own process group, output in tasks/<id>.out), so they survive this process; whoever calls wait next finalizes them.
+# Hosts (docs/hosts-design.md): servers the owner added in the app (hosts/<name>/{meta.json,key,known_hosts}); a chat uses the
+# ones attached to its project (attach/<slug>.hosts.json). ssh runs from argv lists with a pinned host key, key login only.
+HOSTS = CFG / "hosts"
+SSH = os.environ.get("CLAUDERC_SSH", "ssh")
+SCP = os.environ.get("CLAUDERC_SCP", "scp")
+HOST_RE = re.compile(r"^[a-z][a-z0-9-]{0,29}$")
+HOST_ADDR_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$|^(?=.*:.*:)[0-9A-Fa-f:.]{2,45}$")
+HOST_USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+REMOTE_PATH_RE = re.compile(r"^[A-Za-z0-9._@+,=/-]{1,400}$")
+OUT_CAP = 100_000         # bytes of stdout / stderr host_run returns
 
 INSTRUCTIONS = (
     "Hand work to the owner's other Claude accounts. Call list_workers first, then follow the owner's routing "
@@ -49,7 +59,10 @@ INSTRUCTIONS = (
     "attached account with the most room left), then collect each with wait. "
     "Workers cannot ask questions: give each a complete, self-contained task. In a git project each task runs on its own "
     "branch (from your last commit, so commit first if it needs your edits). When wait returns, read the diff with review, "
-    "check it, then merge it or discard it; nothing reaches your branch until you merge. A failed task keeps its partial work on its branch, so review or discard it too. Runs keep going if your session restarts; call wait again to collect them. Use reply to continue a worker's conversation."
+    "check it, then merge it or discard it; nothing reaches your branch until you merge. A failed task keeps its partial work on its branch, so review or discard it too. Runs keep going if your session restarts; call wait again to collect them. Use reply to continue a worker's conversation.\n\n"
+    "Hosts: list_hosts shows the servers (e.g. web servers) the owner attached to this chat. host_run, host_put and host_get work "
+    "in this project's own folder on the host (~/sites/<project>); stay in it, use the account you were given (no root, no sudo "
+    "unless the owner asks), and tell the owner what you changed on the server."
 )
 
 TOOLS = [
@@ -74,6 +87,20 @@ TOOLS = [
      "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}, "force": {"type": "boolean"}}}},
     {"name": "discard", "description": "Throw away a task's branch and workspace without merging.",
      "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}}},
+    {"name": "list_hosts", "description": "List the servers (hosts) attached to this chat: name, address, user and this project's workspace folder on each.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "host_run", "description": "Run a shell command on an attached host, in this project's workspace folder there (created on first use). Returns exit_code, stdout and stderr (each cut at 100 KB).",
+     "inputSchema": {"type": "object", "required": ["host", "command"], "properties": {
+         "host": {"type": "string"}, "command": {"type": "string"},
+         "timeout": {"type": "integer", "description": "Seconds, default 120, max 600."}}}},
+    {"name": "host_put", "description": "Copy a file or folder from this project to an attached host. remote_path is relative to the workspace folder.",
+     "inputSchema": {"type": "object", "required": ["host", "local_path", "remote_path"], "properties": {
+         "host": {"type": "string"}, "local_path": {"type": "string", "description": "Inside this project's folder."},
+         "remote_path": {"type": "string", "description": "Relative to the workspace folder; no absolute paths or '..'."}}}},
+    {"name": "host_get", "description": "Copy a file or folder from an attached host's workspace folder into this project.",
+     "inputSchema": {"type": "object", "required": ["host", "remote_path", "local_path"], "properties": {
+         "host": {"type": "string"}, "remote_path": {"type": "string", "description": "Relative to the workspace folder; no absolute paths or '..'."},
+         "local_path": {"type": "string", "description": "Inside this project's folder."}}}},
 ]
 
 
@@ -713,7 +740,153 @@ def wait(tid, timeout_s=600):
         time.sleep(1)
 
 
+def attached_hosts():
+    """Hosts the owner attached to this project (attach/<slug>.hosts.json, written by the app), read each call."""
+    try:
+        d = json.loads((CFG / "attach" / (re.sub(r"[^A-Za-z0-9]", "-", os.getcwd()) + ".hosts.json")).read_text())
+    except (OSError, ValueError):
+        return []
+    return sorted(n for n in d if isinstance(n, str) and HOST_RE.match(n) and (HOSTS / n / "meta.json").is_file()) if isinstance(d, dict) else []
+
+
+def workspace_dir():
+    """This project's own folder on a host, relative to the account's home."""
+    return "sites/" + (re.sub(r"[^A-Za-z0-9._-]", "-", os.path.basename(os.getcwd())).lstrip(".") or "project")
+
+
+def host(name):
+    """meta of an attached host (checked again: the files come from the app, but nothing reaches ssh unchecked)."""
+    if not isinstance(name, str) or name not in attached_hosts():
+        raise ToolError(f"Host {name!r} isn't attached to this chat. Call list_hosts; the owner attaches servers with the 👥 button in the chat.")
+    d = HOSTS / name
+    try:
+        m = json.loads((d / "meta.json").read_text())
+        port = m["port"]
+        ok = (isinstance(m.get("address"), str) and HOST_ADDR_RE.match(m["address"]) and isinstance(m.get("user"), str)
+              and HOST_USER_RE.match(m["user"]) and isinstance(port, int) and not isinstance(port, bool) and 1 <= port <= 65535
+              and (d / "key").is_file() and (d / "known_hosts").is_file())
+    except (OSError, ValueError, KeyError, TypeError):
+        ok = False
+    if not ok:
+        raise ToolError(f"Host {name}'s settings are incomplete. Ask the owner to add it again in the app.")
+    return {"name": name, "address": m["address"], "port": port, "user": m["user"], "key": str(d / "key"), "known_hosts": str(d / "known_hosts")}
+
+
+def ssh_opts(h):
+    """The only options this server talks to a host with: its own key, the pinned host key, no passwords, no agent."""
+    return ["-F", "/dev/null", "-i", h["key"], "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none", "-o", "BatchMode=yes",
+            "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no", "-o", "StrictHostKeyChecking=yes",
+            "-o", "UserKnownHostsFile=" + h["known_hosts"], "-o", "GlobalKnownHostsFile=/dev/null", "-o", "UpdateHostKeys=no",
+            "-o", "ConnectTimeout=10", "-o", "ForwardAgent=no", "-o", "LogLevel=ERROR", "-o", f"Port={h['port']}", "-o", "User=" + h["user"]]
+
+
+def ssh_argv(h, script):
+    return [SSH, *ssh_opts(h), "-T", h["address"], script]
+
+
+def ssh_run(h, script, timeout=120):
+    """(exit code, stdout, stderr) of a remote script; stdin is never this server's (it carries the MCP requests)."""
+    try:
+        r = subprocess.run(ssh_argv(h, script), stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise ToolError(f"Timed out after {timeout} s (the command may still be running on {h['name']}).")
+    except OSError as e:
+        raise ToolError(f"Couldn't run ssh: {e}")
+    return r.returncode, r.stdout, r.stderr
+
+
+def cap(b):
+    s = b[:OUT_CAP].decode(errors="replace")
+    return s + (f"\n[cut at {OUT_CAP} bytes of {len(b)}]" if len(b) > OUT_CAP else "")
+
+
+def list_hosts():
+    out, ws = [], "~/" + workspace_dir()
+    for n in attached_hosts():
+        try:
+            h = host(n)
+        except ToolError:
+            continue
+        out.append({"name": n, "address": h["address"], "user": h["user"], "workspace": ws})
+    return out
+
+
+def host_run(a):
+    h, cmd = host(a.get("host")), a.get("command")
+    if not isinstance(cmd, str) or not cmd.strip():
+        raise ToolError("The command is empty.")
+    t = a.get("timeout")
+    t = min(max(int(t), 1), 600) if isinstance(t, (int, float)) and not isinstance(t, bool) else 120
+    ws = shlex.quote(workspace_dir())
+    rc, out, err = ssh_run(h, f"mkdir -p {ws} && cd {ws} || exit 97\n{cmd}", t)
+    if rc == 255 and not out:
+        raise ToolError(f"Couldn't connect to {h['name']}: {cap(err).strip()[-500:] or 'ssh failed'}")
+    return json.dumps({"exit_code": rc, "stdout": cap(out), "stderr": cap(err)})
+
+
+def remote_rel(p):
+    """remote_path → workspace-relative path; no absolute paths, no '..', no characters a remote shell or scp would read."""
+    if not isinstance(p, str) or not REMOTE_PATH_RE.match(p) or p.startswith(("/", "-")) or ".." in p.split("/"):
+        raise ToolError("remote_path must be relative to the workspace folder (letters, digits, ._-+@,=/; no '..', no leading /).")
+    return posixpath.normpath(workspace_dir() + "/" + p)
+
+
+def local_inside(p, must_exist):
+    """local_path → its real path, which must be inside this chat's project folder."""
+    if not isinstance(p, str) or not p:
+        raise ToolError("local_path is missing.")
+    root = os.path.realpath(os.getcwd())
+    real = os.path.realpath(os.path.join(root, p))
+    if real != root and not real.startswith(root + os.sep):
+        raise ToolError("local_path must be inside this project's folder.")
+    if must_exist and not os.path.exists(real):
+        raise ToolError(f"{p} doesn't exist.")
+    return real
+
+
+def scp_target(h, rel):
+    a = h["address"]
+    return (f"[{a}]" if ":" in a else a) + ":" + rel
+
+
+def scp(h, src, dst):
+    try:
+        r = subprocess.run([SCP, *ssh_opts(h), "-q", "-r", src, dst], stdin=subprocess.DEVNULL, capture_output=True, timeout=1800)
+    except subprocess.TimeoutExpired:
+        raise ToolError("The copy timed out after 30 minutes.")
+    except OSError as e:
+        raise ToolError(f"Couldn't run scp: {e}")
+    if r.returncode:
+        raise ToolError(f"The copy failed: {cap(r.stderr).strip()[-500:] or 'scp failed'}")
+
+
+def host_put(a):
+    h = host(a.get("host"))
+    src, rel = local_inside(a.get("local_path"), True), remote_rel(a.get("remote_path"))
+    rc, _, err = ssh_run(h, "mkdir -p " + shlex.quote(posixpath.dirname(rel)), 60)
+    if rc:
+        raise ToolError(f"Couldn't create the folder on {h['name']}: {cap(err).strip()[-500:]}")
+    scp(h, src, scp_target(h, rel))
+    return f"Copied {a['local_path']} to {h['name']}:~/{rel}"
+
+
+def host_get(a):
+    h = host(a.get("host"))
+    rel, dst = remote_rel(a.get("remote_path")), local_inside(a.get("local_path"), False)
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    scp(h, scp_target(h, rel), dst)
+    return f"Copied {h['name']}:~/{rel} to {a['local_path']}"
+
+
 def call_tool(name, a):
+    if name == "list_hosts":
+        return json.dumps(list_hosts())
+    if name == "host_run":
+        return host_run(a)
+    if name == "host_put":
+        return host_put(a)
+    if name == "host_get":
+        return host_get(a)
     if name == "list_workers":
         return json.dumps(list_workers())
     if name == "delegate":
