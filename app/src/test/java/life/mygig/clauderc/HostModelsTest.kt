@@ -5,11 +5,15 @@ import life.mygig.clauderc.api.ChatHostsData
 import life.mygig.clauderc.api.HOST_FINGERPRINT_RE
 import life.mygig.clauderc.api.HOST_NAME_RE
 import life.mygig.clauderc.api.HOST_USER_RE
+import life.mygig.clauderc.api.HostHardenResult
 import life.mygig.clauderc.api.HostProbe
 import life.mygig.clauderc.api.HostsData
 import life.mygig.clauderc.api.hostAddressOk
+import life.mygig.clauderc.api.hostPortOk
+import life.mygig.clauderc.api.parseHostPorts
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -32,6 +36,30 @@ class HostModelsTest {
         val s = json.decodeFromString<ChatHostsData>("""{"hosts":[{"name":"shop","address":"example.com","user":"deploy","attached":true},{"name":"blog"}]}""")
         assertTrue(s.hosts[0].attached)
         assertFalse(s.hosts[1].attached)
+    }
+
+    @Test fun parsesHardenResult() {
+        val r = json.decodeFromString<HostHardenResult>(
+            """{"ssh_port":2222,"docker":true,"steps":[{"name":"ports","status":"ok","detail":"opened 80,443"},{"name":"web","status":"skipped"},{"name":"harden","status":"failed","detail":"sshd -t failed"}]}""",
+        )
+        assertEquals(2222, r.sshPort)
+        assertTrue(r.docker)
+        assertEquals(listOf("ok", "skipped", "failed"), r.steps.map { it.status })
+        assertEquals("", r.steps[1].detail)
+        val empty = json.decodeFromString<HostHardenResult>("{}")
+        assertEquals(22, empty.sshPort)
+        assertFalse(empty.docker)
+        assertTrue(empty.steps.isEmpty())
+    }
+
+    @Test fun portRules() {
+        for (ok in listOf("80", "443", "8080/tcp", "51820/udp", "1", "65535")) assertTrue(ok, hostPortOk(ok))
+        for (bad in listOf("", "0", "65536", "99999", "123456", "80/sctp", "80/", "/udp", "a", "80 ", "-1", "8080;x")) assertFalse(bad, hostPortOk(bad))
+        assertEquals(emptyList<String>(), parseHostPorts(""))
+        assertEquals(emptyList<String>(), parseHostPorts(" , "))
+        assertEquals(listOf("8080", "51820/udp"), parseHostPorts(" 8080, 51820/udp ,"))
+        assertNull(parseHostPorts("8080, 70000"))
+        assertNull(parseHostPorts("8080 9090"))
     }
 
     @Test fun hostRules() {
