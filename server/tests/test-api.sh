@@ -897,6 +897,9 @@ check "keyimport: not base64 refused" "$(jqt '.ok==false and .error.code=="inval
 api "host-keyimport imp" ""
 check "keyimport: no key refused" "$(jqt '.ok==false and .error.code=="invalid_key"')"
 [[ ! -e "$HD/.keygen-imp" && -z "$(find "$HD" -maxdepth 1 -name '.new-*' 2>/dev/null)" ]]; check "...nothing kept after any of those" $?
+echo "DEBUG-CI keyimport (temporary)"; ssh -V 2>&1; ( time ssh-keygen -y -P '' -f "$WORK/impkey" ) 2>&1 | tail -5
+( time timeout 25 bash -x "$HOME/bin/claude-setup.sh" --api host-keyimport imp <<<"$(base64 -w0 "$WORK/impkey")" ) 2>&1 | tail -45 | cut -c1-200
+rm -rf "$HD/.keygen-imp"
 api "host-keyimport imp" "$(base64 -w0 "$WORK/impkey")"
 check "keyimport returns the public key and its fingerprint" "$(jqt ".ok and .data.public_key == \"$(ssh-keygen -y -f "$WORK/impkey" | awk '{print $1, $2}')\" and .data.fingerprint == \"$(ssh-keygen -lf "$WORK/impkey.pub" | awk '{print $2}')\"")"
 IPUB="$(jq -r .data.public_key <<<"$OUT")"
