@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Test stub for sshd (a host's, reached through the ssh stub): only `sshd -T`, which prints "port N" for every line of
+# $STUB_STATE/sshd-ports (default 22).
+S="${STUB_STATE:-$HOME/.stub-state}"
+[[ "${1:-}" == -T ]] || { echo "sshd stub: unsupported: $*" >&2; exit 1; }
+if [[ -f "$S/sshd-ports" ]]; then while read -r p; do echo "port $p"; done <"$S/sshd-ports"; else echo "port 22"; fi

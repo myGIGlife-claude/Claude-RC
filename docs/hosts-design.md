@@ -81,33 +81,40 @@ passwordless sudo, or use root"). Server timeout 540 s. Reply `{ssh_port, docker
 The remote script prints `STEP <name> <ok|skipped|failed> <detail>` lines which the server parses; idempotent (safe to re-run).
 
 **Lock-out protection (required):** before touching sshd/ufw, the script schedules a revert with `systemd-run --on-active=120 --unit=clauderc-revert`
-(removes the sshd drop-in, reloads ssh, `ufw disable`). After the apply call returns, the server opens a NEW ssh login with the host's key
+(removes the sshd drop-in, reloads ssh, `ufw disable` only if ufw was inactive before the run). After the apply call returns, the server opens a NEW ssh login with the host's key
 (like host-test); only if that works does it cancel the revert (`systemctl stop clauderc-revert.timer clauderc-revert.service`) in a second call.
 If the new login fails, wait for the revert (about 2 minutes), re-test, and return error `locked_out_reverted` explaining nothing was left locked.
+If the revert service is running at check time it is not stopped: wait for it, sign in again (fails → `locked_out_reverted`) and report a failed
+`safety` step saying the undo ran.
 As built: the settings go after sudo (`sudo -n env CLAUDERC_…=… bash -s`, sudo resets the environment; root runs without sudo); the slow
 apt/optimize/web work runs BEFORE the timer is set, so only the quick ufw/sshd part is inside the 2 minutes; the fresh login itself stops the
-timer; the port sshd answered on (`SSH_CONNECTION`, differs behind a port forward) is allowed too. Bad ports/steps → `invalid_name`.
+timer; the port sshd answered on (`SSH_CONNECTION`, differs behind a port forward) and every `port` from `sshd -T` are allowed too. Bad ports/steps → `invalid_name`.
 
 **Steps (order matters):**
 - always: ports. `ufw allow <ssh_port>/tcp` FIRST (the port the app connects on), then the requested ports, then `ufw --force enable`.
-- `harden`: apt update; install ufw fail2ban unattended-upgrades; `ufw default deny incoming`, `default allow outgoing`, `ufw limit <ssh_port>/tcp`, IPv6 on (`IPV6=yes` in /etc/default/ufw);
+- `harden`: apt update; install ufw fail2ban unattended-upgrades; `ufw default deny incoming`, `default allow outgoing` (ssh ports plain `allow`, never `ufw limit`: it would drop this server's many short ssh connections; fail2ban does the brute-force part), IPv6 on (`IPV6=yes` in /etc/default/ufw);
   sshd drop-in `/etc/ssh/sshd_config.d/00-clauderc.conf`: `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PubkeyAuthentication yes`,
   `PermitRootLogin no` (use `prohibit-password` if the login user IS root), `MaxAuthTries 3`, `LoginGraceTime 30`, `X11Forwarding no`, `AllowAgentForwarding no`,
-  `ClientAliveInterval 300`, `ClientAliveCountMax 2`; validate with `sshd -t` (remove the file and report failed if invalid), confirm with `sshd -T`,
-  reload (`systemctl reload ssh || systemctl reload sshd`); `/etc/fail2ban/jail.d/clauderc.local` ([sshd] enabled, `backend = systemd`, `port = <ssh_port>`,
+  `ClientAliveInterval 300`, `ClientAliveCountMax 2`; validate with `sshd -t` (remove the file and report failed if invalid), confirm every value with `sshd -T`
+  (password/kbd-interactive off, root login, pubkey on; any that differs → failed naming it),
+  reload (`systemctl reload ssh || systemctl reload sshd`; under ssh.socket "saved, sshd will read it on the next connection");
+  `/etc/fail2ban/jail.d/clauderc.local` ([sshd] enabled, `backend = systemd`, `port = <ssh ports>`,
+  `ignoreip = 127.0.0.1/8 ::1 <this server's IP from SSH_CONNECTION, if a valid IP>`,
   `maxretry = 4`, `findtime = 10m`, `bantime = 1h`, `bantime.increment = true`) then restart fail2ban; unattended-upgrades enabled for security
   (`/etc/apt/apt.conf.d/20auto-upgrades`, no automatic reboot); `/etc/sysctl.d/99-clauderc.conf` with only Docker/Caddy-safe values (tcp_syncookies=1,
   rp_filter=1 all/default, accept_redirects=0, send_redirects=0, accept_source_route=0, log_martians=1, icmp_echo_ignore_broadcasts=1, kernel.dmesg_restrict=1,
   kernel.kptr_restrict=2, fs.protected_hardlinks=1, fs.protected_symlinks=1) — never touch `net.ipv4.ip_forward`; `sysctl --system`.
-  If Docker is installed, return `docker:true` and a step detail warning that published ports bypass UFW (publish on 127.0.0.1).
+  If Docker is installed, return `docker:true` and a step detail warning that published ports bypass UFW (publish on 127.0.0.1)
+  and that `default deny incoming` can block containers reaching host services through the docker0 bridge.
 - `optimize`: time sync on (`timedatectl set-ntp true`), journald cap (`/etc/systemd/journald.conf.d/clauderc.conf` SystemMaxUse=200M), swap file only when there is
-  no swap and RAM <= 2 GB (1 GB `/swapfile`, mode 600, fstab entry, `vm.swappiness=10`), `apt-get -y autoremove`.
+  no swap and RAM <= 2 GB (1 GB `/swapfile`, mode 600, fstab entry, `vm.swappiness=10`). No `apt-get autoremove` (too aggressive for a default step).
 - `web`: Caddy from its official apt repo (keyring in /usr/share/keyrings, `deb ... stable main` list, apt install caddy) plus git, curl, unzip, build-essential; ports 80/443 are NOT opened unless requested.
 - Non-interactive apt: `DEBIAN_FRONTEND=noninteractive`, `-y -o Dpkg::Options::=--force-confold`. Never use `ufw reset`, never change the SSH port, never lock the root password.
 
 ### Session tool: `host_firewall(host, action, port?, proto?)` in clauderc-team
 `action` status|open|close. open/close run `sudo -n ufw allow|delete allow <port>/<proto>` over the host's ssh (validated port 1-65535, proto tcp|udp);
-refuse to close the host's SSH port; `status` returns `ufw status numbered`. Same attach gate as host_run. Mention in the hosts instructions paragraph:
+refuse to close the host's SSH port (the app's port, and on the host itself the port in `SSH_CONNECTION` and every `sshd -T` port:
+exit 3 "that is an SSH port"); `status` returns `ufw status numbered`. Same attach gate as host_run. Mention in the hosts instructions paragraph:
 open only the ports the project needs, publish Docker ports on 127.0.0.1 behind Caddy, ask the owner before opening anything unusual.
 
 ### App

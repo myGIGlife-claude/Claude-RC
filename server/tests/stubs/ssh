@@ -4,6 +4,7 @@
 #   host_password   the account's password (password sign-in, via SSH_ASKPASS only)
 #   remote/         the account's home: authorized keys in remote/.ssh/authorized_keys, commands run there with sh -c
 #   ssh-unreachable nothing answers
+#   ssh-connection  the remote commands' SSH_CONNECTION (none = unset)
 #   ssh-argv        the last call's arguments, one per line; ssh-env-askpass: whether a password came through askpass
 #   ssh-log         every call's remote command, one per line ("-" = none)
 #   ssh-locked      logins fail with a timeout; removed by the first failed login (the host's automatic undo ran)
@@ -54,6 +55,7 @@ else
     { echo "user@$host: Permission denied (publickey)." >&2; exit 255; }
 fi
 cd "$S/remote" || exit 255
+[[ -f "$S/ssh-connection" ]] && { SSH_CONNECTION="$(cat "$S/ssh-connection")"; export SSH_CONNECTION; }
 (($#)) || exit 0
 if [[ "$*" == *" bash -s" ]]; then
   export STUB_HARDEN="$S"

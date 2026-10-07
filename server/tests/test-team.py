@@ -276,6 +276,17 @@ err, text = tool("host_firewall", host="web", action="status")
 assert not err and text.startswith("Status: active") and "51820/udp" in text, text
 err, text = tool("host_firewall", host="web", action="close", port=22)
 assert err and "SSH port" in text, text
+# The host's own sshd ports can't be closed either: the one this connection reached (behind a port forward) and sshd -T's.
+(stub / "ssh-connection").write_text("192.0.2.1 50000 192.0.2.2 2200\n")
+(stub / "sshd-ports").write_text("22\n2022\n")
+for p in (2200, 2022):
+    before = (stub / "ufw-log").read_text()
+    err, text = tool("host_firewall", host="web", action="close", port=p)
+    assert err and "SSH port" in text, (p, text)
+    assert (stub / "ufw-log").read_text() == before, p
+err, text = tool("host_firewall", host="web", action="close", port=2022, proto="udp")
+assert not err, text
+(stub / "ssh-connection").unlink(); (stub / "sshd-ports").unlink()
 for bad in ({"action": "open"}, {"action": "open", "port": 0}, {"action": "open", "port": 70000}, {"action": "open", "port": "80;id"},
             {"action": "open", "port": True}, {"action": "open", "port": 80, "proto": "sctp"}, {"action": "open", "port": 80, "proto": "tcp;id"},
             {"action": "reset"}, {}):

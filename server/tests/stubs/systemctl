@@ -5,7 +5,10 @@ S="${STUB_STATE:-$HOME/.stub-state}"
 echo "$(date +%s%N) $*" >>"$S/systemctl-log"
 case "${1:-}" in
   is-enabled) if [[ -e "$S/systemd-enabled" ]]; then echo enabled; exit 0; else echo disabled; exit 1; fi ;;
-  # host-harden's undo timer: stopped unless $STUB_STATE/revert-stuck exists
-  is-active) [[ "$*" == *clauderc-revert.timer* ]] && { [[ -e "$S/revert-stuck" ]] && exit 0; exit 3; } ;;
+  # host-harden's undo timer: stopped unless $STUB_STATE/revert-stuck exists; its service runs (once) when
+  # $STUB_STATE/revert-running exists
+  is-active)
+    [[ "$*" == *clauderc-revert.timer* ]] && { [[ -e "$S/revert-stuck" ]] && exit 0; exit 3; }
+    [[ "$*" == *clauderc-revert.service* ]] && { [[ -e "$S/revert-running" ]] && { rm -f "$S/revert-running"; exit 0; }; exit 3; } ;;
 esac
 exit 0

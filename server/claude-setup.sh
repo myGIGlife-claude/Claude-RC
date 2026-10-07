@@ -1894,18 +1894,24 @@ do_host_harden() {
     ((rc == 124)) && extra='[{"name":"finish","status":"failed","detail":"timed out after 540 s (the firewall and SSH changes were checked anyway)"}]'
     # A fresh login with the host's key (not the session the script ran in) must still work; only then is the undo cancelled.
     local check out2
-    check="$root_or_sudo if [ -e /run/clauderc-reverted ]; then echo REVERTED; exit 0; fi; \$S systemctl stop clauderc-revert.timer clauderc-revert.service; ! systemctl is-active --quiet clauderc-revert.timer && echo CANCELLED"
+    # An undo that is running right now is never stopped halfway: wait for it (up to 20 s) and report it as undone.
+    check="$root_or_sudo if [ -e /run/clauderc-reverted ]; then echo REVERTED; exit 0; fi; \
+if systemctl is-active --quiet clauderc-revert.service; then i=0; while [ \$i -lt 20 ] && systemctl is-active --quiet clauderc-revert.service; do sleep 1; i=\$((i+1)); done; echo RUNNING; exit 0; fi; \
+\$S systemctl stop clauderc-revert.timer clauderc-revert.service; ! systemctl is-active --quiet clauderc-revert.timer && echo CANCELLED"
     out2="$(timeout 30 ssh "${HOST_SSH[@]}" "$HOST_ADDR" "$check" </dev/null 2>"$tmp/err")"
     rc=$?
     if ((rc == 255 || rc == 124)); then
       sleep "$HOST_HARDEN_WAIT"
       if timeout 30 ssh "${HOST_SSH[@]}" "$HOST_ADDR" true </dev/null >/dev/null 2>"$tmp/err"; then
-        host_fail locked_out_reverted "After the changes a new SSH login to $name didn't work, so the server undid them by itself after 2 minutes (firewall off, the SSH settings file removed). Nothing was left locked: check the ports and try again."
+        host_fail locked_out_reverted "After the changes a new SSH login to $name didn't work, so the server undid them by itself after 2 minutes (firewall back as it was, the SSH settings file removed). Nothing was left locked: check the ports and try again."
       fi
       host_fail host_failed "After the changes a new SSH login to $name didn't work, and it still doesn't after the automatic undo should have run ($(host_last_line "$tmp/err")). Use your provider's console to check the firewall (ufw disable) and /etc/ssh/sshd_config.d/00-clauderc.conf."
     fi
-    if [[ "$out2" == *REVERTED* ]]; then
-      extra="$(jq -c '. + [{name:"safety", status:"failed", detail:"the automatic undo ran before the check (the set-up took too long): the firewall is off and the SSH settings were removed; run Set up again"}]' <<<"$extra")"
+    if [[ "$out2" == *RUNNING* ]] && ! timeout 30 ssh "${HOST_SSH[@]}" "$HOST_ADDR" true </dev/null >/dev/null 2>"$tmp/err"; then
+      host_fail locked_out_reverted "The automatic undo on $name ran before the check could cancel it (firewall back as before, the SSH settings file removed), and a new SSH login doesn't work right now ($(host_last_line "$tmp/err")). Wait a minute and try again; if it still fails, use your provider's console."
+    fi
+    if [[ "$out2" == *REVERTED* || "$out2" == *RUNNING* ]]; then
+      extra="$(jq -c '. + [{name:"safety", status:"failed", detail:"the automatic undo ran before the check (the set-up took too long): the firewall is back as it was and the SSH settings were removed; run Set up again"}]' <<<"$extra")"
     elif [[ "$out2" != *CANCELLED* ]]; then
       extra="$(jq -c '. + [{name:"safety", status:"failed", detail:"couldn'"'"'t cancel the automatic undo: the firewall and SSH changes will be undone in 2 minutes"}]' <<<"$extra")"
     fi
@@ -1933,9 +1939,16 @@ SSH_PORT=$((10#$SSH_PORT))
 [[ "$LOGIN_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || fail_exit input "bad user name"
 [[ "$(id -u)" == 0 ]] || fail_exit input "not running as root"
 # The port sshd itself answered on (differs from the app's port behind a port forward): both stay open.
+# Every other port sshd listens on stays open too.
 SSHD_PORTS=("$SSH_PORT")
+add_sshd_port() { port_ok "$1" || return 0; local q; for q in "${SSHD_PORTS[@]}"; do ((q == 10#$1)) && return 0; done; SSHD_PORTS+=("$((10#$1))"); }
 conn_port="${CLAUDERC_CONN:-}"; conn_port="${conn_port##* }"
-if port_ok "$conn_port" && ((10#$conn_port != SSH_PORT)); then SSHD_PORTS+=("$((10#$conn_port))"); fi
+add_sshd_port "$conn_port"
+while read -r p; do add_sshd_port "$p"; done < <(sshd -T 2>/dev/null | awk '/^port /{print $2}')
+# This server's address (first field of SSH_CONNECTION) is never banned by fail2ban; used only when it is a plain IP.
+client_ip="${CLAUDERC_CONN:-}"; client_ip="${client_ip%% *}"
+if ! [[ "$client_ip" =~ ^(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])){3}$ ||
+  ("$client_ip" == *:* && "$client_ip" =~ ^[0-9A-Fa-f:.]{2,45}$) ]]; then client_ip=""; fi
 has() { [[ ",$STEPS," == *",$1,"* ]]; }
 
 exec 9>/run/clauderc-harden.lock
@@ -1977,6 +1990,7 @@ if has harden && ((pkgs_ok)); then
 enabled = true
 backend = systemd
 port = $f2b_ports
+ignoreip = 127.0.0.1/8 ::1${client_ip:+ $client_ip}
 maxretry = 4
 findtime = 10m
 bantime = 1h
@@ -2048,8 +2062,6 @@ if has optimize; then
   else
     step swap failed "$(last)"; swapoff /swapfile >/dev/null 2>&1; rm -f /swapfile
   fi
-
-  if apt-get "${APT_OPTS[@]}" autoremove >"$LOG" 2>&1; then step autoremove ok "unused packages removed"; else step autoremove failed "$(last)"; fi
 fi
 
 if has web; then
@@ -2068,7 +2080,12 @@ fi
 command -v ufw >/dev/null || fail_exit firewall "ufw isn't installed; the firewall and SSH were not changed"
 systemctl stop clauderc-revert.timer clauderc-revert.service >/dev/null 2>&1
 systemctl reset-failed clauderc-revert.timer clauderc-revert.service >/dev/null 2>&1
-revert='rm -f /etc/ssh/sshd_config.d/00-clauderc.conf; systemctl reload ssh || systemctl reload sshd; ufw disable; touch /run/clauderc-reverted'
+# The undo turns ufw off only when it was off before this run.
+ufw_was=inactive
+ufw status 2>/dev/null | grep -q '^Status: active' && ufw_was=active
+revert='rm -f /etc/ssh/sshd_config.d/00-clauderc.conf; systemctl reload ssh || systemctl reload sshd;'
+[[ "$ufw_was" == inactive ]] && revert+=' ufw disable;'
+revert+=' touch /run/clauderc-reverted'
 systemd-run --quiet --on-active=120 --unit=clauderc-revert /bin/sh -c "$revert" >"$LOG" 2>&1 ||
   fail_exit safety "couldn't schedule the automatic undo ($(last)); the firewall and SSH were not changed"
 echo "REVERT scheduled"
@@ -2084,7 +2101,6 @@ for p in "${SSHD_PORTS[@]}"; do ufw_do allow "$p/tcp"; opened+=("$p/tcp (ssh)");
 if has harden; then
   ufw_do default deny incoming
   ufw_do default allow outgoing
-  for p in "${SSHD_PORTS[@]}"; do ufw_do limit "$p/tcp"; done
 fi
 if [[ -n "$PORTS" ]]; then
   IFS=, read -ra plist <<<"$PORTS"
@@ -2093,7 +2109,7 @@ fi
 ufw_do --force enable
 has harden && ufw_do reload
 detail="$(printf '%s, ' "${opened[@]}")"; detail="open: ${detail%, }"
-((docker_on)) && detail+=". Docker is installed: ports it publishes bypass this firewall, so publish containers on 127.0.0.1 and put Caddy in front"
+((docker_on)) && detail+=". Docker is installed: ports it publishes bypass this firewall, so publish containers on 127.0.0.1 and put Caddy in front; 'deny incoming' can also block containers reaching services on this server through the docker0 bridge"
 if ((fw_ok)) && ufw status 2>/dev/null | grep -q '^Status: active'; then step firewall ok "$detail"; else step firewall failed "$(last)"; fi
 
 if has harden; then
@@ -2117,11 +2133,19 @@ ClientAliveCountMax 2
 EOF
     if ! sshd -t >"$LOG" 2>&1; then
       rm -f "$dropin"; step ssh failed "sshd rejected the settings ($(last)); removed them"
-    elif ! sshd -T 2>/dev/null | grep -qx 'passwordauthentication no'; then
-      step ssh failed "another sshd setting still allows passwords (check /etc/ssh/sshd_config.d)"
-    elif systemctl reload ssh >"$LOG" 2>&1 || systemctl reload sshd >"$LOG" 2>&1 || systemctl is-active --quiet ssh.socket; then
-      step ssh ok "key login only, root login $root_login, 3 tries, idle sessions closed after 10 min"
-    else step ssh failed "couldn't reload sshd: $(last)"; fi
+    else
+      # sshd -T shows what sshd really uses: an earlier value in sshd_config wins over ours.
+      eff="$(sshd -T 2>/dev/null)" wrong=""
+      for want in 'passwordauthentication no' 'kbdinteractiveauthentication no' "permitrootlogin $root_login" 'pubkeyauthentication yes'; do
+        grep -qx "$want" <<<"$eff" || wrong+="${wrong:+, }${want%% *}"
+      done
+      ok_detail="key login only, root login $root_login, 3 tries, idle sessions closed after 10 min"
+      if [[ -n "$wrong" ]]; then
+        step ssh failed "not in effect: $wrong (an earlier value in /etc/ssh/sshd_config or sshd_config.d wins)"
+      elif systemctl reload ssh >"$LOG" 2>&1 || systemctl reload sshd >"$LOG" 2>&1; then step ssh ok "$ok_detail"
+      elif systemctl is-active --quiet ssh.socket; then step ssh ok "$ok_detail; saved, sshd will read it on the next connection"
+      else step ssh failed "couldn't reload sshd: $(last)"; fi
+    fi
   fi
 fi
 exit 0

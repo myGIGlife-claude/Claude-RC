@@ -901,12 +901,20 @@ def host_firewall(a):
             raise ToolError("proto must be tcp or udp.")
         if action == "close" and port == h["port"] and proto == "tcp":
             raise ToolError(f"{port}/tcp is the SSH port of {h['name']}: closing it would lock everyone out.")
-        script = sudo + f"$S ufw {'allow' if action == 'open' else 'delete allow'} {port}/{proto} && " + status
+        guard = ""
+        if action == "close" and proto == "tcp":
+            # The port sshd really answers on (behind a port forward it differs from the app's) and every sshd port stay open.
+            guard = (f'c="${{SSH_CONNECTION:-}}"; if [ "${{c##* }}" = {port} ] || '
+                     f'$S sshd -T 2>/dev/null | awk \'/^port /{{print $2}}\' | grep -qx {port}; then '
+                     f'echo "{port}/tcp: that is an SSH port" >&2; exit 3; fi; ')
+        script = sudo + guard + f"$S ufw {'allow' if action == 'open' else 'delete allow'} {port}/{proto} && " + status
     else:
         raise ToolError("action must be status, open or close.")
     rc, out, err = ssh_run(h, script, 60)
     if rc == 255 and not out:
         raise ToolError(f"Couldn't connect to {h['name']}: {cap(err).strip()[-500:] or 'ssh failed'}")
+    if rc == 3 and action == "close" and b"that is an SSH port" in err:
+        raise ToolError(f"{port}/tcp is an SSH port of {h['name']}: closing it would lock everyone out.")
     if rc:
         msg = (cap(err) + cap(out)).strip()[-500:]
         hint = " The host's user needs passwordless sudo (or set the server up in the app first)." if "sudo" in msg or "password" in msg else ""

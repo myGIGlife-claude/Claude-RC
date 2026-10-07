@@ -961,6 +961,22 @@ awk '/^host_harden_script\(\) \{/ {f = 1} f && /^REMOTE$/ {exit} f && p {print} 
 [[ -s "$RS" ]] && cmp -s "$RS" "$STUB_STATE/harden-script"; check "harden: the embedded script went to the host on stdin, unexpanded" $?
 bash -n "$RS"; check "harden: the remote script parses (bash -n)" $?
 if command -v shellcheck >/dev/null; then shellcheck -s bash -S warning - <"$RS"; check "harden: the remote script is shellcheck clean" $?; fi
+# Safety-audit fixes (the script only runs as root on a host, so these check its text).
+! grep -q 'ufw_do limit' "$RS"; check "harden: ssh ports are allowed, never rate-limited (would drop this server)" $?
+grep -q '^ignoreip = 127.0.0.1/8 ::1${client_ip:+ $client_ip}$' "$RS" && grep -q 'client_ip="${client_ip%% \*}"' "$RS"
+check "harden: fail2ban ignores this server's address" $?
+grep -q "ufw status 2>/dev/null | grep -q '^Status: active' && ufw_was=active" "$RS" &&
+  grep -q "\[\[ \"\$ufw_was\" == inactive \]\] && revert+=' ufw disable;'" "$RS" && ! grep -q "^revert=.*ufw disable" "$RS"
+check "harden: the undo turns ufw off only when it was off before" $?
+grep -q "done < <(sshd -T 2>/dev/null | awk '/^port /{print \$2}')" "$RS" &&
+  (($(grep -n 'add_sshd_port "\$p"; done < <(sshd -T' "$RS" | cut -d: -f1) < $(grep -n 'ufw_do --force enable' "$RS" | cut -d: -f1)))
+check "harden: every sshd port is allowed before ufw is enabled" $?
+(($(grep -n 'systemd-run .*clauderc-revert' "$RS" | cut -d: -f1) < $(grep -n 'ufw_do allow "\$p/tcp"' "$RS" | cut -d: -f1)))
+check "harden: the undo is scheduled before any ufw change" $?
+grep -q "'kbdinteractiveauthentication no' \"permitrootlogin \$root_login\" 'pubkeyauthentication yes'" "$RS"
+check "harden: every sshd setting is confirmed with sshd -T" $?
+! grep -q autoremove "$RS"; check "harden: no apt autoremove" $?
+grep -q 'docker0 bridge' "$RS"; check "harden: the Docker warning mentions the docker0 bridge" $?
 # Its own input checks (it stops before touching anything; never run as root here).
 if [[ "$(command -p id -u)" != 0 ]]; then
   rs() { env -i PATH=/usr/bin:/bin CLAUDERC_SSH_PORT=22 CLAUDERC_PORTS=80/tcp CLAUDERC_STEPS=harden CLAUDERC_USER=deploy "$@" bash "$RS" 2>&1 | head -n 3; }
@@ -986,6 +1002,14 @@ touch "$STUB_STATE/revert-stuck"
 api "host-harden web" $'\n'
 check "harden: an undo that won't stop is reported" "$(jqt '.ok and (.data.steps | map(select(.name=="safety" and .status=="failed")) | length == 1)')"
 rm -f "$STUB_STATE/revert-stuck"
+# The undo is running right now: never stopped halfway, reported as undone.
+touch "$STUB_STATE/revert-running"; rm -f "$STUB_STATE/ssh-log" "$STUB_STATE/systemctl-log"
+api "host-harden web" $'\n'
+check "harden: an undo already running is reported as undone" "$(jqt '.ok and (.data.steps | map(select(.name=="safety" and .status=="failed" and (.detail | test("undo ran")))) | length == 1)')"
+! grep -q 'stop clauderc-revert' "$STUB_STATE/systemctl-log"; check "...and was not cancelled" $?
+mapfile -t HLOG <"$STUB_STATE/ssh-log"
+[[ ${#HLOG[@]} == 4 && "${HLOG[3]}" == true ]]; check "...after a fresh login" $?
+rm -f "$STUB_STATE/revert-running"
 printf '%s\n' "STEP packages ok ufw installed" "STEP safety failed couldn't schedule the automatic undo" >"$STUB_STATE/harden-out"
 rm -f "$STUB_STATE/ssh-log"
 api "host-harden web" $'\nweb'
