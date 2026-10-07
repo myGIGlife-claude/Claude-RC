@@ -383,6 +383,18 @@ data class HostProbe(val fingerprint: String = "", val keytype: String = "")
 @Serializable
 data class HostKey(@SerialName("public_key") val publicKey: String = "", val fingerprint: String = "")
 
+/** One step of host-harden: status "ok", "skipped" or "failed". */
+@Serializable
+data class HostHardenStep(val name: String = "", val status: String = "", val detail: String = "")
+
+/** What host-harden did; [docker] means published container ports bypass the firewall. */
+@Serializable
+data class HostHardenResult(
+    @SerialName("ssh_port") val sshPort: Int = 22,
+    val docker: Boolean = false,
+    val steps: List<HostHardenStep> = emptyList(),
+)
+
 /** A host as one chat sees it: attached or not. */
 @Serializable
 data class ChatHost(val name: String, val address: String = "", val user: String = "", val attached: Boolean = false)
