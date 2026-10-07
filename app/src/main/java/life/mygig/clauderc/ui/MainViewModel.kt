@@ -739,35 +739,57 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val hostAddOpen = _hostAddOpen.asStateFlow()
     private val _hostProbe = MutableStateFlow<HostProbe?>(null)
     val hostProbe = _hostProbe.asStateFlow()
+    /** The server's own words for a host problem: its auth_failed means the HOST refused our key, not this phone's key (friendly() says the latter). */
+    private fun hostMessage(e: ApiException) = if (e.code == Codes.AUTH_FAILED) e.message else friendly(e).first
     private val _hostError = MutableStateFlow<String?>(null)
     val hostError = _hostError.asStateFlow()
     /** "Generate a key": the host name it was made for and its public half. */
     private val _hostKey = MutableStateFlow<Pair<String, HostKey>?>(null)
     val hostKey = _hostKey.asStateFlow()
     fun loadHosts() = action("Loading servers…") { _hosts.value = api.hostList().hosts }
-    fun openHostAdd() { _hostProbe.value = null; _hostError.value = null; _hostKey.value = null; _hostAddOpen.value = true }
-    fun closeHostAdd() { _hostAddOpen.value = false; _hostProbe.value = null; _hostError.value = null; _hostKey.value = null }
+    /** What the Add server dialog keeps on the phone while you go and fetch things elsewhere: no secrets, only the plain fields and the PUBLIC key. */
+    data class HostDraft(val name: String = "", val address: String = "", val port: String = "22", val user: String = "", val auth: String = "key")
+    private val hostDraftPrefs by lazy { getApplication<Application>().getSharedPreferences("host_draft", android.content.Context.MODE_PRIVATE) }
+    fun hostDraft() = hostDraftPrefs.run {
+        HostDraft(getString("name", "").orEmpty(), getString("address", "").orEmpty(), getString("port", "22").orEmpty(), getString("user", "").orEmpty(), getString("auth", "key").orEmpty())
+    }
+    fun saveHostDraft(d: HostDraft) = hostDraftPrefs.edit().putString("name", d.name).putString("address", d.address).putString("port", d.port)
+        .putString("user", d.user).putString("auth", d.auth).apply()
+    private fun rememberHostKey(name: String, key: HostKey) {
+        _hostKey.value = name to key
+        hostDraftPrefs.edit().putString("key_name", name).putString("key_pub", key.publicKey).putString("key_fp", key.fingerprint).apply()
+    }
+    fun openHostAdd() {
+        _hostProbe.value = null; _hostError.value = null; _hostAddOpen.value = true
+        // The key made earlier is still waiting on the server (kept 24 h): show it again.
+        _hostKey.value = hostDraftPrefs.getString("key_name", null)?.let { n -> n to HostKey(hostDraftPrefs.getString("key_pub", "").orEmpty(), hostDraftPrefs.getString("key_fp", "").orEmpty()) }
+    }
+    /** [keepDraft]: tapping outside the dialog keeps what was typed; Cancel and a finished add clear it. */
+    fun closeHostAdd(keepDraft: Boolean = false) {
+        _hostAddOpen.value = false; _hostProbe.value = null; _hostError.value = null; _hostKey.value = null
+        if (!keepDraft) hostDraftPrefs.edit().clear().apply()
+    }
     fun clearHostKey() { _hostKey.value = null }
     fun generateHostKey(name: String) {
         _hostKey.value = null
         _hostError.value = null
-        action("Generating a key…", onError = { _hostError.value = friendly(it).first }) { _hostKey.value = name to api.hostKeygen(name) }
+        action("Generating a key…", onError = { _hostError.value = hostMessage(it) }) { rememberHostKey(name, api.hostKeygen(name)) }
     }
     fun importHostKey(name: String, keyBase64: String) {
         _hostKey.value = null
         _hostError.value = null
-        action("Importing the key…", onError = { _hostError.value = friendly(it).first }) { _hostKey.value = name to api.hostKeyImport(name, keyBase64) }
+        action("Importing the key…", onError = { _hostError.value = hostMessage(it) }) { rememberHostKey(name, api.hostKeyImport(name, keyBase64)) }
     }
     /** Address or port changed after Check: the shown key no longer applies. */
     fun clearHostProbe() { _hostProbe.value = null }
     fun probeHost(address: String, port: Int) {
         _hostProbe.value = null
         _hostError.value = null
-        action("Checking $address…", onError = { _hostError.value = friendly(it).first }) { _hostProbe.value = api.hostProbe(address, port) }
+        action("Checking $address…", onError = { _hostError.value = hostMessage(it) }) { _hostProbe.value = api.hostProbe(address, port) }
     }
     fun addHost(name: String, address: String, port: Int, user: String, fingerprint: String, auth: String, secret: String) {
         _hostError.value = null
-        action("Adding $name…", onError = { _hostError.value = friendly(it).first }) {
+        action("Adding $name…", onError = { _hostError.value = hostMessage(it) }) {
             api.hostAdd(name, address, port, user, fingerprint, auth, secret)
             closeHostAdd()
             openHostSetup(name, port)
@@ -790,7 +812,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         action("Setting up $name…", onError = {
             _hostSetupError.value = when (it.code) {
                 "needs_sudo" -> "This user needs passwordless sudo (or use root)"
-                else -> friendly(it).first
+                else -> hostMessage(it)
             }
         }) { _hostHarden.value = api.hostHarden(name, ports, steps) }
     }

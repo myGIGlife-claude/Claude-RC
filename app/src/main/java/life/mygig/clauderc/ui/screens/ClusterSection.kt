@@ -38,6 +38,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -324,12 +325,14 @@ private fun HostAddDialog(vm: MainViewModel) {
     val probe by vm.hostProbe.collectAsState()
     val error by vm.hostError.collectAsState()
     val hostKey by vm.hostKey.collectAsState()
-    var name by remember { mutableStateOf("") }
-    var address by remember { mutableStateOf("") }
-    var port by remember { mutableStateOf("22") }
-    var user by remember { mutableStateOf("") }
+    val draft = remember { vm.hostDraft() }   // what was typed before the app was left (no secrets)
+    var name by rememberSaveable { mutableStateOf(draft.name) }
+    var address by rememberSaveable { mutableStateOf(draft.address) }
+    var port by rememberSaveable { mutableStateOf(draft.port) }
+    var user by rememberSaveable { mutableStateOf(draft.user) }
     var confirmed by remember { mutableStateOf(false) }
-    var auth by remember { mutableStateOf("key") }
+    var auth by rememberSaveable { mutableStateOf(draft.auth) }
+    LaunchedEffect(name, address, port, user, auth) { vm.saveHostDraft(MainViewModel.HostDraft(name, address, port, user, auth)) }
     var keyText by remember { mutableStateOf("") }
     var keyFile by remember { mutableStateOf<String?>(null) }   // base64 of a picked key file
     var password by remember { mutableStateOf("") }
@@ -369,31 +372,35 @@ private fun HostAddDialog(vm: MainViewModel) {
     val p = probe
     val generated = hostKey?.takeIf { it.first == name }?.second   // made (or imported) for this name only
     LaunchedEffect(generated) {
-        if (generated != null) { auth = "generated"; importOpen = false; importText = ""; importFile = null; importFileError = null }
+        if (generated != null) { importOpen = false; importText = ""; importFile = null; importFileError = null }
     }
     val importSecret = when {
         importFile != null -> importFile!!
         importText.isNotBlank() -> keyTextBase64(importText)
         else -> ""
     }
+    // A key made or imported above is THE sign-in: no choice, no password to type.
+    val mode = if (generated != null) "generated" else if (auth == "password") "password" else "key"
     val secret = when {
-        auth == "generated" -> if (generated != null) "-" else ""
-        auth == "password" -> password
+        mode == "generated" -> "-"
+        mode == "password" -> password
         keyFile != null -> keyFile!!
         keyText.isNotBlank() -> keyTextBase64(keyText)
         else -> ""
     }
     val canSave = p != null && confirmed && HOST_NAME_RE.matches(name) && HOST_USER_RE.matches(user) && secret.isNotEmpty() && busy == null
+    val scroll = rememberScrollState()
+    LaunchedEffect(error) { if (error != null) scroll.animateScrollTo(scroll.maxValue) }   // the message is at the bottom of a tall dialog: bring it into view
     AlertDialog(
-        onDismissRequest = { if (busy == null) vm.closeHostAdd() },
+        onDismissRequest = { if (busy == null) vm.closeHostAdd(keepDraft = true) },
         confirmButton = {
             if (p == null) TextButton(onClick = { vm.probeHost(address, portNum ?: 22) }, enabled = addressOk && busy == null) { Text("Check") }
-            else TextButton(onClick = { vm.addHost(name, address, portNum ?: 22, user, p.fingerprint, auth, secret) }, enabled = canSave) { Text("Save") }
+            else TextButton(onClick = { vm.addHost(name, address, portNum ?: 22, user, p.fingerprint, mode, secret) }, enabled = canSave) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = { vm.closeHostAdd() }) { Text("Cancel") } },
         title = { Text("Add a server") },
         text = {
-            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.heightIn(max = 520.dp).verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 NoAutofill()
                 OutlinedTextField(
                     value = name, onValueChange = { if (it.trim() != name) vm.clearHostKey(); name = it.trim() }, label = { Text("Name (shop, blog…)") },
@@ -469,18 +476,16 @@ private fun HostAddDialog(vm: MainViewModel) {
                         Text("This is my server's key")
                     }
                     if (confirmed) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(selected = auth == "key", onClick = { auth = "key" }, label = { Text("Key") })
-                            FilterChip(selected = auth == "password", onClick = { auth = "password" }, label = { Text("Password") })
-                            FilterChip(selected = auth == "generated", onClick = { auth = "generated" }, label = { Text("Key above") })
+                        if (generated == null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(selected = mode == "key", onClick = { auth = "key" }, label = { Text("Key") })
+                            FilterChip(selected = mode == "password", onClick = { auth = "password" }, label = { Text("Password") })
                         }
-                        if (auth == "generated") {
+                        if (mode == "generated") {
                             Text(
-                                if (generated == null) "Generate a new key or use an existing one at the top first."
-                                else "Signs in with the key shown above. Put its public key on the server before you Save.",
+                                "Signs in with the key shown above (no password needed). Make sure its public key is on the server or in your provider's key box, then Save.",
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                        } else if (auth == "key") {
+                        } else if (mode == "key") {
                             OutlinedTextField(
                                 value = keyText, onValueChange = { keyText = it; keyFile = null }, label = { Text("Private key (paste)") },
                                 maxLines = 4, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(),
