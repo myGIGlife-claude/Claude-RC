@@ -31,7 +31,7 @@ cfg = tmp / "cfg" / "claude-launcher" / "workers"
 env = {**os.environ, "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(HERE / "stubs" / "claude"), "CLAUDERC_CODEX": str(HERE / "stubs" / "codex"), "CLAUDERC_GEMINI": str(HERE / "stubs" / "gemini"),
        "ANTHROPIC_API_KEY": "secret-should-not-leak", "CLAUDE_CODE_OAUTH_TOKEN": "main-token", "CLAUDECODE": "1", "STUB_STATE": str(tmp / "stub"),
        "CLAUDERC_TEST_SECRET": "service-token", "CLAUDERC_WORKER_SLOTS": "3", "CLAUDERC_USAGE_TTL": "0", "CLAUDERC_START_GAP": "0",
-       "CLAUDERC_USAGE_URL": f"http://127.0.0.1:{usage_srv.server_port}/"}
+       "CLAUDERC_USAGE_URL": f"http://127.0.0.1:{usage_srv.server_port}/", "CLAUDERC_SSH": str(HERE / "stubs" / "ssh"), "CLAUDERC_SCP": str(HERE / "stubs" / "scp")}
 cfg.parent.mkdir(parents=True, exist_ok=True)
 (cfg.parent / "env").write_text("export CLAUDERC_TEST_SECRET='service-token'\n")
 for name, signed in (("research", True), ("ui", False)):
@@ -80,7 +80,8 @@ def tool(name, **args):
 
 r = rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}})["result"]
 assert r["serverInfo"]["name"] == "clauderc-team" and "list_workers" in r["instructions"], r
-assert {t["name"] for t in rpc("tools/list")["result"]["tools"]} == {"list_workers", "delegate", "wait", "reply", "review", "merge", "discard"}
+assert {t["name"] for t in rpc("tools/list")["result"]["tools"]} == {"list_workers", "delegate", "wait", "reply", "review", "merge", "discard",
+                                                                       "list_hosts", "host_run", "host_put", "host_get"}
 
 # Nothing is attached to this project yet: no workers visible, none usable.
 err, text = tool("list_workers")
@@ -172,6 +173,93 @@ assert err and "stub gemini failure" in text, text
 err, tid = tool("delegate", role="second opinion", task="by role")
 assert not err, tid
 tool("wait", task_id=tid, timeout_s=30)
+proc.stdin.close()
+proc.wait(timeout=5)
+
+# Hosts: servers attached to a project's chat (attach/<slug>.hosts.json). ssh and scp are the stubs; the host's home is
+# $STUB_STATE/remote, which only accepts the pinned host key and the keys in its authorized_keys.
+stub = tmp / "stub"
+(stub / "remote" / ".ssh").mkdir(parents=True, exist_ok=True)
+keygen = lambda f: subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(f)], check=True, stdin=subprocess.DEVNULL)
+keygen(tmp / "hostkey")
+hostpub = (tmp / "hostkey.pub").read_text().split()
+(stub / "host_key.pub").write_text(" ".join(hostpub) + "\n")
+hosts = cfg.parent / "hosts"
+for n in ("web", "other"):
+    (hosts / n).mkdir(parents=True)
+    keygen(hosts / n / "key")
+    with open(stub / "remote" / ".ssh" / "authorized_keys", "a") as f:
+        f.write((hosts / n / "key.pub").read_text())
+    (hosts / n / "key.pub").unlink()
+    (hosts / n / "known_hosts").write_text(f"web.example.com {hostpub[0]} {hostpub[1]}\n")
+    (hosts / n / "meta.json").write_text(json.dumps({"address": "web.example.com", "port": 22, "user": "deploy", "fingerprint": "SHA256:" + "A" * 43, "auth": "key", "added": 1}))
+site = tmp / "my site"
+site.mkdir()
+
+
+def attach_hosts(folder, names):
+    f = cfg.parent / "attach" / (re.sub(r"[^A-Za-z0-9]", "-", str(Path(folder).resolve())) + ".hosts.json")
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(names))
+
+
+proc = spawn(site)
+_id = 0
+err, text = tool("list_hosts")
+assert not err and json.loads(text) == [], text
+err, text = tool("host_run", host="web", command="true")
+assert err and "isn't attached" in text and "👥" in text, text
+attach_hosts(site, {"web": {}, "ghost": {}, "../x": {}})
+attach(site, {"research": {}})                                   # workers attached here stay workers, hosts stay hosts
+err, text = tool("list_hosts")
+assert not err and json.loads(text) == [{"name": "web", "address": "web.example.com", "user": "deploy", "workspace": "~/sites/my-site"}], text
+err, text = tool("list_workers")
+assert not err and [w["name"] for w in json.loads(text)] == ["research"], text
+for h in ("other", "ghost", "../x", None):
+    err, text = tool("host_run", host=h, command="true")
+    assert err and "isn't attached" in text, (h, text)
+err, text = tool("host_run", host="web", command="pwd; echo hi; echo oops >&2; exit 3")
+r = json.loads(text)
+assert not err and r["exit_code"] == 3 and r["stdout"].splitlines() == [str(stub / "remote" / "sites" / "my-site"), "hi"] and r["stderr"] == "oops\n", r
+argv = (stub / "ssh-argv").read_text().splitlines()
+k = str(hosts / "web" / "key")
+assert argv[:4] == ["-F", "/dev/null", "-i", k], argv
+for o in ("IdentitiesOnly=yes", "IdentityAgent=none", "BatchMode=yes", "PasswordAuthentication=no", "StrictHostKeyChecking=yes",
+          "UserKnownHostsFile=" + str(hosts / "web" / "known_hosts"), "GlobalKnownHostsFile=/dev/null", "ConnectTimeout=10", "Port=22", "User=deploy"):
+    assert argv[argv.index(o) - 1] == "-o", (o, argv)
+i = argv.index("-T")   # (the stub writes one argument per line; the remote script has two lines)
+assert argv[i + 1] == "web.example.com" and argv[i + 2:] == ["mkdir -p sites/my-site && cd sites/my-site || exit 97", "pwd; echo hi; echo oops >&2; exit 3"], argv
+err, text = tool("host_run", host="web", command="head -c 150000 /dev/zero | tr '\\0' a")
+r = json.loads(text)
+assert not err and len(r["stdout"]) < 101000 and "[cut at 100000 bytes of 150000]" in r["stdout"], len(r["stdout"])
+(stub / "ssh-unreachable").touch()
+err, text = tool("host_run", host="web", command="true")
+assert err and "Couldn't connect to web" in text and "Connection refused" in text, text
+(stub / "ssh-unreachable").unlink()
+# Copies: remote paths stay inside the workspace, local paths inside the project.
+(site / "index.html").write_text("<h1>hi</h1>\n")
+err, text = tool("host_put", host="web", local_path="index.html", remote_path="public/index.html")
+assert not err and (stub / "remote" / "sites" / "my-site" / "public" / "index.html").read_text() == "<h1>hi</h1>\n", text
+assert "UserKnownHostsFile=" + str(hosts / "web" / "known_hosts") in (stub / "scp-argv").read_text().splitlines(), (stub / "scp-argv").read_text()
+err, text = tool("host_get", host="web", remote_path="public/index.html", local_path="copy/index.html")
+assert not err and (site / "copy" / "index.html").read_text() == "<h1>hi</h1>\n", text
+os.symlink("/etc", site / "escape")
+for bad in ("../x", "/etc/passwd", "a/../../x", "..", "-oProxyCommand=x", "a b", "~/x", "a;id", "", None):
+    err, text = tool("host_put", host="web", local_path="index.html", remote_path=bad)
+    assert err and "remote_path" in text, (bad, text)
+    err, text = tool("host_get", host="web", remote_path=bad, local_path="x")
+    assert err and "remote_path" in text, (bad, text)
+for bad in ("../outside", "/etc/passwd", "escape/passwd", str(tmp / "repo")):
+    err, text = tool("host_put", host="web", local_path=bad, remote_path="x")
+    assert err and ("inside this project" in text or "doesn't exist" in text), (bad, text)
+    err, text = tool("host_get", host="web", remote_path="public/index.html", local_path=bad)
+    assert err and "inside this project" in text, (bad, text)
+err, text = tool("host_put", host="other", local_path="index.html", remote_path="x")
+assert err and "isn't attached" in text, text
+# Broken settings never reach ssh.
+(hosts / "web" / "meta.json").write_text(json.dumps({"address": "-oProxyCommand=x", "port": 22, "user": "deploy"}))
+err, text = tool("host_run", host="web", command="true")
+assert err and "incomplete" in text, text
 proc.stdin.close()
 proc.wait(timeout=5)
 
