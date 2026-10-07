@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings.
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated.
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=38
+SCRIPT_API=40
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -1585,6 +1585,243 @@ do_cluster_assign() {
   if [[ -z "$val" ]]; then attach_write 'if has($n) then .[$n] |= del(.[$f]) else . end' --arg n "$2" --arg f "$3"
   else attach_write 'if has($n) then .[$n] = ((.[$n] // {}) + {($f): $v}) else . end' --arg n "$2" --arg f "$3" --arg v "${val:0:200}"; fi
   api_ok "$(jq -cn --arg n "$2" '{saved:$n}')"
+}
+
+# ---- Hosts: servers sessions work on over ssh (web servers), not for running Claude (docs/hosts-design.md) ----
+# hosts/<name>/{meta.json,key,known_hosts}; a chat's project uses the ones in attach/<slug>.hosts.json (read by clauderc-team).
+HOSTS_DIR="$LAUNCHER_CONFIG_DIR/hosts"
+HOST_NAME_RE='^[a-z][a-z0-9-]{0,29}$'
+HOST_ADDR_RE='^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$'
+HOST_USER_RE='^[a-z_][a-z0-9_-]{0,31}$'
+HOST_FP_RE='^SHA256:[A-Za-z0-9+/]{43}$'
+
+host_check() { [[ "${1:-}" =~ $HOST_NAME_RE ]] || api_err invalid_name "A host name is up to 30 lower-case letters, digits and -, starting with a letter."; }
+host_exists() { host_check "${1:-}"; [[ -f "$HOSTS_DIR/$1/meta.json" ]] || api_err invalid_name "No host named '$1'."; }
+host_addr_ok() { [[ "$1" =~ $HOST_ADDR_RE || ( "$1" =~ ^[0-9A-Fa-f:.]{2,45}$ && "$1" == *:*:* ) ]]; }   # name, IPv4 or IPv6 literal
+# host_target <address> <port> <user>: validates them and sets HOST_ADDR, HOST_PORT, HOST_USER.
+host_target() {
+  host_addr_ok "$1" || api_err invalid_name "That isn't a host name or IP address."
+  [[ "$2" =~ ^[0-9]{1,5}$ ]] && ((10#$2 >= 1 && 10#$2 <= 65535)) || api_err invalid_name "The port must be 1-65535."
+  [[ -z "${3+x}" || "$3" =~ $HOST_USER_RE ]] || api_err invalid_name "That isn't a valid user name (lower case, e.g. deploy)."
+  HOST_ADDR="${1,,}" HOST_PORT=$((10#$2)) HOST_USER="${3:-}"
+}
+# host_scan <out-file>: the host's public keys as known_hosts lines, best type first. No login.
+host_scan() {
+  local raw
+  raw="$(timeout 25 ssh-keyscan -T 10 -p "$HOST_PORT" -t ed25519,ecdsa,rsa "$HOST_ADDR" 2>/dev/null | grep -v '^#' || true)"
+  { grep ' ssh-ed25519 ' <<<"$raw"; grep ' ecdsa-' <<<"$raw"; grep ' ssh-rsa ' <<<"$raw"; } >"$1" || true
+}
+# host_fp <one known_hosts line>: "SHA256:… TYPE"
+host_fp() { ssh-keygen -lf /dev/stdin <<<"$1" 2>/dev/null | awk 'NR == 1 {t = $NF; gsub(/[()]/, "", t); print $2, t}'; }
+# host_ssh_opts <key> <known_hosts>: HOST_SSH = the only way this server talks to a host (key login, pinned host key).
+host_ssh_opts() {
+  HOST_SSH=(-F /dev/null -i "$1" -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o PasswordAuthentication=no
+    -o KbdInteractiveAuthentication=no -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$2" -o GlobalKnownHostsFile=/dev/null
+    -o UpdateHostKeys=no -o ConnectTimeout=10 -o ForwardAgent=no -o LogLevel=ERROR -T -p "$HOST_PORT" -l "$HOST_USER")
+}
+host_meta_target() {  # <name>: HOST_ADDR/PORT/USER from its meta.json
+  local m; m="$(jq -r '[.address, (.port | tostring), .user] | @tsv' "$HOSTS_DIR/$1/meta.json" 2>/dev/null)"
+  local a p u; IFS=$'\t' read -r a p u <<<"$m"
+  host_target "$a" "$p" "$u"
+}
+host_last_line() { grep -v '^[[:space:]]*$' "$1" 2>/dev/null | tail -n 1 | cut -c1-300; }
+
+do_host_list() {
+  local f out=""
+  for f in "$HOSTS_DIR"/*/meta.json; do
+    [[ -f "$f" ]] || continue
+    out+="$(jq -c --arg n "$(basename "$(dirname "$f")")" '{name:$n, address, port, user, auth, fingerprint, added}' "$f" 2>/dev/null)"$'\n'
+  done
+  api_ok "$(printf '%s' "$out" | jq -sc '{hosts: .}')"
+}
+
+# host-probe: stdin = address, port. The host key's fingerprint for the owner to confirm; nothing is saved.
+do_host_probe() {
+  local addr port d line fp
+  addr="$(read_secret_line)"; port="$(read_secret_line)"
+  exec 0</dev/null
+  host_target "$addr" "$port"
+  need ssh-keyscan
+  d="$(mktemp -d)"
+  host_scan "$d/scan"
+  line="$(head -n 1 "$d/scan")"; rm -rf "$d"
+  [[ -n "$line" ]] || api_err unreachable "Couldn't reach $HOST_ADDR on port $HOST_PORT (no ssh server answered)."
+  fp="$(host_fp "$line")"
+  [[ "${fp%% *}" =~ $HOST_FP_RE ]] || api_err internal "Couldn't read the host key."
+  api_ok "$(jq -cn --arg f "${fp%% *}" --arg t "${fp#* }" '{fingerprint:$f, keytype:$t}')"
+}
+
+host_keygen_cleanup() { find "$HOSTS_DIR" -maxdepth 1 -name '.keygen-*' -mmin +1440 -exec rm -rf -- {} + 2>/dev/null || true; }
+
+# host-keygen <name>: a key pair for a host not added yet, in hosts/.keygen-<name>/ (the same one again if it is there).
+# Returns only the public half: the owner gives it to the provider or puts it in authorized_keys, then host-add ... generated.
+do_host_keygen() {
+  [[ $# -eq 1 ]] || bad_args "usage: host-keygen <name>"
+  local name="$1" d pub fp
+  host_check "$name"
+  need ssh-keygen
+  umask 077
+  mkdir -p "$HOSTS_DIR" && chmod 700 "$HOSTS_DIR" || api_err internal "Couldn't create the hosts folder."
+  [[ ! -e "$HOSTS_DIR/$name" ]] || api_err invalid_name "A host named $name already exists. Remove it first, or pick another name."
+  host_keygen_cleanup
+  d="$HOSTS_DIR/.keygen-$name"
+  if [[ -f "$d/key" ]] && pub="$(ssh-keygen -y -P '' -f "$d/key" 2>/dev/null)" && [[ -n "$pub" ]]; then
+    touch "$d"   # still in use: not cleaned up for another 24 h
+  else
+    rm -rf -- "$d"
+    mkdir -m 700 "$d" || api_err internal "Couldn't create a folder for the key."
+    ssh-keygen -q -t ed25519 -N '' -C "clauderc-host-$name" -f "$d/key" </dev/null >/dev/null 2>&1 || { rm -rf -- "$d"; api_err internal "Couldn't create a key."; }
+    chmod 600 "$d/key"; rm -f "$d/key.pub"
+    pub="$(ssh-keygen -y -P '' -f "$d/key" 2>/dev/null)" || api_err internal "Couldn't read the new key."
+  fi
+  pub="$(awk 'NR == 1 {print $1, $2}' <<<"$pub") clauderc-host-$name"
+  fp="$(ssh-keygen -lf /dev/stdin <<<"$pub" 2>/dev/null | awk 'NR == 1 {print $2}')"
+  [[ "$pub" =~ ^ssh-ed25519[[:space:]][A-Za-z0-9+/=]+[[:space:]]clauderc-host- && "$fp" =~ $HOST_FP_RE ]] || api_err internal "Couldn't read the new key."
+  api_ok "$(jq -cn --arg k "$pub" --arg f "$fp" '{public_key:$k, fingerprint:$f}')"
+}
+
+# host-add <name>: stdin = address, port, user, fingerprint, auth (key|password|generated), secret (base64 private key, the
+# password, or any placeholder for generated: the key from host-keygen). A password is only used to install a key this server
+# makes; nothing stores it. Nothing is saved unless key login works; a generated key stays pending until it does.
+do_host_add() {
+  local name="${1:-}" addr port user fp auth secret tmp line l
+  addr="$(read_secret_line)"; port="$(read_secret_line)"; user="$(read_secret_line)"
+  fp="$(read_secret_line)"; auth="$(read_secret_line)"; secret="$(read_secret_line)"
+  exec 0</dev/null
+  [[ $# -eq 1 ]] || bad_args "usage: host-add <name>"
+  host_check "$name"
+  host_target "$addr" "$port" "$user"
+  fp="${fp//[[:space:]]/}"
+  [[ "$fp" =~ $HOST_FP_RE ]] || api_err invalid_name "That isn't a host key fingerprint (SHA256:…)."
+  [[ "$auth" == key || "$auth" == password || "$auth" == generated ]] || api_err invalid_name "Sign-in must be key, password or generated."
+  [[ -n "$secret" ]] || api_err invalid_name "The $auth is missing."
+  need ssh; need ssh-keyscan; need ssh-keygen
+  umask 077
+  mkdir -p "$HOSTS_DIR" && chmod 700 "$HOSTS_DIR" || api_err internal "Couldn't create the hosts folder."
+  [[ ! -e "$HOSTS_DIR/$name" ]] || api_err invalid_name "A host named $name already exists. Remove it first (projects attached to it would otherwise get a different server)."
+  find "$HOSTS_DIR" -maxdepth 1 -name '.new-*' -mmin +10 -exec rm -rf -- {} + 2>/dev/null || true   # left by an interrupted add (may hold a password)
+  host_keygen_cleanup
+  [[ "$auth" != generated || -f "$HOSTS_DIR/.keygen-$name/key" ]] || api_err invalid_name "Generate the key first."
+  HOST_TMP="$(mktemp -d "$HOSTS_DIR/.new-$name.XXXXXX")" || api_err internal "Couldn't create a temporary folder."
+  tmp="$HOST_TMP"
+  trap 'rc=$?; [[ -n "${HOST_TMP:-}" ]] && rm -rf -- "$HOST_TMP"; (exit $rc); on_exit' EXIT
+  trap 'exit 1' HUP INT TERM
+
+  # The host key the owner confirmed, and only that one.
+  host_scan "$tmp/scan"
+  [[ -s "$tmp/scan" ]] || host_fail unreachable "Couldn't reach $HOST_ADDR on port $HOST_PORT (no ssh server answered)."
+  line=""
+  while IFS= read -r l; do
+    [[ "$(host_fp "$l")" == "$fp "* ]] && { line="$l"; break; }
+  done <"$tmp/scan"
+  [[ -n "$line" ]] || host_fail fingerprint_mismatch "The server's host key changed since you checked it (it isn't $fp). Check the server, then try again."
+  printf '%s\n' "$line" >"$tmp/known_hosts"; rm -f "$tmp/scan"
+
+  if [[ "$auth" == generated ]]; then
+    unset secret
+    cp "$HOSTS_DIR/.keygen-$name/key" "$tmp/key" && chmod 600 "$tmp/key" || host_fail internal "Couldn't read the generated key."
+  elif [[ "$auth" == key ]]; then
+    secret="${secret//[[:space:]]/}"
+    [[ "$secret" =~ ^[A-Za-z0-9+/=]{20,30000}$ ]] || host_fail invalid_key "The key must be sent as base64."
+    printf '%s' "$secret" | base64 -d >"$tmp/key" 2>/dev/null || host_fail invalid_key "The key isn't valid base64."
+    unset secret
+    [[ -z "$(tail -c 1 "$tmp/key")" ]] || echo >>"$tmp/key"
+    chmod 600 "$tmp/key"
+    if ! ssh-keygen -y -P '' -f "$tmp/key" >/dev/null 2>"$tmp/err"; then
+      grep -qi passphrase "$tmp/err" &&
+        host_fail invalid_key "That key is protected with a passphrase. Use a key without one (or remove it: ssh-keygen -p)."
+      host_fail invalid_key "That isn't a private key ssh can read."
+    fi
+  else
+    ssh-keygen -q -t ed25519 -N '' -C "clauderc-host-$name" -f "$tmp/key" </dev/null >/dev/null 2>&1 || host_fail internal "Couldn't create a key."
+    # The password reaches ssh only through a 600 askpass file, never argv or the environment.
+    printf '#!/bin/sh\ncat "%s"\n' "$tmp/pw" >"$tmp/askpass"
+    printf '%s\n' "$secret" >"$tmp/pw"; unset secret
+    chmod 600 "$tmp/pw"; chmod 700 "$tmp/askpass"
+    { printf '\n'; cat "$tmp/key.pub"; } | SSH_ASKPASS="$tmp/askpass" SSH_ASKPASS_REQUIRE=force DISPLAY="${DISPLAY:-:0}" \
+      timeout 40 ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -o PubkeyAuthentication=no \
+      -o PreferredAuthentications=password,keyboard-interactive -o NumberOfPasswordPrompts=1 \
+      -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$tmp/known_hosts" -o GlobalKnownHostsFile=/dev/null \
+      -o UpdateHostKeys=no -o ConnectTimeout=10 -o ForwardAgent=no -o LogLevel=ERROR -T -p "$HOST_PORT" -l "$HOST_USER" "$HOST_ADDR" \
+      'umask 077 && mkdir -p .ssh && cat >>.ssh/authorized_keys' >/dev/null 2>"$tmp/err"
+    local rc=$?
+    rm -f "$tmp/pw" "$tmp/askpass"
+    ((rc == 0)) || host_fail auth_failed "Couldn't sign in with that password: $(host_last_line "$tmp/err")"
+  fi
+  rm -f "$tmp/key.pub"
+
+  host_ssh_opts "$tmp/key" "$tmp/known_hosts"
+  if ! timeout 30 ssh "${HOST_SSH[@]}" "$HOST_ADDR" true </dev/null >/dev/null 2>"$tmp/err"; then
+    [[ "$auth" == generated ]] &&
+      host_fail auth_failed "Key login didn't work: $(host_last_line "$tmp/err"). Add the public key to ~/.ssh/authorized_keys of $HOST_USER on the server (or in your provider's panel), then Save again."
+    host_fail auth_failed "Key login didn't work: $(host_last_line "$tmp/err")"
+  fi
+  rm -f "$tmp/err"
+
+  jq -cn --arg a "$HOST_ADDR" --argjson p "$HOST_PORT" --arg u "$HOST_USER" --arg f "$fp" --arg au "$auth" \
+    '{address:$a, port:$p, user:$u, fingerprint:$f, auth:$au, added:(now | floor)}' >"$tmp/meta.json" || host_fail internal "Couldn't save the host."
+  chmod 600 "$tmp/key" "$tmp/known_hosts" "$tmp/meta.json"
+  mv -T "$tmp" "$HOSTS_DIR/$name" || host_fail internal "Couldn't save the host."
+  chmod 700 "$HOSTS_DIR/$name"
+  rm -rf -- "${HOSTS_DIR:?}/.keygen-$name"
+  api_ok "$(jq -cn --arg n "$name" '{saved:$n}')"
+}
+# host_fail <code> <message>: host-add's error exit; nothing of the half-made host stays.
+host_fail() { [[ -n "${HOST_TMP:-}" ]] && rm -rf -- "$HOST_TMP"; api_err "$@"; }
+
+do_host_test() {
+  [[ $# -eq 1 ]] || bad_args "usage: host-test <name>"
+  host_exists "$1"
+  host_meta_target "$1"
+  need ssh
+  local err; err="$(mktemp)"
+  host_ssh_opts "$HOSTS_DIR/$1/key" "$HOSTS_DIR/$1/known_hosts"
+  if ! timeout 30 ssh "${HOST_SSH[@]}" "$HOST_ADDR" true </dev/null >/dev/null 2>"$err"; then
+    local m; m="$(host_last_line "$err")"; rm -f "$err"
+    api_err host_failed "Couldn't sign in to $1: ${m:-no answer}"
+  fi
+  rm -f "$err"
+  api_ok '{"ok":true}'
+}
+
+# Removes the key and every project's attachment. The key stays authorized on the host until removed there.
+do_host_remove() {
+  [[ $# -eq 1 ]] || bad_args "usage: host-remove <name>"
+  host_exists "$1"
+  rm -rf -- "${HOSTS_DIR:?}/$1"
+  local f tmp
+  for f in "$ATTACH_DIR"/*.hosts.json; do
+    [[ -f "$f" ]] || continue
+    tmp="$(mktemp "$ATTACH_DIR/a.XXXXXX")"
+    jq -c --arg n "$1" 'if type == "object" then del(.[$n]) else {} end' "$f" >"$tmp" 2>/dev/null && mv -f "$tmp" "$f" || rm -f "$tmp"
+  done
+  api_ok "$(jq -cn --arg n "$1" '{removed:$n}')"
+}
+
+host_attach_session() { attach_session "$1"; ATTACH_FILE="${ATTACH_FILE%.json}.hosts.json"; }
+
+do_host_session() {
+  [[ $# -eq 1 ]] || bad_args "usage: host-session <project>"
+  host_attach_session "$1"
+  local att f out=""
+  att="$(attach_read)"
+  for f in "$HOSTS_DIR"/*/meta.json; do
+    [[ -f "$f" ]] || continue
+    out+="$(jq -c --arg n "$(basename "$(dirname "$f")")" --argjson a "$att" '{name:$n, address, user, attached:($a | has($n))}' "$f" 2>/dev/null)"$'\n'
+  done
+  api_ok "$(printf '%s' "$out" | jq -sc '{hosts: .}')"
+}
+
+do_host_attach() {
+  [[ $# -eq 3 ]] || bad_args "usage: host-attach <project> <host> on|off"
+  host_exists "$2"
+  host_attach_session "$1"
+  case "$3" in
+    on) attach_write '.[$n] //= {}' --arg n "$2" ;;
+    off) attach_write 'del(.[$n])' --arg n "$2" ;;
+    *) bad_args "usage: host-attach <project> <host> on|off" ;;
+  esac
+  api_ok "$(jq -cn --arg n "$2" --arg v "$3" '{host:$n, state:$v}')"
 }
 
 # Worker sign-in = the main account's login flow, aimed at the worker's folder and its own tmux session.
@@ -3828,7 +4065,7 @@ api_main() {
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | set-secret-file | login-keystore | login-apple | youtube-login-start | \
       chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
-      migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot) ;;  # these read stdin
+      migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | host-probe | host-add) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -3885,6 +4122,14 @@ api_main() {
     cluster-session)     do_cluster_session "$@" ;;
     cluster-attach)      do_cluster_attach "$@" ;;
     cluster-assign)      do_cluster_assign "$@" ;;
+    host-list)           [[ $# -eq 0 ]] || bad_args "host-list takes no arguments"; do_host_list ;;
+    host-probe)          [[ $# -eq 0 ]] || bad_args "host-probe reads the address on stdin"; do_host_probe ;;
+    host-keygen)         do_host_keygen "$@" ;;
+    host-add)            do_host_add "$@" ;;
+    host-test)           do_host_test "$@" ;;
+    host-remove)         do_host_remove "$@" ;;
+    host-session)        do_host_session "$@" ;;
+    host-attach)         do_host_attach "$@" ;;
     worker-login-start)  do_worker_login_start "$@" ;;
     worker-login-code)   do_worker_login_code "$@" ;;
     mcp)                 do_mcp "$@" ;;

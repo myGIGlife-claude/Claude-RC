@@ -59,6 +59,14 @@ val SKILLS_SOURCE_RE = Regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 /** Same rule as the server's worker names (Team). */
 val WORKER_NAME_RE = Regex("^[A-Za-z][A-Za-z0-9_-]{0,29}$")
 
+/** Same rules as the server's host actions (docs/hosts-design.md). */
+val HOST_NAME_RE = Regex("^[a-z][a-z0-9-]{0,29}$")
+val HOST_ADDRESS_RE = Regex("^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
+val HOST_IPV6_RE = Regex("^[0-9A-Fa-f:.]{2,45}$")
+val HOST_USER_RE = Regex("^[a-z_][a-z0-9_-]{0,31}$")
+val HOST_FINGERPRINT_RE = Regex("^SHA256:[A-Za-z0-9+/]{43}$")
+fun hostAddressOk(address: String) = HOST_ADDRESS_RE.matches(address) || (':' in address && HOST_IPV6_RE.matches(address))
+
 /** Same rules as the server's migrate actions (docs/migrate-design.md). */
 val MIGRATE_USER_RE = Regex("^[a-z][a-z0-9_-]{0,30}$")
 val MIGRATE_FILE_RE = Regex("^incoming-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\\.gpg$")
@@ -198,6 +206,40 @@ class LauncherApi(
     }
     private fun requireWorker(name: String) {
         if (!WORKER_NAME_RE.matches(name)) throw ApiException(Codes.INVALID_NAME, "Bad worker name")
+    }
+
+    // Hosts: web servers chats can work on. Secrets go on stdin only.
+    suspend fun hostList(): HostsData = call("host-list")
+    suspend fun hostProbe(address: String, port: Int): HostProbe {
+        requireHostAddress(address, port)
+        return call("host-probe", stdin = address + "\n" + port, timeoutMs = 30_000)
+    }
+    /** A key pair for [name] (the same one again until it is added); only the public half comes back. */
+    suspend fun hostKeygen(name: String): HostKey { requireHost(name); return call("host-keygen $name") }
+    /** [auth] is "key" (secret = the private key, base64 on one line), "password" (used once, never stored)
+     *  or "generated" (the key from [hostKeygen]; secret is a placeholder). */
+    suspend fun hostAdd(name: String, address: String, port: Int, user: String, fingerprint: String, auth: String, secret: String): JsonObject {
+        requireHost(name)
+        requireHostAddress(address, port)
+        requireMigrate(HOST_USER_RE, user, "User names are lowercase letters, digits, '_' and '-', up to 32.")
+        requireMigrate(HOST_FINGERPRINT_RE, fingerprint, "Bad host key fingerprint")
+        if (auth != "key" && auth != "password" && auth != "generated") throw ApiException(Codes.INVALID_NAME, "Bad sign-in method")
+        if (secret.isEmpty() || secret.any { it == '\n' || it == '\r' }) throw ApiException(Codes.INVALID_NAME, "Bad key or password")
+        return call("host-add $name", stdin = listOf(address, port.toString(), user, fingerprint, auth, secret).joinToString("\n"), timeoutMs = 120_000)
+    }
+    suspend fun hostTest(name: String): JsonObject { requireHost(name); return call("host-test $name", timeoutMs = 60_000) }
+    suspend fun hostRemove(name: String): JsonObject { requireHost(name); return call("host-remove $name") }
+    suspend fun hostSession(project: String): ChatHostsData { requireName(project); return call("host-session $project") }
+    suspend fun hostAttach(project: String, name: String, on: Boolean): JsonObject {
+        requireName(project); requireHost(name)
+        return call("host-attach $project $name ${if (on) "on" else "off"}")
+    }
+    private fun requireHost(name: String) {
+        if (!HOST_NAME_RE.matches(name)) throw ApiException(Codes.INVALID_NAME, "Host names are lowercase letters, digits and '-', up to 30, starting with a letter.")
+    }
+    private fun requireHostAddress(address: String, port: Int) {
+        if (!hostAddressOk(address)) throw ApiException(Codes.INVALID_NAME, "Bad server address")
+        if (port !in 1..65535) throw ApiException(Codes.INVALID_NAME, "Bad port")
     }
     suspend fun plugins(): PluginsData = call("plugins", timeoutMs = 120_000)
     suspend fun skillsUpdate(repo: String): JsonObject {

@@ -360,6 +360,36 @@ data class ChatWorkersData(val workers: List<ChatWorker> = emptyList(), val task
 @Serializable
 data class WorkersData(val workers: List<Worker> = emptyList())
 
+/** A server chats can work on (a web server): Claude runs commands there, nothing is installed. No key material. */
+@Serializable
+data class Host(
+    val name: String,
+    val address: String = "",
+    val port: Int = 22,
+    val user: String = "",
+    /** "key", "password" (the server's own key was installed with a password) or "generated" (the server's key, installed by the owner). */
+    val auth: String = "key",
+    val fingerprint: String = "",
+)
+
+@Serializable
+data class HostsData(val hosts: List<Host> = emptyList())
+
+/** A host's key before it is added, to confirm with the owner. */
+@Serializable
+data class HostProbe(val fingerprint: String = "", val keytype: String = "")
+
+/** A key the server made for a host not added yet: only the public half, for the owner to put on the host. */
+@Serializable
+data class HostKey(@SerialName("public_key") val publicKey: String = "", val fingerprint: String = "")
+
+/** A host as one chat sees it: attached or not. */
+@Serializable
+data class ChatHost(val name: String, val address: String = "", val user: String = "", val attached: Boolean = false)
+
+@Serializable
+data class ChatHostsData(val hosts: List<ChatHost> = emptyList())
+
 @Serializable
 data class WorkerRun(
     val id: String,

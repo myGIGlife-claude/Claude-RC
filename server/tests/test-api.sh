@@ -751,6 +751,166 @@ check "remove signed-in worker" "$(jqt '.ok')"
 api "worker-list"
 check "worker gone" "$(jqt '.data.workers | length == 0')"
 
+echo "hosts"
+ALOG="$HOME/.local/state/claude-launcher/api.log"
+HD="$HOME/.config/claude-launcher/hosts"
+cp "$HERE/stubs/ssh" "$HOME/.local/bin/ssh"   # (the migrate tests put their own ssh there later)
+ssh-keygen -q -t ed25519 -N '' -C hostkey -f "$WORK/hostkey" </dev/null
+ssh-keygen -q -t ed25519 -N '' -C hostkey2 -f "$WORK/hostkey2" </dev/null
+ssh-keygen -q -t ed25519 -N '' -C userkey -f "$WORK/userkey" </dev/null
+ssh-keygen -q -t ed25519 -N '' -C otherkey -f "$WORK/otherkey" </dev/null
+ssh-keygen -q -t ed25519 -N 'key-pass-phrase' -C locked -f "$WORK/lockedkey" </dev/null
+cp "$WORK/hostkey.pub" "$STUB_STATE/host_key.pub"
+HFP="$(ssh-keygen -lf "$WORK/hostkey.pub" | awk '{print $2}')"
+mkdir -p "$STUB_STATE/remote/.ssh"; cp "$WORK/userkey.pub" "$STUB_STATE/remote/.ssh/authorized_keys"
+UK64="$(base64 -w0 "$WORK/userkey")"
+HPW="Pw-Very-Secret-42"; echo "$HPW" >"$STUB_STATE/host_password"
+add_in() { printf '%s\n' "$@"; }
+nothing_new() { [[ ! -e "$HD/$1" && -z "$(find "$HD" -maxdepth 1 -name '.new-*' 2>/dev/null)" ]]; }
+for bad in "host-list x" "host-probe x" "host-add" "host-add Web" "host-add -x" "host-add 1web" "host-add web extra" "host-add ../x" \
+  "host-add $(printf 'a%.0s' {1..31})" "host-test" "host-test a b" "host-remove web_1" "host-session" "host-session a b" "host-session ../x" \
+  "host-attach a web" "host-attach a web maybe" "host-attach ../x web on" "host-attach a Web on" "host-attach a web on x"; do
+  api "$bad"
+  check "forbidden: $bad" "$(jqt '.ok==false and .error.code=="forbidden"')"
+done
+api "host-list"
+check "no hosts yet" "$(jqt '.ok and .data.hosts == []')"
+api "host-probe" "$(add_in web.example.com 22)"
+check "probe returns the fingerprint" "$(jqt ".ok and .data.fingerprint == \"$HFP\" and .data.keytype == \"ED25519\"")"
+api "host-probe" "$(add_in 2001:db8::10 2222)"
+check "probe an IPv6 address on another port" "$(jqt ".ok and .data.fingerprint == \"$HFP\"")"
+[[ "$(cat "$STUB_STATE/keyscan-argv")" == $'2001:db8::10\n2222' ]]; check "keyscan got the address and port" $?
+for bad in "bad host|22" "-oProxyCommand=x|22" "h.example.com|0" "h.example.com|70000" "h.example.com|22x" "h.example.com;id|22" "|"; do
+  api "host-probe" "$(tr '|' '\n' <<<"$bad")"
+  check "probe refuses: $bad" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+touch "$STUB_STATE/ssh-unreachable"
+api "host-probe" "$(add_in web.example.com 22)"
+check "probe: unreachable is an error" "$(jqt '.ok==false and .error.code=="unreachable"')"
+api "host-add web" "$(add_in web.example.com 2222 deploy "$HFP" key "$UK64")"
+check "add: unreachable is an error" "$(jqt '.ok==false and .error.code=="unreachable"')"
+nothing_new web; check "...nothing saved" $?
+rm -f "$STUB_STATE/ssh-unreachable"
+
+api "host-add web" "$(add_in web.example.com 2222 deploy "$HFP" key "$UK64")"
+check "add with a key" "$(jqt '.ok and .data.saved=="web"')"
+[[ "$(stat -c %a "$HD")" == 700 && "$(stat -c %a "$HD/web")" == 700 && "$(stat -c %a "$HD/web/key")" == 600 && "$(stat -c %a "$HD/web/known_hosts")" == 600 ]]
+check "hosts folder 700, key and known_hosts 600" $?
+cmp -s "$HD/web/key" "$WORK/userkey"; check "the key is stored as sent" $?
+[[ "$(cat "$HD/web/known_hosts")" == "[web.example.com]:2222 $(awk '{print $1, $2}' "$WORK/hostkey.pub")" ]]; check "known_hosts pins exactly the confirmed key" $?
+grep -qx 'StrictHostKeyChecking=yes' "$STUB_STATE/ssh-argv" && grep -qx 'BatchMode=yes' "$STUB_STATE/ssh-argv" && grep -qx 'PasswordAuthentication=no' "$STUB_STATE/ssh-argv" &&
+  grep -qx 'IdentitiesOnly=yes' "$STUB_STATE/ssh-argv" && grep -qx 'ConnectTimeout=10' "$STUB_STATE/ssh-argv" && [[ "$(tail -n 1 "$STUB_STATE/ssh-argv")" == true ]]
+check "key login verified with the safe options" $?
+api "host-list"
+check "host-list shows it" "$(jqt ".data.hosts == [{name:\"web\",address:\"web.example.com\",port:2222,user:\"deploy\",auth:\"key\",fingerprint:\"$HFP\",added:.data.hosts[0].added}] and (.data.hosts[0].added | type) == \"number\"")"
+grep -qF "${UK64:40:40}" <<<"$OUT"; [[ $? -ne 0 ]]; check "host-list has no key material" $?
+
+api "host-add pw" "$(add_in web.example.com 22 deploy "$HFP" password wrong-password)"
+check "add: wrong password refused" "$(jqt '.ok==false and .error.code=="auth_failed"')"
+nothing_new pw; check "...nothing saved" $?
+rm -f "$STUB_STATE/ssh-env-askpass"
+api "host-add pw" "$(add_in web.example.com 22 deploy "$HFP" password "$HPW")"
+check "add with a password" "$(jqt '.ok and .data.saved=="pw"')"
+[[ -e "$STUB_STATE/ssh-env-askpass" ]]; check "the password went through askpass" $?
+[[ "$(tail -n 1 "$STUB_STATE/remote/.ssh/authorized_keys")" == "$(ssh-keygen -y -f "$HD/pw/key" | awk '{print $1, $2}') clauderc-host-pw" ]]
+check "the server's own new key was installed on the host" $?
+[[ "$(jq -r .auth "$HD/pw/meta.json")" == password && "$(ls -A "$HD/pw" | sort | tr '\n' ' ')" == "key known_hosts meta.json " ]]; check "only key, known_hosts and meta are kept" $?
+! grep -rqF "$HPW" "$HD" "$ALOG" "$STUB_STATE/ssh-argv"; check "the password is stored nowhere (hosts, api.log, ssh argv)" $?
+grep -qF "${UK64:40:40}" "$ALOG"; [[ $? -ne 0 ]]; check "no key material in api.log" $?
+
+cp "$WORK/hostkey2.pub" "$STUB_STATE/host_key.pub"
+api "host-add moved" "$(add_in web.example.com 22 deploy "$HFP" key "$UK64")"
+check "add: a changed host key is refused" "$(jqt '.ok==false and .error.code=="fingerprint_mismatch"')"
+nothing_new moved; check "...nothing saved" $?
+cp "$WORK/hostkey.pub" "$STUB_STATE/host_key.pub"
+api "host-add bad" "$(add_in web.example.com 22 deploy "$HFP" key "$(printf 'not a private key at all' | base64 -w0)")"
+check "add: not a key refused" "$(jqt '.ok==false and .error.code=="invalid_key"')"
+api "host-add bad" "$(add_in web.example.com 22 deploy "$HFP" key "not base64!")"
+check "add: not base64 refused" "$(jqt '.ok==false and .error.code=="invalid_key"')"
+api "host-add bad" "$(add_in web.example.com 22 deploy "$HFP" key "$(base64 -w0 "$WORK/lockedkey")")"
+check "add: a passphrase key is refused with a clear message" "$(jqt '.ok==false and .error.code=="invalid_key" and (.error.message | test("passphrase"))')"
+api "host-add bad" "$(add_in web.example.com 22 deploy "$HFP" key "$(base64 -w0 "$WORK/otherkey")")"
+check "add: a key the host doesn't accept is refused" "$(jqt '.ok==false and .error.code=="auth_failed"')"
+nothing_new bad; check "...nothing saved after any of those" $?
+for bad in "a b|22|deploy|$HFP|key" "web.example.com|22|Root|$HFP|key" "web.example.com|22|-oProxyCommand=x|$HFP|key" \
+  "web.example.com|22|deploy|SHA256:short|key" "web.example.com|22|deploy|$HFP|token" "web.example.com|0|deploy|$HFP|key"; do
+  api "host-add bad" "$(tr '|' '\n' <<<"$bad")"$'\n'"$UK64"
+  check "add refuses: ${bad:0:40}" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+api "host-add bad" "$(add_in web.example.com 22 deploy "$HFP" password "")"
+check "add refuses: no password" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+nothing_new bad; check "...nothing saved" $?
+api "host-add web" "$(add_in web.example.com 22 deploy "$HFP" key "$UK64")"
+check "add again is refused (remove it first)" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+[[ "$(jq -r .port "$HD/web/meta.json")" == 2222 ]]; check "...the existing host is untouched" $?
+mkdir -p "$HD/.new-old.stale" && touch -d '30 minutes ago' "$HD/.new-old.stale"
+api "host-add moved2" "$(add_in web.example.com 22 deploy "$HFP" key "$UK64")"
+[[ ! -e "$HD/.new-old.stale" ]]; check "stale half-made host folders are cleaned up" $?
+api "host-remove moved2"
+# A key this server generates; the owner puts the public half on the host (e.g. the provider's install form).
+for bad in "host-keygen" "host-keygen Gen" "host-keygen ../x" "host-keygen a b"; do
+  api "$bad"; check "forbidden: $bad" "$(jqt '.ok==false and .error.code=="forbidden"')"
+done
+api "host-add gen" "$(add_in web.example.com 22 deploy "$HFP" generated -)"
+check "add generated before host-keygen is refused" "$(jqt '.ok==false and (.error.message | test("Generate the key first"))')"
+nothing_new gen; check "...nothing saved" $?
+api "host-keygen web"
+check "keygen for an existing host is refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "host-keygen gen"
+check "keygen returns a public key and its fingerprint" "$(jqt '.ok and (.data.public_key | test("^ssh-ed25519 [A-Za-z0-9+/=]+ clauderc-host-gen$")) and (.data.fingerprint | test("^SHA256:[A-Za-z0-9+/]{43}$"))')"
+GPUB="$(jq -r .data.public_key <<<"$OUT")"; GFP="$(jq -r .data.fingerprint <<<"$OUT")"
+[[ "$(ssh-keygen -lf /dev/stdin <<<"$GPUB" | awk '{print $2}')" == "$GFP" ]]; check "...the fingerprint is the key's" $?
+GPRIV="$(sed -n 2p "$HD/.keygen-gen/key")"
+[[ -n "$GPRIV" && "$(stat -c %a "$HD/.keygen-gen")" == 700 && "$(stat -c %a "$HD/.keygen-gen/key")" == 600 ]]; check "pending key folder 700, key 600" $?
+! grep -qF -e "$GPRIV" -e "PRIVATE KEY" <<<"$OUT" && ! grep -qF -e "$GPRIV" -e "PRIVATE KEY" "$ALOG"; check "no private key text in the reply or api.log" $?
+api "host-keygen gen"
+check "keygen again shows the same key" "$(jqt ".ok and .data.public_key == \"$GPUB\"")"
+api "host-add gen" "$(add_in web.example.com 22 deploy "$HFP" generated -)"
+check "add generated: a key the host doesn't know yet is refused with a hint" "$(jqt '.ok==false and .error.code=="auth_failed" and (.error.message | test("authorized_keys"))')"
+[[ ! -e "$HD/gen" && -f "$HD/.keygen-gen/key" ]]; check "...nothing saved, the pending key stays" $?
+echo "$GPUB" >>"$STUB_STATE/remote/.ssh/authorized_keys"
+api "host-add gen" "$(add_in web.example.com 22 deploy "$HFP" generated -)"
+check "add generated once the host has the key" "$(jqt '.ok and .data.saved=="gen"')"
+[[ "$(jq -r .auth "$HD/gen/meta.json")" == generated && "$(ls -A "$HD/gen" | sort | tr '\n' ' ')" == "key known_hosts meta.json " ]]; check "...saved as generated" $?
+[[ "$(ssh-keygen -y -f "$HD/gen/key" | awk '{print $2}')" == "$(awk '{print $2}' <<<"$GPUB")" && "$(stat -c %a "$HD/gen/key")" == 600 ]]; check "...with the generated key (600)" $?
+[[ ! -e "$HD/.keygen-gen" ]]; check "...and the pending folder is gone" $?
+api "host-list"; check "host-list shows auth generated" "$(jqt '[.data.hosts[] | select(.name=="gen") | .auth] == ["generated"]')"
+mkdir -p "$HD/.keygen-old" && touch -d '25 hours ago' "$HD/.keygen-old"
+api "host-keygen gen2"
+[[ ! -e "$HD/.keygen-old" && -f "$HD/.keygen-gen2/key" ]]; check "pending keys older than 24 h are cleaned up" $?
+rm -rf "$HD/.keygen-gen2"
+api "host-remove gen"
+
+api "host-test web"
+check "host-test ok" "$(jqt '.ok and .data.ok')"
+touch "$STUB_STATE/ssh-unreachable"
+api "host-test web"
+check "host-test shows ssh's error" "$(jqt '.ok==false and (.error.message | test("Connection refused"))')"
+rm -f "$STUB_STATE/ssh-unreachable"
+api "host-test nosuch"
+check "host-test unknown host" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+
+HATT="$HOME/.config/claude-launcher/attach/${PD//[^A-Za-z0-9]/-}.hosts.json"
+api "host-session demo-app2"
+check "host-session lists hosts, none attached" "$(jqt '.ok and (.data.hosts | map(.name) == ["pw","web"]) and (.data.hosts | map(select(.attached)) == []) and (.data.hosts[0] | keys == ["address","attached","name","user"])')"
+api "host-attach demo-app2 web on"
+check "attach a host" "$(jqt '.ok and .data.host=="web" and .data.state=="on"')"
+api "host-attach demo-app2 pw on"
+[[ "$(jq -c 'keys' "$HATT")" == '["pw","web"]' ]]; check "attach file per project" $?
+! jq -e 'has("web")' "${HATT%.hosts.json}.json" >/dev/null 2>&1; check "the workers' attach file is untouched" $?
+api "host-attach demo-app2 pw off"
+api "host-session demo-app2"
+check "host-session shows the attachment" "$(jqt '[.data.hosts[] | select(.attached) | .name] == ["web"]')"
+api "host-attach demo-app2 nosuch on"; check "attach needs a real host" "$(jqt '.ok == false')"
+api "host-attach nosuch web on"; check "attach needs a running session" "$(jqt '.ok == false')"
+api "host-remove web"
+check "remove a host" "$(jqt '.ok and .data.removed=="web"')"
+[[ ! -e "$HD/web" && "$(jq -c . "$HATT")" == '{}' ]]; check "remove deletes its files and every attachment" $?
+api "host-remove web"; check "remove twice is an error" "$(jqt '.ok == false')"
+api "host-remove pw"
+api "host-list"
+check "no hosts left" "$(jqt '.ok and .data.hosts == []')"
+
 echo "worker-login helper sessions stay out of the lists"
 printf '#!/usr/bin/env bash\nexec sleep 300\n' >"$WORK/claude"; chmod +x "$WORK/claude"
 tmux new-session -d -s worker-login-zz "$WORK/claude 300"

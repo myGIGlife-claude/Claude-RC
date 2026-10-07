@@ -12,11 +12,13 @@ working in **its own folder** on the host. Nothing is installed on the host and 
   fingerprint it sees now differs. All later ssh uses `StrictHostKeyChecking=yes` with the host's own `known_hosts`.
 - Every ssh uses `BatchMode=yes`, `IdentitiesOnly=yes`, `PasswordAuthentication=no`, `-i <that host's key>` and a connect timeout.
 - Names/addresses/users are validated (see below); no value ever goes through a shell: argv lists only.
+- Attach is a convenience filter, not isolation: any session can read `hosts/<name>/key` itself.
 - Attach is a guardrail, not a sandbox: sessions run as the same Unix user as the launcher. Say so in docs; do not claim isolation.
 - Public repo: no personal values (addresses, users, key material) in code, tests or docs.
 
 ## Storage (`$LAUNCHER_CONFIG_DIR`)
-- `hosts/<name>/meta.json` `{address, port, user, fingerprint, auth:"key"|"password", added}`; `hosts/<name>/key` (600); `hosts/<name>/known_hosts` (600). `hosts/` is 700.
+- `hosts/<name>/meta.json` `{address, port, user, fingerprint, auth:"key"|"password"|"generated", added}`; `hosts/<name>/key` (600); `hosts/<name>/known_hosts` (600). `hosts/` is 700.
+- `hosts/.keygen-<name>/key` (dir 700, key 600): a key from `host-keygen` waiting for `host-add … generated`. Removed when that add succeeds, or after 24 h unused.
 - Attach state per project: `attach/<project-slug>.hosts.json` = `{"<host>": {}}` (a separate file from the workers' attach file,
   which clauderc-team iterates by key). Reuse the slug logic of `attach_session`/`claude_proj_slug`.
 
@@ -25,14 +27,19 @@ working in **its own folder** on the host. Nothing is installed on the host and 
 - address: hostname `^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$` or IPv4/IPv6 literal; port 1-65535; user `^[a-z_][a-z0-9_-]{0,31}$`.
 - fingerprint: `^SHA256:[A-Za-z0-9+/]{43}$`.
 
-## Server API (claude-setup.sh `--api`, allowlisted in claude-launcher-api; SCRIPT_API 39)
+## Server API (claude-setup.sh `--api`, allowlisted in claude-launcher-api; SCRIPT_API 39, `host-keygen`/`generated` 40)
 All replies are the usual `{ok, data | error}`. Secrets come on stdin one per line (`read_secret_line`), never in argv.
 - `host-list` → `{hosts:[{name,address,port,user,auth,fingerprint,added}]}` (no key material).
 - `host-probe` stdin: address, port → `{fingerprint, keytype}` via `ssh-keyscan` + `ssh-keygen -lf`, no login. Error if unreachable.
-- `host-add <name>` stdin: address, port, user, fingerprint, auth (`key`|`password`), secret.
+- `host-keygen <name>` (no stdin) → `{public_key, fingerprint}`: an ed25519 pair (comment `clauderc-host-<name>`) in `hosts/.keygen-<name>/`,
+  the same one again if it is already there. Only the public half is returned. Refused if a host with that name exists. For providers
+  that ask for a public key when they install the server (e.g. OVH), or to append to the user's `~/.ssh/authorized_keys` by hand.
+- `host-add <name>` stdin: address, port, user, fingerprint, auth (`key`|`password`|`generated`), secret.
+  - `generated`: secret is any placeholder (e.g. `-`), ignored. Uses `hosts/.keygen-<name>/key` ("Generate the key first" if missing).
+    If key login fails the pending key stays (the error says to add the public key to authorized_keys), so the owner fixes the server and saves again.
   - `key`: secret is the private key, base64 (one line, no newlines). Reject unless `ssh-keygen -y` can read it; passphrase-protected keys are refused with a clear message.
   - `password`: generate `ed25519` key, install the public key (use `SSH_ASKPASS` with a 600 temp script that prints the password and `SSH_ASKPASS_REQUIRE=force`, or `sshpass -e` if installed; the password must not appear in argv or logs), then verify key login. Discard the password; set `auth:"password"` only to mean "key was installed with a password".
-  - Both: pin the host key from probe (must match fingerprint), verify `ssh <host> true` works, then write the files. Nothing is saved if verification fails. Replace if the name exists.
+  - Both: pin the host key from probe (must match fingerprint), verify `ssh <host> true` works, then write the files. Nothing is saved if verification fails. An existing name is refused (remove it first), so attachments never silently point at a different server.
   → `{saved:name}`.
 - `host-test <name>` → `{ok:true}` or error with ssh's last line. `host-remove <name>` → deletes `hosts/<name>` and every project's attachment (does not touch the remote's authorized_keys: say so in the app).
 - `host-session <project>` → `{hosts:[{name,address,user,attached}]}`; `host-attach <project> <name> on|off` → `{host,state}`.
@@ -50,6 +57,6 @@ All replies are the usual `{ok, data | error}`. Secrets come on stdin one per li
 
 ## App
 - Cluster tab (ClusterSection): a "Hosting servers" card: list, Test, Remove (confirm; says the key stays authorized on the server until removed there), **+ Add host**.
-- Add host dialog: name, address, port (22), user → **Check** (host-probe) shows the fingerprint to confirm → pick Key (paste, or upload a file; base64 on the wire) or Password → Save (host-add). Error text from the server is shown in the dialog (not only in a snackbar).
+- Add host dialog: name, address, port (22), user → **Check** (host-probe) shows the fingerprint to confirm → pick Key (paste, or upload a file; base64 on the wire), Password, or Generate a key (host-keygen; shows the public key with Copy and where to put it) → Save (host-add). Error text from the server is shown in the dialog (not only in a snackbar).
 - Chat 👥 sheet: a "Servers" section with a switch per host (host-session / host-attach).
-- Needs SCRIPT_API 39: raise `Updates.MIN_SCRIPT_API`.
+- Needs SCRIPT_API 40 (39 without Generate a key): raise `Updates.MIN_SCRIPT_API`.
