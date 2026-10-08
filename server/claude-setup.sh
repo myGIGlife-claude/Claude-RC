@@ -22,6 +22,7 @@ set -uo pipefail
 SCRIPT_API=44
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
+CLAUDERC_API="${CLAUDERC_API:-https://api.github.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 
 STATE_DIR="$HOME/.config/claude-setup"
@@ -2590,8 +2591,8 @@ sa_token_ok() {
   sig="$(printf '%s.%s' "$hdr" "$claims" | openssl dgst -sha256 -sign "$d/k.pem" 2>/dev/null | b64)"
   rm -rf "$d"
   [[ -n "$sig" ]] || return 1
-  tok="$(curl -fsS --max-time 15 https://oauth2.googleapis.com/token \
-    -d grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer -d "assertion=$hdr.$claims.$sig" 2>/dev/null |
+  tok="$(printf 'data-urlencode = "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer"\ndata-urlencode = "assertion=%s.%s.%s"\n' "$hdr" "$claims" "$sig" |
+    curl -fsS --max-time 15 -K - https://oauth2.googleapis.com/token 2>/dev/null |
     jq -r '.access_token // empty' 2>/dev/null)"
   [[ -n "$tok" ]]
 }
@@ -2661,7 +2662,10 @@ do_login_token() {
 
 # Older apps call this name.
 
-custom_name_ok() { [[ "$1" =~ $CUSTOM_NAME_RE && "$1" != CLAUDE_* && "$1" != ANTHROPIC_* ]]; }
+# Names that redirect package installs, API traffic or TLS trust for every session are refused (an attacker with the phone key could
+# otherwise point pip/npm/the AWS CLI at their own server, or swap the CA bundle).
+CUSTOM_NAME_DENY='^(PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|UV_INDEX_URL|UV_DEFAULT_INDEX|UV_EXTRA_INDEX_URL|NPM_CONFIG_REGISTRY|OPENAI_BASE_URL|OPENAI_API_BASE|AWS_ENDPOINT_URL(_[A-Z0-9_]+)?|SSL_CERT_FILE|CURL_CA_BUNDLE|REQUESTS_CA_BUNDLE|NODE_EXTRA_CA_CERTS|DOCKER_HOST|GH_HOST|GITHUB_API_URL|GIT_SSH_COMMAND|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$'
+custom_name_ok() { [[ "$1" =~ $CUSTOM_NAME_RE && "$1" != CLAUDE_* && "$1" != ANTHROPIC_* && ! "$1" =~ $CUSTOM_NAME_DENY ]]; }
 
 # set-secret <NAME>: stdin = the value. For APIs without a built-in service:
 # saved like the others, so every Claude session and MCP server sees it.
@@ -2825,9 +2829,10 @@ do_youtube_login_poll() {
   [[ -f "$YT_PENDING" ]] || api_err not_logged_in "No YouTube sign-in in progress. Start it again."
   local id secret dc resp err rt at chan
   id="$(jq -r .client_id "$YT_PENDING")"; secret="$(jq -r .client_secret "$YT_PENDING")"; dc="$(jq -r .device_code "$YT_PENDING")"
-  resp="$(curl -sS --max-time 20 https://oauth2.googleapis.com/token \
-    --data-urlencode "client_id=$id" --data-urlencode "client_secret=$secret" --data-urlencode "device_code=$dc" \
-    --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:device_code" 2>/dev/null)"
+  # (id, secret and device code are read from the saved file as jq strings; quotes/backslashes would break a curl config line: refuse them)
+  [[ "$id$secret$dc" != *[\"\\]* && "$id$secret$dc" != *$'\n'* ]] || { rm -f "$YT_PENDING"; api_err not_logged_in "The saved sign-in is damaged. Start again."; }
+  resp="$(printf 'data-urlencode = "client_id=%s"\ndata-urlencode = "client_secret=%s"\ndata-urlencode = "device_code=%s"\ndata-urlencode = "grant_type=urn:ietf:params:oauth:grant-type:device_code"\n' "$id" "$secret" "$dc" |
+    curl -sS --max-time 20 -K - https://oauth2.googleapis.com/token 2>/dev/null)"
   err="$(jq -r '.error // empty' <<<"$resp" 2>/dev/null)"
   case "$err" in
     authorization_pending | slow_down) api_ok '{"pending":true}' ;;
@@ -3120,6 +3125,7 @@ drive_backup_run() {
 # drive-login-start: the code to enter at Google's page; the app then polls drive-login-poll.
 do_drive_login_start() {
   [[ $# -eq 0 ]] || bad_args "drive-login-start takes no arguments"
+  migrate_need_run   # signing in to a Google account sends every backup there: not from a lost phone alone
   drive_need_client
   need curl
   local resp dc
@@ -3185,6 +3191,7 @@ do_drive_passphrase() {
     rm -f "$DRIVE_PASS"
     api_ok '{"saved":false,"removed":true}'
   fi
+  migrate_need_run   # backups are encrypted with it: a stranger's passphrase would make them readable to a stranger
   if ((${#p} < 12 || ${#p} > 200)) || [[ ! "$p" =~ ^[[:print:]]+$ ]]; then
     unset p
     api_err invalid_name "The passphrase must be one line of 12 to 200 characters."
@@ -3326,6 +3333,11 @@ do_self_update() {
   local sha="${1:-}" dir out
   [[ $# -eq 1 && "$sha" =~ ^[0-9a-f]{40}$ ]] || bad_args "usage: self-update <commit>"
   need curl
+  # GitHub serves a commit of ANY fork through the parent repo's URL: only a commit that is on main may be installed (it runs as you).
+  local where
+  where="$(curl -fsSL --max-time 20 "$CLAUDERC_API/repos/$CLAUDERC_REPO/compare/$sha...main" 2>/dev/null | jq -r '.status // empty' 2>/dev/null)"
+  [[ "$where" == ahead || "$where" == identical ]] ||
+    api_err invalid_name "Commit ${sha:0:7} isn't on the main branch (or GitHub couldn't be asked), so it was not installed."
   dir="$(mktemp -d)"
   trap 'rc=$?; rm -rf "$dir"; (exit $rc); on_exit' EXIT
   curl -fsSL --max-time 30 "$CLAUDERC_RAW/$CLAUDERC_REPO/$sha/server/install.sh" -o "$dir/install.sh" 2>/dev/null ||
@@ -3393,6 +3405,7 @@ do_install_cli() {
   local name="$1" pw="" dir tag ver f a64 bin out
   IFS= read -r -t 5 pw || true
   exec 0</dev/null
+  case "$name" in docker | railway | neon | hf | gcloud | bun) migrate_need_run ;; esac   # their installers run unverified downloads (docker also takes your sudo password)
   need curl; need tar; need sha256sum
   case "$(uname -m)" in x86_64) a64=false ;; aarch64 | arm64) a64=true ;; *) api_err internal "No $name build for this CPU ($(uname -m))." ;; esac
   dir="$(mktemp -d)"
@@ -3534,6 +3547,10 @@ do_claude_cmd() {
     mcp) [[ "${a[1]:-}" =~ ^(list|get|remove)$ ]] && allowed=true ;;
   esac
   $allowed || api_err forbidden "Command Center runs: doctor, update, --version, plugin …, plugin marketplace …, mcp list/get/remove."
+  # Installing or updating a plugin, or adding/updating a marketplace, brings in code that runs in every session.
+  if [[ "${a[0]}" == plugin || "${a[0]}" == plugins ]]; then
+    [[ "${a[1]:-}" =~ ^(install|i|update)$ || ( "${a[1]:-}" == marketplace && "${a[2]:-}" =~ ^(add|update)$ ) ]] && migrate_need_run
+  fi
   need claude
   out="$(cd "$HOME" && t 300 env -u ANTHROPIC_API_KEY claude "${a[@]}" </dev/null 2>&1)"
   rc=$?
@@ -4233,6 +4250,7 @@ do_migrate_authorize() {
   local key addr blob opts tmp ak="$HOME/.ssh/authorized_keys"
   key="$(read_secret_line)"; addr="$(read_secret_line)"
   exec 0</dev/null
+  migrate_need_run   # it lets another key push a backup here that migrate-restore unpacks: never from a lost phone alone
   umask 077
   [[ "$key" =~ $MIGRATE_PUBKEY_RE && ${#key} -le 300 ]] || api_err invalid_name "That isn't a public key line (ssh-ed25519 AAAA…)."
   [[ -z "$addr" || "$addr" =~ $MIGRATE_ADDR_RE ]] || api_err invalid_name "That isn't a host name or IP address."
@@ -4473,6 +4491,7 @@ do_migrate_restore() {
   local name="$1" pass pf started
   pass="$(read_secret_line)"
   exec 0</dev/null
+  migrate_need_run   # unpacking a backup writes anywhere in the home folder
   umask 077
   [[ "$pass" =~ ^[[:print:]]{8,200}$ ]] || api_err invalid_name "That passphrase doesn't look right."
   migrate_need_backup

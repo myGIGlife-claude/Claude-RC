@@ -119,6 +119,9 @@ OSLUG="$(printf %s "$HOME" | sed 's/[^A-Za-z0-9]/-/g')"; mkdir -p "$HOME/.claude
 
 echo '{"token":"SECRET-MARKER-123"}' >"$HOME/.claude/.credentials.json"
 echo 'ssh-ed25519 AAAA demo' >"$HOME/.ssh/authorized_keys"
+# files sshd reads/runs at login, and this server's forced command: a (hostile) backup must not plant them
+echo 'ssh-ed25519 AAAA planted' >"$HOME/.ssh/authorized_keys2"; echo 'planted' >"$HOME/.ssh/rc"; echo 'planted' >"$HOME/.ssh/environment"
+mkdir -p "$HOME/bin"; echo 'planted launcher' >"$HOME/bin/claude-launcher-api"
 mkdir -p "$L/migrate"   # the Migrate wizard's transfer key and passphrase: never part of a backup
 echo 'PRIVATE-MIGRATE-KEY' >"$L/migrate/key"
 echo 'MIGRATE-PASSPHRASE' >"$L/migrate/passphrase"
@@ -258,6 +261,8 @@ grep -q SECRET-MARKER "$H2/.claude/.credentials.json" && grep -q SECRET-MARKER "
 [[ -f "$H2/.ssh/id_demo" && -f "$H2/.agents/.skill-lock.json" && -f "$H2/.claude/settings.json" ]]; check "other files restored" $?
 # (changed on purpose: the old version of this check also expected .ssh/authorized_keys to come back, which is the hole fixed in task 6)
 [[ ! -e "$H2/.ssh/authorized_keys" ]]; check "import does NOT restore .ssh/authorized_keys" $?
+[[ ! -e "$H2/.ssh/authorized_keys2" && ! -e "$H2/.ssh/rc" && ! -e "$H2/.ssh/environment" ]]; check "import does NOT restore authorized_keys2, .ssh/rc or .ssh/environment" $?
+[[ ! -e "$H2/bin/claude-launcher-api" ]]; check "import does NOT restore bin/claude-launcher-api" $?
 NSLUG="$(printf %s "$H2" | sed 's/[^A-Za-z0-9]/-/g')"
 grep -qF "$H2/.config/x.json" "$H2/.claude/settings.json" && ! grep -qF "$OLD" "$H2/.claude/settings.json"; check "old home path rewritten to the new home in settings" $?
 [[ -f "$H2/.claude/projects/$NSLUG-projects-app/c.jsonl" && ! -e "$H2/.claude/projects/$OSLUG-projects-app" ]]; check "chat history folders renamed to the new home" $?

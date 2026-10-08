@@ -967,7 +967,9 @@ cmd_import() {
   start_read extract "$FILE"
   # Never restored: this server's own authorized_keys (unless asked), its launcher config (PROJECTS_DIR only, below), the migrate keys.
   xex=(--exclude=manifest.json --exclude=docker --exclude=.config/claude-launcher/config --exclude=.config/claude-launcher/migrate)
-  ((WITHAK)) || xex+=(--exclude=.ssh/authorized_keys)
+  # The server's own forced command stays the installed one; sshd also reads authorized_keys2 and runs ~/.ssh/rc / environment at login.
+  xex+=(--exclude=bin/claude-launcher-api --exclude=.ssh/rc --exclude=.ssh/environment)
+  ((WITHAK)) || xex+=("--exclude=.ssh/authorized_keys*")
   if ! (umask 022; decrypt "$FILE" | gunz | tar -xpf - -C "$HOME" --anchored "${xex[@]}"); then
     stop_read
     die "extracting failed half way (older files are in $pre)"
