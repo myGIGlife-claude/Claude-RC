@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -22,7 +23,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -72,10 +72,10 @@ fun mcpSubtitle(m: McpServer) = when (m.health) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConnectionsScreen(vm: MainViewModel) {
-    val status by vm.status.collectAsState()
-    val refreshing by vm.statusRefreshing.collectAsState()
-    val latest by vm.latest.collectAsState()
-    val mcp by vm.mcp.collectAsState()
+    val status by vm.status.collectAsStateWithLifecycle()
+    val refreshing by vm.statusRefreshing.collectAsStateWithLifecycle()
+    val latest by vm.latest.collectAsStateWithLifecycle()
+    val mcp by vm.mcp.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val login = { kind: LoginKind -> vm.showLogin(kind) }
     val detail = { d: Detail -> vm.openDetail(d) }
@@ -175,7 +175,7 @@ private fun LazyGridScope.section(title: String, tiles: List<Tile>) {
 @Composable
 private fun ServerUpdateCard(vm: MainViewModel, required: Boolean, commit: String?) {
     val context = LocalContext.current
-    val busy by vm.busy.collectAsState()
+    val busy by vm.busy.collectAsStateWithLifecycle()
     var confirm by remember { mutableStateOf(false) }
     Surface(
         modifier = Modifier.fillMaxWidth(),

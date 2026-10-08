@@ -17,6 +17,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -221,6 +222,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _latest = MutableStateFlow<Latest?>(null)
     val latest = _latest.asStateFlow()
 
+    private val _foreground = MutableStateFlow(true)
+    val foreground = _foreground.asStateFlow()
+
     init {
         // An update's APK is only needed until it's installed (which restarts the app).
         viewModelScope.launch(Dispatchers.IO) { deleteApks() }
@@ -240,19 +244,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (store.current().isConfigured) refreshStatus()
         }
         viewModelScope.launch {
-            while (true) {
-                checkUpdates()
-                delay(60 * 60 * 1000L)
+            foreground.collectLatest { isForeground ->
+                if (isForeground) while (true) {
+                    checkUpdates()
+                    delay(60 * 60 * 1000L)
+                }
             }
         }
         viewModelScope.launch {
             if (store.current().notify && SessionWatcher.allowed(getApplication())) { SessionWatcher.schedule(getApplication()); setupPush() }
         }
         viewModelScope.launch {
-            delay(3_000)   // let the first status call land
-            while (true) {
-                refreshMcp()
-                delay(5 * 60 * 1000L)
+            foreground.collectLatest { isForeground ->
+                if (isForeground) {
+                    delay(3_000)   // let the first status call land
+                    while (true) {
+                        refreshMcp()
+                        delay(5 * 60 * 1000L)
+                    }
+                }
             }
         }
     }
@@ -1235,8 +1245,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---- Status ---------------------------------------------------------------
 
     /** False while the app is in the background: screens pause their refresh loops (battery, data). */
-    private val _foreground = MutableStateFlow(true)
-    val foreground = _foreground.asStateFlow()
     fun setForeground(on: Boolean) {
         _foreground.value = on
         if (on && !_pushReady.value) viewModelScope.launch { if (store.current().notify) setupPush() }   // retry after offline / locked starts

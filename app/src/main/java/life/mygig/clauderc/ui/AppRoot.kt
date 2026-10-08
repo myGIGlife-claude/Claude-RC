@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.app.Activity
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Row
@@ -59,7 +61,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -116,8 +117,8 @@ val LocalAppLock = staticCompositionLocalOf<AppLock?> { null }
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppRoot(vm: MainViewModel, lock: AppLock) {
-    val settings by vm.settings.collectAsState()
-    val unlocked by vm.unlocked.collectAsState()
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val unlocked by vm.unlocked.collectAsStateWithLifecycle()
     val s = settings
     if (s == null) {
         ClaudeRcTheme(ThemeMode.SYSTEM) {
@@ -157,26 +158,26 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
         CompositionLocalProvider(LocalAppLock provides lock) {
             val context = LocalContext.current
             val snackbar = remember { SnackbarHostState() }
-            val busy by vm.busy.collectAsState()
-            val tab by vm.tab.collectAsState()
-            val showSettings by vm.showSettings.collectAsState()
-            val status by vm.status.collectAsState()
-            val latest by vm.latest.collectAsState()
-            val login by vm.login.collectAsState()
-            val setup by vm.setup.collectAsState()
-            val showAdd by vm.showAdd.collectAsState()
-            val detail by vm.detail.collectAsState()
-            val showRun by vm.showRun.collectAsState()
-            val chatSession by vm.chatSession.collectAsState()
-            val showCustom by vm.showCustom.collectAsState()
-            val showKeystores by vm.showKeystores.collectAsState()
-            val showApple by vm.showApple.collectAsState()
+            val busy by vm.busy.collectAsStateWithLifecycle()
+            val tab by vm.tab.collectAsStateWithLifecycle()
+            val showSettings by vm.showSettings.collectAsStateWithLifecycle()
+            val status by vm.status.collectAsStateWithLifecycle()
+            val latest by vm.latest.collectAsStateWithLifecycle()
+            val login by vm.login.collectAsStateWithLifecycle()
+            val setup by vm.setup.collectAsStateWithLifecycle()
+            val showAdd by vm.showAdd.collectAsStateWithLifecycle()
+            val detail by vm.detail.collectAsStateWithLifecycle()
+            val showRun by vm.showRun.collectAsStateWithLifecycle()
+            val chatSession by vm.chatSession.collectAsStateWithLifecycle()
+            val showCustom by vm.showCustom.collectAsStateWithLifecycle()
+            val showKeystores by vm.showKeystores.collectAsStateWithLifecycle()
+            val showApple by vm.showApple.collectAsStateWithLifecycle()
             // Only the open flag: the wizard screen follows the rest of its state itself.
-            val showMigrate by remember(vm) { vm.migrate.map { it.open }.distinctUntilChanged() }.collectAsState(vm.migrate.value.open)
-            val tokenService by vm.tokenService.collectAsState()
-            val tail by vm.tail.collectAsState()
-            val pendingKey by vm.pendingHostKey.collectAsState()
-            val clusterOffer by vm.clusterOffer.collectAsState()
+            val showMigrate by remember(vm) { vm.migrate.map { it.open }.distinctUntilChanged() }.collectAsStateWithLifecycle(vm.migrate.value.open)
+            val tokenService by vm.tokenService.collectAsStateWithLifecycle()
+            val tail by vm.tail.collectAsStateWithLifecycle()
+            val pendingKey by vm.pendingHostKey.collectAsStateWithLifecycle()
+            val clusterOffer by vm.clusterOffer.collectAsStateWithLifecycle()
 
             LaunchedEffect(Unit) {
                 vm.messages.collect { m ->
@@ -316,15 +317,17 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                 // windows don't resize for it on their own).
                 Column(Modifier.padding(padding).consumeWindowInsets(padding).imePadding().fillMaxSize()) {
                   if (!showSettings && !setupNeeded && detail == null) UpdateBar(vm, latest, status, tab)
-                  Box(Modifier.weight(1f).fillMaxWidth()) {
-                    when {
-                        showSettings || setupNeeded -> SettingsScreen(vm, s, firstRun = setupNeeded)
-                        detail != null -> DetailScreen(vm, detail!!)
-                        tab == Tab.STATUS -> ConnectionsScreen(vm)
-                        tab == Tab.NEW -> NewProjectScreen(vm)
-                        tab == Tab.PROJECTS -> ProjectsScreen(vm)
-                        tab == Tab.SESSIONS -> SessionsScreen(vm)
-                        tab == Tab.COMMAND -> ClaudeScreen(vm)
+                  Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                    Box(Modifier.widthIn(max = 640.dp).fillMaxSize()) {
+                        when {
+                            showSettings || setupNeeded -> SettingsScreen(vm, s, firstRun = setupNeeded)
+                            detail != null -> DetailScreen(vm, detail!!)
+                            tab == Tab.STATUS -> ConnectionsScreen(vm)
+                            tab == Tab.NEW -> NewProjectScreen(vm)
+                            tab == Tab.PROJECTS -> ProjectsScreen(vm)
+                            tab == Tab.SESSIONS -> SessionsScreen(vm)
+                            tab == Tab.COMMAND -> ClaudeScreen(vm)
+                        }
                     }
                   }
                 }
@@ -358,7 +361,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
 /** A bar across the top of every tab while a new app build or server scripts are waiting. */
 @Composable
 private fun UpdateBar(vm: MainViewModel, lt: Latest?, st: StatusData?, tab: Tab) {
-    val busy by vm.busy.collectAsState()
+    val busy by vm.busy.collectAsStateWithLifecycle()
     val newApp = lt?.appVersionCode?.takeIf { it > BuildConfig.VERSION_CODE }
     val apk = lt?.apkUrl
     val server = st != null && (st.scriptApi < Updates.MIN_SCRIPT_API || (lt?.serverCommit != null && lt.serverCommit != st.commit))

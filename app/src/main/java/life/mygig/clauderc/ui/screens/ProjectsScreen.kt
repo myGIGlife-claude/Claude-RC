@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.PaddingValues
@@ -43,7 +44,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,8 +63,8 @@ private enum class Filter(val label: String) { RUNNING("Running"), LOCAL("On ser
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ProjectsScreen(vm: MainViewModel) {
-    val repos by vm.repos.collectAsState()
-    val refreshing by vm.reposRefreshing.collectAsState()
+    val repos by vm.repos.collectAsStateWithLifecycle()
+    val refreshing by vm.reposRefreshing.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableStateOf(Filter.RUNNING) }
     var selected by remember { mutableStateOf<Repo?>(null) }

@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -39,7 +40,6 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -116,14 +116,14 @@ private fun TermButton(label: String, onClick: () -> Unit, enabled: Boolean = tr
 /** A session's screen, live, with keys to answer its prompts. */
 @Composable
 fun TailScreen(vm: MainViewModel, tail: TailResult) {
-    val busy by vm.busy.collectAsState()
-    val updatedAt by vm.tailUpdatedAt.collectAsState()
-    val refreshing by vm.tailRefreshing.collectAsState()
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val updatedAt by vm.tailUpdatedAt.collectAsStateWithLifecycle()
+    val refreshing by vm.tailRefreshing.collectAsStateWithLifecycle()
     var live by remember { mutableStateOf(true) }
     var size by rememberSaveable { mutableIntStateOf(13) }
     val vScroll = rememberScrollState()
     LaunchedEffect(tail.text) { vScroll.scrollTo(vScroll.maxValue) }
-    val foreground by vm.foreground.collectAsState()
+    val foreground by vm.foreground.collectAsStateWithLifecycle()
     LaunchedEffect(live, foreground) {
         while (live && foreground) {
             delay(5_000)
@@ -165,10 +165,10 @@ fun TailScreen(vm: MainViewModel, tail: TailResult) {
 /** Run a command: type or paste, optional sudo password; each run's output stays in the scrollback. */
 @Composable
 fun RunScreen(vm: MainViewModel) {
-    val busy by vm.busy.collectAsState()
-    val status by vm.status.collectAsState()
-    val history by vm.runHistory.collectAsState()
-    var command by rememberSaveable { mutableStateOf("") }
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val status by vm.status.collectAsStateWithLifecycle()
+    val history by vm.runHistory.collectAsStateWithLifecycle()
+    var command by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     val vScroll = rememberScrollState()
     LaunchedEffect(history.size) { vScroll.scrollTo(vScroll.maxValue) }
