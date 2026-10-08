@@ -33,8 +33,8 @@ claude_stub = tmp / "claude-stub"
 stub_text = (HERE / "stubs" / "claude").read_text()
 stub_text = stub_text.replace("svc=${CLAUDERC_TEST_SECRET:-unset} args=", "svc=${CLAUDERC_TEST_SECRET:-unset} ssh=${SSH_AUTH_SOCK:-unset} gh=${GH_TOKEN:-unset} ghub=${GITHUB_TOKEN:-unset} settings=${SETTINGS_ONLY_SECRET:-unset} args=")
 claude_stub.write_text(stub_text); claude_stub.chmod(0o755)
-env = {**os.environ, "HOME": str(test_home), "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(claude_stub), "CLAUDERC_CODEX": str(HERE / "stubs" / "codex"), "CLAUDERC_GEMINI": str(HERE / "stubs" / "gemini"),
-       "ANTHROPIC_API_KEY": "secret-should-not-leak", "CLAUDE_CODE_OAUTH_TOKEN": "main-token", "CLAUDECODE": "1", "CLAUDERC_TEST_STUB_STATE": str(tmp / "stub"),
+env = {**os.environ, "HOME": str(test_home), "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t", "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(claude_stub), "CLAUDERC_CODEX": str(HERE / "stubs" / "codex"), "CLAUDERC_GEMINI": str(HERE / "stubs" / "gemini"),
+       "ANTHROPIC_API_KEY": "secret-should-not-leak", "CLAUDE_CODE_OAUTH_TOKEN": "main-token", "CLAUDECODE": "1", "CLAUDERC_TEST_STUB_STATE": str(tmp / "stub"), "STUB_STATE": str(tmp / "stub"),
        "SSH_AUTH_SOCK": "/tmp/fake-agent.sock", "GH_TOKEN": "fake-gh-token", "GITHUB_TOKEN": "fake-github-token",
        "CLAUDERC_TEST_SECRET": "service-token", "CLAUDERC_WORKER_SLOTS": "3", "CLAUDERC_USAGE_TTL": "0", "CLAUDERC_START_GAP": "0",
        "CLAUDERC_USAGE_URL": f"http://127.0.0.1:{usage_srv.server_port}/", "CLAUDERC_SSH": str(HERE / "stubs" / "ssh"), "CLAUDERC_SCP": str(HERE / "stubs" / "scp")}
