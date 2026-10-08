@@ -22,7 +22,9 @@ class AppBackupTest {
 
     @Test fun decryptsV1Fixture() {
         val plain = "old settings and key seed".toByteArray()
-        assertArrayEquals(plain, encryptV1Fixture(plain, "correct horse".toCharArray()))
+        val v1 = encryptV1Fixture(plain, "correct horse".toCharArray())
+        assertEquals("CLRCBK1", String(v1, 0, 7, Charsets.US_ASCII))
+        assertArrayEquals(plain, AppBackup.decrypt(v1, "correct horse".toCharArray()))
     }
 
     @Test fun wrongPassphraseFails() {
