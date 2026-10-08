@@ -17,6 +17,9 @@ updates:
         patterns: ["*"]
         update-types: [minor, patch]
     ignore:
-      # Gradle 9 needs the Android Gradle Plugin 9 upgrade (its own PR, see PLAN.md).
+      # The build toolchain moves together (AGP 9 + Gradle 9 + Kotlin 2.4 + Compose BOM): one planned upgrade PR (see PLAN.md), not one by one.
       - dependency-name: "gradle-wrapper"
         update-types: ["version-update:semver-major"]
+      - dependency-name: "com.android.application"
+      - dependency-name: "org.jetbrains.kotlin.*"
+      - dependency-name: "androidx.compose:compose-bom"
