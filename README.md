@@ -276,7 +276,8 @@ review) hands the code to the others ("workers") and you stay in charge of what 
    MCP server (`list_workers`, `delegate`, `wait`, `reply`, `review`, `merge`,
    `discard`). In a project with a commit, each task runs in its own private clone (no link back to your repository: the finished branch is fetched in with git hooks off)
    on a branch `cluster/<worker>/<id>`, so workers don't share files with the
-   main checkout or each other. `delegate` can branch from a worktree (`repo=`),
+   main checkout or each other. Each run also happens inside a sandbox (bubblewrap) that
+   hides your credentials, SSH keys and other projects (Cluster settings › Sandbox). `delegate` can branch from a worktree (`repo=`),
    and `review` can show one file at a time (`file=`).
 4. **Review and merge.** When a task finishes, the main Claude reads the diff,
    builds and tests it, and merges the branch (a conflict changes nothing) or discards it.

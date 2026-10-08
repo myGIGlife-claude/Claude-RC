@@ -343,6 +343,8 @@ data class ClusterConfig(
     @SerialName("max_parallel") val maxParallel: Int = 3,
     val handback: Boolean = true,
     @SerialName("handback_pct") val handbackPct: Int = 95,
+    /** Worker sandbox (bubblewrap): "auto" = use it when it works here, "on" = refuse to run workers without it, "off". */
+    val sandbox: String = "auto",
 )
 
 /** A worker as one chat sees it: attached or not, with this chat's role and mode. */

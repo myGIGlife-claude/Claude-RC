@@ -285,6 +285,17 @@ private fun ClusterSettingsCard(vm: MainViewModel, c: ClusterConfig, idle: Boole
                     onDown = { vm.setClusterConfig("handback_pct", (c.handbackPct - 5).coerceAtLeast(50).toString()) },
                     onUp = { vm.setClusterConfig("handback_pct", (c.handbackPct + 5).coerceAtMost(100).toString()) })
             }
+            Text("Sandbox for workers", style = MaterialTheme.typography.labelLarge)
+            Text(
+                "Each worker run sees only its own project copy and its own login: none of your credentials, SSH keys or other projects. " +
+                    "Auto uses it when this server supports it; Required refuses to run workers without it.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for ((value, label) in listOf("auto" to "Auto", "on" to "Required", "off" to "Off")) {
+                    FilterChip(selected = c.sandbox == value, onClick = { vm.setClusterConfig("sandbox", value) }, label = { Text(label) }, enabled = idle)
+                }
+            }
         }
     }
 }

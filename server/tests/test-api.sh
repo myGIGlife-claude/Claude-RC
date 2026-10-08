@@ -380,10 +380,15 @@ if [[ -n "$KT" ]]; then
   [[ ! -e "$HOME/.config/claude-launcher/keystores/GTG.jks" ]] && ! grep -q GTG_ "$HOME/.config/claude-launcher/env"; check "file and variables gone" $?
 fi
 echo "cluster settings"
-api "cluster-config"; check "cluster defaults" "$(jqt '.data == {max_parallel:3, handback:true, handback_pct:95}')"
+api "cluster-config"; check "cluster defaults" "$(jqt '.data == {max_parallel:3, handback:true, handback_pct:95, sandbox:"auto"}')"
 api "cluster-config-set max_parallel 7"; check "set parallel" "$(jqt '.ok and .data.max_parallel==7')"
 api "cluster-config-set handback false"; check "set handback" "$(jqt '.ok and .data.handback==false and .data.max_parallel==7')"
-api "cluster-config-set handback_pct 80"; api "cluster-config"; check "settings persist" "$(jqt '.data == {max_parallel:7, handback:false, handback_pct:80}')"
+api "cluster-config-set handback_pct 80"; api "cluster-config"; check "settings persist" "$(jqt '.data == {max_parallel:7, handback:false, handback_pct:80, sandbox:"auto"}')"
+api "cluster-config-set sandbox on"; check "sandbox can be required" "$(jqt '.ok and .data.sandbox=="on"')"
+api "cluster-config"; check "...and persists" "$(jqt '.data.sandbox=="on"')"
+api "cluster-config-set sandbox off"; check "sandbox can be turned off" "$(jqt '.ok and .data.sandbox=="off"')"
+api "cluster-config-set sandbox maybe"; check "sandbox refuses another value" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "cluster-config-set sandbox auto"; check "sandbox back to auto" "$(jqt '.ok and .data.sandbox=="auto"')"
 for bad in "max_parallel 11" "max_parallel 0" "handback maybe" "handback_pct 49" "handback_pct 101" "color red" "max_parallel"; do
   api "cluster-config-set $bad"; check "cluster-config-set $bad refused" "$(jqt '.ok == false')"
 done

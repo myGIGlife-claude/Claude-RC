@@ -195,7 +195,7 @@ case "$sub" in
     ((nargs >= 1 && nargs <= 2)) && [[ "${args[0]}" =~ $WORKER_RE && ( $nargs -eq 1 || "${args[1]}" =~ ^(claude|codex|gemini)$ ) ]] || deny "$sub"
     ;;
   cluster-config-set)
-    ((nargs == 2)) && [[ "${args[0]}" =~ ^(max_parallel|handback|handback_pct)$ && "${args[1]}" =~ ^[0-9a-z]{1,5}$ ]] || deny "$sub"
+    ((nargs == 2)) && [[ "${args[0]}" =~ ^(max_parallel|handback|handback_pct|sandbox)$ && "${args[1]}" =~ ^[0-9a-z]{1,5}$ ]] || deny "$sub"
     ;;
   worker-set)
     ((nargs == 2)) && [[ "${args[0]}" =~ $WORKER_RE && ( "${args[1]}" =~ ^(role|mode|model|effort)$ ) ]] || deny "$sub"
