@@ -375,7 +375,12 @@ data class Host(
     /** "key", "password" (the server's own key was installed with a password) or "generated" (the server's key, installed by the owner). */
     val auth: String = "key",
     val fingerprint: String = "",
+    /** What "Set up this server" last ran on it (steps asked for, and whether every step went through); null = never. */
+    val setup: HostSetupInfo? = null,
 )
+
+@Serializable
+data class HostSetupInfo(val at: Long = 0, val steps: List<String> = emptyList(), val ok: Boolean = false)
 
 @Serializable
 data class HostsData(val hosts: List<Host> = emptyList())

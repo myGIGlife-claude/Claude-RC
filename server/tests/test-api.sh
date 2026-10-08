@@ -932,7 +932,7 @@ grep -qx 'StrictHostKeyChecking=yes' "$STUB_STATE/ssh-argv" && grep -qx 'BatchMo
   grep -qx 'IdentitiesOnly=yes' "$STUB_STATE/ssh-argv" && grep -qx 'ConnectTimeout=10' "$STUB_STATE/ssh-argv" && [[ "$(tail -n 1 "$STUB_STATE/ssh-argv")" == true ]]
 check "key login verified with the safe options" $?
 api "host-list"
-check "host-list shows it" "$(jqt ".data.hosts == [{name:\"web\",address:\"web.example.com\",port:2222,user:\"deploy\",auth:\"key\",fingerprint:\"$HFP\",added:.data.hosts[0].added}] and (.data.hosts[0].added | type) == \"number\"")"
+check "host-list shows it" "$(jqt ".data.hosts == [{name:\"web\",address:\"web.example.com\",port:2222,user:\"deploy\",auth:\"key\",fingerprint:\"$HFP\",added:.data.hosts[0].added,setup:null}] and (.data.hosts[0].added | type) == \"number\"")"
 grep -qF "${UK64:40:40}" <<<"$OUT"; [[ $? -ne 0 ]]; check "host-list has no key material" $?
 
 api "host-add pw" "$(add_in web.example.com 22 deploy "$HFP" password wrong-password)"
@@ -1101,6 +1101,8 @@ rm -f "$STUB_STATE/ssh-log" "$STUB_STATE/systemctl-log"
 api "host-harden web" $' 80, 443,8080/tcp ,51820/udp,80/tcp,\nharden,optimize,harden'
 check "harden: steps parsed, docker reported" "$(jqt '.ok and .data.ssh_port == 2222 and .data.docker == true and ([.data.steps[] | [.name, .status]] == [["packages","ok"],["fail2ban","ok"],["firewall","ok"],["ssh","failed"],["swap","skipped"]]) and .data.steps[4].detail == ""')"
 check "harden: the Docker warning is in a step" "$(jqt '[.data.steps[].detail | select(test("bypass"))] | length == 1')"
+api "host-list"; check "harden: the run is remembered in host-list (steps; not ok, a step failed)" "$(jqt '.data.hosts[] | select(.name=="web") | .setup.steps == ["harden","optimize"] and .setup.ok == false and (.setup.at > 0)')"
+api "host-list"; check "host-list: setup is null for a host never set up" "$(jqt '[.data.hosts[] | select(.name != "web") | .setup] | all(. == null)')"
 H_ENV="$(grep -E '^CLAUDERC_(SSH_PORT|PORTS|STEPS|USER)=' "$STUB_STATE/harden-env" | tr '\n' ' ')"
 [[ "$H_ENV" == "CLAUDERC_PORTS=80/tcp,443/tcp,8080/tcp,51820/udp CLAUDERC_SSH_PORT=2222 CLAUDERC_STEPS=harden,optimize CLAUDERC_USER=deploy " ]]
 check "harden: validated, normalised settings reach the script through sudo" $?

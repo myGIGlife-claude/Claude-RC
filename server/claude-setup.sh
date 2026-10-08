@@ -1630,7 +1630,7 @@ do_host_list() {
   local f out=""
   for f in "$HOSTS_DIR"/*/meta.json; do
     [[ -f "$f" ]] || continue
-    out+="$(jq -c --arg n "$(basename "$(dirname "$f")")" '{name:$n, address, port, user, auth, fingerprint, added}' "$f" 2>/dev/null)"$'\n'
+    out+="$(jq -c --arg n "$(basename "$(dirname "$f")")" '{name:$n, address, port, user, auth, fingerprint, added, setup:(.setup // null)}' "$f" 2>/dev/null)"$'\n'
   done
   api_ok "$(printf '%s' "$out" | jq -sc '{hosts: .}')"
 }
@@ -1916,7 +1916,14 @@ if systemctl is-active --quiet clauderc-revert.service; then i=0; while [ \$i -l
       extra="$(jq -c '. + [{name:"safety", status:"failed", detail:"couldn'"'"'t cancel the automatic undo: the firewall and SSH changes will be undone in 2 minutes"}]' <<<"$extra")"
     fi
   fi
-  api_ok "$(jq -cn --argjson p "$HOST_PORT" --argjson d "$docker" --argjson s "$steps_json" --argjson x "$extra" '{ssh_port:$p, docker:$d, steps:($s + $x)}')"
+  local all; all="$(jq -c --argjson s "$steps_json" --argjson x "$extra" -n '$s + $x')"
+  # Remember what was run (and whether it all went through) in the host's meta, so the app doesn't offer it again.
+  if [[ -n "$steps" ]]; then
+    local mt; mt="$(mktemp "$HOSTS_DIR/$name/meta.XXXXXX")" &&
+      jq -c --arg st "$steps" --argjson a "$all" '.setup = {at:(now | floor), steps:($st | split(",")), ok:(all($a[]; .status != "failed"))}' "$HOSTS_DIR/$name/meta.json" >"$mt" 2>/dev/null &&
+      chmod 600 "$mt" && mv -f "$mt" "$HOSTS_DIR/$name/meta.json" || rm -f "${mt:-}"
+  fi
+  api_ok "$(jq -cn --argjson p "$HOST_PORT" --argjson d "$docker" --argjson s "$all" '{ssh_port:$p, docker:$d, steps:$s}')"
 }
 
 # host_harden_script: the script host-harden runs on the host as root (bash -s, settings in CLAUDERC_* from the command

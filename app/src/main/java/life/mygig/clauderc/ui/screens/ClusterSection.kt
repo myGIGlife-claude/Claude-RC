@@ -24,6 +24,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.Icons
 import androidx.compose.material3.Button
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.material3.FilterChip
@@ -295,7 +302,7 @@ private fun HostsCard(vm: MainViewModel, idle: Boolean, onRemove: (String) -> Un
                 OutlinedButton(onClick = { vm.openHostAdd() }, enabled = idle) { Text("+ Add host") }
             }
             Text(
-                "Web servers chats can work on: attach one with 👥 in a chat. Claude runs commands there in its own folder; nothing is installed.",
+                "Web servers chats can work on: attach one with 👥 in a chat. Claude runs commands there in its own folder.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             val hs = hosts
@@ -309,11 +316,24 @@ private fun HostsCard(vm: MainViewModel, idle: Boolean, onRemove: (String) -> Un
                             if (h.auth == "password") " · key installed with a password" else "",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        TextButton(onClick = { vm.testHost(h.name) }, enabled = idle) { Text("Test") }
-                        TextButton(onClick = { vm.openHostSetup(h.name, h.port) }, enabled = idle) { Text("Set up / harden") }
-                        if ((st?.scriptApi ?: 0) >= 44) TextButton(onClick = { vm.openHostAuthorize(h.name) }, enabled = idle) { Text("Add my key") }
-                        TextButton(onClick = { onRemove(h.name) }, enabled = idle) { Text("Remove") }
+                    // Done once (and every step went through): say so instead of offering it again; "Run set-up again" stays in the menu.
+                    val setupDone = h.setup?.let { it.ok && "harden" in it.steps } == true
+                    if (setupDone) Text(
+                        "Set up ✓ (" + h.setup!!.steps.joinToString(", ") + ")",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary,
+                    )
+                    var menu by remember { mutableStateOf(false) }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = { vm.testHost(h.name) }, enabled = idle) { Text("Test", maxLines = 1) }
+                        if (!setupDone) TextButton(onClick = { vm.openHostSetup(h.name, h.port) }, enabled = idle) { Text("Set up", maxLines = 1) }
+                        Box {
+                            IconButton(onClick = { menu = true }, enabled = idle) { Icon(Icons.Filled.MoreVert, contentDescription = "More for ${h.name}") }
+                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                if ((st?.scriptApi ?: 0) >= 44) DropdownMenuItem(text = { Text("Add my key") }, onClick = { menu = false; vm.openHostAuthorize(h.name) })
+                                if (setupDone) DropdownMenuItem(text = { Text("Run set-up again") }, onClick = { menu = false; vm.openHostSetup(h.name, h.port) })
+                                DropdownMenuItem(text = { Text("Remove") }, onClick = { menu = false; onRemove(h.name) })
+                            }
+                        }
                     }
                 }
             }
