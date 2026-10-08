@@ -868,6 +868,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }) { _hostHarden.value = api.hostHarden(name, ports, steps) }
     }
+    /** "Download key": the host's private key held in memory just long enough to be written to the file the owner picks. */
+    class HostKeyFile(val name: String, val bytes: ByteArray, val hint: String)
+    private val _hostKeyFile = MutableStateFlow<HostKeyFile?>(null)
+    val hostKeyFile = _hostKeyFile.asStateFlow()
+    fun exportHostKey(h: life.mygig.clauderc.api.Host) = action("Getting the key for ${h.name}…") {
+        val b64 = api.hostKeyExport(h.name)["private_key"]?.jsonPrimitive?.contentOrNull
+            ?: throw ApiException(Codes.INTERNAL, "The server sent no key.")
+        val bytes = android.util.Base64.decode(b64, android.util.Base64.NO_WRAP)
+        _hostKeyFile.value = HostKeyFile(h.name, bytes, "ssh -i ${h.name}-key ${h.user}@${h.address}" + (if (h.port != 22) " -p ${h.port}" else ""))
+    }
+    fun clearHostKeyFile() { _hostKeyFile.value?.bytes?.fill(0); _hostKeyFile.value = null }
     /** "Add my key": the host the dialog is open for, the server's answer and any error, all shown inside the dialog. */
     private val _hostAuthTarget = MutableStateFlow<String?>(null)
     val hostAuthTarget = _hostAuthTarget.asStateFlow()
