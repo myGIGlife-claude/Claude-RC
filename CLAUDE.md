@@ -96,4 +96,7 @@ hostnames, IPs, emails, org names, keys. They live in
   not `claude plugin update`; `claude-plugin-updates` gives each installed plugin an update state for the app's lights.
 - `claude-backup` (server/): `export` = one encrypted file (tar|gzip|gpg AES256, passphrase only via file/tty, printed once) with the Claude/launcher/agents/cloud logins, ssh, scripts, chat history and a rescue copy of git repos that are unpushed/dirty/without a remote; `import [--from user@host:FILE] [--clone]` restores it (pre-restore copies kept), `list` shows the manifest (no secret values). Tests: `server/tests/test-backup.sh`.
 - Migrate (docs/migrate-design.md): `claude-backup` (`export --no-claude-login`, `plan --json`, `receive` as the SSH forced command of a restricted transfer key, `import --manifest-out`; `import` never restores `.ssh/authorized_keys` or the launcher `config` unless `--with-authorized-keys`) plus `migrate-*` actions (SCRIPT_API 35); privileged ones need `ALLOW_RUN=1`. Tests never touch the real system: stubs for sudo/adduser/userdel/reboot/ssh, temp HOME, CLAUDE_CONFIG_DIR unset.
-
+- Team workers (`server/clauderc-team`): each task runs in a PRIVATE CLONE (`workers/<name>/trees/<id>`, objects copied, no remote), not a git
+  worktree; `sync_branch` fetches the finished branch into the project with hooks off (`transfer.fsckObjects`). Old tasks (no `ws` field) are still
+  worktrees. Workers still run as the SAME Unix user as the owner, so a worker with shell access can read the owner's credentials: the env
+  allowlist only limits what is handed over. Separate Unix users per worker are the next step (sudoers rule for one wrapper script).

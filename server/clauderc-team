@@ -4,7 +4,7 @@ owner's other Claude accounts ("workers") set up in the cLaudeRC app (Claude tab
 
 Only workers the owner attached to this project (Cluster button in the chat) are visible.
 A task is a headless `claude -p` run under the worker's own CLAUDE_CONFIG_DIR. In a git
-project it runs in its own worktree on its own branch (cluster/<worker>/<task>); the main
+project it runs in its own private clone on its own branch (cluster/<worker>/<task>); the main
 Claude reviews the diff and merges or discards. Elsewhere it runs in the project folder.
 State lives in <workers>/<name>/tasks/<id>.json.
 """
@@ -15,7 +15,7 @@ CFG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "clau
 WORKERS = CFG / "workers"
 DIFF_SHOWN = 20000        # characters of a diff that review returns
 MODES = ("acceptEdits", "plan", "bypassPermissions")
-git_lock = threading.Lock()   # one worktree is created at a time
+git_lock = threading.Lock()   # one clone is created at a time
 CLAUDE = os.environ.get("CLAUDERC_CLAUDE", "claude")
 # Other CLIs a worker can be (meta.json "kind"): ChatGPT's Codex and Gemini, each signed in under its own home folder.
 CLIS = {"codex": os.environ.get("CLAUDERC_CODEX", "codex"), "gemini": os.environ.get("CLAUDERC_GEMINI", "gemini")}
@@ -382,7 +382,7 @@ def repo_dir(repo):
 
 
 def workspace(worker, tid, cwd, ref=None, base=None):
-    """Its own worktree + branch for a task, from HEAD or from ref (another task's branch; base is then that task's base, so
+    """Its own private clone + branch for a task, from HEAD or from ref (another task's branch; base is then that task's base, so
     its diffs show both sets of changes). None only when cwd isn't a git project with a commit (then the task runs in the
     folder). A git project that can't get a workspace is an error: never let a worker edit the main checkout."""
     try:
@@ -392,14 +392,25 @@ def workspace(worker, tid, cwd, ref=None, base=None):
             return None
         top = top.stdout.strip()
         wt, branch = WORKERS / worker / "trees" / tid, f"cluster/{worker}/{tid}"
+        # A PRIVATE CLONE, not a worktree: a worktree shares the project's .git (objects, refs, config, hooks), so a worker could
+        # change them. The clone has its own .git and no link back (the remote is removed), so the worker can't push, and the
+        # project only receives the finished branch, fetched by this server with hooks off (sync_branch).
+        start = git("rev-parse", "--verify", (ref or "HEAD") + "^{commit}", cwd=top)
+        if start.returncode:
+            raise ToolError("Couldn't find where to start the worker's branch: " + (start.stderr or start.stdout).strip()[-300:])
+        wt.parent.mkdir(parents=True, exist_ok=True)
         with git_lock:
-            git("worktree", "prune", cwd=top)
-            r = git("worktree", "add", "-q", "-b", branch, str(wt), ref or "HEAD", cwd=top)
+            r = git("clone", "-q", "--local", "--no-hardlinks", "--no-checkout", top, str(wt), cwd=top)   # copies the objects: no shared files to tamper with
+            if not r.returncode:
+                r = git("checkout", "-q", "-b", branch, start.stdout.strip(), cwd=str(wt))
+            if not r.returncode:
+                git("remote", "remove", "origin", cwd=str(wt))
         if r.returncode:
-            raise ToolError("Couldn't create the worker's own branch, so nothing was started: " + (r.stderr or r.stdout).strip()[-400:])
+            shutil.rmtree(wt, ignore_errors=True)
+            raise ToolError("Couldn't create the worker's own copy, so nothing was started: " + (r.stderr or r.stdout).strip()[-400:])
         rel = os.path.relpath(cwd, top)
         copied = bring_along(Path(top), wt)
-        ws = {"top": top, "base": base or head.stdout.strip(), "wt": str(wt), "branch": branch, "copied": copied,
+        ws = {"top": top, "base": base or head.stdout.strip(), "wt": str(wt), "branch": branch, "copied": copied, "ws": "clone",
               "cwd": str(wt if rel == "." else wt / rel)}
         if ref:
             ws["fork"] = git("rev-parse", ref, cwd=top).stdout.strip()   # where this task starts: its own changes are fork..branch
@@ -431,14 +442,26 @@ def bring_along(top, wt):
 
 
 def seal(t):
-    """Commit whatever the worker left in its worktree; returns the diffstat against where it branched."""
+    """Commit whatever the worker left in its clone; returns the diffstat against where it branched."""
     if git("status", "--porcelain", cwd=t["wt"]).stdout.strip():
         git("add", "-A", cwd=t["wt"])
         if t.get("copied"):
             git("reset", "-q", "--", *t["copied"], cwd=t["wt"])   # copies of ignored files stay out of the branch
         git("-c", f"user.name=cluster-{t['worker']}", "-c", "user.email=cluster@localhost", "-c", "commit.gpgsign=false",
             "commit", "-q", "--no-verify", "-m", f"{t['worker']}: {t['task'][:70]}", cwd=t["wt"])
+    sync_branch(t)
     return git("diff", "--no-ext-diff", "--no-textconv", "--stat", f"{t.get('fork') or t['base']}..{t['branch']}", cwd=t["top"]).stdout.strip()
+
+
+def sync_branch(t):
+    """Clone workspaces: bring the worker's branch into the project's repository (forced, so a follow-up replaces it). Hooks are
+    off, objects are checked, submodules and tags are not followed. Old worktree tasks already share the repository."""
+    if t.get("ws") != "clone":
+        return
+    r = git("-c", "transfer.fsckObjects=true", "fetch", "-q", "--no-tags", "--no-recurse-submodules", t["wt"],
+            f"+refs/heads/{t['branch']}:refs/heads/{t['branch']}", cwd=t["top"])
+    if r.returncode:
+        raise ToolError("Couldn't take the worker's branch into the project: " + (r.stderr or r.stdout).strip()[-400:])
 
 
 def branch_task(tid):
@@ -474,7 +497,10 @@ def check_idle(t):
 
 
 def close(t, how, delete_flag):
-    git("worktree", "remove", "--force", t["wt"], cwd=t["top"])
+    if t.get("ws") == "clone":
+        shutil.rmtree(t["wt"], ignore_errors=True)
+    else:
+        git("worktree", "remove", "--force", t["wt"], cwd=t["top"])
     git("branch", delete_flag, t["branch"], cwd=t["top"])
     for p in WORKERS.glob("*/tasks/*.json"):   # every task (and follow-up) that shared the branch
         try:
@@ -710,7 +736,7 @@ def start(worker, prompt, resume=None, parent=None, repo=None, stack=None, note=
     role, mode = settings(worker, att)
     tid, text = uuid.uuid4().hex[:8], prompt
     if parent:
-        ws, cwd = {k: parent.get(k) for k in ("top", "base", "fork", "wt", "branch", "copied")}, parent["cwd"]
+        ws, cwd = {k: parent.get(k) for k in ("top", "base", "fork", "wt", "branch", "copied", "ws")}, parent["cwd"]
         if ws["top"]:
             text = text.replace(ws["top"], ws["wt"])   # main's paths point at the main checkout; the worker's copy is elsewhere
     else:
