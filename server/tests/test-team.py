@@ -343,12 +343,22 @@ err, text = tool("wait", task_id=tid, timeout_s=30)
 assert not err and f"cluster/research/{tid}" in text and "cluster-out.txt" in text, text
 assert not (repo / "cluster-out.txt").exists(), "the worker must not touch the main checkout"
 assert f"cwd={cfg / 'research' / 'trees' / tid}" in text, text
+# The worker's workspace is a PRIVATE CLONE: its own .git, no link back to the project, no shared object files.
+wt = cfg / "research" / "trees" / tid
+assert (wt / ".git").is_dir(), "a clone has its own .git directory (a worktree has a .git file)"
+assert g("remote", c=wt).strip() == "", "the clone has no remote: the worker can't push to the project"
+assert not (repo / ".git" / "worktrees").exists(), "the project's .git has no worktree entries for the worker"
+objs = [p for p in (wt / ".git" / "objects").rglob("*") if p.is_file() and p.parent.name not in ("pack", "info")]
+assert objs and all(p.stat().st_nlink == 1 for p in objs), "object files are copies, not hardlinks into the project"
+assert f"cluster/research/{tid}" in g("branch"), "the finished branch is fetched into the project when the task is sealed"
+cfg_before = (repo / ".git" / "config").read_text()
 err, text = tool("review", task_id=tid)
 assert not err and "+from sess-1" in text, text
 assert not marker.exists(), "post-checkout/post-commit hooks must not run during delegate/seal"
 err, text = tool("merge", task_id=tid)
 assert not err and "Merged" in text and (repo / "cluster-out.txt").read_text() == "from sess-1\n", text
 assert not marker.exists(), "post-merge hook must not run"
+assert (repo / ".git" / "config").read_text() == cfg_before, "the project's .git/config is never changed by a worker task"
 assert not (cfg / "research" / "trees" / tid).exists() and f"cluster/research/{tid}" not in g("branch"), "merge cleans up"
 err, text = tool("merge", task_id=tid)
 assert err, text                                                  # already merged

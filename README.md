@@ -274,7 +274,7 @@ review) hands the code to the others ("workers") and you stay in charge of what 
    **Edit files**, **Read-only** or **Full access**.
 3. **A branch per task.** The main Claude delegates through the `clauderc-team`
    MCP server (`list_workers`, `delegate`, `wait`, `reply`, `review`, `merge`,
-   `discard`). In a project with a commit, each task runs in its own worktree
+   `discard`). In a project with a commit, each task runs in its own private clone (no link back to your repository: the finished branch is fetched in with git hooks off)
    on a branch `cluster/<worker>/<id>`, so workers don't share files with the
    main checkout or each other. `delegate` can branch from a worktree (`repo=`),
    and `review` can show one file at a time (`file=`).
