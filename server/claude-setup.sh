@@ -1441,11 +1441,12 @@ do_cluster() {
 
 CLUSTER_CONFIG="$LAUNCHER_CONFIG_DIR/cluster.json"
 cluster_config_json() {
-  local d='{"max_parallel":3,"handback":true,"handback_pct":95}'
+  local d='{"max_parallel":3,"handback":true,"handback_pct":95,"sandbox":"auto"}'
   jq -c --argjson d "$d" '($d + (if type == "object" then . else {} end)) |
     {max_parallel: ((.max_parallel | numbers | floor) // 3 | if . < 1 then 1 elif . > 10 then 10 else . end),
      handback: (if (.handback | type) == "boolean" then .handback else true end),
-     handback_pct: ((.handback_pct | numbers | floor) // 95 | if . < 50 then 50 elif . > 100 then 100 else . end)}' \
+     handback_pct: ((.handback_pct | numbers | floor) // 95 | if . < 50 then 50 elif . > 100 then 100 else . end),
+     sandbox: (if (.sandbox | IN("auto", "on", "off")) then .sandbox else "auto" end)}' \
     "$CLUSTER_CONFIG" 2>/dev/null || echo "$d"
 }
 
@@ -1456,7 +1457,7 @@ do_cluster_config() {
 
 # cluster-config-set max_parallel 1-10 | handback true|false | handback_pct 50-100
 do_cluster_config_set() {
-  [[ $# -eq 2 ]] || bad_args "usage: cluster-config-set max_parallel|handback|handback_pct <value>"
+  [[ $# -eq 2 ]] || bad_args "usage: cluster-config-set max_parallel|handback|handback_pct|sandbox <value>"
   local cur new tmp
   cur="$(cluster_config_json)"
   case "$1" in
@@ -1466,7 +1467,9 @@ do_cluster_config_set() {
       new="$(jq -c --argjson v "$2" '.handback = $v' <<<"$cur")" ;;
     handback_pct) [[ "$2" =~ ^([5-9][0-9]|100)$ ]] || api_err invalid_name "The limit must be 50 to 100 percent."
       new="$(jq -c --argjson v "$2" '.handback_pct = $v' <<<"$cur")" ;;
-    *) bad_args "usage: cluster-config-set max_parallel|handback|handback_pct <value>" ;;
+    sandbox) [[ "$2" == auto || "$2" == on || "$2" == off ]] || api_err invalid_name "Sandbox must be auto, on or off."
+      new="$(jq -c --arg v "$2" '.sandbox = $v' <<<"$cur")" ;;
+    *) bad_args "usage: cluster-config-set max_parallel|handback|handback_pct|sandbox <value>" ;;
   esac
   mkdir -p "$LAUNCHER_CONFIG_DIR"
   tmp="$(mktemp "$LAUNCHER_CONFIG_DIR/cluster.json.XXXXXX")"

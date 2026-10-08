@@ -98,5 +98,10 @@ hostnames, IPs, emails, org names, keys. They live in
 - Migrate (docs/migrate-design.md): `claude-backup` (`export --no-claude-login`, `plan --json`, `receive` as the SSH forced command of a restricted transfer key, `import --manifest-out`; `import` never restores `.ssh/authorized_keys` or the launcher `config` unless `--with-authorized-keys`) plus `migrate-*` actions (SCRIPT_API 35); privileged ones need `ALLOW_RUN=1`. Tests never touch the real system: stubs for sudo/adduser/userdel/reboot/ssh, temp HOME, CLAUDE_CONFIG_DIR unset.
 - Team workers (`server/clauderc-team`): each task runs in a PRIVATE CLONE (`workers/<name>/trees/<id>`, objects copied, no remote), not a git
   worktree; `sync_branch` fetches the finished branch into the project with hooks off (`transfer.fsckObjects`). Old tasks (no `ws` field) are still
-  worktrees. Workers still run as the SAME Unix user as the owner, so a worker with shell access can read the owner's credentials: the env
-  allowlist only limits what is handed over. Separate Unix users per worker are the next step (sudoers rule for one wrapper script).
+  worktrees. Every worker run is also wrapped in a bubblewrap SANDBOX (`sandbox_argv`): read-only system, EMPTY tmpfs home, only the worker's own
+  login folder, the CLI tool dirs and the task workspace mounted (workspace read-only in plan mode), no other processes, network open. So a worker
+  can't read the owner's credentials/SSH keys/other projects even though it runs as the same Unix user (no sudo needed). Setting `sandbox` in
+  cluster.json (app: Cluster settings): auto (default; unsandboxed with `sandbox:"unavailable"` in list_workers if bwrap doesn't work), on (refuse to run
+  without it), off. Codex's own sandbox can't nest inside ours (needs namespaces), so inside ours it runs with `danger-full-access` and plan mode is a
+  read-only mount. Ubuntu 24.04+ may need `kernel.apparmor_restrict_unprivileged_userns=0` for bwrap. Tests run with `CLAUDERC_SANDBOX=off`
+  (stub paths live in the hidden home) plus dedicated sandbox checks that skip when bwrap is unusable.

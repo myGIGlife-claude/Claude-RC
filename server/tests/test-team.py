@@ -33,7 +33,7 @@ claude_stub = tmp / "claude-stub"
 stub_text = (HERE / "stubs" / "claude").read_text()
 stub_text = stub_text.replace("svc=${CLAUDERC_TEST_SECRET:-unset} args=", "svc=${CLAUDERC_TEST_SECRET:-unset} ssh=${SSH_AUTH_SOCK:-unset} gh=${GH_TOKEN:-unset} ghub=${GITHUB_TOKEN:-unset} settings=${SETTINGS_ONLY_SECRET:-unset} args=")
 claude_stub.write_text(stub_text); claude_stub.chmod(0o755)
-env = {**os.environ, "HOME": str(test_home), "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t", "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(claude_stub), "CLAUDERC_CODEX": str(HERE / "stubs" / "codex"), "CLAUDERC_GEMINI": str(HERE / "stubs" / "gemini"),
+env = {**os.environ, "HOME": str(test_home), "CLAUDERC_SANDBOX": "off", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t", "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(claude_stub), "CLAUDERC_CODEX": str(HERE / "stubs" / "codex"), "CLAUDERC_GEMINI": str(HERE / "stubs" / "gemini"),
        "ANTHROPIC_API_KEY": "secret-should-not-leak", "CLAUDE_CODE_OAUTH_TOKEN": "main-token", "CLAUDECODE": "1", "CLAUDERC_TEST_STUB_STATE": str(tmp / "stub"), "STUB_STATE": str(tmp / "stub"),
        "SSH_AUTH_SOCK": "/tmp/fake-agent.sock", "GH_TOKEN": "fake-gh-token", "GITHUB_TOKEN": "fake-github-token",
        "CLAUDERC_TEST_SECRET": "service-token", "CLAUDERC_WORKER_SLOTS": "3", "CLAUDERC_USAGE_TTL": "0", "CLAUDERC_START_GAP": "0",
@@ -652,4 +652,46 @@ assert not err, tid
 tool("wait", task_id=tid, timeout_s=30); tool("discard", task_id=tid); tool("discard", task_id=dead)
 proc.stdin.close()
 proc.wait(timeout=5)
+# ---- the worker sandbox (bubblewrap): what the argv grants, and (when bwrap works here) what a run can really see ----
+sbx_home = tmp / "sbxhome"; (sbx_home / ".config" / "claude-launcher").mkdir(parents=True); (sbx_home / ".ssh").mkdir()
+(sbx_home / ".config" / "claude-launcher" / "env").write_text("export SECRET_TOKEN='owner-secret'\n")
+(sbx_home / ".ssh" / "id_ed25519").write_text("PRIVATE KEY\n")
+(sbx_home / ".local" / "bin").mkdir(parents=True)
+sbx_w = tmp / "sbxworkers" / "w1"; (sbx_w / "home").mkdir(parents=True); (sbx_w / "tasks").mkdir()
+sbx_ws = tmp / "sbxws"; sbx_ws.mkdir(); (sbx_ws / "f.txt").write_text("keep\n")
+sbx_env = {"PATH": f"{sbx_home}/.local/bin:/usr/bin:/bin", "HOME": str(sbx_home), "LANG": "C.UTF-8", "CODEX_HOME": str(sbx_w / "home")}
+sbx_t = {"id": "feedbeef", "cwd": str(sbx_ws), "wt": str(sbx_ws), "worker": "w1"}
+argv = ns["sandbox_argv"](sbx_t, "codex", sbx_w, sbx_env, read_only=False)
+argv[0] = argv[0] or "bwrap"   # (no bubblewrap on this machine, e.g. CI: only the argument list is checked)
+j = " ".join(argv)
+assert "--unshare-pid" in argv and "--cap-drop" in argv and "--clearenv" in argv, argv
+assert argv[argv.index("--tmpfs", argv.index("/tmp") + 1) + 1] == str(sbx_home), "the home folder is an empty tmpfs"
+assert f"--bind {sbx_ws} {sbx_ws}" in j and f"--bind {sbx_w / 'home'} {sbx_w / 'home'}" in j, "workspace and the worker's own login folder are writable"
+assert f"--bind {sbx_w / 'tasks' / 'feedbeef.last'}" in j, "codex's answer file is bound"
+assert str(sbx_home / ".config") not in j and str(sbx_home / ".ssh") not in j, "none of the owner's files are mounted"
+assert "--setenv HOME " + str(sbx_home) in j and "--setenv CODEX_HOME " in j and argv[-3:] == ["--chdir", str(sbx_ws), "--"], argv[-4:]
+argv_ro = ns["sandbox_argv"](sbx_t, "claude", sbx_w, sbx_env, read_only=True)
+argv_ro[0] = argv_ro[0] or "bwrap"
+assert f"--ro-bind {sbx_ws} {sbx_ws}" in " ".join(argv_ro), "plan mode: the workspace is read-only"
+if ns["bwrap_ok"]():
+    def inside(cmd, a=argv):
+        return subprocess.run(a + ["sh", "-c", cmd], capture_output=True, text=True, timeout=30)
+    r = inside(f"cat {sbx_home}/.config/claude-launcher/env; cat {sbx_home}/.ssh/id_ed25519; ls {sbx_home}/.config/claude-launcher")
+    assert "owner-secret" not in r.stdout + r.stderr and "PRIVATE KEY" not in r.stdout + r.stderr, "a sandboxed run can't read the owner's secrets"
+    assert inside(f"echo new > {sbx_ws}/g.txt && cat {sbx_ws}/g.txt").stdout.strip() == "new" and (sbx_ws / "g.txt").read_text() == "new\n", "it can write in its workspace"
+    assert inside("ps -e | wc -l").stdout.strip().isdigit() and int(inside("ps -e | wc -l").stdout) < 10, "it can't see the server's other processes"
+    assert inside(f"echo x > {sbx_ws}/h.txt", argv_ro).returncode != 0 and not (sbx_ws / "h.txt").exists(), "plan mode can't write"
+    assert inside(f"echo x > {sbx_home}/dropped", argv).returncode == 0 and not (sbx_home / "dropped").exists(), "writes to the home folder vanish"
+else:
+    print("test-team: bubblewrap unusable here, the sandbox run checks were skipped")
+# modes: the cluster setting, the env override, and 'on' refuses to run without bubblewrap
+os.environ.pop("CLAUDERC_SANDBOX", None); os.environ["XDG_CONFIG_HOME"] = str(tmp / "cfg2"); (tmp / "cfg2" / "claude-launcher").mkdir(parents=True)
+ns2 = runpy.run_path(str(HERE.parent / "clauderc-team"), run_name="not_main")
+assert ns2["sandbox_mode"]() == "auto", "default is auto"
+(tmp / "cfg2" / "claude-launcher" / "cluster.json").write_text('{"sandbox":"on"}'); assert ns2["sandbox_mode"]() == "on"
+(tmp / "cfg2" / "claude-launcher" / "cluster.json").write_text('{"sandbox":"bogus"}'); assert ns2["sandbox_mode"]() == "auto"
+os.environ["CLAUDERC_SANDBOX"] = "off"; assert ns2["sandbox_mode"]() == "off"; os.environ.pop("CLAUDERC_SANDBOX")
+os.environ["CLAUDERC_BWRAP"] = "/nonexistent/bwrap"; ns3 = runpy.run_path(str(HERE.parent / "clauderc-team"), run_name="not_main")
+assert ns3["bwrap_ok"]() is False, "no bubblewrap: not usable"
+os.environ.pop("CLAUDERC_BWRAP")
 print("test-team: ok")

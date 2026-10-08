@@ -189,7 +189,7 @@ class LauncherApi(
     suspend fun cluster(): ClusterData = call("cluster", timeoutMs = 30_000)
     suspend fun clusterConfig(): ClusterConfig = call("cluster-config")
     suspend fun clusterConfigSet(key: String, value: String): ClusterConfig {
-        require(key in listOf("max_parallel", "handback", "handback_pct") && value.all { it.isLetterOrDigit() })
+        require(key in listOf("max_parallel", "handback", "handback_pct", "sandbox") && value.all { it.isLetterOrDigit() })
         return call("cluster-config-set $key $value")
     }
 

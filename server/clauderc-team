@@ -20,6 +20,8 @@ CLAUDE = os.environ.get("CLAUDERC_CLAUDE", "claude")
 # Other CLIs a worker can be (meta.json "kind"): ChatGPT's Codex and Gemini, each signed in under its own home folder.
 CLIS = {"codex": os.environ.get("CLAUDERC_CODEX", "codex"), "gemini": os.environ.get("CLAUDERC_GEMINI", "gemini")}
 CODEX_SANDBOX = {"acceptEdits": "workspace-write", "plan": "read-only", "bypassPermissions": "danger-full-access"}
+BWRAP = os.environ.get("CLAUDERC_BWRAP") or shutil.which("bwrap")
+TOOL_DIRS = (".local/bin", ".local/lib", ".local/share/claude", ".nvm", ".npm-global", ".bun", ".cargo/bin", ".volta")   # ro: the CLIs and their runtimes, no secrets
 GEMINI_APPROVAL = {"acceptEdits": "auto_edit", "plan": "plan", "bypassPermissions": "yolo"}
 SLOTS = max(1, int(os.environ.get("CLAUDERC_WORKER_SLOTS") or 10))   # hard cap of runs of one worker at once (they share its login like several chats share one); the owner's per-chat limit is lower
 USAGE_URL = os.environ.get("CLAUDERC_USAGE_URL") or "https://api.anthropic.com/api/oauth/usage"
@@ -173,7 +175,7 @@ def signed_in(name):
 
 def cluster_cfg():
     """The owner's cluster settings (app: Claude tab › cLaudeCluster), read live: parallel tasks per chat and when to hand back to main."""
-    c = {"max_parallel": 3, "handback": True, "handback_pct": 95}
+    c = {"max_parallel": 3, "handback": True, "handback_pct": 95, "sandbox": "auto"}
     try:
         j = json.loads((CFG / "cluster.json").read_text())
         for k, lo, hi in (("max_parallel", 1, 10), ("handback_pct", 50, 100)):
@@ -181,6 +183,8 @@ def cluster_cfg():
                 c[k] = min(max(int(j[k]), lo), hi)
         if isinstance(j.get("handback"), bool):
             c["handback"] = j["handback"]
+        if j.get("sandbox") in ("auto", "on", "off"):
+            c["sandbox"] = j["sandbox"]
     except (OSError, ValueError, AttributeError):
         pass
     return c
@@ -299,7 +303,8 @@ def list_workers():
         name = meta.parent.name
         if name in att:
             role, mode = settings(name, att)
-            w = {"name": name, "role": role, "mode": mode, "signed_in": signed_in(name)}
+            w = {"name": name, "role": role, "mode": mode, "signed_in": signed_in(name),
+                 "sandbox": "off" if sandbox_mode() == "off" else ("on" if bwrap_ok() else "unavailable")}
             if kind(name) != "claude":
                 w["kind"] = kind(name)
             u = usage(name)
@@ -573,6 +578,68 @@ def allowed_tools(t):
     return ok[:20]
 
 
+def sandbox_mode():
+    """auto (default): sandbox every worker run when bubblewrap works here, otherwise run as before; on: refuse to run without it; off."""
+    m = os.environ.get("CLAUDERC_SANDBOX") or cluster_cfg()["sandbox"]
+    return m if m in ("auto", "on", "off") else "auto"
+
+
+_bwrap_ok = None
+
+
+def bwrap_ok():
+    global _bwrap_ok
+    if _bwrap_ok is None:
+        try:
+            _bwrap_ok = bool(BWRAP) and subprocess.run(
+                [BWRAP, "--unshare-pid", "--cap-drop", "ALL", "--ro-bind", "/usr", "/usr", "--symlink", "usr/bin", "/bin", "--symlink", "usr/lib", "/lib",
+                 "--symlink", "usr/lib64", "/lib64", "--proc", "/proc", "--dev", "/dev", "/usr/bin/true"], capture_output=True, timeout=20).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            _bwrap_ok = False
+    return _bwrap_ok
+
+
+def sandbox_argv(t, k, w, env, read_only):
+    """bubblewrap command prefix for a worker run: the worker sees the system read-only, a temporary EMPTY home (plus its own login
+    folder, the CLI tools and the task's workspace), no other processes and none of the owner's files: no credentials, SSH keys,
+    tokens, other projects or the project's .git. The network stays open (the CLIs need it). The workspace is read-only in plan mode."""
+    home = env.get("HOME") or str(Path.home())
+    a = [BWRAP, "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--cap-drop", "ALL"]
+    for d in ("/bin", "/sbin", "/lib", "/lib32", "/lib64"):
+        if os.path.islink(d):
+            a += ["--symlink", os.readlink(d), d]
+        elif os.path.isdir(d):
+            a += ["--ro-bind", d, d]
+    for d in ("/usr", "/etc", "/opt", "/run/systemd/resolve"):
+        if os.path.isdir(d):
+            a += ["--ro-bind", d, d]
+    a += ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", home]
+    bound = []
+
+    def ro(p):
+        if p and os.path.exists(p) and not any(p == b or p.startswith(b + "/") for b in bound):
+            a.extend(["--ro-bind", p, p])
+            bound.append(p)
+    for sub in TOOL_DIRS:
+        ro(os.path.join(home, sub))
+    prog = CLIS.get(k) if k in CLIS else CLAUDE
+    for p in [d for d in env.get("PATH", "").split(":") if d.startswith(home + "/")] + [os.path.dirname(os.path.realpath(shutil.which(prog) or prog))]:
+        if p.startswith(home + "/"):
+            ro(p)
+    wh = str(w / "home")
+    a += ["--bind", wh, wh]
+    ws = t.get("wt") or t["cwd"]
+    a += ["--ro-bind" if read_only else "--bind", ws, ws]
+    last = w / "tasks" / f"{t['id']}.last"   # codex writes its final answer here
+    if k == "codex":
+        last.touch()
+        a += ["--bind", str(last), str(last)]
+    a += ["--clearenv"]
+    for n, v in env.items():
+        a += ["--setenv", n, v]
+    return a + ["--chdir", t["cwd"], "--"]
+
+
 def launch(t):
     """Start the worker detached: it queues behind other runs of the same worker (they share one login), is capped by
     `timeout`, and writes to tasks/<id>.out, so it outlives this process."""
@@ -591,19 +658,21 @@ def launch(t):
     # file says the run really started, so wait can tell "Queued" from "Still running".
     k = kind(t["worker"])
     model = meta.get("model") if isinstance(meta.get("model"), str) and meta.get("model") else None
+    use_sb = sandbox_mode() != "off" and bwrap_ok()
+    t["sandbox"] = "on" if use_sb else "off"
     if k == "codex":
         # prompt on stdin ("-"); the answer is the last message, the session id comes from the JSON events
         base = [CLIS[k], "exec"] + (["resume", t["resume"]] if t.get("resume") else [])
+        # Inside our sandbox codex's own sandbox can't start (it needs namespaces too): our sandbox is the boundary then
+        # (plan mode = the workspace is mounted read-only).
+        sbx = "danger-full-access" if use_sb else CODEX_SANDBOX[mode]
         run = base + ["--json", "--skip-git-repo-check", "-o", str(d / f"{tid}.last")] + (["-m", model] if model else []) \
-            + ["-c", f'sandbox_mode="{CODEX_SANDBOX[mode]}"', "-"]   # -c, not -s: `exec resume` has no -s and would fall back to read-only
+            + ["-c", f'sandbox_mode="{sbx}"', "-"]   # -c, not -s: `exec resume` has no -s and would fall back to read-only
     elif k == "gemini":
         # no session ids to resume by, so a follow-up starts fresh (the prompt carries what it needs)
         run = [CLIS[k], "-p", "", "-o", "json", "--skip-trust", "--approval-mode", GEMINI_APPROVAL[mode]] + (["-m", model] if model else [])
     else:
         run = [CLAUDE, "-p", "--output-format", "json", "--permission-mode", mode] + pick + (["--allowed-tools", ",".join(tools)] if tools else []) + (["--resume", t["resume"]] if t.get("resume") else [])
-    cmd = ["sh", "-c", SLOT_SH, "slot", str(w / "run.lock"), str(SLOTS), str(d / f"{tid}.started"),
-           str(w / "home" / ".credentials.json"), str(RUN_TIMEOUT + 300), TOKEN_LEFT_PY, str(START_GAP),
-           "timeout", "--kill-after=10", str(RUN_TIMEOUT)] + run
     # The worker must run as its own account: drop the main session's credentials, Claude Code markers and the service tokens.
     env = {n: os.environ[n] for n in ("PATH", "HOME", "LANG", "LC_ALL", "TERM", "USER", "LOGNAME", "SHELL", "TMPDIR", "TZ") if n in os.environ}
     if "CLAUDERC_TEST_STUB_STATE" in os.environ:
@@ -611,6 +680,11 @@ def launch(t):
     env[{"codex": "CODEX_HOME", "gemini": "GEMINI_CLI_HOME"}.get(k, "CLAUDE_CONFIG_DIR")] = str(w / "home")
     if k == "gemini":
         env["GEMINI_API_KEY"] = (w / "home" / "gemini-api-key").read_text().strip()
+    if use_sb:
+        run = sandbox_argv(t, k, w, env, read_only=(mode == "plan")) + run
+    cmd = ["sh", "-c", SLOT_SH, "slot", str(w / "run.lock"), str(SLOTS), str(d / f"{tid}.started"),
+           str(w / "home" / ".credentials.json"), str(RUN_TIMEOUT + 300), TOKEN_LEFT_PY, str(START_GAP),
+           "timeout", "--kill-after=10", str(RUN_TIMEOUT)] + run
     with open(d / f"{tid}.in") as fin, open(d / f"{tid}.out", "wb") as fo, open(d / f"{tid}.err", "wb") as fe:
         proc = subprocess.Popen(cmd, stdin=fin, stdout=fo, stderr=fe, cwd=t["cwd"], env=env, start_new_session=True)
     t["pid"] = proc.pid
@@ -727,6 +801,9 @@ def start(worker, prompt, resume=None, parent=None, repo=None, stack=None, note=
     if resume is not None and (not isinstance(resume, str) or not SESSION_RE.fullmatch(resume)):
         resume = None
     c = cluster_cfg()
+    if sandbox_mode() == "on" and not bwrap_ok():
+        raise ToolError("The owner requires workers to run sandboxed, but bubblewrap isn't usable on this server (install it: sudo apt install bubblewrap; "
+                        "on Ubuntu 24.04+ unprivileged user namespaces must be allowed). Do this task yourself, or ask the owner to set the sandbox to auto.")
     u = usage(worker)
     if near_limit(worker, c, u):
         raise ToolError(f"{worker} has used {peak(u):.0f}% of its usage limit ({usage_text(u)}; the owner's hand-back point is {c['handback_pct']}%). "
