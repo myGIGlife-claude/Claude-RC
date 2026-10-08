@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.padding
@@ -47,7 +48,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -73,7 +73,7 @@ private const val GITHUB_TOKEN_URL =
 
 @Composable
 fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
-    val busy by vm.busy.collectAsState()
+    val busy by vm.busy.collectAsStateWithLifecycle()
     AlertDialog(
         onDismissRequest = { if (busy == null) vm.showLogin(null) },
         title = {
@@ -89,7 +89,7 @@ fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
             )
         },
         text = {
-            val error by vm.loginError.collectAsState()
+            val error by vm.loginError.collectAsStateWithLifecycle()
             Column(
                 Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -120,7 +120,7 @@ fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddServiceDialog(vm: MainViewModel) {
-    val status by vm.status.collectAsState()
+    val status by vm.status.collectAsStateWithLifecycle()
     val st = status
     val sv = st?.services.orEmpty()
     // name, hint, what a tap does
@@ -197,8 +197,8 @@ fun AddServiceDialog(vm: MainViewModel) {
 @Composable
 fun KeystoresDialog(vm: MainViewModel) {
     val context = LocalContext.current
-    val status by vm.status.collectAsState()
-    val busy by vm.busy.collectAsState()
+    val status by vm.status.collectAsStateWithLifecycle()
+    val busy by vm.busy.collectAsStateWithLifecycle()
     var name by remember { mutableStateOf("") }
     var alias by remember { mutableStateOf("") }
     var storePw by remember { mutableStateOf("") }
@@ -291,8 +291,8 @@ fun KeystoresDialog(vm: MainViewModel) {
 @Composable
 fun AppleDialog(vm: MainViewModel) {
     val context = LocalContext.current
-    val status by vm.status.collectAsState()
-    val busy by vm.busy.collectAsState()
+    val status by vm.status.collectAsStateWithLifecycle()
+    val busy by vm.busy.collectAsStateWithLifecycle()
     var keyId by remember { mutableStateOf("") }
     var issuer by remember { mutableStateOf("") }
     var team by remember { mutableStateOf("") }
@@ -379,8 +379,8 @@ fun AppleDialog(vm: MainViewModel) {
 /** Custom API keys: add a NAME=value every session sees, or remove one. Values are never shown. */
 @Composable
 fun CustomKeysDialog(vm: MainViewModel) {
-    val status by vm.status.collectAsState()
-    val busy by vm.busy.collectAsState()
+    val status by vm.status.collectAsStateWithLifecycle()
+    val busy by vm.busy.collectAsStateWithLifecycle()
     var name by remember { mutableStateOf("") }
     var value by remember { mutableStateOf("") }
     var confirmRemove by remember { mutableStateOf<String?>(null) }
@@ -471,8 +471,8 @@ fun CustomKeysDialog(vm: MainViewModel) {
 @Composable
 fun TokenServiceDialog(vm: MainViewModel, def: ServiceDef) {
     val context = LocalContext.current
-    val busy by vm.busy.collectAsState()
-    val error by vm.tokenError.collectAsState()
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val error by vm.tokenError.collectAsStateWithLifecycle()
     val values = remember(def.id) { mutableStateListOf(*Array(def.fields.size) { "" }) }
     var needs by remember { mutableStateOf(false) }
     // JSON keys can be picked as a file instead of pasted (the field that's multiline).
@@ -534,7 +534,7 @@ fun TokenServiceDialog(vm: MainViewModel, def: ServiceDef) {
 /** Getting a service's CLI onto the server. */
 @Composable
 fun SetupDialog(vm: MainViewModel, kind: LoginKind) {
-    val busy by vm.busy.collectAsState()
+    val busy by vm.busy.collectAsStateWithLifecycle()
     var sudoPw by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = { if (busy == null) vm.showSetup(null) },
@@ -579,7 +579,7 @@ fun SetupDialog(vm: MainViewModel, kind: LoginKind) {
 @Composable
 private fun ClaudeLogin(vm: MainViewModel, busy: Boolean) {
     val context = LocalContext.current
-    val url by vm.loginUrl.collectAsState()
+    val url by vm.loginUrl.collectAsStateWithLifecycle()
     var code by remember { mutableStateOf("") }
     val u = url
     if (u == null) {
@@ -730,7 +730,7 @@ private fun PlainField(value: String, label: String, onChange: (String) -> Unit)
 @Composable
 private fun YoutubeLogin(vm: MainViewModel, busy: Boolean) {
     val context = LocalContext.current
-    val url by vm.loginUrl.collectAsState()
+    val url by vm.loginUrl.collectAsStateWithLifecycle()
     var id by remember { mutableStateOf("") }
     var secret by remember { mutableStateOf("") }
     val u = url
@@ -803,8 +803,8 @@ private fun DockerLogin(vm: MainViewModel, busy: Boolean) {
 @Composable
 private fun AwsLogin(vm: MainViewModel, busy: Boolean) {
     val context = LocalContext.current
-    val status by vm.status.collectAsState()
-    val url by vm.loginUrl.collectAsState()
+    val status by vm.status.collectAsStateWithLifecycle()
+    val url by vm.loginUrl.collectAsStateWithLifecycle()
     var sso by remember { mutableStateOf(status?.aws?.ssoConfigured == true) }
     var keyId by remember { mutableStateOf("") }
     var secret by remember { mutableStateOf("") }

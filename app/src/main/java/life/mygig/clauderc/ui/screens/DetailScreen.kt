@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
@@ -24,7 +25,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,11 +70,11 @@ private class Page(
 /** A Connections tile, opened: status, public info, the variable names sessions get, and actions. */
 @Composable
 fun DetailScreen(vm: MainViewModel, d: Detail) {
-    val status by vm.status.collectAsState()
-    val mcp by vm.mcp.collectAsState()
-    val busy by vm.busy.collectAsState()
-    val mcpAuth by vm.mcpAuth.collectAsState()
-    val plugins by vm.plugins.collectAsState()
+    val status by vm.status.collectAsStateWithLifecycle()
+    val mcp by vm.mcp.collectAsStateWithLifecycle()
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val mcpAuth by vm.mcpAuth.collectAsStateWithLifecycle()
+    val plugins by vm.plugins.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var confirm by remember { mutableStateOf(false) }
     BackHandler { vm.openDetail(null) }

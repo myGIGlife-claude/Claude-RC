@@ -106,6 +106,14 @@ class SessionWatcher(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setContentTitle(title)
                 .setContentText(text)
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .setPublicVersion(
+                    NotificationCompat.Builder(ctx, channel)
+                        .setSmallIcon(R.drawable.ic_stat_clauderc)
+                        .setContentTitle("cLaudeRC")
+                        .setContentText(if (channel == FINISHED) "A session finished" else "A session needs you")
+                        .build(),
+                )
                 .setContentIntent(open)
                 .setAutoCancel(true)
                 .build()

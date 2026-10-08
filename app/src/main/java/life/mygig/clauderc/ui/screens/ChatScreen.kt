@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -58,7 +59,6 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.DisposableEffect
@@ -89,11 +89,11 @@ import life.mygig.clauderc.ui.theme.WarnAmber
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ChatScreen(vm: MainViewModel, session: String) {
-    val pinNeeded by vm.chatPinNeeded.collectAsState()
-    val chat by vm.chat.collectAsState()
-    val error by vm.chatError.collectAsState()
-    val busy by vm.busy.collectAsState()
-    val pending by vm.chatPending.collectAsState()
+    val pinNeeded by vm.chatPinNeeded.collectAsStateWithLifecycle()
+    val chat by vm.chat.collectAsStateWithLifecycle()
+    val error by vm.chatError.collectAsStateWithLifecycle()
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val pending by vm.chatPending.collectAsStateWithLifecycle()
     val context = LocalContext.current
     // The speaker switch stays as the owner left it: across chats and app restarts, until tapped again.
     val voicePrefs = remember { context.getSharedPreferences("chat_voice", Context.MODE_PRIVATE) }
@@ -164,7 +164,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                             }
                         }
                     }
-                    val st by vm.status.collectAsState()
+                    val st by vm.status.collectAsStateWithLifecycle()
                     var showCluster by remember { mutableStateOf(false) }
                     if ((st?.scriptApi ?: 0) >= life.mygig.clauderc.api.Updates.MIN_SCRIPT_API && pinNeeded == null) {
                         TextButton(onClick = { showCluster = true; vm.loadChatWorkers(); vm.loadChatHosts() }) { Text("👥", fontSize = 20.sp) }
@@ -173,7 +173,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                     TextButton(onClick = { speak = !speak }) { Text(if (speak) "🔊" else "🔈", fontSize = 20.sp) }
                     Icon(Icons.Filled.Lock, contentDescription = "PIN-protected", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                val notice by vm.chatNotice.collectAsState()
+                val notice by vm.chatNotice.collectAsStateWithLifecycle()
                 notice?.let { n ->
                     Surface(color = MaterialTheme.colorScheme.inverseSurface, modifier = Modifier.fillMaxWidth().clickable { vm.clearChatNotice() }) {
                         Text(n, color = MaterialTheme.colorScheme.inverseOnSurface, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
@@ -183,7 +183,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                 if (need != null) {
                     PinGate(vm, need, error)
                 } else {
-                    androidx.compose.runtime.key(vm.chatSession.collectAsState().value) { Messages(vm, voice, chat?.messages.orEmpty(), pending, Modifier.weight(1f)) }
+                    androidx.compose.runtime.key(vm.chatSession.collectAsStateWithLifecycle().value) { Messages(vm, voice, chat?.messages.orEmpty(), pending, Modifier.weight(1f)) }
                     chat?.takeIf { it.waiting }?.let { c -> c.ask?.takeIf { it.isNotEmpty() }?.let { AskCard(vm, it, busy == null) } ?: PromptCard(vm, c.screen.orEmpty(), busy == null) }
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp)) }
                     Composer(vm, working = chat?.busy == true, enabled = busy == null && chat != null)
@@ -353,7 +353,7 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
         }
     }
     // Typing "/" suggests commands: the best match shows as faded text in the box, all matches as chips above it.
-    val extra by vm.chatCommands.collectAsState()
+    val extra by vm.chatCommands.collectAsStateWithLifecycle()
     val matches = if (text.startsWith("/") && !text.contains(' ')) {
         (SLASH_COMMANDS + extra.map { it.name to it.hint }).distinctBy { it.first }.filter { it.first.startsWith(text.lowercase()) }
     } else emptyList()

@@ -65,8 +65,10 @@ fun openInClaude(context: Context) {
 }
 
 fun openUrl(context: Context, url: String) {
+    val uri = Uri.parse(url)
+    if (!uri.scheme.equals("https", ignoreCase = true) || uri.host.isNullOrEmpty()) return
     try {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     } catch (_: ActivityNotFoundException) {
     }
 }
