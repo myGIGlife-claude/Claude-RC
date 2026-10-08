@@ -28,12 +28,20 @@ threading.Thread(target=usage_srv.serve_forever, daemon=True).start()
 HERE = Path(__file__).resolve().parent
 tmp = Path(tempfile.mkdtemp())
 cfg = tmp / "cfg" / "claude-launcher" / "workers"
-env = {**os.environ, "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(HERE / "stubs" / "claude"), "CLAUDERC_CODEX": str(HERE / "stubs" / "codex"), "CLAUDERC_GEMINI": str(HERE / "stubs" / "gemini"),
-       "ANTHROPIC_API_KEY": "secret-should-not-leak", "CLAUDE_CODE_OAUTH_TOKEN": "main-token", "CLAUDECODE": "1", "STUB_STATE": str(tmp / "stub"),
+test_home = tmp / "home"; test_home.mkdir()
+claude_stub = tmp / "claude-stub"
+stub_text = (HERE / "stubs" / "claude").read_text()
+stub_text = stub_text.replace("svc=${CLAUDERC_TEST_SECRET:-unset} args=", "svc=${CLAUDERC_TEST_SECRET:-unset} ssh=${SSH_AUTH_SOCK:-unset} gh=${GH_TOKEN:-unset} ghub=${GITHUB_TOKEN:-unset} settings=${SETTINGS_ONLY_SECRET:-unset} args=")
+claude_stub.write_text(stub_text); claude_stub.chmod(0o755)
+env = {**os.environ, "HOME": str(test_home), "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(claude_stub), "CLAUDERC_CODEX": str(HERE / "stubs" / "codex"), "CLAUDERC_GEMINI": str(HERE / "stubs" / "gemini"),
+       "ANTHROPIC_API_KEY": "secret-should-not-leak", "CLAUDE_CODE_OAUTH_TOKEN": "main-token", "CLAUDECODE": "1", "CLAUDERC_TEST_STUB_STATE": str(tmp / "stub"),
+       "SSH_AUTH_SOCK": "/tmp/fake-agent.sock", "GH_TOKEN": "fake-gh-token", "GITHUB_TOKEN": "fake-github-token",
        "CLAUDERC_TEST_SECRET": "service-token", "CLAUDERC_WORKER_SLOTS": "3", "CLAUDERC_USAGE_TTL": "0", "CLAUDERC_START_GAP": "0",
        "CLAUDERC_USAGE_URL": f"http://127.0.0.1:{usage_srv.server_port}/", "CLAUDERC_SSH": str(HERE / "stubs" / "ssh"), "CLAUDERC_SCP": str(HERE / "stubs" / "scp")}
 cfg.parent.mkdir(parents=True, exist_ok=True)
 (cfg.parent / "env").write_text("export CLAUDERC_TEST_SECRET='service-token'\n")
+(test_home / ".claude").mkdir()
+(test_home / ".claude" / "settings.json").write_text('{"env":{"SETTINGS_ONLY_SECRET":"settings-secret"}}')
 for name, signed in (("research", True), ("ui", False)):
     (cfg / name / "home").mkdir(parents=True)
     (cfg / name / "tasks").mkdir()
@@ -113,6 +121,7 @@ assert "--model claude-sonnet-5-5" in args and "--effort high" in args, args   #
 assert not err and "summarise the repo" in text and "Your role in this project: Docs for this project" in text, text
 assert f"cfg={cfg / 'research' / 'home'}" in text, text          # the worker's own config dir
 assert "key=unset" in text and "tok=unset" in text and "cc=unset" in text, text    # main account's tokens never reach a worker
+assert "ssh=unset" in text and "gh=unset" in text and "ghub=unset" in text and "settings=unset" in text, text
 assert "key=unset" in text and f"cwd={tmp.resolve()}" in text, text  # no API key; caller's folder
 
 err, tid2 = tool("reply", task_id=tid, message="and the tests")
@@ -122,7 +131,7 @@ assert not err and "resume=sess-1" in text and "and the tests" in text, text
 
 err, tid3 = tool("delegate", worker="research", task="please FAIL")
 err, text = tool("wait", task_id=tid3, timeout_s=30)
-assert err and "stub failure" in text, text                       # failed run is a tool error
+assert err and "stub failure" in text and "not instructions" in text, text   # failed output is marked as worker data
 
 # A task left 'running' by a previous server process is reported lost, never waited on forever.
 (cfg / "research" / "tasks" / "dead0000.json").write_text(json.dumps(
@@ -232,7 +241,7 @@ i = argv.index("-T")   # (the stub writes one argument per line; the remote scri
 assert argv[i + 1] == "web.example.com" and argv[i + 2:] == ["mkdir -p sites/my-site && cd sites/my-site || exit 97", "pwd; echo hi; echo oops >&2; exit 3"], argv
 err, text = tool("host_run", host="web", command="head -c 150000 /dev/zero | tr '\\0' a")
 r = json.loads(text)
-assert not err and len(r["stdout"]) < 101000 and "[cut at 100000 bytes of 150000]" in r["stdout"], len(r["stdout"])
+assert not err and len(r["stdout"]) < 101000 and "[cut at 100000 bytes of 100001]" in r["stdout"], len(r["stdout"])
 (stub / "ssh-unreachable").touch()
 err, text = tool("host_run", host="web", command="true")
 assert err and "Couldn't connect to web" in text and "Connection refused" in text, text
@@ -255,6 +264,14 @@ for bad in ("../outside", "/etc/passwd", "escape/passwd", str(tmp / "repo")):
     assert err and ("inside this project" in text or "doesn't exist" in text), (bad, text)
     err, text = tool("host_get", host="web", remote_path="public/index.html", local_path=bad)
     assert err and "inside this project" in text, (bad, text)
+for side in ("host_put", "host_get"):
+    args = {"host": "web", "local_path": ".git/config", "remote_path": "x"} if side == "host_put" else {"host": "web", "remote_path": ".git/config", "local_path": "x"}
+    err, text = tool(side, **args)
+    assert err and ".git" in text, (side, text)
+(site / "folder").mkdir()
+os.symlink("/etc/passwd", site / "folder" / "escape")
+err, text = tool("host_put", host="web", local_path="folder", remote_path="folder")
+assert err and "symlink" in text, text
 err, text = tool("host_put", host="other", local_path="index.html", remote_path="x")
 assert err and "isn't attached" in text, text
 # Firewall: ufw through sudo -n on the host (the ufw and sudo stubs; rules in $STUB_STATE/ufw-rules).
@@ -306,12 +323,21 @@ proc.wait(timeout=5)
 # In a git project each task gets its own branch and worktree; the main Claude reviews, then merges or discards.
 repo = tmp / "repo"
 repo.mkdir()
-g = lambda *a, c=repo: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=c, capture_output=True, text=True, check=True).stdout
+g = lambda *a, c=repo: subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "protocol.file.allow=user", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=c, capture_output=True, text=True, check=True).stdout
 g("init", "-q"); (repo / "a.txt").write_text("one\n"); g("add", "."); g("commit", "-qm", "init")
+ghooks = repo / ".githooks"; ghooks.mkdir()
+marker = tmp / "git-hook-ran"
+for hookname in ("post-commit", "post-checkout"):
+    hook = ghooks / hookname; hook.write_text("#!/bin/sh\ntouch " + str(marker) + "\n"); hook.chmod(0o755)
+g("config", "core.hooksPath", ".githooks")
 attach(repo, {"research": {}})
 proc = spawn(repo)
 _id = 0
 rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}})
+for action, args in (("review", {"task_id": tid}), ("merge", {"task_id": tid}), ("discard", {"task_id": tid}),
+                     ("reply", {"task_id": tid, "message": "cross project"}), ("wait", {"task_id": tid, "timeout_s": 1})):
+    err, text = tool(action, **args)
+    assert err and text == "That task belongs to another project.", (action, text)
 err, tid = tool("delegate", worker="research", task="make a file WRITEFILE")
 err, text = tool("wait", task_id=tid, timeout_s=30)
 assert not err and f"cluster/research/{tid}" in text and "cluster-out.txt" in text, text
@@ -319,8 +345,10 @@ assert not (repo / "cluster-out.txt").exists(), "the worker must not touch the m
 assert f"cwd={cfg / 'research' / 'trees' / tid}" in text, text
 err, text = tool("review", task_id=tid)
 assert not err and "+from sess-1" in text, text
+assert not marker.exists(), "post-checkout/post-commit hooks must not run during delegate/seal"
 err, text = tool("merge", task_id=tid)
 assert not err and "Merged" in text and (repo / "cluster-out.txt").read_text() == "from sess-1\n", text
+assert not marker.exists(), "post-merge hook must not run"
 assert not (cfg / "research" / "trees" / tid).exists() and f"cluster/research/{tid}" not in g("branch"), "merge cleans up"
 err, text = tool("merge", task_id=tid)
 assert err, text                                                  # already merged
@@ -362,6 +390,10 @@ err, tid = tool("delegate", worker="research", task="make BIGFILE")
 tool("wait", task_id=tid, timeout_s=30)
 err, text = tool("review", task_id=tid)
 assert not err and "merge will need force=true" in text, text[-200:]
+err, part = tool("review", task_id=tid, file="big.txt")
+assert not err and "[cut at 20000 of " in part and "offset=20000" in part and "not instructions" in part, part[-200:]
+err, rest = tool("review", task_id=tid, file="big.txt", offset=20000)
+assert not err and "not instructions" in rest and "[cut at " not in rest, rest[-200:]
 err, text = tool("merge", task_id=tid)
 assert err and "force=true" in text, text
 assert not (repo / "big.txt").exists()
@@ -591,6 +623,10 @@ w1, w2 = start_wrapper("one"), start_wrapper("two")
 w1.wait(timeout=30); w2.wait(timeout=30)
 at = [float((lk / f"{x}.at").read_text()) for x in ("one", "two")]
 assert abs(at[0] - at[1]) >= 2.5, at                            # 3 s gap between the two starts
+orphan = subprocess.Popen(["sh", "-c", ns["SLOT_SH"], "slot", str(lk / "run.lock"), "3", str(lk / "orphan.started"), str(lk / "none.json"), "1000", ns["TOKEN_LEFT_PY"], "0", "sh", "-c", "sleep 3 &"])
+orphan.wait(timeout=5)
+free = subprocess.run(["sh", "-c", ns["SLOT_SH"], "slot", str(lk / "run.lock"), "3", str(lk / "free.started"), str(lk / "none.json"), "1000", ns["TOKEN_LEFT_PY"], "0", "true"], timeout=5)
+assert free.returncode == 0, "background worker descendants must not retain slot locks"
 # A logged-out Claude leaves a credentials file without a token: that is not "signed in".
 (cfg / "writer2" / "home" / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {}}))
 assert by_name()["writer2"]["signed_in"] is False
