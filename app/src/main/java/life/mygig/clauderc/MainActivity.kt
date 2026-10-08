@@ -6,7 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.biometric.BiometricManager
-import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
+import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -86,7 +86,7 @@ class MainActivity : FragmentActivity(), AppLock {
     }
 
     private companion object {
-        const val AUTHENTICATORS = BIOMETRIC_WEAK or DEVICE_CREDENTIAL
+        const val AUTHENTICATORS = BIOMETRIC_STRONG or DEVICE_CREDENTIAL
         const val RELOCK_AFTER_MS = 30_000L
     }
 }

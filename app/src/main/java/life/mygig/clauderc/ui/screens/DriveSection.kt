@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -12,12 +13,12 @@ import life.mygig.clauderc.ui.openUrl
 
 @Composable
 fun DriveSection(vm: MainViewModel) {
-    val status by vm.driveStatus.collectAsState()
-    val login by vm.driveLogin.collectAsState()
-    val backups by vm.driveBackups.collectAsState()
-    val progress by vm.driveProgress.collectAsState()
-    val error by vm.driveError.collectAsState()
-    val restore by vm.driveRestoreCommand.collectAsState()
+    val status by vm.driveStatus.collectAsStateWithLifecycle()
+    val login by vm.driveLogin.collectAsStateWithLifecycle()
+    val backups by vm.driveBackups.collectAsStateWithLifecycle()
+    val progress by vm.driveProgress.collectAsStateWithLifecycle()
+    val error by vm.driveError.collectAsStateWithLifecycle()
+    val restore by vm.driveRestoreCommand.collectAsStateWithLifecycle()
     var phrase by remember { mutableStateOf("") }
     var deleteId by remember { mutableStateOf<String?>(null) }
     var disconnect by remember { mutableStateOf(false) }

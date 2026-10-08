@@ -8,6 +8,7 @@ import android.util.Base64
 import java.security.GeneralSecurityException
 import java.security.KeyStore
 import java.security.SecureRandom
+import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -64,29 +65,15 @@ class SshKeyManager(context: Context) {
     @Synchronized fun importSeed(seed: ByteArray) {
         require(seed.size == 32)
         val identity = Ed25519Identity(seed)
-        val enc = try { encrypt(seed, newWrappingKey(unlockedOnly = true)) }
-        catch (e: GeneralSecurityException) { encrypt(seed, newWrappingKey(unlockedOnly = false)) }
-        val saved = prefs.edit().putString(PREF_SEED, Base64.encodeToString(enc, Base64.NO_WRAP))
-            .putString(PREF_PUB, identity.authorizedKey(COMMENT)).commit()
-        check(saved) { "Couldn't save the restored key." }
+        replaceSeed(seed, identity.authorizedKey(COMMENT))
     }
 
     private fun generate(): String {
         val seed = ByteArray(32).also { SecureRandom().nextBytes(it) }
         try {
             val identity = Ed25519Identity(seed)
-            // Some phones can't use an "unlocked device only" key (e.g. unlocked by
-            // face or Smart Lock), so fall back to a plain Keystore key there.
-            val enc = try {
-                encrypt(seed, newWrappingKey(unlockedOnly = true))
-            } catch (e: GeneralSecurityException) {
-                encrypt(seed, newWrappingKey(unlockedOnly = false))
-            }
             val pub = identity.authorizedKey(COMMENT)
-            prefs.edit()
-                .putString(PREF_SEED, Base64.encodeToString(enc, Base64.NO_WRAP))
-                .putString(PREF_PUB, pub)
-                .commit()
+            replaceSeed(seed, pub)
             return pub
         } finally {
             seed.fill(0)
@@ -99,16 +86,43 @@ class SshKeyManager(context: Context) {
         return cipher.iv + cipher.doFinal(seed)
     }
 
-    private fun wrappingKey(): SecretKey =
-        KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }.getKey(KEY_ALIAS, null) as? SecretKey
+    private fun wrappingKey(): SecretKey {
+        val alias = prefs.getString(PREF_WRAP_ALIAS, null) ?: KEY_ALIAS
+        return KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }.getKey(alias, null) as? SecretKey
             ?: throw GeneralSecurityException("Keystore key missing")
+    }
 
-    /** A fresh wrapping key, replacing any old one, so a broken key is never reused. */
-    private fun newWrappingKey(unlockedOnly: Boolean): SecretKey {
+    /** Commit ciphertext against a temporary key before switching away from the current key. */
+    private fun replaceSeed(seed: ByteArray, publicKey: String) {
+        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+        val previousAlias = prefs.getString(PREF_WRAP_ALIAS, null) ?: KEY_ALIAS
+        val tempAlias = "$KEY_ALIAS-temp-${UUID.randomUUID()}"
+        try {
+            val encrypted = try {
+                encrypt(seed, newWrappingKey(tempAlias, unlockedOnly = true))
+            } catch (e: GeneralSecurityException) {
+                if (keyStore.containsAlias(tempAlias)) keyStore.deleteEntry(tempAlias)
+                encrypt(seed, newWrappingKey(tempAlias, unlockedOnly = false))
+            }
+            val saved = prefs.edit()
+                .putString(PREF_SEED, Base64.encodeToString(encrypted, Base64.NO_WRAP))
+                .putString(PREF_PUB, publicKey)
+                .putString(PREF_WRAP_ALIAS, tempAlias)
+                .commit()
+            check(saved) { "Couldn't save the phone key." }
+            if (previousAlias != tempAlias && keyStore.containsAlias(previousAlias)) keyStore.deleteEntry(previousAlias)
+        } catch (e: Exception) {
+            if (prefs.getString(PREF_WRAP_ALIAS, null) != tempAlias && keyStore.containsAlias(tempAlias)) keyStore.deleteEntry(tempAlias)
+            throw e
+        }
+    }
+
+    /** Create a fresh wrapping key under a caller-owned alias. */
+    private fun newWrappingKey(alias: String, unlockedOnly: Boolean): SecretKey {
         val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         gen.init(
             KeyGenParameterSpec.Builder(
-                KEY_ALIAS,
+                alias,
                 KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
             )
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
@@ -130,6 +144,7 @@ class SshKeyManager(context: Context) {
         const val IV_LEN = 12
         const val PREF_SEED = "seed_enc"
         const val PREF_PUB = "public_key"
+        const val PREF_WRAP_ALIAS = "wrap_alias"
         const val COMMENT = "clauderc"
     }
 }

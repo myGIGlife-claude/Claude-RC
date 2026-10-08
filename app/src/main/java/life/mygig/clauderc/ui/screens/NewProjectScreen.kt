@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.FilterChip
@@ -33,7 +34,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,10 +53,10 @@ import life.mygig.clauderc.ui.openUrl
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun NewProjectScreen(vm: MainViewModel) {
-    val owners by vm.owners.collectAsState()
-    val ownersError by vm.ownersError.collectAsState()
-    val busy by vm.busy.collectAsState()
-    val result by vm.newResult.collectAsState()
+    val owners by vm.owners.collectAsStateWithLifecycle()
+    val ownersError by vm.ownersError.collectAsStateWithLifecycle()
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val result by vm.newResult.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     var name by rememberSaveable { mutableStateOf("") }

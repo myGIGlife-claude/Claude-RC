@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -34,7 +35,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,21 +66,21 @@ import life.mygig.clauderc.ui.theme.WarnAmber
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionsScreen(vm: MainViewModel) {
-    val sessions by vm.sessions.collectAsState()
-    val pushReady by vm.pushReady.collectAsState()
-    val refreshing by vm.sessionsRefreshing.collectAsState()
-    val settings by vm.settings.collectAsState()
+    val sessions by vm.sessions.collectAsStateWithLifecycle()
+    val pushReady by vm.pushReady.collectAsStateWithLifecycle()
+    val refreshing by vm.sessionsRefreshing.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var confirmStop by remember { mutableStateOf<Session?>(null) }
     var confirmRestart by remember { mutableStateOf<Session?>(null) }
     var confirmRestartAll by remember { mutableStateOf(false) }
-    val busyRestart by vm.busyRestart.collectAsState()
+    val busyRestart by vm.busyRestart.collectAsStateWithLifecycle()
     val narrow = isNarrow()
     val appLock = LocalAppLock.current
     val scope = rememberCoroutineScope()
 
     // Previews and "needs an answer" stay current while the tab is open.
-    val foreground by vm.foreground.collectAsState()
+    val foreground by vm.foreground.collectAsStateWithLifecycle()
     LaunchedEffect(foreground) {
         while (foreground) {
             vm.refreshSessions()

@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -41,7 +42,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,14 +80,14 @@ private fun modeHint(m: String) = when (m) {
 /** cLaudeCluster: every Claude account you're connected to, with what's left of its usage, plus the workers the main Claude hands work to. */
 @Composable
 fun ClusterSection(vm: MainViewModel) {
-    val groups by vm.cluster.collectAsState()
-    val status by vm.status.collectAsState()
-    val login by vm.workerLogin.collectAsState()
-    val keyFor by vm.workerKey.collectAsState()
+    val groups by vm.cluster.collectAsStateWithLifecycle()
+    val status by vm.status.collectAsStateWithLifecycle()
+    val login by vm.workerLogin.collectAsStateWithLifecycle()
+    val keyFor by vm.workerKey.collectAsStateWithLifecycle()
     var apiKey by remember { mutableStateOf("") }
-    val runs by vm.workerRuns.collectAsState()
-    val busy by vm.busy.collectAsState()
-    val config by vm.clusterConfig.collectAsState()
+    val runs by vm.workerRuns.collectAsStateWithLifecycle()
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val config by vm.clusterConfig.collectAsStateWithLifecycle()
     var add by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
     var role by remember { mutableStateOf("") }
@@ -96,8 +96,8 @@ fun ClusterSection(vm: MainViewModel) {
     var confirmRemove by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val ready = (status?.scriptApi ?: 0) >= Updates.MIN_SCRIPT_API
-    val hostAddOpen by vm.hostAddOpen.collectAsState()
-    val hostSetup by vm.hostSetup.collectAsState()
+    val hostAddOpen by vm.hostAddOpen.collectAsStateWithLifecycle()
+    val hostSetup by vm.hostSetup.collectAsStateWithLifecycle()
     var confirmRemoveHost by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(ready) { if (ready) { vm.loadCluster(); vm.loadHosts() } }
 
@@ -291,10 +291,10 @@ private fun ClusterSettingsCard(vm: MainViewModel, c: ClusterConfig, idle: Boole
 /** Hosting servers: web servers chats can work on (docs/hosts-design.md). */
 @Composable
 private fun HostsCard(vm: MainViewModel, idle: Boolean, onRemove: (String) -> Unit) {
-    val st by vm.status.collectAsState()
-    val authTarget by vm.hostAuthTarget.collectAsState()
+    val st by vm.status.collectAsStateWithLifecycle()
+    val authTarget by vm.hostAuthTarget.collectAsStateWithLifecycle()
     authTarget?.let { HostAuthorizeDialog(vm, it) }
-    val hosts by vm.hosts.collectAsState()
+    val hosts by vm.hosts.collectAsStateWithLifecycle()
     CardBox {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -345,10 +345,10 @@ private fun HostsCard(vm: MainViewModel, idle: Boolean, onRemove: (String) -> Un
  *  (pasted or a file), a one-time password or the generated key. Save moves on to [HostSetupDialog]. */
 @Composable
 private fun HostAddDialog(vm: MainViewModel) {
-    val busy by vm.busy.collectAsState()
-    val probe by vm.hostProbe.collectAsState()
-    val error by vm.hostError.collectAsState()
-    val hostKey by vm.hostKey.collectAsState()
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val probe by vm.hostProbe.collectAsStateWithLifecycle()
+    val error by vm.hostError.collectAsStateWithLifecycle()
+    val hostKey by vm.hostKey.collectAsStateWithLifecycle()
     val draft = remember { vm.hostDraft() }   // what was typed before the app was left (no secrets)
     var name by rememberSaveable { mutableStateOf(draft.name) }
     var address by rememberSaveable { mutableStateOf(draft.address) }
@@ -549,9 +549,9 @@ private fun keyTextBase64(text: String): String = Base64.encodeToString((text.tr
 /** "Set up this server": host-harden opens the ports and runs the chosen steps (idempotent, safe to re-run). */
 @Composable
 private fun HostSetupDialog(vm: MainViewModel, name: String, sshPort: Int) {
-    val busy by vm.busy.collectAsState()
-    val result by vm.hostHarden.collectAsState()
-    val error by vm.hostSetupError.collectAsState()
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val result by vm.hostHarden.collectAsStateWithLifecycle()
+    val error by vm.hostSetupError.collectAsStateWithLifecycle()
     var harden by remember { mutableStateOf(true) }
     var tune by remember { mutableStateOf(true) }
     var web by remember { mutableStateOf(false) }
@@ -643,7 +643,7 @@ private fun Stepper(label: String, enabled: Boolean, canDown: Boolean, canUp: Bo
 
 @Composable
 private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean, onRemove: () -> Unit) {
-    val idle = vm.busy.collectAsState().value == null   // a double tap would repeat the action (Mode would skip a step)
+    val idle = vm.busy.collectAsStateWithLifecycle().value == null   // a double tap would repeat the action (Mode would skip a step)
     val worker = a.name != "main"
     CardBox {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -714,10 +714,10 @@ private val MODE_LABELS = listOf("acceptEdits" to "Edit files", "plan" to "Read-
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun ChatClusterSheet(vm: MainViewModel, onClose: () -> Unit) {
-    val workers by vm.chatWorkers.collectAsState()
-    val tasks by vm.chatTasks.collectAsState()
-    val hosts by vm.chatHosts.collectAsState()
-    val busy by vm.busy.collectAsState()
+    val workers by vm.chatWorkers.collectAsStateWithLifecycle()
+    val tasks by vm.chatTasks.collectAsStateWithLifecycle()
+    val hosts by vm.chatHosts.collectAsStateWithLifecycle()
+    val busy by vm.busy.collectAsStateWithLifecycle()
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onClose,
         sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -805,9 +805,9 @@ fun ChatClusterSheet(vm: MainViewModel, onClose: () -> Unit) {
 /** "Add my key": paste the public key (the one-line .pub file) of a phone terminal app or a PC; the server adds it to the host account. */
 @Composable
 private fun HostAuthorizeDialog(vm: MainViewModel, name: String) {
-    val busy by vm.busy.collectAsState()
-    val error by vm.hostAuthError.collectAsState()
-    val done by vm.hostAuthDone.collectAsState()
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val error by vm.hostAuthError.collectAsStateWithLifecycle()
+    val done by vm.hostAuthDone.collectAsStateWithLifecycle()
     var key by rememberSaveable { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = { if (busy == null) vm.closeHostAuthorize() },

@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -42,7 +43,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -96,8 +96,8 @@ private fun migrateServerLabel(s: Server) = "${s.host} (${s.user})"
 /** Move everything from one server to another. The state lives in the view model, so it survives rotation. */
 @Composable
 fun MigrateScreen(vm: MainViewModel) {
-    val ui by vm.migrate.collectAsState()
-    val settings by vm.settings.collectAsState()
+    val ui by vm.migrate.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
     val servers = settings?.servers.orEmpty().filter { it.isConfigured }
     val scroll = rememberScrollState()
     LaunchedEffect(ui.step) { scroll.scrollTo(0) }
@@ -432,7 +432,7 @@ private fun MigrateLoginKey(vm: MainViewModel, pem: String, forWho: String) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(onClick = { save.launch("clauderc-${forWho.substringBefore('@')}.key") }, modifier = Modifier.weight(1f)) { Text("Save key file") }
             OutlinedButton(
-                onClick = { copy(context, "ssh key", pem); note = "Copied." },
+                onClick = { copy(context, "ssh key", pem, sensitive = true); note = "Copied." },
                 modifier = Modifier.weight(1f),
             ) { Text("Copy") }
         }
@@ -633,7 +633,7 @@ private fun MigrateFixes(vm: MainViewModel, ui: MigrateUi, failed: List<String>)
     val github = "gh" in failed
     val repos = "repos" in failed || "remotes" in failed
     if (!github && !repos) return
-    var token by rememberSaveable { mutableStateOf("") }
+    var token by remember { mutableStateOf("") }
     CardBox {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (github) {

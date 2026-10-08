@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -41,7 +42,6 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.mutableIntStateOf
@@ -74,11 +74,11 @@ import life.mygig.clauderc.ui.theme.Term
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ClaudeScreen(vm: MainViewModel) {
-    val status by vm.status.collectAsState()
-    val plugins by vm.plugins.collectAsState()
-    val loading by vm.pluginsLoading.collectAsState()
-    val result by vm.ccResult.collectAsState()
-    val busy by vm.busy.collectAsState()
+    val status by vm.status.collectAsStateWithLifecycle()
+    val plugins by vm.plugins.collectAsStateWithLifecycle()
+    val loading by vm.pluginsLoading.collectAsStateWithLifecycle()
+    val result by vm.ccResult.collectAsStateWithLifecycle()
+    val busy by vm.busy.collectAsStateWithLifecycle()
     var install by remember { mutableStateOf(false) }
     var open by remember { mutableStateOf<InstalledPlugin?>(null) }
     var addMarket by remember { mutableStateOf(false) }
@@ -231,7 +231,7 @@ private fun LazyGridScope.fullItem(content: @Composable () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PluginSheet(vm: MainViewModel, pl: InstalledPlugin, p: PluginsData?, onClose: () -> Unit) {
-    val busy by vm.busy.collectAsState()
+    val busy by vm.busy.collectAsStateWithLifecycle()
     var confirm by remember { mutableStateOf(false) }
     val desc = p?.available?.firstOrNull { it.id == pl.id }?.description
     val change = { args: String -> onClose(); vm.claudeCommand(args) }
@@ -285,7 +285,7 @@ private fun PluginSheet(vm: MainViewModel, pl: InstalledPlugin, p: PluginsData?,
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun InstallPluginSheet(vm: MainViewModel, p: PluginsData, onClose: () -> Unit, onAddMarketplace: () -> Unit) {
-    val busy by vm.busy.collectAsState()
+    val busy by vm.busy.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
     var market by rememberSaveable { mutableStateOf<String?>(null) }
     val shown = remember(p, query, market) {
