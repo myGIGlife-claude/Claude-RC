@@ -263,6 +263,13 @@ class LauncherApi(
         return call("host-harden $name", stdin = ports.joinToString(",") + "\n" + steps.joinToString(","), timeoutMs = 600_000)
     }
     suspend fun hostRemove(name: String): JsonObject { requireHost(name); return call("host-remove $name") }
+    /** Adds the owner's own public key (one line) to that host account's authorized_keys; the key goes on stdin. */
+    suspend fun hostAuthorize(name: String, publicKey: String): JsonObject {
+        requireHost(name)
+        val line = publicKey.lines().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+        if (line.length < 40 || line.length > 1000) throw ApiException(Codes.INVALID_NAME, "That doesn't look like a public key (ssh-ed25519 AAAA… or ssh-rsa AAAA…).")
+        return call("host-authorize $name", stdin = line, timeoutMs = 60_000)
+    }
     suspend fun hostSession(project: String): ChatHostsData { requireName(project); return call("host-session $project") }
     suspend fun hostAttach(project: String, name: String, on: Boolean): JsonObject {
         requireName(project); requireHost(name)
