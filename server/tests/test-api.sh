@@ -1054,6 +1054,28 @@ check "host-test shows ssh's error" "$(jqt '.ok==false and (.error.message | tes
 rm -f "$STUB_STATE/ssh-unreachable"
 api "host-test nosuch"
 check "host-test unknown host" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+# host-authorize: the owner's own public key (phone terminal app, PC) goes into the host account's authorized_keys, once.
+ssh-keygen -q -t ed25519 -N '' -C 'phone@term' -f "$WORK/phonekey" </dev/null
+PHONEPUB="$(cat "$WORK/phonekey.pub")"
+api "host-authorize web" "$PHONEPUB"
+check "authorize: key added" "$(jqt '.ok and .data.host=="web" and .data.added==true')"
+[[ "$(grep -cF "$(awk '{print $2}' "$WORK/phonekey.pub")" "$STUB_STATE/remote/.ssh/authorized_keys")" == 1 ]]; check "authorize: it is in authorized_keys once" $?
+[[ "$(stat -c %a "$STUB_STATE/remote/.ssh/authorized_keys")" == 600 ]]; check "authorize: authorized_keys is mode 600" $?
+api "host-authorize web" "$PHONEPUB"
+check "authorize: again says already there" "$(jqt '.ok and .data.added==false')"
+[[ "$(grep -cF "$(awk '{print $2}' "$WORK/phonekey.pub")" "$STUB_STATE/remote/.ssh/authorized_keys")" == 1 ]]; check "authorize: ...and is not duplicated" $?
+api "host-authorize web" "$(awk '{print $1, $2}' "$WORK/phonekey.pub") evil;rm -rf /\$(id)"
+check "authorize: a hostile comment is cleaned, not run" "$(jqt '.ok')"
+! grep -qE '[;$()]' "$STUB_STATE/remote/.ssh/authorized_keys"; check "authorize: no shell characters reached the host" $?
+api "host-authorize web" "$(cat "$WORK/phonekey")"; check "authorize: a PRIVATE key is refused" "$(jqt '.ok==false and .error.code=="invalid_key"')"
+api "host-authorize web" "ssh-dss AAAAB3NzaC1kc3MAAACBAL0000000000000000000000000000000"; check "authorize: an unsupported key type is refused" "$(jqt '.ok==false and .error.code=="invalid_key"')"
+api "host-authorize web" "ssh-ed25519 AAAA"; check "authorize: a too-short key is refused" "$(jqt '.ok==false and .error.code=="invalid_key"')"
+api "host-authorize web" $'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOnotarealkeyatallxxxxxxxxxxxxxxxxxxxxxxxxxxx'; check "authorize: a garbage key blob is refused" "$(jqt '.ok==false and .error.code=="invalid_key"')"
+api "host-authorize nosuch" "$PHONEPUB"; check "authorize: unknown host" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+for bad in "host-authorize" "host-authorize Web" "host-authorize ../x" "host-authorize web extra"; do
+  api "$bad" "$PHONEPUB"; check "runner refuses '$bad'" "$(jqt '.ok == false')"
+done
+grep -qF "$(awk '{print $2}' "$WORK/phonekey.pub")" "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "authorize: the key is not in api.log" $?
 
 # host-harden: the remote script never runs here (the ssh stub records it and prints harden-out instead).
 for bad in "host-harden" "host-harden Web" "host-harden ../x" "host-harden web extra" "host-harden -x"; do

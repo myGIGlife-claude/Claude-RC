@@ -858,6 +858,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }) { _hostHarden.value = api.hostHarden(name, ports, steps) }
     }
+    /** "Add my key": the host the dialog is open for, the server's answer and any error, all shown inside the dialog. */
+    private val _hostAuthTarget = MutableStateFlow<String?>(null)
+    val hostAuthTarget = _hostAuthTarget.asStateFlow()
+    private val _hostAuthError = MutableStateFlow<String?>(null)
+    val hostAuthError = _hostAuthError.asStateFlow()
+    private val _hostAuthDone = MutableStateFlow<String?>(null)
+    val hostAuthDone = _hostAuthDone.asStateFlow()
+    fun openHostAuthorize(name: String) { _hostAuthError.value = null; _hostAuthDone.value = null; _hostAuthTarget.value = name }
+    fun closeHostAuthorize() { _hostAuthTarget.value = null; _hostAuthError.value = null; _hostAuthDone.value = null }
+    fun authorizeHostKey(name: String, publicKey: String) {
+        _hostAuthError.value = null
+        _hostAuthDone.value = null
+        action("Adding the key to $name…", onError = { _hostAuthError.value = hostMessage(it) }) {
+            val added = api.hostAuthorize(name, publicKey)["added"]?.jsonPrimitive?.booleanOrNull == true
+            _hostAuthDone.value = if (added) "Added. You can now sign in to $name with that key." else "That key was already on $name."
+        }
+    }
     fun testHost(name: String) = action("Testing $name…") { api.hostTest(name); say("$name: connection works.") }
     fun removeHost(name: String) = action("Removing $name…") {
         api.hostRemove(name)

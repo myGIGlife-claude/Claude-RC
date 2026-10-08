@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore).
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=43
+SCRIPT_API=44
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -2150,6 +2150,40 @@ EOF
 fi
 exit 0
 REMOTE
+}
+
+# host-authorize <name>: stdin = a public key (e.g. from the owner's phone terminal app or PC). Appended to that host account's
+# ~/.ssh/authorized_keys over the pinned ssh login, once (nothing changes if it is already there).
+do_host_authorize() {
+  [[ $# -eq 1 ]] || bad_args "usage: host-authorize <name>"
+  local key type blob comment
+  key="$(read_secret_line)"
+  exec 0</dev/null
+  host_exists "$1"
+  key="${key//$'\r'/}"
+  [[ ${#key} -ge 40 && ${#key} -le 1000 ]] || api_err invalid_key "That doesn't look like a public key (ssh-ed25519 AAAA… or ssh-rsa AAAA…)."
+  [[ "$key" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521)[[:space:]]+([A-Za-z0-9+/]+=*)([[:space:]]+(.*))?$ ]] ||
+    api_err invalid_key "That isn't a public key line. Paste the .pub file's one line (it starts with ssh-ed25519 or ssh-rsa), not the private key."
+  type="${BASH_REMATCH[1]}" blob="${BASH_REMATCH[2]}" comment="${BASH_REMATCH[4]:-}"
+  need ssh-keygen; need ssh
+  ssh-keygen -lf /dev/stdin <<<"$type $blob" >/dev/null 2>&1 || api_err invalid_key "That public key isn't valid."
+  comment="$(tr -c 'A-Za-z0-9@._ -' ' ' <<<"$comment" | tr -s ' ' | cut -c1-60)"; comment="${comment%% }"; comment="${comment## }"
+  key="$type $blob${comment:+ $comment}"
+  host_meta_target "$1"
+  local err out; err="$(mktemp)"
+  host_ssh_opts "$HOSTS_DIR/$1/key" "$HOSTS_DIR/$1/known_hosts"
+  # The key line arrives on the remote command's stdin; nothing of it is in argv.
+  if ! out="$(printf '%s\n' "$key" | timeout 30 ssh "${HOST_SSH[@]}" "$HOST_ADDR" \
+    'umask 077; mkdir -p .ssh && touch .ssh/authorized_keys && chmod 600 .ssh/authorized_keys && IFS= read -r k && { grep -qxF -- "$k" .ssh/authorized_keys && echo EXISTS || { [ -z "$(tail -c1 .ssh/authorized_keys)" ] || echo >>.ssh/authorized_keys; printf "%s\n" "$k" >>.ssh/authorized_keys && echo ADDED; }; }' 2>"$err")"; then
+    local m; m="$(host_last_line "$err")"; rm -f "$err"
+    api_err host_failed "Couldn't add the key on $1: ${m:-no answer}"
+  fi
+  rm -f "$err"
+  case "$out" in
+    *ADDED*) api_ok "$(jq -cn --arg n "$1" '{host:$n, added:true}')" ;;
+    *EXISTS*) api_ok "$(jq -cn --arg n "$1" '{host:$n, added:false}')" ;;
+    *) api_err host_failed "The server didn't confirm the key was added." ;;
+  esac
 }
 
 # Removes the key and every project's attachment. The key stays authorized on the host until removed there.
@@ -4896,7 +4930,7 @@ api_main() {
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | set-secret-file | login-keystore | login-apple | youtube-login-start | \
       chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
-      migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | host-probe | host-add | host-keyimport | host-harden | drive-passphrase) ;;  # these read stdin
+      migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | host-probe | host-add | host-keyimport | host-authorize | host-harden | drive-passphrase) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -4970,6 +5004,7 @@ api_main() {
     host-keyimport)      do_host_keyimport "$@" ;;
     host-add)            do_host_add "$@" ;;
     host-test)           do_host_test "$@" ;;
+    host-authorize)      do_host_authorize "$@" ;;
     host-harden)         do_host_harden "$@" ;;
     host-remove)         do_host_remove "$@" ;;
     host-session)        do_host_session "$@" ;;

@@ -284,6 +284,9 @@ private fun ClusterSettingsCard(vm: MainViewModel, c: ClusterConfig, idle: Boole
 /** Hosting servers: web servers chats can work on (docs/hosts-design.md). */
 @Composable
 private fun HostsCard(vm: MainViewModel, idle: Boolean, onRemove: (String) -> Unit) {
+    val st by vm.status.collectAsState()
+    val authTarget by vm.hostAuthTarget.collectAsState()
+    authTarget?.let { HostAuthorizeDialog(vm, it) }
     val hosts by vm.hosts.collectAsState()
     CardBox {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -309,6 +312,7 @@ private fun HostsCard(vm: MainViewModel, idle: Boolean, onRemove: (String) -> Un
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextButton(onClick = { vm.testHost(h.name) }, enabled = idle) { Text("Test") }
                         TextButton(onClick = { vm.openHostSetup(h.name, h.port) }, enabled = idle) { Text("Set up / harden") }
+                        if ((st?.scriptApi ?: 0) >= 44) TextButton(onClick = { vm.openHostAuthorize(h.name) }, enabled = idle) { Text("Add my key") }
                         TextButton(onClick = { onRemove(h.name) }, enabled = idle) { Text("Remove") }
                     }
                 }
@@ -776,4 +780,37 @@ fun ChatClusterSheet(vm: MainViewModel, onClose: () -> Unit) {
             }
         }
     }
+}
+
+/** "Add my key": paste the public key (the one-line .pub file) of a phone terminal app or a PC; the server adds it to the host account. */
+@Composable
+private fun HostAuthorizeDialog(vm: MainViewModel, name: String) {
+    val busy by vm.busy.collectAsState()
+    val error by vm.hostAuthError.collectAsState()
+    val done by vm.hostAuthDone.collectAsState()
+    var key by rememberSaveable { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = { if (busy == null) vm.closeHostAuthorize() },
+        confirmButton = {
+            if (done != null) TextButton(onClick = { vm.closeHostAuthorize() }) { Text("Done") }
+            else TextButton(onClick = { vm.authorizeHostKey(name, key) }, enabled = key.trim().length >= 40 && busy == null) { Text("Add key") }
+        },
+        dismissButton = { if (done == null) TextButton(onClick = { vm.closeHostAuthorize() }) { Text("Cancel") } },
+        title = { Text("Add my key to $name") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Paste the PUBLIC key of the app or computer you want to sign in from (one line starting with ssh-ed25519 or ssh-rsa, from the .pub file). " +
+                        "It is added to this server's account so you can SSH in directly. Never paste a private key here.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = key, onValueChange = { key = it }, label = { Text("Public key") }, maxLines = 4, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                )
+                done?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+    )
 }
