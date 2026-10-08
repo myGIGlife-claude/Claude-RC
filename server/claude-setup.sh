@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=44
+SCRIPT_API=45
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 CLAUDERC_API="${CLAUDERC_API:-https://api.github.com}"
@@ -2192,6 +2192,19 @@ do_host_authorize() {
     *EXISTS*) api_ok "$(jq -cn --arg n "$1" '{host:$n, added:false}')" ;;
     *) api_err host_failed "The server didn't confirm the key was added." ;;
   esac
+}
+
+# host-key-export <name>: the private key this server uses for that host, to use it from another SSH program. It is a secret leaving
+# the server (to the phone), so like the other such actions it needs ALLOW_RUN=1; the app also asks for a fresh unlock.
+do_host_key_export() {
+  [[ $# -eq 1 ]] || bad_args "usage: host-key-export <name>"
+  host_exists "$1"
+  migrate_need_run
+  local f="$HOSTS_DIR/$1/key" pub
+  [[ -f "$f" && ! -L "$f" ]] || api_err internal "That host has no key file."
+  need ssh-keygen
+  pub="$(ssh-keygen -y -P '' -f "$f" 2>/dev/null | awk 'NR == 1 {print $1, $2}')"
+  api_ok "$(jq -cn --arg n "$1" --arg k "$(base64 -w0 <"$f")" --arg p "$pub" '{name:$n, private_key:$k, public_key:$p}')"
 }
 
 # Removes the key and every project's attachment. The key stays authorized on the host until removed there.
@@ -5031,6 +5044,7 @@ api_main() {
     host-add)            do_host_add "$@" ;;
     host-test)           do_host_test "$@" ;;
     host-authorize)      do_host_authorize "$@" ;;
+    host-key-export)     do_host_key_export "$@" ;;
     host-harden)         do_host_harden "$@" ;;
     host-remove)         do_host_remove "$@" ;;
     host-session)        do_host_session "$@" ;;

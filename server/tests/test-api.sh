@@ -1106,6 +1106,19 @@ for bad in "host-authorize" "host-authorize Web" "host-authorize ../x" "host-aut
   api "$bad" "$PHONEPUB"; check "runner refuses '$bad'" "$(jqt '.ok == false')"
 done
 grep -qF "$(awk '{print $2}' "$WORK/phonekey.pub")" "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "authorize: the key is not in api.log" $?
+# host-key-export: the key this server uses for a host, to use from another SSH program. A secret leaving the server: needs ALLOW_RUN=1.
+api "host-key-export web"; check "key export: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
+api "host-key-export web"
+check "key export: returns the private and public key" "$(jqt '.ok and .data.name=="web" and (.data.private_key | length) > 100 and (.data.public_key | startswith("ssh-"))')"
+[[ "$(jq -r .data.private_key <<<"$OUT" | base64 -d)" == "$(cat "$HD/web/key")" ]]; check "key export: it is the host's own key file, byte for byte" $?
+[[ "$(jq -r .data.public_key <<<"$OUT")" == "$(ssh-keygen -y -f "$HD/web/key" | awk '{print $1, $2}')" ]]; check "key export: the public half matches" $?
+api "host-key-export nosuch"; check "key export: unknown host" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+for bad in "host-key-export" "host-key-export Web" "host-key-export ../x" "host-key-export web extra"; do
+  api "$bad"; check "runner refuses '$bad'" "$(jqt '.ok == false')"
+done
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
+grep -qF "$(base64 -w0 "$HD/web/key" | cut -c1-60)" "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "key export: the key is not in api.log" $?
 
 # host-harden: the remote script never runs here (the ssh stub records it and prints harden-out instead).
 for bad in "host-harden" "host-harden Web" "host-harden ../x" "host-harden web extra" "host-harden -x"; do

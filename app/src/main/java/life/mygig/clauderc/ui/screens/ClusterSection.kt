@@ -49,6 +49,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.dp
 import life.mygig.clauderc.api.WORKER_NAME_RE
 import life.mygig.clauderc.api.ClusterAccount
@@ -294,6 +295,20 @@ private fun HostsCard(vm: MainViewModel, idle: Boolean, onRemove: (String) -> Un
     val st by vm.status.collectAsStateWithLifecycle()
     val authTarget by vm.hostAuthTarget.collectAsStateWithLifecycle()
     authTarget?.let { HostAuthorizeDialog(vm, it) }
+    // "Download key": after a fresh unlock the key is fetched, then written to a file the owner picks (e.g. in Downloads or Drive).
+    val keyFile by vm.hostKeyFile.collectAsStateWithLifecycle()
+    val keyContext = LocalContext.current
+    val appLock = life.mygig.clauderc.ui.LocalAppLock.current
+    val keyScope = androidx.compose.runtime.rememberCoroutineScope()
+    val saveKey = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        val f = vm.hostKeyFile.value
+        if (uri != null && f != null) {
+            val ok = runCatching { keyContext.contentResolver.openOutputStream(uri)?.use { it.write(f.bytes) } ?: error("no stream") }.isSuccess
+            vm.say(if (ok) "Key saved. Use it with: ${f.hint}. Keep the file private (on a computer: chmod 600)." else "Couldn't save the key file.")
+        }
+        vm.clearHostKeyFile()
+    }
+    LaunchedEffect(keyFile) { keyFile?.let { saveKey.launch(it.name + "-key") } }
     val hosts by vm.hosts.collectAsStateWithLifecycle()
     CardBox {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -329,6 +344,10 @@ private fun HostsCard(vm: MainViewModel, idle: Boolean, onRemove: (String) -> Un
                         Box {
                             IconButton(onClick = { menu = true }, enabled = idle) { Icon(Icons.Filled.MoreVert, contentDescription = "More for ${h.name}") }
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                if ((st?.scriptApi ?: 0) >= 45) DropdownMenuItem(text = { Text("Download key") }, onClick = {
+                                    menu = false
+                                    keyScope.launch { if (appLock?.unlock("Download the key for ${h.name}") != false) vm.exportHostKey(h) }
+                                })
                                 if ((st?.scriptApi ?: 0) >= 44) DropdownMenuItem(text = { Text("Add my key") }, onClick = { menu = false; vm.openHostAuthorize(h.name) })
                                 if (setupDone) DropdownMenuItem(text = { Text("Run set-up again") }, onClick = { menu = false; vm.openHostSetup(h.name, h.port) })
                                 DropdownMenuItem(text = { Text("Remove") }, onClick = { menu = false; onRemove(h.name) })
