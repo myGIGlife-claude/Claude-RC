@@ -333,6 +333,11 @@ done
 api "set-secret ACME_API_KEY" "it's"; check "set-secret refuses a single quote" "$(jqt '.error.code=="invalid_name"')"
 api "remove-secret CLOUDFLARE_API_TOKEN"; check "remove-secret only removes custom keys" "$(jqt '.ok==false')"
 api "remove-secret ACME_API_KEY"; check "custom key removed" "$(jqt '.ok and .data.removed=="ACME_API_KEY"')"
+for bad in PIP_INDEX_URL UV_INDEX_URL OPENAI_BASE_URL AWS_ENDPOINT_URL AWS_ENDPOINT_URL_S3 SSL_CERT_FILE DOCKER_HOST GH_HOST HTTPS_PROXY GIT_SSH_COMMAND; do
+  api "set-secret $bad" "http://evil.example"; check "set-secret refuses the behaviour-changing name $bad" "$(jqt '.ok==false')"
+done
+api "set-secret ACME_ENDPOINT" "https://api.acme.example"; check "set-secret still allows an ordinary _ENDPOINT name" "$(jqt '.ok and .data.saved=="ACME_ENDPOINT"')"
+api "remove-secret ACME_ENDPOINT"
 api "set-secret TS_AUTHKEY" "tskey-auth-abc"; check "TS_AUTHKEY accepted" "$(jqt '.ok and .data.saved=="TS_AUTHKEY"')"
 api "remove-secret TS_AUTHKEY"; check "TS_AUTHKEY removed" "$(jqt '.ok')"
 grep -q ACME_API_KEY "$HOME/.config/claude-launcher/env" "$HOME/.claude/settings.json"; [[ $? -ne 0 ]]; check "removed from env file and settings" $?
@@ -420,6 +425,10 @@ for bad in "drive-status x" "drive-login-start x" "drive-login-poll x" "drive-pa
 done
 api "drive-status"
 check "drive: status before setup" "$(jqt '.ok and .data == {configured:false, connected:false, schedule:"off", last_backup:null, has_passphrase:false}')"
+# Sending backups to a Google account / choosing their passphrase is as strong as `run`: it needs ALLOW_RUN=1.
+api "drive-login-start"; check "drive: sign-in refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+api "drive-passphrase" "a long passphrase here"; check "drive: setting a passphrase refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
 api "drive-login-start"
 check "drive: not configured names both variables" "$(jqt '.error.code=="not_configured" and (.error.message | contains("GOOGLE_DRIVE_CLIENT_ID") and contains("GOOGLE_DRIVE_CLIENT_SECRET")) and .error.variables==["GOOGLE_DRIVE_CLIENT_ID","GOOGLE_DRIVE_CLIENT_SECRET"]')"
 api "drive-list"; check "drive: list needs the setup too" "$(jqt '.error.code=="not_configured"')"
@@ -506,6 +515,7 @@ api "drive-restore $DID"; DP2="$(jq -r .data.path <<<"$OUT")"
 [[ -z "$(find "$HOME/backups" -name '.drive-download.*')" ]]; check "drive: no partial download left" $?
 rm -f "$DP1" "$DP2"; ((had_backups)) || rmdir "$HOME/backups"
 api "drive-restore otherfile01"; check "drive: restore only our files" "$(jqt '.error.code=="invalid_name"')"
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
 echo "0 1 * * * echo mine" >"$STUB_STATE/crontab"
 api "drive-schedule on"; check "drive: schedule on" "$(jqt '.ok and .data.schedule=="daily"')"
 cp "$STUB_STATE/crontab" "$WORK/crontab.1"
@@ -693,8 +703,15 @@ grep -q "demo-proj\|private_key" "$HOME/.local/state/claude-launcher/api.log"; [
 echo "claude-cmd"
 api "claude-cmd" "doctor"
 check "claude-cmd doctor, colours stripped" "$(jqt '.ok and .data.exit_code==0 and .data.output=="No installation issues found."')"
+# Plugins and marketplaces bring in code that runs in every session: they need ALLOW_RUN=1 like `run`.
+for gated in "plugin install demo@market --scope user" "plugin i demo@market" "plugin update demo@market" "plugin marketplace add evil/repo" "plugin marketplace update"; do
+  api "claude-cmd" "$gated"; check "claude-cmd '${gated:0:30}' refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+done
+api "claude-cmd" "plugin list"; check "claude-cmd plugin list needs no ALLOW_RUN" "$(jqt '.ok')"
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
 api "claude-cmd" "plugin install demo@market --scope user"
-check "claude-cmd plugin install" "$(jqt '.ok and .data.output=="Installed demo@market"')"
+check "claude-cmd plugin install (with ALLOW_RUN)" "$(jqt '.ok and .data.output=="Installed demo@market"')"
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
 for bad in "mcp add x -- bash -c id" "auth logout" "doctor; id" 'plugin install $(id)' "--dangerously-skip-permissions" "" "doctor extra"; do
   api "claude-cmd" "$bad"
   check "claude-cmd refuses '${bad:0:25}'" "$(jqt '.ok==false')"
@@ -703,6 +720,9 @@ api "claude-cmd doctor"
 check "claude-cmd takes nothing on the command line" "$(jqt '.error.code=="forbidden"')"
 
 echo "install-cli"
+for gated in docker railway neon hf gcloud bun; do
+  api "install-cli $gated"; check "install-cli $gated refused while Run-a-command is off (piped installer / sudo password)" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+done
 api "install-cli glab"
 check "install-cli without the internet fails cleanly" "$(jqt '.ok==false and .error.code=="internal"')"
 [[ ! -e "$HOME/.local/bin/glab.new" ]]; check "install-cli leaves nothing half-installed" $?
@@ -734,14 +754,24 @@ SHA=0123456789abcdef0123456789abcdef01234567
 mkdir -p "$WORK/raw/myGIGlife-claude/Claude-RC/$SHA"
 ln -s "$SERVER" "$WORK/raw/myGIGlife-claude/Claude-RC/$SHA/server"
 export CLAUDERC_RAW="file://$WORK/raw"
+export CLAUDERC_API="file://$WORK/ghapi"
+mkdir -p "$WORK/ghapi/repos/myGIGlife-claude/Claude-RC/compare"
+echo '{"status":"diverged"}' >"$WORK/ghapi/repos/myGIGlife-claude/Claude-RC/compare/$SHA...main"
+api "self-update $SHA"
+check "self-update refuses a commit that is not on main (a fork's commit)" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+[[ ! -e "$HOME/.config/claude-launcher/installed-commit" ]]; check "...and installed nothing" $?
+echo '{"status":"ahead"}' >"$WORK/ghapi/repos/myGIGlife-claude/Claude-RC/compare/$SHA...main"
 api "self-update $SHA"
 check "self-update installs that commit" "$(jqt '.ok and .data.commit=="'$SHA'"')"
 [[ "$(cat "$HOME/.config/claude-launcher/installed-commit")" == "$SHA" && -x "$HOME/claude-setup.sh" ]]; check "self-update recorded the commit" $?
 api "status"
 check "status reports the installed commit" "$(jqt '.data.commit=="'$SHA'"')"
+echo '{"status":"identical"}' >"$WORK/ghapi/repos/myGIGlife-claude/Claude-RC/compare/${SHA/0123/9999}...main"
 api "self-update ${SHA/0123/9999}"
 check "self-update of a missing commit fails cleanly" "$(jqt '.ok==false and .error.code=="internal"')"
-unset CLAUDERC_RAW
+api "self-update ${SHA/0123/8888}"
+check "self-update when GitHub can't be asked is refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+unset CLAUDERC_RAW CLAUDERC_API
 
 echo "install.sh (no clone)"
 IH="$WORK/installhome"; mkdir -p "$IH"
@@ -1301,6 +1331,10 @@ api "migrate-passphrase"
 check "passphrase: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled" and (.error.message | contains("ALLOW_RUN=1"))')"
 api "migrate-sudo-check"
 check "sudo-check: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled" and (.error.message | contains("ALLOW_RUN=1"))')"
+api "migrate-authorize" "$(printf '%s\n%s' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGatedGatedGatedGatedGatedGatedGatedGatedGatedGa gated' 203.0.113.5)"
+check "authorize: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+api "migrate-restore incoming-20260101-010101.gpg" "a long passphrase here"
+check "restore: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
 echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
 
 api "status"; check "migrate: script_api is 34 or more" "$(jqt '.data.script_api >= 34')"
