@@ -4,8 +4,19 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
   - package-ecosystem: gradle
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    groups:
+      libraries:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # Gradle 9 needs the Android Gradle Plugin 9 upgrade (its own PR, see PLAN.md).
+      - dependency-name: "gradle-wrapper"
+        update-types: ["version-update:semver-major"]
