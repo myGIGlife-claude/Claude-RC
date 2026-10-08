@@ -19,7 +19,7 @@ jobs:
   ios:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Generate the Xcode project
         run: brew install xcodegen && cd ios && xcodegen generate
       - name: Build for iPhone and iPad (unsigned)
@@ -33,7 +33,7 @@ jobs:
           cd ios/build/Build/Products/Release-iphoneos
           mkdir Payload && cp -R cLaudeRC.app Payload/
           zip -qry "$GITHUB_WORKSPACE/cLaudeRC-unsigned.ipa" Payload
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cLaudeRC-ios-unsigned
           path: cLaudeRC-unsigned.ipa
