@@ -19,7 +19,7 @@ jobs:
   secrets-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: gitleaks (full history)
@@ -32,7 +32,7 @@ jobs:
   server:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install tools
         run: sudo apt-get update -q && sudo apt-get install -y -q jq tmux shellcheck openssh-server gnupg
       - name: shellcheck
@@ -57,7 +57,7 @@ jobs:
       # APK); pull requests are signed with the committed debug keystore and are never published.
       EXPECTED_CERT_SHA256: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && 'b62dd1599ca2dd7f9a637f215da28321e6ec1c45981a940e594f4595efd570f7' || 'ff714e476e95c2d2af85c31a6cc7455011ea74825f182dad9a6a74c4dc1df5c3' }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
