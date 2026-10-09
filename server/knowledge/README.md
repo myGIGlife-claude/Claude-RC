@@ -1,6 +1,6 @@
 # Developer knowledge pack
 
-Twelve skills (`skills/rc-*`) that cLaudeRC installs for every Claude session and Claude worker on the server, so they code against
+Thirteen skills (`skills/rc-*`: twelve topic skills plus the process skill `rc-dev-playbook`) that cLaudeRC installs for every Claude session and Claude worker on the server, so they code against
 CURRENT standards (what changed lately, what is now wrong, what to do instead) for web front end, JavaScript/TypeScript, Node, web back end,
 PHP, Python, Go, Java, Android, iOS, UI/UX and web security/performance.
 
@@ -18,3 +18,9 @@ each month, 04:xx) or runs it now (`knowledge-schedule`, `knowledge-refresh`; bo
 It clones the repo fresh, lets headless Claude update every skill and fact-check it with independent subagents, then the SCRIPT (not the model) checks that
 only pack files changed, runs `lint.sh`, rebuilds `MANIFEST`, pushes `knowledge-refresh-YYYY-MM` and opens a pull request. It never merges: review the diff
 (versions, dates, removed claims) and CI first. A run that only moved the date opens nothing.
+
+## Coverage and what is next
+`COVERAGE.md` tracks every part of the expansion brief as done / partial / planned / unsupported / unverified, honestly. `rc-dev-playbook` is the entry skill:
+how to approach any task, detect the project type, load the right topic skills, privacy-first and minimal-dependency defaults, root-cause debugging and a
+production-quality definition of done. Next (queued, researched in small batches with a fact-check pass each): more languages, cross-platform,
+databases, cloud/DevOps, testing/debugging, architecture, security engineering, then an evaluation set (`evals/`) that measures whether the pack improves results.

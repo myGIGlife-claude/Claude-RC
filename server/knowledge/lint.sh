@@ -14,14 +14,20 @@ for d in skills/rc-*/; do
   [[ "$(sed -n '2,6p' "$f" | grep -c "^name: $name$")" == 1 ]] || fail "$name: 'name:' must equal the folder name"
   desc="$(sed -n '2,8p' "$f" | grep '^description:' | head -n 1)"
   [[ -n "$desc" ]] || fail "$name: description is missing"
-  ((${#desc} >= 60 && ${#desc} <= 700)) || fail "$name: description should be 60-700 characters (it is loaded into every session): ${#desc}"
+  # (the 12 first skills predate the 450 limit and are shortened in the next refresh: they may still be up to 700)
+  max=450; case "$name" in rc-web-frontend|rc-javascript-typescript|rc-node-backend|rc-web-backend|rc-php|rc-python|rc-go|rc-java|rc-android|rc-ios|rc-ui-ux-design|rc-web-security-perf) max=700 ;; esac
+  ((${#desc} >= 60 && ${#desc} <= max)) || fail "$name: description should be 60-$max characters (it is loaded into every session): ${#desc}"
+  kind="$(sed -n '2,8p' "$f" | sed -n 's/^kind: *//p' | head -n 1)"
   lines="$(wc -l <"$f")"
   ((lines <= 520)) || fail "$name: SKILL.md is $lines lines (max 520): move detail to references/"
-  for h in "Currency check" "What changed" "Do this" "Security" "Common mistakes" "Before you ship" "Sources"; do
+  if [[ "$kind" == process ]]; then sections=("Do this" "Common mistakes" "Before you ship"); else sections=("Currency check" "What changed" "Do this" "Security" "Common mistakes" "Before you ship" "Sources"); fi
+  for h in "${sections[@]}"; do
     grep -qi "^## .*$h" "$f" || fail "$name: missing section '$h'"
   done
-  [[ "$(sed -n '/^## Sources/,$p' "$f" | grep -c 'https\?://')" -ge 5 ]] || fail "$name: Sources needs at least 5 URLs"
-  grep -qE '20[0-9]{2}-[0-9]{2}' "$f" || fail "$name: no dates (every skill states 'as of')"
+  if [[ "$kind" != process ]]; then
+    [[ "$(sed -n '/^## Sources/,$p' "$f" | grep -c 'https\?://')" -ge 5 ]] || fail "$name: Sources needs at least 5 URLs"
+    grep -qE '20[0-9]{2}-[0-9]{2}' "$f" || fail "$name: no dates (every skill states 'as of')"
+  fi
   [[ -s "$f" ]] || fail "$name: empty"
 done
 ((n >= 1)) || fail "no skills found"
