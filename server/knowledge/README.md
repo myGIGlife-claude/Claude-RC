@@ -11,3 +11,10 @@ PHP, Python, Go, Java, Android, iOS, UI/UX and web security/performance.
   riskiest claims in the first drafts were wrong, which is why the second pass exists). Treat every version/date as dated; `(unverified)` marks leads.
 - To refresh: re-run the research with `BRIEF.md`, then a separate fact-check pass, update `VERSION`, run `lint.sh` and `make-manifest.sh`, open a PR.
   `lint.sh` (run by the tests and CI) enforces the shape, sources, size and that nothing personal or secret-looking is in the pack.
+
+## Monthly refresh
+`server/knowledge/refresh.sh` is installed as `~/.local/bin/clauderc-knowledge-refresh`. Settings > Developer knowledge switches it on (cron, the 1st of
+each month, 04:xx) or runs it now (`knowledge-schedule`, `knowledge-refresh`; both need ALLOW_RUN=1: it runs a model with web access and spends usage).
+It clones the repo fresh, lets headless Claude update every skill and fact-check it with independent subagents, then the SCRIPT (not the model) checks that
+only pack files changed, runs `lint.sh`, rebuilds `MANIFEST`, pushes `knowledge-refresh-YYYY-MM` and opens a pull request. It never merges: review the diff
+(versions, dates, removed claims) and CI first. A run that only moved the date opens nothing.

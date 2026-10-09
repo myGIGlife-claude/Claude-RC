@@ -808,6 +808,73 @@ bash "$SERVER/knowledge/make-manifest.sh" --check >/dev/null 2>&1; check "knowle
 KS="$(HOME="$IH" "$IH/claude-setup.sh" --api status </dev/null 2>/dev/null | jq -c '.data.knowledge')"
 [[ "$(jq -r .skills <<<"$KS")" -ge 12 && "$(jq -r .version <<<"$KS")" == "$(head -n 1 "$SERVER/knowledge/VERSION")" ]]; check "status reports the installed pack (version and skill count)" $?
 
+# ---- the monthly knowledge refresh: schedule actions and the refresh script (stub claude/gh, a local bare repo as "origin") ----
+for bad in "knowledge-status x" "knowledge-refresh x" "knowledge-schedule" "knowledge-schedule maybe" "knowledge-schedule on off" "knowledge-schedule ON"; do
+  api "$bad"; check "knowledge forbidden: '$bad'" "$(jqt '.ok==false and .error.code=="forbidden"')"
+done
+KB="$HOME/.local/bin/clauderc-knowledge-refresh"; mkdir -p "$HOME/.local/bin"; rm -f "$KB"
+api "knowledge-status"; check "knowledge status: nothing installed, schedule off" "$(jqt '.ok and .data.installed==false and .data.schedule=="off" and .data.running==false and .data.last==null')"
+api "knowledge-schedule on"; check "knowledge schedule refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+api "knowledge-refresh"; check "knowledge refresh refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
+api "knowledge-schedule on"; check "knowledge schedule needs the tool installed" "$(jqt '.ok==false and .error.code=="not_configured"')"
+install -m 755 "$SERVER/knowledge/refresh.sh" "$KB"
+api "knowledge-schedule on"; check "knowledge schedule on" "$(jqt '.ok and .data.schedule=="monthly" and .data.installed==true')"
+api "knowledge-schedule on"; check "...again is idempotent" "$(jqt '.ok and .data.schedule=="monthly"')"
+[[ "$(grep -cF 'clauderc-knowledge-refresh' "$STUB_STATE/crontab")" == 1 ]] && grep -qE "^[0-9]{1,2} 4 1 \* \* env PATH=.* '$KB' >/dev/null 2>&1 # clauderc-knowledge-refresh$" "$STUB_STATE/crontab"; check "...exactly one monthly crontab line (1st, 04:xx)" $?
+echo '30 2 * * * other-job' >>"$STUB_STATE/crontab"
+api "knowledge-schedule off"; check "knowledge schedule off" "$(jqt '.ok and .data.schedule=="off"')"
+grep -q 'other-job' "$STUB_STATE/crontab" && ! grep -q 'clauderc-knowledge-refresh' "$STUB_STATE/crontab"; check "...leaves the other crontab lines alone" $?
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
+
+# The refresh script itself, end to end. "origin" is a local bare repo made from this repo's pack; claude and gh are stubs.
+RW="$WORK/refresh"; rm -rf "$RW"; mkdir -p "$RW/bin" "$RW/seed/server" "$RW/state"
+cp -r "$SERVER/knowledge" "$RW/seed/server/knowledge"
+git -C "$RW/seed" init -q -b main && git -C "$RW/seed" add -A && git -C "$RW/seed" -c user.name=t -c user.email=t@t commit -qm seed && git clone -q --bare "$RW/seed" "$RW/origin.git"
+cat >"$RW/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+# stub claude -p: records its arguments, then changes the clone the way the scenario says
+printf '%s\n' "$@" >"$RW_LOG/claude-args"
+[[ "${RW_FAIL:-}" == 1 ]] && { echo "boom" >&2; exit 3; }
+case "$RW_SCENARIO" in
+  ok) echo "- updated Go and bumped dates" >>server/knowledge/skills/rc-go/SKILL.md; date -u +%Y-%m-%d >server/knowledge/VERSION; echo "Refreshed 12 skills." ;;
+  outside) echo "x" >README.md; echo "- note" >>server/knowledge/skills/rc-go/SKILL.md ;;
+  dateonly) date -u +%Y-%m-%d >server/knowledge/VERSION ;;
+  badlint) sed -i '/^## Sources/,$d' server/knowledge/skills/rc-go/SKILL.md ;;
+esac
+STUB
+cat >"$RW/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$RW_LOG/gh-calls"
+if [[ "$1 $2" == "pr create" ]]; then printf '%s\n' "$@" >"$RW_LOG/pr-args"; echo "https://github.com/example/repo/pull/99"; fi
+STUB
+chmod +x "$RW/bin/claude" "$RW/bin/gh"
+refresh() {  # <scenario> [fail]
+  rm -f "$RW/gh-calls" "$RW/claude-args" "$RW/pr-args" "$RW/state/claude-launcher/knowledge-refresh.json"
+  RW_LOG="$RW" RW_SCENARIO="$1" RW_FAIL="${2:-0}" XDG_STATE_HOME="$RW/state" CLAUDERC_KNOWLEDGE_SOURCE="$RW/origin.git" PATH="$RW/bin:$PATH" \
+    CLAUDERC_REFRESH_TIMEOUT=60 bash "$SERVER/knowledge/refresh.sh" >"$RW/out" 2>"$RW/err"; RFRC=$?
+  RSTAT="$(cat "$RW/state/claude-launcher/knowledge-refresh.json" 2>/dev/null || echo '{}')"
+}
+BR="knowledge-refresh-$(date -u +%Y-%m)"
+refresh ok
+[[ $RFRC == 0 && "$(jq -r .state <<<"$RSTAT")" == "done" && "$(jq -r .pr <<<"$RSTAT")" == "https://github.com/example/repo/pull/99" ]]; check "refresh: a good run opens a pull request (state done, PR link)" $?
+git -C "$RW/origin.git" show "$BR:server/knowledge/skills/rc-go/SKILL.md" | grep -q "updated Go and bumped dates"; check "...the branch carries the changed skill" $?
+[[ "$(git -C "$RW/origin.git" show "$BR:server/knowledge/VERSION")" == "$(date -u +%Y-%m-%d)" ]]; check "...with VERSION set to today" $?
+git -C "$RW/origin.git" show "$BR:server/knowledge/MANIFEST" | grep -q "$(git -C "$RW/origin.git" show "$BR:server/knowledge/skills/rc-go/SKILL.md" | sha256sum | cut -d' ' -f1)"; check "...and the MANIFEST was rebuilt by the script" $?
+[[ "$(git -C "$RW/origin.git" rev-parse main)" == "$(git -C "$RW/seed" rev-parse main)" ]]; check "...main is never touched (a PR, not a merge)" $?
+grep -q -- "--permission-mode" "$RW/claude-args" && grep -qx "Agent,WebSearch,WebFetch,Read,Write,Edit,Glob,Grep" "$RW/claude-args" && ! grep -q "Bash" "$RW/claude-args"; check "...claude gets web research and file edits, no shell" $?
+grep -q "BRIEF.md" "$RW/claude-args" && grep -q "$(date -u +%Y-%m-%d)" "$RW/claude-args"; check "...and a prompt that names the brief and today's date" $?
+grep -q "Refreshed 12 skills" "$RW/pr-args" && grep -q "NOT merged automatically" "$RW/pr-args"; check "...the PR body has Claude's summary and says it is not merged automatically" $?
+refresh outside
+[[ $RFRC != 0 && "$(jq -r .state <<<"$RSTAT")" == failed && "$(jq -r .message <<<"$RSTAT")" == *"outside the pack"* ]] && ! grep -q "pr create" "$RW/gh-calls" 2>/dev/null; check "refresh: a change outside the pack fails the run and opens no PR" $?
+git -C "$RW/origin.git" show "$BR:server/knowledge/skills/rc-go/SKILL.md" 2>/dev/null | grep -q "^- note$"; [[ $? -ne 0 ]]; check "...and nothing from that run was pushed" $?
+refresh dateonly
+[[ $RFRC == 0 && "$(jq -r .state <<<"$RSTAT")" == "done" && "$(jq -r .message <<<"$RSTAT")" == *"Nothing changed"* && "$(jq -r .pr <<<"$RSTAT")" == null ]] && ! grep -q "pr create" "$RW/gh-calls" 2>/dev/null; check "refresh: only the date moved = nothing to review, no PR" $?
+refresh badlint
+[[ $RFRC != 0 && "$(jq -r .state <<<"$RSTAT")" == failed && "$(jq -r .message <<<"$RSTAT")" == *"quality gate"* ]]; check "refresh: a pack that fails the quality gate is not pushed" $?
+refresh ok 1
+[[ $RFRC != 0 && "$(jq -r .state <<<"$RSTAT")" == failed && "$(jq -r .message <<<"$RSTAT")" == *"Claude stopped (exit 3)"* ]]; check "refresh: a failing claude is reported" $?
+
 echo "team workers"
 for bad in "worker-add" "worker-add ../x" "worker-add -x" "worker-add .x" "worker-add a b" "worker-set a" \
   "worker-set a color" "worker-remove" "worker-remove a/b" "worker-list extra" "worker-runs" "worker-login-start" \
