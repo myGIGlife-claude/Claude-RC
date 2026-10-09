@@ -36,6 +36,7 @@ import life.mygig.clauderc.api.ChatTask
 import life.mygig.clauderc.api.ChatWorker
 import life.mygig.clauderc.api.ChatHost
 import life.mygig.clauderc.api.Host
+import life.mygig.clauderc.api.KnowledgeRefresh
 import life.mygig.clauderc.api.HostHardenResult
 import life.mygig.clauderc.api.HostKey
 import life.mygig.clauderc.api.HostProbe
@@ -867,6 +868,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 else -> hostMessage(it)
             }
         }) { _hostHarden.value = api.hostHarden(name, ports, steps) }
+    }
+    /** Developer knowledge: the monthly refresh (switch, run now, last result). */
+    private val _knowledgeRefresh = MutableStateFlow<KnowledgeRefresh?>(null)
+    val knowledgeRefresh = _knowledgeRefresh.asStateFlow()
+    private var knowledgePoller: Job? = null
+    fun loadKnowledgeRefresh() = action("Loading…") { _knowledgeRefresh.value = api.knowledgeStatus(); pollKnowledge() }
+    fun setKnowledgeSchedule(on: Boolean) = action("Saving…") { _knowledgeRefresh.value = api.knowledgeSchedule(on) }
+    fun startKnowledgeRefresh() = action("Starting the refresh…") {
+        api.knowledgeRefresh()
+        _knowledgeRefresh.value = api.knowledgeStatus()
+        pollKnowledge()
+    }
+    /** While a refresh runs (it takes a while), look again every few seconds. */
+    private fun pollKnowledge() {
+        if (_knowledgeRefresh.value?.running != true || knowledgePoller?.isActive == true) return
+        knowledgePoller = viewModelScope.launch {
+            var left = 3_000   // 5 s each: a little over 4 hours
+            while (left-- > 0 && _knowledgeRefresh.value?.running == true) {
+                delay(5_000)
+                runCatching { api.knowledgeStatus() }.getOrNull()?.let { _knowledgeRefresh.value = it }
+            }
+        }
     }
     /** "Download key": the host's private key held in memory just long enough to be written to the file the owner picks. */
     class HostKeyFile(val name: String, val bytes: ByteArray, val hint: String)

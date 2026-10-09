@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=45
+SCRIPT_API=46
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 CLAUDERC_API="${CLAUDERC_API:-https://api.github.com}"
@@ -2971,26 +2971,29 @@ drive_schedule_state() {
   if command -v crontab >/dev/null 2>&1 && crontab -l 2>/dev/null | grep -qF -- "$DRIVE_CRON_MARK"; then echo daily; else echo off; fi
 }
 
-# drive_cron_set on|off: exactly one marked line in the user's crontab, or none. Leaves every other line alone.
-drive_cron_set() {
-  local cur rest line n
+# cron_line_set <mark> on|off <line>: exactly one marked line in the user's crontab (the given line for "on"), or none. Leaves every other line alone.
+cron_line_set() {
+  local mark="$1" want="$2" line="${3:-}" cur rest n
   if ! cur="$(crontab -l 2>&1)"; then
     # Only "no crontab" means empty; any other failure must not end with our line replacing the owner's crontab.
     grep -qi 'no crontab' <<<"$cur" && cur="" || api_err internal "Couldn't read your crontab, so the schedule was not changed: ${cur:0:150}"
   fi
-  n="$(grep -cF -- "$DRIVE_CRON_MARK" <<<"$cur" || true)"
-  if [[ "$1" == off ]]; then
+  n="$(grep -cF -- "$mark" <<<"$cur" || true)"
+  if [[ "$want" == off ]]; then
     ((n == 0)) && return 0
   else
     ((n == 1)) && return 0
   fi
-  rest="$(grep -vF -- "$DRIVE_CRON_MARK" <<<"$cur" || true)"
-  if [[ "$1" == on ]]; then
-    # A quiet hour; the minute spreads servers out.
-    line="$((RANDOM % 60)) 3 * * * '$SCRIPT_PATH' --drive-backup-run >/dev/null 2>&1 $DRIVE_CRON_MARK"
+  rest="$(grep -vF -- "$mark" <<<"$cur" || true)"
+  if [[ "$want" == on ]]; then
     if [[ -n "$rest" ]]; then rest+=$'\n'"$line"; else rest="$line"; fi
   fi
   printf '%s\n' "$rest" | crontab -
+}
+
+# drive_cron_set on|off: the daily backup line (a quiet hour; the minute spreads servers out).
+drive_cron_set() {
+  cron_line_set "$DRIVE_CRON_MARK" "$1" "$((RANDOM % 60)) 3 * * * '$SCRIPT_PATH' --drive-backup-run >/dev/null 2>&1 $DRIVE_CRON_MARK"
 }
 
 # drive_status_write <state> <phase> <percent|null> <message>: the run's progress for drive-backup-status.
@@ -3291,6 +3294,50 @@ do_drive_schedule() {
     drive_cron_set off || api_err internal "Couldn't update your crontab."
   fi
   api_ok "$(jq -cn --arg s "$(drive_schedule_state)" '{schedule:$s}')"
+}
+
+# ---- Developer knowledge pack: monthly refresh (docs: server/knowledge/README.md) ----
+KNOWLEDGE_CRON_MARK="# clauderc-knowledge-refresh"
+KNOWLEDGE_BIN="$HOME/.local/bin/clauderc-knowledge-refresh"
+KNOWLEDGE_RSTATE="${XDG_STATE_HOME:-$HOME/.local/state}/claude-launcher"
+
+knowledge_running() { [[ -f "$KNOWLEDGE_RSTATE/knowledge-refresh.lock" ]] && ! ( flock -n 9 ) 9>"$KNOWLEDGE_RSTATE/knowledge-refresh.lock" 2>/dev/null; }
+
+# knowledge-status: {installed, schedule: monthly|off, running, last: {state,message,pr,started,finished}|null}
+do_knowledge_status() {
+  [[ $# -eq 0 ]] || bad_args "knowledge-status takes no arguments"
+  local sched=off last=null
+  command -v crontab >/dev/null 2>&1 && crontab -l 2>/dev/null | grep -qF -- "$KNOWLEDGE_CRON_MARK" && sched=monthly
+  [[ -f "$KNOWLEDGE_RSTATE/knowledge-refresh.json" ]] && last="$(jq -c . "$KNOWLEDGE_RSTATE/knowledge-refresh.json" 2>/dev/null || echo null)"
+  api_ok "$(jq -cn --argjson i "$([[ -x "$KNOWLEDGE_BIN" ]] && echo true || echo false)" --arg s "$sched" --argjson r "$(knowledge_running && echo true || echo false)" \
+    --argjson l "${last:-null}" '{installed:$i, schedule:$s, running:$r, last:$l}')"
+}
+
+# knowledge-schedule on|off: on the 1st of every month at a quiet hour the refresh opens a pull request (never merges). "on" spends model usage and
+# runs a model with web access on this server, so like the other such actions it needs ALLOW_RUN=1.
+do_knowledge_schedule() {
+  [[ $# -eq 1 && ( "$1" == on || "$1" == off ) ]] || bad_args "usage: knowledge-schedule on|off"
+  if [[ "$1" == on ]]; then
+    migrate_need_run
+    need crontab
+    [[ -x "$KNOWLEDGE_BIN" ]] || api_err not_configured "The refresh tool isn't installed: run Update now."
+    [[ "$KNOWLEDGE_BIN" =~ ^/[A-Za-z0-9._/-]+$ ]] || api_err internal "The tool's path can't go in a crontab line."
+    cron_line_set "$KNOWLEDGE_CRON_MARK" on "$((RANDOM % 60)) 4 1 * * env PATH='$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin' '$KNOWLEDGE_BIN' >/dev/null 2>&1 $KNOWLEDGE_CRON_MARK" ||
+      api_err internal "Couldn't update your crontab."
+  elif command -v crontab >/dev/null 2>&1; then
+    cron_line_set "$KNOWLEDGE_CRON_MARK" off || api_err internal "Couldn't update your crontab."
+  fi
+  do_knowledge_status
+}
+
+# knowledge-refresh: start a refresh now (background; the app polls knowledge-status).
+do_knowledge_refresh() {
+  [[ $# -eq 0 ]] || bad_args "knowledge-refresh takes no arguments"
+  migrate_need_run
+  [[ -x "$KNOWLEDGE_BIN" ]] || api_err not_configured "The refresh tool isn't installed: run Update now."
+  if knowledge_running; then api_err busy "A refresh is already running."; fi
+  setsid env PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" "$KNOWLEDGE_BIN" </dev/null >/dev/null 2>&1 &
+  api_ok '{"started":true}'
 }
 
 # drive-logout: revoke at Google (best effort), forget the token, stop the schedule. The passphrase stays.
@@ -5050,6 +5097,9 @@ api_main() {
     host-test)           do_host_test "$@" ;;
     host-authorize)      do_host_authorize "$@" ;;
     host-key-export)     do_host_key_export "$@" ;;
+    knowledge-status)    do_knowledge_status "$@" ;;
+    knowledge-schedule)  do_knowledge_schedule "$@" ;;
+    knowledge-refresh)   do_knowledge_refresh "$@" ;;
     host-harden)         do_host_harden "$@" ;;
     host-remove)         do_host_remove "$@" ;;
     host-session)        do_host_session "$@" ;;

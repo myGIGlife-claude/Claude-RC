@@ -83,6 +83,8 @@ main() {
   put "$tmp/claude-push" "$HOME/.local/bin/claude-push"
   put "$tmp/claude-plugin-updates" "$HOME/.local/bin/claude-plugin-updates"
   put "$tmp/claude-backup" "$HOME/.local/bin/claude-backup"
+  curl -fsSL "$base/knowledge/refresh.sh" -o "$tmp/knowledge-refresh" && put "$tmp/knowledge-refresh" "$HOME/.local/bin/clauderc-knowledge-refresh" ||
+    echo "Note: the knowledge refresh tool wasn't installed." >&2
   install_knowledge "$base" "$tmp" || echo "Note: the developer knowledge pack wasn't updated." >&2
   if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
     printf '%s\n' "$sha" >"$HOME/.config/claude-launcher/installed-commit"

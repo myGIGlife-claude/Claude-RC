@@ -263,6 +263,9 @@ class LauncherApi(
         return call("host-harden $name", stdin = ports.joinToString(",") + "\n" + steps.joinToString(","), timeoutMs = 600_000)
     }
     suspend fun hostRemove(name: String): JsonObject { requireHost(name); return call("host-remove $name") }
+    suspend fun knowledgeStatus(): KnowledgeRefresh = call("knowledge-status")
+    suspend fun knowledgeSchedule(on: Boolean): KnowledgeRefresh = call("knowledge-schedule ${if (on) "on" else "off"}")
+    suspend fun knowledgeRefresh(): JsonObject = call("knowledge-refresh")
     /** The private key this server uses for the host (base64 in "private_key"), to use from another SSH program. Needs ALLOW_RUN on the server. */
     suspend fun hostKeyExport(name: String): JsonObject { requireHost(name); return call("host-key-export $name", timeoutMs = 60_000) }
     /** Adds the owner's own public key (one line) to that host account's authorized_keys; the key goes on stdin. */

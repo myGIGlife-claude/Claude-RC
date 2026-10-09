@@ -30,6 +30,13 @@ data class StatusData(
 @Serializable
 data class KnowledgePack(val version: String = "", val skills: Int = 0)
 
+/** The monthly refresh of the knowledge pack: whether the tool is installed, the schedule, a run in progress and the last result. */
+@Serializable
+data class KnowledgeRefresh(val installed: Boolean = false, val schedule: String = "off", val running: Boolean = false, val last: KnowledgeRun? = null)
+
+@Serializable
+data class KnowledgeRun(val state: String = "", val message: String = "", val pr: String? = null, val started: Long? = null, val finished: Long? = null)
+
 @Serializable
 data class ServiceStatus(
     val installed: Boolean = false,
