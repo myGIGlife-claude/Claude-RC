@@ -578,6 +578,29 @@ def allowed_tools(t):
     return ok[:20]
 
 
+def sync_skills(w):
+    """The developer knowledge pack (the owner's install keeps it in <config>/knowledge) as skills in a Claude worker's own config
+    folder, so workers code against the same current standards as the main session. Copied only when the pack's VERSION changed."""
+    src = CFG / "knowledge"
+    try:
+        ver = (src / "VERSION").read_text()
+    except OSError:
+        return
+    dst = w / "home" / "skills"
+    try:
+        if (dst / ".rc-version").read_text() == ver:
+            return
+    except OSError:
+        pass
+    dst.mkdir(parents=True, exist_ok=True)
+    for old in dst.glob("rc-*"):
+        shutil.rmtree(old, ignore_errors=True)
+    for d in (src / "skills").glob("rc-*"):
+        if d.is_dir():
+            shutil.copytree(d, dst / d.name)
+    (dst / ".rc-version").write_text(ver)
+
+
 def sandbox_mode():
     """auto (default): sandbox every worker run when bubblewrap works here, otherwise run as before; on: refuse to run without it; off."""
     m = os.environ.get("CLAUDERC_SANDBOX") or cluster_cfg()["sandbox"]
@@ -658,6 +681,8 @@ def launch(t):
     # file says the run really started, so wait can tell "Queued" from "Still running".
     k = kind(t["worker"])
     model = meta.get("model") if isinstance(meta.get("model"), str) and meta.get("model") else None
+    if k == "claude":
+        sync_skills(w)
     use_sb = sandbox_mode() != "off" and bwrap_ok()
     t["sandbox"] = "on" if use_sb else "off"
     if k == "codex":

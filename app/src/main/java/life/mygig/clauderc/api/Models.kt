@@ -23,7 +23,12 @@ data class StatusData(
     val keystores: List<String> = emptyList(),
     /** An App Store Connect API key is saved (iOS signing and uploads). */
     val apple: Boolean = false,
+    /** The developer knowledge pack installed for every session (null = none yet). */
+    val knowledge: KnowledgePack? = null,
 )
+
+@Serializable
+data class KnowledgePack(val version: String = "", val skills: Int = 0)
 
 @Serializable
 data class ServiceStatus(

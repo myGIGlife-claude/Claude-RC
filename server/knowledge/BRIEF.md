@@ -1,6 +1,6 @@
 # Developer knowledge pack: how each skill is written
 
-Each topic is one Claude skill: `knowledge/skills/rc-<topic>/SKILL.md` (+ optional `references/*.md`). RC installs the pack for every
+Each topic is one Claude skill: `server/knowledge/skills/rc-<topic>/SKILL.md` (+ optional `references/*.md`). RC installs the pack for every
 session and worker so they code against CURRENT standards instead of stale training data. Written October 2026; every fact is dated.
 
 ## Rules for the author (a research agent)

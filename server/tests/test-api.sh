@@ -790,6 +790,23 @@ OUT="$(HOME="$IH" PATH=/usr/local/bin:/usr/bin:/bin CLAUDERC_BASE="file://$SERVE
 [[ "$(cat "$IH/claude-setup.sh.bak")" == old ]]; check "install.sh backs up a changed claude-setup.sh" $?
 grep -q "^restrict,command=\"$IH/bin/claude-launcher-api\" ssh-ed25519 " "$IH/.ssh/authorized_keys"; check "install.sh authorizes the key" $?
 [[ "$OUT" == *"already set up"* && "$OUT" == *"Username: $(id -un)"* ]]; check "install.sh skips autostart and prints app details" $?
+# The developer knowledge pack: installed as Claude skills (rc-*) from a checksummed manifest; only rc-* folders are ever touched.
+SK="$IH/.claude/skills"; CANON="$IH/.config/claude-launcher/knowledge"
+[[ "$OUT" == *"developer knowledge pack"* && "$(ls -d "$SK"/rc-*/ | wc -l)" -ge 12 && -f "$SK/rc-go/SKILL.md" ]]; check "install.sh installs the knowledge pack as Claude skills" $?
+cmp -s "$SERVER/knowledge/VERSION" "$CANON/VERSION" && cmp -s "$SERVER/knowledge/skills/rc-go/SKILL.md" "$SK/rc-go/SKILL.md"; check "...exactly the files of the pack, plus a canonical copy and VERSION" $?
+mkdir -p "$SK/mine" "$SK/rc-dropped"; echo mine >"$SK/mine/SKILL.md"; echo old >"$SK/rc-dropped/SKILL.md"; echo stale >"$SK/rc-go/SKILL.md"
+OUT2="$(HOME="$IH" PATH=/usr/local/bin:/usr/bin:/bin CLAUDERC_BASE="file://$SERVER" bash -s <"$SERVER/install.sh" 2>&1)"
+[[ "$OUT2" == *"Installed the developer knowledge pack"* && "$(cat "$SK/mine/SKILL.md")" == mine && ! -e "$SK/rc-dropped" ]]; check "install.sh leaves other skills alone and removes dropped rc-* topics" $?
+cmp -s "$SERVER/knowledge/skills/rc-go/SKILL.md" "$SK/rc-go/SKILL.md"; check "...and refreshes a changed rc-* skill" $?
+rm -rf "$WORK/tampered"; cp -rL "$SERVER" "$WORK/tampered"; echo "tampered" >>"$WORK/tampered/knowledge/skills/rc-go/SKILL.md"
+cp "$SK/rc-java/SKILL.md" "$WORK/java-before"
+OUT3="$(HOME="$IH" PATH=/usr/local/bin:/usr/bin:/bin CLAUDERC_BASE="file://$WORK/tampered" bash -s <"$SERVER/install.sh" 2>&1)"
+[[ "$OUT3" == *"checksum mismatch"* && "$OUT3" == *"knowledge pack wasn't updated"* ]]; check "a file that doesn't match the manifest is refused" $?
+cmp -s "$SERVER/knowledge/skills/rc-go/SKILL.md" "$SK/rc-go/SKILL.md" && cmp -s "$WORK/java-before" "$SK/rc-java/SKILL.md"; check "...and the installed pack is left as it was" $?
+bash "$SERVER/knowledge/lint.sh" >/dev/null 2>"$WORK/lint.err"; check "knowledge pack passes its quality gate (format, sections, sources, nothing personal)" $?
+bash "$SERVER/knowledge/make-manifest.sh" --check >/dev/null 2>&1; check "knowledge MANIFEST is current" $?
+KS="$(HOME="$IH" "$IH/claude-setup.sh" --api status </dev/null 2>/dev/null | jq -c '.data.knowledge')"
+[[ "$(jq -r .skills <<<"$KS")" -ge 12 && "$(jq -r .version <<<"$KS")" == "$(head -n 1 "$SERVER/knowledge/VERSION")" ]]; check "status reports the installed pack (version and skill count)" $?
 
 echo "team workers"
 for bad in "worker-add" "worker-add ../x" "worker-add -x" "worker-add .x" "worker-add a b" "worker-set a" \
