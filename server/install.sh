@@ -12,6 +12,34 @@
 
 set -euo pipefail
 
+# The developer knowledge pack: skills (rc-*) every Claude session and worker loads, so they code against current standards.
+# Every file is checked against the manifest's sha256; a failure leaves the installed pack as it was and never breaks the update.
+install_knowledge() {  # <base url> <tmp dir>
+  local base="$1" k="$2/knowledge" sum path canon="$HOME/.config/claude-launcher/knowledge" skills="$HOME/.claude/skills" d n
+  mkdir -p "$k"
+  curl -fsSL --max-time 30 "$base/knowledge/MANIFEST" -o "$k/MANIFEST" 2>/dev/null || return 1   # (an older commit without a pack)
+  while read -r sum path; do
+    [[ "$sum" =~ ^[0-9a-f]{64}$ && "$path" =~ ^(VERSION|skills/rc-[a-z0-9-]{1,40}/(SKILL\.md|references/[a-z0-9._-]{1,60}\.md))$ ]] ||
+      { echo "knowledge pack: bad manifest line" >&2; return 1; }
+    mkdir -p "$k/$(dirname "$path")"
+    curl -fsSL --max-time 30 --max-filesize 400000 "$base/knowledge/$path" -o "$k/$path" 2>/dev/null || return 1
+    [[ "$(sha256sum "$k/$path" | cut -d' ' -f1)" == "$sum" ]] || { echo "knowledge pack: checksum mismatch for $path" >&2; return 1; }
+  done <"$k/MANIFEST"
+  [[ -f "$k/VERSION" ]] || return 1
+  mkdir -p "$HOME/.config/claude-launcher" "$skills"
+  rm -rf "$canon.new" "$canon.old"; mkdir -p "$canon.new"
+  cp -a "$k/skills" "$k/VERSION" "$k/MANIFEST" "$canon.new/" || return 1
+  [[ ! -d "$canon" ]] || mv "$canon" "$canon.old"
+  mv "$canon.new" "$canon"; rm -rf "$canon.old"
+  # Claude Code's user skills: only our rc-* folders are ever touched (topics that were dropped are removed).
+  for d in "$skills"/rc-*; do [[ -d "$d" && ! -d "$canon/skills/$(basename "$d")" ]] && rm -rf "$d"; done
+  for d in "$canon"/skills/rc-*; do
+    n="$(basename "$d")"; rm -rf "$skills/$n.new"
+    cp -a "$d" "$skills/$n.new" && rm -rf "${skills:?}/${n:?}" && mv "$skills/$n.new" "$skills/$n"
+  done
+  echo "Installed the developer knowledge pack ($(head -n 1 "$canon/VERSION"), $(find "$canon/skills" -maxdepth 1 -name 'rc-*' | wc -l) skills; restart sessions to load it)"
+}
+
 # Everything runs from main() so a half-downloaded script never runs.
 main() {
   local repo="myGIGlife-claude/Claude-RC" base sha="${CLAUDERC_COMMIT:-}"
@@ -55,6 +83,7 @@ main() {
   put "$tmp/claude-push" "$HOME/.local/bin/claude-push"
   put "$tmp/claude-plugin-updates" "$HOME/.local/bin/claude-plugin-updates"
   put "$tmp/claude-backup" "$HOME/.local/bin/claude-backup"
+  install_knowledge "$base" "$tmp" || echo "Note: the developer knowledge pack wasn't updated." >&2
   if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
     printf '%s\n' "$sha" >"$HOME/.config/claude-launcher/installed-commit"
   fi

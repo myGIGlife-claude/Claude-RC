@@ -741,12 +741,14 @@ do_status() {
     --argjson c "$claude_ok" --argjson g "$gh_ok" --arg gu "$gh_user" --argjson gm "$scopes" \
     --argjson a "$aws_ok" --argjson ai "$aws_json" --arg ap "${AWS_PROFILE_NAME:-default}" \
     --argjson sso "$(aws_sso_configured && echo true || echo false)" \
+    --argjson knowledge "$(kd="$LAUNCHER_CONFIG_DIR/knowledge"
+      if [[ -f "$kd/VERSION" ]]; then jq -cn --arg v "$(head -n 1 "$kd/VERSION")" --argjson n "$(find "$kd/skills" -maxdepth 1 -name 'rc-*' 2>/dev/null | wc -l)" '{version:$v, skills:$n}'; else echo null; fi)" \
     --arg host "$(hostname -s 2>/dev/null || hostname)" '{
       claude:{logged_in:$c},
       github:{logged_in:$g, user:(if $gu=="" then null else $gu end), missing_scopes:$gm},
       aws:{logged_in:$a, identity:$ai, profile:$ap, sso_configured:$sso},
       hostname:$host, services:$services, custom:$custom, keystores:$keystores, apple:$apple,
-      commit:(if $commit=="" then null else $commit end), script_api:$api, run_enabled:$run}')"
+      commit:(if $commit=="" then null else $commit end), script_api:$api, run_enabled:$run, knowledge:$knowledge}')"
 }
 
 # Extra services the phone can log in to. Each: installed, logged_in, detail.

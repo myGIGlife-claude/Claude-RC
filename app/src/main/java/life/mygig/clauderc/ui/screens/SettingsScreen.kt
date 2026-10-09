@@ -266,6 +266,19 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 SectionLabel("Backup")
                 DriveSection(vm)
             }
+            status?.knowledge?.let { k ->
+                SectionLabel("Developer knowledge")
+                CardBox {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("${k.skills} skills for every Claude session and worker", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "Current standards and what changed lately for web, PHP, JavaScript/TypeScript, Node, Python, Go, Java, Android, iOS and UI/UX. " +
+                                "Version ${k.version}. Update now refreshes it; restart sessions to load it.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
             SectionLabel("Servers")
             CardBox {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

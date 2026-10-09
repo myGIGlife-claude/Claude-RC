@@ -650,6 +650,26 @@ os.kill(d["pid"], 9); time.sleep(0.5)                              # the run die
 err, tid = tool("delegate", worker="writer1", task="room again after a dead run")
 assert not err, tid
 tool("wait", task_id=tid, timeout_s=30); tool("discard", task_id=tid); tool("discard", task_id=dead)
+# ---- the developer knowledge pack: a Claude worker gets the owner's rc-* skills in its own config folder (copied when VERSION changes) ----
+kp = tmp / "cfg" / "claude-launcher" / "knowledge"; (kp / "skills" / "rc-demo").mkdir(parents=True)
+(kp / "VERSION").write_text("2026-10-09\n"); (kp / "skills" / "rc-demo" / "SKILL.md").write_text("---\nname: rc-demo\ndescription: demo\n---\nv1\n")
+attach(repo, {"writer1": {}})   # (the server reads the attach file on every call)
+wsk = cfg / "writer1" / "home" / "skills"
+(wsk / "mine").mkdir(parents=True); (wsk / "mine" / "SKILL.md").write_text("mine\n"); (wsk / "rc-old").mkdir(); (wsk / "rc-old" / "SKILL.md").write_text("old\n")
+err, tid = tool("delegate", worker="writer1", task="fresh sync 1"); assert not err, tid
+tool("wait", task_id=tid, timeout_s=30); tool("discard", task_id=tid)
+assert (wsk / "rc-demo" / "SKILL.md").read_text().endswith("v1\n") and (wsk / ".rc-version").read_text() == "2026-10-09\n", "the worker got the pack"
+assert (wsk / "mine" / "SKILL.md").read_text() == "mine\n" and not (wsk / "rc-old").exists(), "its own skills stay, stale rc-* are removed"
+(kp / "skills" / "rc-demo" / "SKILL.md").write_text("---\nname: rc-demo\ndescription: demo\n---\nv2\n")
+err, tid = tool("delegate", worker="writer1", task="fresh sync 2")
+tool("wait", task_id=tid, timeout_s=30); tool("discard", task_id=tid)
+assert (wsk / "rc-demo" / "SKILL.md").read_text().endswith("v1\n"), "same VERSION: not copied again"
+(kp / "VERSION").write_text("2026-11-01\n")
+err, tid = tool("delegate", worker="writer1", task="fresh sync 3")
+tool("wait", task_id=tid, timeout_s=30); tool("discard", task_id=tid)
+assert (wsk / "rc-demo" / "SKILL.md").read_text().endswith("v2\n") and (wsk / ".rc-version").read_text() == "2026-11-01\n", "a new VERSION refreshes it"
+import shutil; shutil.rmtree(kp)
+
 proc.stdin.close()
 proc.wait(timeout=5)
 # ---- the worker sandbox (bubblewrap): what the argv grants, and (when bwrap works here) what a run can really see ----
