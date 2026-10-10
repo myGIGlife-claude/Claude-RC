@@ -12,30 +12,32 @@ Process and non-web surfaces. Web recipes (headers, CSP, cookies, CSRF, XSS, SSR
 ## Currency check
 - **OWASP ASVS 5.0.0** (2025-05-30): ~350 requirements, 17 chapters, levels L1-L3; requirement IDs changed from 4.0.3, so old mappings break.
 - **OWASP MASVS 2.1.0** (2024-01-18) still current, added MASVS-PRIVACY. **MASTG 2.0.0** (2026-06-30): modular atomic tests linked to
-  **MASWE** weaknesses (MASWE 1.0 2026-08, vendor source). MASVS v2 dropped L1/L2/R levels: use MAS testing profiles.
-- **OWASP SAMM 2.1.0** (2024-09-18). **NIST SSDF** SP 800-218 v1.1 + SP 800-218A (generative AI profile). NIST CSF 2.0 (2024-02).
+  **MASWE** weaknesses (MASWE 1.0.0 2026-08-17). MASVS v2 dropped L1/L2/R levels: use MAS testing profiles.
+- **OWASP SAMM 2.2.0** (2026-07-06; 2.1.0 was 2024-09-18). **NIST SSDF** SP 800-218 v1.1 + SP 800-218A (generative AI profile). NIST CSF 2.0 (2024-02).
 - **OWASP Top 10 for LLM Apps 2025** (LLM01 Prompt Injection ... LLM10 Unbounded Consumption) and **OWASP Top 10 for Agentic
   Applications 2026** (released 2025-12-09: ASI01 Agent Goal Hijack, ASI02 Tool Misuse, ASI03 Identity and Privilege Abuse, ...).
-- **Post-quantum**: FIPS 203 ML-KEM, 204 ML-DSA, 205 SLH-DSA final 2024-08-13. FIPS 206 FN-DSA (Falcon) still not final; HQC selected
-  2025-03 as backup KEM (draft FIPS 207 expected, unverified). NIST IR 8547 (deprecate 112-bit RSA/ECC after 2030, disallow after 2035)
-  is still an **initial public draft** on csrc.nist.gov as of 2026-10.
-- **Hybrid TLS key exchange X25519MLKEM768 is the default** in OpenSSL 3.5 (2025-04-08, an LTS), Go 1.24+, Chrome 131+,
-  and iOS/macOS 26 (URLSession and Network.framework). CryptoKit on 26 adds ML-KEM, ML-DSA and X-Wing HPKE. JDK 24 adds ML-KEM/ML-DSA APIs.
+- **Post-quantum**: FIPS 203 ML-KEM, 204 ML-DSA, 205 SLH-DSA final 2024-08-13. FIPS 206 FN-DSA (Falcon) not final (no FIPS 206 on the
+  csrc FIPS list, 2026-10); HQC selected 2025-03-11 as backup KEM (NIST: draft ~1 year later, final 2027). NIST IR 8547 (deprecate 112-bit
+  RSA/ECC after 2030, disallow after 2035) is still the 2024-11-12 **initial public draft** on csrc.nist.gov as of 2026-10.
+- **Hybrid TLS key exchange X25519MLKEM768 is on by default** in OpenSSL 3.5 (2025-04-08, an LTS), Go 1.24+ (when `CurvePreferences` is nil;
+  `GODEBUG=tlsmlkem=0` reverts), Chrome 131+, and all TLS 1.3 on iOS/macOS 26. CryptoKit on 26 adds ML-KEM, ML-DSA and X-Wing HPKE.
+  JDK 24 (2025-03-18) adds ML-KEM/ML-DSA (JEP 496/497).
 - **Vuln data**: CVSS 4.0 (2023-11). EPSS v4 (2025-03-17). CISA KEV is the "exploited in the wild" list. The CVE program survived the
-  2025 funding scare (CISA funding moved to a protected budget line, 2026-01). NVD enrichment backlog persists: don't depend on NVD CVSS alone.
-- **SBOM**: CISA "2026 Minimum Elements for an SBOM" (2026-07) replaced the 2021 NTIA list; adds component hash, license, tool, generation context.
+  2025 funding scare (CISA/MITRE contract renegotiated, reported 2026-03; budget details unconfirmed). NVD enrichment backlog persists: don't depend on NVD CVSS alone.
+- **SBOM**: CISA "2026 Minimum Elements for an SBOM" (2026-07, guidance, not a legal requirement) replaced the 2021 NTIA list; adds component hash, license, tool, generation context.
 - **EU Cyber Resilience Act**: actively exploited vulns and severe incidents in products sold in the EU must be reported via ENISA's
   Single Reporting Platform from **2026-09-11** (24 h early warning, 72 h notification); full obligations (SBOM, security updates,
-  vulnerability handling) from **2027-12-11**. Open-source stewards have lighter duties.
-- **EU AI Act**: Digital Omnibus on AI in force 2026-07-27: Annex III high-risk duties moved to 2027-12-02; Art. 50 transparency (tell users
+  vulnerability handling) from **2027-12-11**. Open-source stewards have lighter duties (reporting from 2027-12-11).
+- **EU AI Act**: Digital Omnibus on AI (Reg. (EU) 2026/1744, per law-firm reports) in force 2026-07-27: Annex III high-risk duties moved to 2027-12-02, Annex I to 2028-08-02; Art. 50 transparency (tell users
   they're talking to AI, label synthetic content) still from 2026-08-02.
 - **Privacy law**: COPPA amended rule full compliance **2026-04-22** (separate parental consent for third-party disclosure/ads, written
   retention limits, written security program). California CPPA rules effective 2026-01-01 (risk assessments now; ADMT duties 2027-01-01;
-  cybersecurity audits phased). UK Data (Use and Access) Act 2025: DSAR search only "reasonable and proportionate"; mandatory complaints
+  cybersecurity audit certifications 2028-04-01 to 2030-04-01 by revenue). UK Data (Use and Access) Act 2025: DSAR search only "reasonable and proportionate"; mandatory complaints
   procedure from 2026-06-19. HIPAA Security Rule overhaul still a **proposal** (NPRM 2025-01-06; final targeted 2027, unverified):
   the current rule applies. PCI DSS 4.0.1: all future-dated requirements mandatory since 2025-03-31 (incl. 6.4.3/11.6.1 payment-page scripts).
 - **Android 17** (stable 2026-06): `usesCleartextTraffic` slated for deprecation (use network security config), per-app Keystore key cap
-  (50,000 when targeting 17), cross-profile loopback blocked, SMS OTP held 3 h from unverified apps; implicit URI grants for SEND/IMAGE_CAPTURE end in Android 18.
+  (50,000 when targeting 17, else 200,000), cross-profile loopback blocked, OTP SMS withheld from most apps for 3 h (use SMS Retriever/User
+  Consent); implicit URI grants for SEND/SEND_MULTIPLE/IMAGE_CAPTURE end in Android 18 (set `FLAG_GRANT_*_URI_PERMISSION`).
   Android 16: built-in intent-redirection protection. **Play Integrity**: standard requests, `appAccessRiskVerdict`, `recentDeviceActivity`,
   `deviceRecall` (beta); SafetyNet Attestation is gone.
 
@@ -43,7 +45,7 @@ Process and non-web surfaces. Web recipes (headers, CSP, cookies, CSRF, XSS, SSR
 - ASVS 4.0.3 projects: keep the old IDs in existing reports; map new work to 5.0 and note the mapping. Don't rewrite past audits.
 - OpenSSL 3.0/3.2 (still on many LTS distros): no ML-KEM; hybrid PQ needs the oqs-provider or a newer TLS terminator (proxy/CDN). Don't
   upgrade the OS crypto stack inside an unrelated task.
-- Android below 13: `MEETS_STRONG_INTEGRITY` does not imply recent patches; check `sdkVersion`. iOS below 26: no PQ TLS or CryptoKit ML-KEM.
+- Android 12 and lower: `MEETS_STRONG_INTEGRITY` does not imply recent patches; opt in to device attributes and check `sdkVersion`. iOS below 26: no PQ TLS or CryptoKit ML-KEM.
 - PCI DSS 3.2.1 is retired (2024-03-31); any "PCI 3.2.1 compliant" claim is stale.
 
 ## What changed / stop doing
@@ -59,8 +61,8 @@ Process and non-web surfaces. Web recipes (headers, CSP, cookies, CSRF, XSS, SSR
 | Patch by CVSS score alone | KEV first, then EPSS + reachability + exposure; CVSS as severity input | EPSS v4, 2025 |
 | "We're too small to be targeted" | Attacks are automated (credential stuffing, exposed keys, worm-style supply chain); small = easy | - |
 | Root/jailbreak detection as a security control | Server-side attestation (Play Integrity, App Attest) as one risk signal; never sole gate | - |
-| SafetyNet Attestation | Play Integrity API (standard requests) | SafetyNet off 2025 (unverified exact date) |
-| `EncryptedSharedPreferences` | Keystore AES-GCM key + DataStore (or Tink) | security-crypto deprecated 2025 |
+| SafetyNet Attestation | Play Integrity API (standard requests) | SafetyNet fully turned down 2025-01 |
+| `EncryptedSharedPreferences` | Keystore AES-GCM key + DataStore (or Tink) | security-crypto 1.1.0 (2025-07-30) deprecates all APIs |
 | Static long-lived cloud keys in CI and apps | OIDC workload identity, short-lived STS tokens, IMDSv2 | - |
 | Log everything incl. request bodies | Allow-list fields; redact tokens, passwords, PII; structured logs | - |
 | SBOM as a one-off PDF | Machine-readable CycloneDX/SPDX per build + VEX for "not affected" | CISA 2026 elements |
@@ -157,7 +159,7 @@ Process and non-web surfaces. Web recipes (headers, CSP, cookies, CSRF, XSS, SSR
 - Never log: passwords, tokens, session ids, API keys, full card numbers (PCI), health data, raw request bodies. Redact at the logger, test it.
 - Detect: alert on auth failure spikes, impossible travel, new admin, MFA disabled, mass export, KEV hits on your SBOM, cloud root login.
   Ship logs off-host, append-only/retention-locked; retention per purpose (security logs often 90 days-1 year).
-- IR runbook (one page, NIST SP 800-61r3 / CSF 2.0 aligned, unverified rev date): roles (lead, comms, scribe), contacts (host, registrar,
+- IR runbook (one page, NIST SP 800-61r3 (2025-04, a CSF 2.0 profile) aligned): roles (lead, comms, scribe), contacts (host, registrar,
   payment processor, lawyer, insurer), severity levels, steps: detect -> contain (revoke keys, disable accounts, block) -> preserve evidence
   (snapshots, logs) -> eradicate -> recover -> notify -> post-incident review (blameless, tickets). Practice once a year (tabletop).
 - Notification clocks: GDPR authority 72 h from awareness; CRA 24 h/72 h; HIPAA individuals without unreasonable delay, max 60 days;
@@ -214,7 +216,7 @@ Process and non-web surfaces. Web recipes (headers, CSP, cookies, CSRF, XSS, SSR
   instructions. Prompt injection has no complete fix: limit what a hijacked model can DO.
 - Tools/agents: least privilege per tool and per user (the agent acts with the user's permissions, never a superuser token); allow-listed
   tools; human confirmation for irreversible or external side effects (send, pay, delete, merge, deploy); sandbox code execution
-  (no network/secrets by default); budget caps (tokens, calls, time) per user (LLM10/ASI08).
+  (no network/secrets by default); budget caps (tokens, calls, time) per user (LLM10); contain failures between agents (ASI08 Cascading Failures).
 - Data leakage: no secrets in system prompts (assume they leak, LLM07); RAG respects the caller's authz at retrieval time, per-tenant indexes
   or filters (LLM08); redact PII before sending to third-party models; check the provider's retention/training terms (DPA).
 - Output handling: model output is untrusted input to HTML, SQL, shell, file paths, URLs (LLM05); block markdown image/link exfiltration.
@@ -272,16 +274,20 @@ to notice any of these, and LLM agents with ambient permissions.
 - https://github.com/OWASP/ASVS/releases - ASVS 5.0.0, 2025-05-30 (accessed 2026-10-09)
 - https://github.com/OWASP/mastg/releases/tag/v2.0.0 - MASTG 2.0.0 (2026-10-09)
 - https://mas.owasp.org/MASVS/ - MASVS 2.1.0, MASVS-PRIVACY (2026-10-09)
-- https://www.nowsecure.com/blog/2026/08/18/owasp-maswe-hits-v1-0-nowsecure-platform-already-maps-to-it/ - MASWE 1.0 (vendor lead) (2026-10-09)
-- https://github.com/owaspsamm/core/releases/tag/v2.1.0 - SAMM 2.1.0, 2024-09-18 (2026-10-09)
+- https://github.com/OWASP/maswe/releases - MASWE 1.0.0, 2026-08-17 (2026-10-10)
+- https://github.com/owaspsamm/core/releases - SAMM 2.2.0 2026-07-06, 2.1.0 2024-09-18 (2026-10-10)
+- https://csrc.nist.gov/pubs/sp/800/61/r3/final - SP 800-61r3, 2025-04 (2026-10-10)
+- https://www.nist.gov/news-events/news/2025/03/nist-selects-hqc-fifth-algorithm-post-quantum-encryption - HQC, 2025-03-11 (2026-10-10)
+- https://go.dev/doc/go1.24 , https://openjdk.org/projects/jdk/24/ , https://security.googleblog.com/2024/09/a-new-path-for-kyber-on-web.html - PQ TLS/API defaults (2026-10-10)
+- https://developer.android.com/training/safetynet/attestation , https://developer.android.com/jetpack/androidx/releases/security - SafetyNet off 2025-01; security-crypto deprecated (2026-10-10)
 - https://csrc.nist.gov/projects/ssdf - SSDF 1.1, SP 800-218A (2026-10-09)
-- https://genai.owasp.org/llm-top-10/ - LLM Top 10 2025; https://genai.owasp.org/ - Agentic Top 10 2026 (date from secondary reports) (2026-10-09)
+- https://genai.owasp.org/llm-top-10/ - LLM Top 10 2025; https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/ - Agentic Top 10, 2025-12-09 (2026-10-10)
 - https://csrc.nist.gov/pubs/fips/203/final (and /204, /205) - PQC standards 2024-08-13 (2026-10-09)
 - https://csrc.nist.gov/pubs/ir/8547/ipd - IR 8547 still initial public draft (2026-10-09)
 - https://openssl-library.org/news/openssl-3.5-notes/ - OpenSSL 3.5 PQC, default hybrid keyshare (2026-10-09)
 - https://support.apple.com/en-us/122756 - iOS/macOS 26 X25519MLKEM768 by default (2026-10-09)
 - https://www.first.org/epss/ - EPSS v4 2025-03-17; https://www.cisa.gov/known-exploited-vulnerabilities-catalog - KEV (2026-10-09)
-- https://www.csoonline.com/article/4142600/cve-program-funding-secured-easing-fears-of-repeat-crisis.html - CVE funding (lead) (2026-10-09)
+- https://www.csoonline.com/article/4142600/cve-program-funding-secured-easing-fears-of-repeat-crisis.html - CVE contract renegotiated 2026-03 (lead; budget line unconfirmed) (2026-10-10)
 - https://www.cisa.gov/sites/default/files/2026-07/2026_cisa_sbom_minimum_elements_508c.pdf - SBOM minimum elements 2026 (2026-10-09)
 - https://www.enisa.europa.eu/news/the-cra-single-reporting-platform-is-launched - CRA reporting from 2026-09-11 (2026-10-09)
 - https://www.orrick.com/en/Insights/2026/07/EU-AI-Act-Update-Digital-Omnibus-Finalizes-8-Compliance-Changes - AI Act omnibus dates (lead) (2026-10-09)
