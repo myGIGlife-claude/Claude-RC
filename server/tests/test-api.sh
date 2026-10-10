@@ -875,6 +875,23 @@ refresh badlint
 refresh ok 1
 [[ $RFRC != 0 && "$(jq -r .state <<<"$RSTAT")" == failed && "$(jq -r .message <<<"$RSTAT")" == *"Claude stopped (exit 3)"* ]]; check "refresh: a failing claude is reported" $?
 
+# ---- the evaluation set: valid scenarios, and the runner's scoring (stub claude answers differently with and without skills) ----
+EV="$SERVER/knowledge/evals"
+jq -e -s 'length >= 20 and all(.[]; (.id | test("^[a-z0-9-]+$")) and (.skill | startswith("rc-")) and (.prompt | length > 20) and (.must | type == "array") and (.must_not | type == "array"))' "$EV/scenarios.jsonl" >/dev/null; check "evals: scenarios.jsonl is valid (ids, skills, prompts, checks)" $?
+BADRE=0; while IFS= read -r re; do grep -Eq -- "$re" </dev/null; [[ $? -le 1 ]] || BADRE=1; done < <(jq -r '.must[], .must_not[]' "$EV/scenarios.jsonl"); [[ $BADRE == 0 ]]; check "evals: every check is a valid regular expression" $?
+[[ "$(jq -r .skill "$EV/scenarios.jsonl" | sort -u | while read -r sk; do [[ -d "$SERVER/knowledge/skills/$sk" ]] || echo missing; done | wc -l)" == 0 ]]; check "evals: every scenario points at an existing skill" $?
+mkdir -p "$WORK/evbin"
+cat >"$WORK/evbin/claude" <<'STUB'
+#!/usr/bin/env bash
+# stub claude -p for the eval runner: a modern answer with skills, an outdated one without (--disable-slash-commands)
+if [[ " $* " == *" --disable-slash-commands "* ]]; then printf '{ "compilerOptions": { "moduleResolution": "node", "baseUrl": ".", "strict": true } }\n'
+else printf '{ "compilerOptions": { "module": "nodenext", "moduleResolution": "nodenext", "strict": true } }\n'; fi
+STUB
+chmod +x "$WORK/evbin/claude"
+EVOUT="$(PATH="$WORK/evbin:$PATH" bash "$EV/run-evals.sh" --only ts-tsconfig --out "$WORK/evout" 2>&1)"
+[[ "$EVOUT" == *"with the pack: 1/1 passed   without: 0/1 passed"* && "$EVOUT" == *"ts-tsconfig"* ]]; check "evals: the runner scores with-pack vs baseline (modern answer passes, outdated fails)" $?
+grep -q 'FAIL: has' "$WORK/evout/ts-tsconfig.without.1.result" && [[ "$(cat "$WORK/evout/ts-tsconfig.with.1.result")" == PASS ]]; check "evals: per-check results are kept with the answers" $?
+
 echo "team workers"
 for bad in "worker-add" "worker-add ../x" "worker-add -x" "worker-add .x" "worker-add a b" "worker-set a" \
   "worker-set a color" "worker-remove" "worker-remove a/b" "worker-list extra" "worker-runs" "worker-login-start" \
