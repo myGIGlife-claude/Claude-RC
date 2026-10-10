@@ -168,7 +168,12 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                     }
                     val st by vm.status.collectAsStateWithLifecycle()
                     var showCluster by remember { mutableStateOf(false) }
-                    if ((st?.scriptApi ?: 0) >= life.mygig.clauderc.api.Updates.MIN_SCRIPT_API && pinNeeded == null) {
+                    // Workers and hosts belong to a project: a general chat has none.
+                    val sessionList by vm.sessions.collectAsStateWithLifecycle()
+                    val generalChats by vm.general.chats.collectAsStateWithLifecycle()
+                    val general = session.startsWith("chat-") &&
+                        (sessionList.any { it.name == session && it.general } || generalChats.any { it.session == session })
+                    if (!general && (st?.scriptApi ?: 0) >= life.mygig.clauderc.api.Updates.MIN_SCRIPT_API && pinNeeded == null) {
                         TextButton(onClick = { showCluster = true; vm.team.loadChatWorkers(); vm.webHosts.loadChatHosts() }) { Text("👥", fontSize = 20.sp) }
                     }
                     if (showCluster) ChatClusterSheet(vm, onClose = { showCluster = false })

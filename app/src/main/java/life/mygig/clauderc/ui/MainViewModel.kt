@@ -55,6 +55,7 @@ import life.mygig.clauderc.ui.vm.DriveController
 import life.mygig.clauderc.ui.vm.HostsController
 import life.mygig.clauderc.ui.vm.KnowledgeController
 import life.mygig.clauderc.ui.vm.LoginsController
+import life.mygig.clauderc.ui.vm.GeneralChatsController
 import life.mygig.clauderc.ui.vm.PushController
 import life.mygig.clauderc.ui.vm.ServicesController
 import life.mygig.clauderc.ui.vm.TeamController
@@ -130,6 +131,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val drive = DriveController(api, tools)
     /** In-app chat: PIN, polling, pending messages, drafts, files. */
     val chats: ChatController = ChatController(app, api, tools) { team.clearChat(); webHosts.clearChatHosts() }
+    /** General chats (not tied to a repo): the Sessions screen's General chat tab. */
+    val general = GeneralChatsController(api, tools, { _status.value?.scriptApi }, { chats.openChat(it) }) { refreshSessions() }
     /** Team (extra Claude accounts), cluster settings and the open chat's workers. */
     val team: TeamController = TeamController(api, store, tools, { apiFor(it) }) { chats.chatSession.value }
     /** Hosts: web servers chats can work on (docs/hosts-design.md). */
@@ -298,7 +301,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Safe-restarts every session one by one; skips those where Claude is still working. */
     fun restartAll() = action("Restarting all sessions…") {
-        val names = api.sessions().sessions.map { it.name }
+        // General chats have their own tab (stop/open there); this restarts the Code chat list.
+        val names = api.sessions().sessions.filterNot { it.general }.map { it.name }
         val busy = mutableListOf<String>()
         var done = 0
         var waitingShown = false
@@ -713,6 +717,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         clonePollers.clear()
         // Another server: nothing from the old one may stay on screen or in use.
         connections.clearServerState()
+        general.clearServerState()
         chats.clearServerState()   // chat log, open chat, queued messages, drafts, PIN (session names repeat across servers)
     }
 
