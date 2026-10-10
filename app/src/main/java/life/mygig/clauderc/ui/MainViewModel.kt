@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.SystemClock
 import android.os.Environment
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import java.util.concurrent.atomic.AtomicLong
@@ -72,6 +73,10 @@ import life.mygig.clauderc.data.AppSettings
 import life.mygig.clauderc.data.ChatPinVault
 import life.mygig.clauderc.data.SettingsStore
 import life.mygig.clauderc.data.ThemeMode
+import life.mygig.clauderc.data.cached
+import life.mygig.clauderc.data.chatDraftsStore
+import life.mygig.clauderc.data.chatVoiceStore
+import life.mygig.clauderc.data.hostDraftStore
 import life.mygig.clauderc.ssh.HostKeyInfo
 import life.mygig.clauderc.ssh.SshKeyManager
 import life.mygig.clauderc.ssh.SshRunner
@@ -110,9 +115,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val keys = SshKeyManager(app)
     private val json = Json { ignoreUnknownKeys = true }
     private val api = LauncherApi(config = { store.current().toServerConfig() }, identity = { keys.identity() })
-    private val _pushReady = MutableStateFlow(Push.active(app))
+    private val _pushReady = MutableStateFlow(false)
     /** This phone is registered for instant alerts (the server has push set up). */
     val pushReady = _pushReady.asStateFlow()
+    init { viewModelScope.launch { _pushReady.value = Push.active(app) } }
 
     val settings: StateFlow<AppSettings?> =
         store.settings.stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -353,9 +359,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val queuedBySession = mutableMapOf<String, List<String>>()
 
     /** Half-typed chat messages, kept per session so leaving the chat or the app doesn't lose them. */
-    private val draftPrefs by lazy { getApplication<Application>().getSharedPreferences("chat_drafts", android.content.Context.MODE_PRIVATE) }
-    fun draft(session: String): String = draftPrefs.getString(session, "").orEmpty()
-    fun setDraft(session: String, text: String) = draftPrefs.edit().apply { if (text.isEmpty()) remove(session) else putString(session, text) }.apply()
+    private val draftPrefs = app.chatDraftsStore.cached()
+    fun draft(session: String): String = draftPrefs.get()[stringPreferencesKey(session)].orEmpty()
+    fun setDraft(session: String, text: String) = draftPrefs.edit { p ->
+        val k = stringPreferencesKey(session)
+        if (text.isEmpty()) { p.remove(k) } else { p[k] = text }
+    }
+    /** The chat's speaker switch: stays as the owner left it, across chats and app restarts. */
+    val voicePrefs = app.chatVoiceStore.cached()
     private var chatPoller: Job? = null
 
     /** Claude's full checkup in a session of its own, opened in the chat. */
@@ -591,7 +602,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Quietly (re)registers this phone; fails without a word when offline or the server has no push yet. */
     private fun setupPush() = viewModelScope.launch {
         val ctx = getApplication<Application>()
-        _pushReady.value = runCatching { Push.setup(ctx, api) }.getOrDefault(Push.active(ctx))
+        _pushReady.value = runCatching { Push.setup(ctx, api) }.getOrElse { Push.active(ctx) }
     }
 
     /** Saves the pasted Firebase key on the server (it registers the app itself), then registers this phone. */
@@ -802,25 +813,37 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun loadHosts() = action("Loading servers…") { _hosts.value = api.hostList().hosts }
     /** What the Add server dialog keeps on the phone while you go and fetch things elsewhere: no secrets, only the plain fields and the PUBLIC key. */
     data class HostDraft(val name: String = "", val address: String = "", val port: String = "22", val user: String = "", val auth: String = "key")
-    private val hostDraftPrefs by lazy { getApplication<Application>().getSharedPreferences("host_draft", android.content.Context.MODE_PRIVATE) }
-    fun hostDraft() = hostDraftPrefs.run {
-        HostDraft(getString("name", "").orEmpty(), getString("address", "").orEmpty(), getString("port", "22").orEmpty(), getString("user", "").orEmpty(), getString("auth", "key").orEmpty())
+    private val hostDraftPrefs = app.hostDraftStore.cached()
+    private object HD {
+        val NAME = stringPreferencesKey("name")
+        val ADDRESS = stringPreferencesKey("address")
+        val PORT = stringPreferencesKey("port")
+        val USER = stringPreferencesKey("user")
+        val AUTH = stringPreferencesKey("auth")
+        val KEY_NAME = stringPreferencesKey("key_name")
+        val KEY_PUB = stringPreferencesKey("key_pub")
+        val KEY_FP = stringPreferencesKey("key_fp")
     }
-    fun saveHostDraft(d: HostDraft) = hostDraftPrefs.edit().putString("name", d.name).putString("address", d.address).putString("port", d.port)
-        .putString("user", d.user).putString("auth", d.auth).apply()
+    fun hostDraft() = hostDraftPrefs.get().let { p ->
+        HostDraft(p[HD.NAME].orEmpty(), p[HD.ADDRESS].orEmpty(), p[HD.PORT] ?: "22", p[HD.USER].orEmpty(), p[HD.AUTH] ?: "key")
+    }
+    fun saveHostDraft(d: HostDraft) = hostDraftPrefs.edit { p ->
+        p[HD.NAME] = d.name; p[HD.ADDRESS] = d.address; p[HD.PORT] = d.port; p[HD.USER] = d.user; p[HD.AUTH] = d.auth
+    }
     private fun rememberHostKey(name: String, key: HostKey) {
         _hostKey.value = name to key
-        hostDraftPrefs.edit().putString("key_name", name).putString("key_pub", key.publicKey).putString("key_fp", key.fingerprint).apply()
+        hostDraftPrefs.edit { p -> p[HD.KEY_NAME] = name; p[HD.KEY_PUB] = key.publicKey; p[HD.KEY_FP] = key.fingerprint }
     }
     fun openHostAdd() {
         _hostProbe.value = null; _hostError.value = null; _hostAddOpen.value = true
         // The key made earlier is still waiting on the server (kept 24 h): show it again.
-        _hostKey.value = hostDraftPrefs.getString("key_name", null)?.let { n -> n to HostKey(hostDraftPrefs.getString("key_pub", "").orEmpty(), hostDraftPrefs.getString("key_fp", "").orEmpty()) }
+        val p = hostDraftPrefs.get()
+        _hostKey.value = p[HD.KEY_NAME]?.let { n -> n to HostKey(p[HD.KEY_PUB].orEmpty(), p[HD.KEY_FP].orEmpty()) }
     }
     /** [keepDraft]: tapping outside the dialog keeps what was typed; Cancel and a finished add clear it. */
     fun closeHostAdd(keepDraft: Boolean = false) {
         _hostAddOpen.value = false; _hostProbe.value = null; _hostError.value = null; _hostKey.value = null
-        if (!keepDraft) hostDraftPrefs.edit().clear().apply()
+        if (!keepDraft) hostDraftPrefs.edit { it.clear() }
     }
     fun clearHostKey() { _hostKey.value = null }
     fun generateHostKey(name: String) {
@@ -1281,7 +1304,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** False while the app is in the background: screens pause their refresh loops (battery, data). */
     fun setForeground(on: Boolean) {
         _foreground.value = on
-        if (on && !_pushReady.value) viewModelScope.launch { if (store.current().notify) setupPush() }   // retry after offline / locked starts
+        if (on && !_pushReady.value) viewModelScope.launch { if (store.current().notify && !Push.active(getApplication<Application>())) setupPush() }   // retry after offline / locked starts
     }
 
     private var statusJob: Job? = null
@@ -1693,7 +1716,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _detail.value = null
         closeChat()
         queuedBySession.clear()   // session names repeat across servers
-        draftPrefs.edit().clear().apply()
+        draftPrefs.edit { it.clear() }
         chatPin = null
         pinVault.clear()
     }
