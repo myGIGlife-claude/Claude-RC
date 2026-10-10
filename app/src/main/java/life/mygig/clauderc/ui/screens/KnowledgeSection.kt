@@ -24,10 +24,10 @@ import life.mygig.clauderc.ui.openUrl
 /** Developer knowledge pack: what is installed for every session, plus the monthly refresh (research + fact-check, ends in a pull request). */
 @Composable
 fun KnowledgeSection(vm: MainViewModel, pack: KnowledgePack, canRefresh: Boolean) {
-    val refresh by vm.knowledgeRefresh.collectAsStateWithLifecycle()
+    val refresh by vm.knowledge.knowledgeRefresh.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    LaunchedEffect(canRefresh) { if (canRefresh) vm.loadKnowledgeRefresh() }
+    LaunchedEffect(canRefresh) { if (canRefresh) vm.knowledge.loadKnowledgeRefresh() }
     CardBox {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("${pack.skills} skills for every Claude session and worker", style = MaterialTheme.typography.titleSmall)
@@ -46,9 +46,9 @@ fun KnowledgeSection(vm: MainViewModel, pack: KnowledgePack, canRefresh: Boolean
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Switch(checked = r.schedule == "monthly", onCheckedChange = { vm.setKnowledgeSchedule(it) }, enabled = busy == null)
+                    Switch(checked = r.schedule == "monthly", onCheckedChange = { vm.knowledge.setKnowledgeSchedule(it) }, enabled = busy == null)
                 }
-                OutlinedButton(onClick = { vm.startKnowledgeRefresh() }, enabled = busy == null && !r.running, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = { vm.knowledge.startKnowledgeRefresh() }, enabled = busy == null && !r.running, modifier = Modifier.fillMaxWidth()) {
                     Text(if (r.running) "Refreshing…" else "Refresh now")
                 }
                 r.last?.let { last ->

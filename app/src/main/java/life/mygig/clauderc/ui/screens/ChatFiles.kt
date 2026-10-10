@@ -90,7 +90,7 @@ private fun FileItem(vm: MainViewModel, path: String) {
     val image by produceState<Result<Bitmap>?>(null, path) {
         if (!isImage) return@produceState
         value = runCatching {
-            val bytes = vm.chatFileBytes(path)
+            val bytes = vm.chats.chatFileBytes(path)
             withContext(Dispatchers.Default) { decode(bytes, 1024) ?: error("not an image") }
         }
     }
@@ -110,8 +110,8 @@ private fun FileItem(vm: MainViewModel, path: String) {
             onClick = {
                 scope.launch {
                     working = true; note = null
-                    runCatching { vm.chatFileBytes(path) }
-                        .onSuccess { pending = it; vm.externalScreen(); save.launch(name) }
+                    runCatching { vm.chats.chatFileBytes(path) }
+                        .onSuccess { pending = it; vm.chats.externalScreen(); save.launch(name) }
                         .onFailure { note = "Couldn't get it: ${it.message}" }
                     working = false
                 }
@@ -128,7 +128,7 @@ private fun FileItem(vm: MainViewModel, path: String) {
 @Composable
 private fun ImageViewer(vm: MainViewModel, path: String, onClose: () -> Unit) {
     val bmp by produceState<Bitmap?>(null, path) {
-        value = runCatching { vm.chatFileBytes(path).let { withContext(Dispatchers.Default) { decode(it, 2560) } } }.getOrNull()
+        value = runCatching { vm.chats.chatFileBytes(path).let { withContext(Dispatchers.Default) { decode(it, 2560) } } }.getOrNull()
     }
     var scale by remember { mutableStateOf(1f) }
     var offsetX by remember { mutableStateOf(0f) }

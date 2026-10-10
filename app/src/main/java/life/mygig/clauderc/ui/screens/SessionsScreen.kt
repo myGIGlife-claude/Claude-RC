@@ -67,7 +67,7 @@ import life.mygig.clauderc.ui.theme.WarnAmber
 @Composable
 fun SessionsScreen(vm: MainViewModel) {
     val sessions by vm.sessions.collectAsStateWithLifecycle()
-    val pushReady by vm.pushReady.collectAsStateWithLifecycle()
+    val pushReady by vm.push.pushReady.collectAsStateWithLifecycle()
     val refreshing by vm.sessionsRefreshing.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -110,12 +110,12 @@ fun SessionsScreen(vm: MainViewModel) {
             items(sessions.sortedByDescending { it.waiting }, key = { it.name }) { s ->
                 SessionCard(
                     s,
-                    chat = { vm.openChat(s.name) },
+                    chat = { vm.chats.openChat(s.name) },
                     onOpen = { openInClaude(context) },
                     onLog = { vm.loadTail(s.name) },
                     onRestart = { confirmRestart = s },
                     onStop = { confirmStop = s },
-                    onPushDone = if (pushReady) { { vm.setSessionPush(s.name, !s.pushDone) } } else null,
+                    onPushDone = if (pushReady) { { vm.push.setSessionPush(s.name, !s.pushDone) } } else null,
                 )
             }
         }
