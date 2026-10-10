@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Does the knowledge pack change what a session writes? Each scenario in scenarios.jsonl is a realistic prompt plus OBJECTIVE checks
 # (regexes the answer must match / must not match). Every prompt runs twice with headless Claude and no tools except Skill:
-#   with    = the installed rc-* skills available (the model decides whether to load them, like a real session)
-#   without = skills disabled (--disable-slash-commands): the baseline
+#   with    = a clean config with only this pack (skills + the always-on rule that tells sessions to load them), like a real session
+#   without = a clean config with nothing: the baseline
 # Usage: run-evals.sh [--repeat N] [--only id,id] [--model NAME] [--out DIR]
-# "practice" scenarios test habits (modern idioms a good model often knows); "fresh" scenarios test facts that changed recently (where stale
-# training data is the risk). Results are indicative, not proof: models vary run to run (use --repeat 3 for a steadier number) and the checks are simple patterns.
+# "practice" = habits a good model often knows; "known" = recent facts the model usually already knows (a control); "postcutoff" = facts that
+# appeared after the model's knowledge cutoff (only a pack, or a web search, can supply them: the real test). Results are indicative, not proof: models vary run to run (use --repeat 3 for a steadier number) and the checks are simple patterns.
 set -uo pipefail
 cd "$(dirname "$(readlink -f "$0")")" || exit 1
 repeat=1 only="" model="${EVAL_MODEL:-sonnet}" out="${EVAL_OUT:-$(mktemp -d)}"
@@ -20,10 +20,19 @@ while (($#)); do
 done
 command -v claude >/dev/null && command -v jq >/dev/null || { echo "claude and jq are needed" >&2; exit 1; }
 mkdir -p "$out"; work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
+# Two CLEAN Claude config folders (no hooks, plugins, memory or other skills of the owner's): "with" gets only this pack (skills + the always-on
+# rule); "without" gets nothing. Both borrow the login (a copy of the credentials file, deleted at the end).
+cred="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json"
+[[ -f "$cred" ]] || { echo "no Claude login found at $cred" >&2; exit 1; }
+for m in with without; do
+  mkdir -p "$work/cfg-$m"; cp "$cred" "$work/cfg-$m/.credentials.json"; chmod 600 "$work/cfg-$m/.credentials.json"
+done
+mkdir -p "$work/cfg-with/skills" "$work/cfg-with/rules"
+cp -r ../skills/rc-* "$work/cfg-with/skills/" && cp ../rules/rc-knowledge.md "$work/cfg-with/rules/" || { echo "the pack (../skills, ../rules) is incomplete" >&2; exit 1; }
 ask() {  # <mode> <prompt> -> answer on stdout
-  local mode="$1" prompt="$2"
-  if [[ "$mode" == with ]]; then (cd "$work" && timeout 240 claude -p "$prompt" --model "$model" --output-format text --tools Skill </dev/null 2>/dev/null)
-  else (cd "$work" && timeout 240 claude -p "$prompt" --model "$model" --output-format text --tools "" --disable-slash-commands </dev/null 2>/dev/null); fi
+  local mode="$1" prompt="$2" tools="Skill"
+  [[ "$mode" == with ]] || tools=""
+  (cd "$work" && CLAUDE_CONFIG_DIR="$work/cfg-$mode" timeout 300 claude -p "$prompt" --model "$model" --output-format text --tools "$tools" </dev/null 2>/dev/null)
 }
 check() {  # <answer file> <scenario json> -> prints PASS or FAIL: reason
   local f="$1" j="$2" re

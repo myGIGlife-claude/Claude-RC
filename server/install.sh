@@ -19,7 +19,7 @@ install_knowledge() {  # <base url> <tmp dir>
   mkdir -p "$k"
   curl -fsSL --max-time 30 "$base/knowledge/MANIFEST" -o "$k/MANIFEST" 2>/dev/null || return 1   # (an older commit without a pack)
   while read -r sum path; do
-    [[ "$sum" =~ ^[0-9a-f]{64}$ && "$path" =~ ^(VERSION|skills/rc-[a-z0-9-]{1,40}/(SKILL\.md|references/[a-z0-9._-]{1,60}\.md))$ ]] ||
+    [[ "$sum" =~ ^[0-9a-f]{64}$ && "$path" =~ ^(VERSION|rules/rc-knowledge\.md|skills/rc-[a-z0-9-]{1,40}/(SKILL\.md|references/[a-z0-9._-]{1,60}\.md))$ ]] ||
       { echo "knowledge pack: bad manifest line" >&2; return 1; }
     mkdir -p "$k/$(dirname "$path")"
     curl -fsSL --max-time 30 --max-filesize 400000 "$base/knowledge/$path" -o "$k/$path" 2>/dev/null || return 1
@@ -29,6 +29,7 @@ install_knowledge() {  # <base url> <tmp dir>
   mkdir -p "$HOME/.config/claude-launcher" "$skills"
   rm -rf "$canon.new" "$canon.old"; mkdir -p "$canon.new"
   cp -a "$k/skills" "$k/VERSION" "$k/MANIFEST" "$canon.new/" || return 1
+  [[ ! -d "$k/rules" ]] || cp -a "$k/rules" "$canon.new/" || return 1
   [[ ! -d "$canon" ]] || mv "$canon" "$canon.old"
   mv "$canon.new" "$canon"; rm -rf "$canon.old"
   # Claude Code's user skills: only our rc-* folders are ever touched (topics that were dropped are removed).
@@ -37,6 +38,10 @@ install_knowledge() {  # <base url> <tmp dir>
     n="$(basename "$d")"; rm -rf "$skills/$n.new"
     cp -a "$d" "$skills/$n.new" && rm -rf "${skills:?}/${n:?}" && mv "$skills/$n.new" "$skills/$n"
   done
+  # The always-on rule that makes sessions load the skills (Claude Code reads ~/.claude/rules/*.md in every session).
+  if [[ -f "$canon/rules/rc-knowledge.md" ]]; then
+    mkdir -p "$HOME/.claude/rules" && cp -f "$canon/rules/rc-knowledge.md" "$HOME/.claude/rules/rc-knowledge.md.new" && mv -f "$HOME/.claude/rules/rc-knowledge.md.new" "$HOME/.claude/rules/rc-knowledge.md"
+  fi
   echo "Installed the developer knowledge pack ($(head -n 1 "$canon/VERSION"), $(find "$canon/skills" -maxdepth 1 -name 'rc-*' | wc -l) skills; restart sessions to load it)"
 }
 

@@ -10,3 +10,5 @@ Bash(bash server/tests/test-backup.sh:*)
 Bash(chmod +x:*)
 Bash(shellcheck:*)
 Bash(bash -n:*)
+WebSearch
+WebFetch

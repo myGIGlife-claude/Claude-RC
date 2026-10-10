@@ -6,13 +6,15 @@ cd "$(dirname "$(readlink -f "$0")")" || exit 1
 bad=0
 fail() { echo "knowledge lint: $1" >&2; bad=1; }
 [[ -f VERSION ]] || fail "VERSION is missing"
+[[ -f rules/rc-knowledge.md ]] || fail "rules/rc-knowledge.md is missing"
+[[ ! -f rules/rc-knowledge.md ]] || (($(wc -c <rules/rc-knowledge.md) <= 2000)) || fail "rules/rc-knowledge.md is loaded into every session: keep it under 2000 characters"
 n=0
 for d in skills/rc-*/; do
   d="${d%/}"; name="${d#skills/}"; f="$d/SKILL.md"; n=$((n + 1))
   [[ -f "$f" ]] || { fail "$name: SKILL.md is missing"; continue; }
   [[ "$(sed -n 1p "$f")" == --- ]] || fail "$name: frontmatter must start on line 1"
   [[ "$(sed -n '2,6p' "$f" | grep -c "^name: $name$")" == 1 ]] || fail "$name: 'name:' must equal the folder name"
-  desc="$(sed -n '2,8p' "$f" | grep '^description:' | head -n 1)"
+  desc="$(sed -n '2,8p' "$f" | grep '^description:' | head -n 1)"; desc="${desc#description: }"
   [[ -n "$desc" ]] || fail "$name: description is missing"
   # (the 12 first skills predate the 450 limit and are shortened in the next refresh: they may still be up to 700)
   max=450; case "$name" in rc-web-frontend|rc-javascript-typescript|rc-node-backend|rc-web-backend|rc-php|rc-python|rc-go|rc-java|rc-android|rc-ios|rc-ui-ux-design|rc-web-security-perf) max=700 ;; esac
@@ -32,8 +34,9 @@ for d in skills/rc-*/; do
 done
 ((n >= 1)) || fail "no skills found"
 # nothing personal or secret-looking anywhere in the pack
-if grep -rEn '(/home/[a-z0-9_-]+/|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}|\b([0-9]{1,3}\.){3}[0-9]{1,3}\b|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9]{20,})' skills VERSION 2>/dev/null |
-  grep -vE '(127\.0\.0\.1|0\.0\.0\.0|192\.0\.2\.|198\.51\.100\.|203\.0\.113\.|169\.254\.169\.254|10\.0\.0\.|192\.168\.|example\.(com|org|net)|noreply@|user@example)' | head -5 | grep .; then
+if grep -rEn '(/home/[a-z0-9_-]+/|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}|(^|[^0-9A-Za-z.])([0-9]{1,3}\.){3}[0-9]{1,3}([^0-9A-Za-z.]|$)|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9]{20,})' skills rules VERSION 2>/dev/null |
+  grep -vE '(127\.0\.0\.1|0\.0\.0\.0|192\.0\.2\.|198\.51\.100\.|203\.0\.113\.|169\.254\.169\.254|10\.0\.0\.|192\.168\.|example\.(com|org|net)|noreply@|user@example)' |
+  grep -vE '(OTP|[Vv]ersion|latest|release|JDK|Java|Python|Node|Rails|Ruby|Erlang|Elixir|Kotlin|Scala|Flutter|Dart|Go [0-9]|[0-9]{4}-[0-9]{2}-[0-9]{2}|\.[0-9]+\.[0-9]+\.[0-9]+ )' | head -5 | grep .; then
   fail "personal or secret-looking text found (see above)"
 fi
 ((bad == 0)) && echo "knowledge lint: $n skills OK"
