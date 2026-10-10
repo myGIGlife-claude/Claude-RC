@@ -14,14 +14,14 @@ release notes for the full list. Stable ships every 6 weeks; only the newest sta
 - `NumBuffer` + integer `format_into` (fast decimal formatting without `fmt`), `str::substr_range`, `slice::subslice_range`,
   `String::from_utf16le/be(_lossy)`, `strip_circumfix`, `Atomic*::from_mut`, `NonZero::from_str_radix`, `std::range::legacy`.
 
-## 1.97 (2026-07-09), patch 1.97.1
-- v0 symbol mangling is the default (legacy mangling nightly-only). Linker messages now shown as warnings.
+## 1.97 (2026-07-09), patch 1.97.1 (2026-07-16)
+- v0 symbol mangling is the default (legacy mangling nightly-only). Linker output now warns by default (`linker_messages`; release notes).
 - Integer `highest_one`, `lowest_one`, `isolate_*_one`, `bit_width`. Cargo: `CARGO_BUILD_WARNINGS` (allow/warn/deny) without cache invalidation.
 
-## 1.96 (2026-05-28), patch 1.96.1
+## 1.96 (2026-05-28), patch 1.96.1 (2026-06-30)
 - New `Copy` range types in `core::range` (RFC 3550): `Range`, `RangeFrom`, `RangeInclusive` implement `IntoIterator`, not `Iterator`.
   `a..b` syntax still makes the legacy types (an edition may switch it later).
-- `assert_matches!` / `debug_assert_matches!` (import from `std::assert_matches`, not in prelude).
+- `assert_matches!` / `debug_assert_matches!` (`use std::assert_matches;`, not in prelude).
 - wasm targets: `--allow-undefined` no longer passed; undefined symbols are link errors.
 - Cargo CVE-2026-5223 (tarball symlink extraction) and CVE-2026-5222 fixed; crates.io users were not affected.
 
@@ -30,11 +30,11 @@ release notes for the full list. Stable ships every 6 weeks; only the newest sta
 - `Vec::push_mut` / `insert_mut` (return `&mut T`), `VecDeque` / `LinkedList` `push_*_mut`, `Atomic*::update` / `try_update`,
   `hint::cold_path`, `bool: TryFrom<int>`. Custom JSON target specs removed from stable rustc.
 
-## 1.94 (2026-03-05), patch 1.94.1
+## 1.94 (2026-03-05), patch 1.94.1 (2026-03-26, Cargo CVE-2026-33056 in the `tar` crate)
 - `slice::array_windows`, `element_offset`, `LazyLock/LazyCell::get/get_mut/force_mut`, `Peekable::next_if_map`.
 - Cargo: `include` in `.cargo/config.toml`; TOML 1.1 in manifests (raises dev MSRV of the manifest; rewritten on publish).
 
-## 1.93 (2026-01-22), patch 1.93.1
+## 1.93 (2026-01-22), patch 1.93.1 (2026-02-12)
 - musl targets on musl 1.2.5. `String/Vec::into_raw_parts`, `slice::as_array`, `VecDeque::pop_front_if/pop_back_if`, `fmt::from_fn`,
   `MaybeUninit` slice helpers, `#[cfg]` on individual `asm!` lines.
 
@@ -79,4 +79,4 @@ release notes for the full list. Stable ships every 6 weeks; only the newest sta
 - `gen` blocks: nightly only (`#![feature(gen_blocks)]`), no stabilization date.
 - Next-generation trait solver and next borrow checker (Polonius line): enabled on nightly only (blog, 2026-08).
 - `cargo -Zscript` single-file packages and `build-dir-new-layout`: still unstable in the Cargo book.
-- Next edition: a 2027 edition is discussed (internals.rust-lang.org) but not announced (unverified).
+- Next edition: none announced on blog.rust-lang.org (checked 2026-10-10).

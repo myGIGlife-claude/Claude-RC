@@ -7,7 +7,7 @@ Names change often: check the console/docs before writing IaC. Rows marked (unve
 | Need | AWS | Azure | Google Cloud | Cloudflare | OVHcloud | IBM Cloud |
 |---|---|---|---|---|---|---|
 | VMs | EC2 | Virtual Machines | Compute Engine | - (Containers only) | VPS, Public Cloud Instances, Bare Metal | Virtual Servers for VPC, Bare Metal, Power Virtual Server |
-| Containers (no K8s) | ECS (Fargate), App Runner (unverified status), Lambda container images | Container Apps, App Service | Cloud Run (services + jobs) | Containers (GA 2026-04, Workers Paid) | Managed Kubernetes or VPS + Docker (no serverless containers, unverified) | Code Engine |
+| Containers (no K8s) | ECS (Fargate, Express Mode), Lambda container images (App Runner closed to new customers 2026-04-30) | Container Apps, App Service | Cloud Run (services + jobs) | Containers (GA 2026-04, Workers Paid) | Managed Kubernetes or VPS + Docker (no serverless containers, unverified) | Code Engine |
 | Kubernetes | EKS | AKS | GKE (Autopilot / Standard) | - | Managed Kubernetes Service (free control plane, unverified) | IKS, Red Hat OpenShift on IBM Cloud |
 | Serverless functions | Lambda | Functions (Flex Consumption) | Cloud Run functions (ex Cloud Functions) | Workers | none first-party (unverified) | Code Engine functions |
 | Object storage | S3 | Blob Storage | Cloud Storage | R2 | Object Storage (S3 API) | Cloud Object Storage |
@@ -39,15 +39,15 @@ Names change often: check the console/docs before writing IaC. Rows marked (unve
 | Queues | consumer 15 min wall | CPU 30 s default, 5 min max | 128 KB message, 5,000 msg/s per queue | Retention up to 14 days (24 h on Free). At-least-once: make consumers idempotent. |
 | R2 | - | - | - | $0.015/GB-month Standard, $0.01 IA (30-day minimum + $0.01/GB retrieval); **zero egress**; Class A $4.50/M, Class B $0.36/M; free 10 GB, 1 M A, 10 M B. S3-compatible API (not every S3 feature). |
 | Cloudflare Containers | - | lite 1/16 vCPU 256 MiB ... standard-4 4 vCPU 12 GiB 20 GB disk; custom types up to 4 vCPU | - | GA 2026-04-13 on Workers Paid; driven from a Worker/Durable Object; disk is ephemeral. |
-| Vercel Functions (Fluid compute) | 300 s default; Pro/Enterprise max 800 s (1,800 s beta) | per plan | 4.5 MB body (unverified) | Active CPU pricing: billed for CPU time, not I/O wait. |
+| Vercel Functions (Fluid compute) | 300 s default; Pro/Enterprise max 800 s (1,800 s beta) | per plan | 4.5 MB request/response body; 250 MB bundle (500 MB Python) | Active CPU pricing: billed for CPU time, not I/O wait. |
 
 ## Cloudflare product cheat sheet: can / cannot
 
 - **Workers**: request handlers at the edge, cron, queue consumers. Cannot: long CPU (>5 min), native modules, filesystem, listening sockets. Outbound TCP via `connect()`.
-- **Pages**: still works, but new full-stack projects go to **Workers with static assets** (Cloudflare steers there; Pages gets fewer features) (unverified wording).
+- **Pages**: still works, but prefer **Workers with static assets** for new full-stack projects: Cloudflare's migration guide says Workers has a broader feature set; static asset requests are free on both.
 - **R2**: object store, zero egress, presigned URLs, event notifications to Queues. Cannot: object-level ACLs like S3 (bucket public or token-scoped), Glacier-style tiers.
-- **D1**: small relational per-tenant/per-app DBs, Time Travel point-in-time restore (30 days on Paid, unverified). Cannot: big single DB, high write concurrency.
+- **D1**: small relational per-tenant/per-app DBs, Time Travel point-in-time restore (30 days Paid, 7 days Free). Cannot: big single DB, high write concurrency.
 - **KV**: read-heavy config, flags, cache. Cannot: counters, anything needing read-after-write across locations.
 - **Durable Objects**: per-entity state, WebSockets (hibernation API), rate limiters, rooms, locks, alarms. Design one object per entity, not one global object.
 - **Queues**: async jobs, batching, retries, DLQ. Cannot: >128 KB messages (store in R2, pass the key).
-- **Tunnel (cloudflared)**: publish a private service with no open inbound port; pair with **Access** (Zero Trust) for SSO in front of admin panels. Free Zero Trust plan covers small teams (50 users, unverified).
+- **Tunnel (cloudflared)**: publish a private service with no open inbound port; pair with **Access** (Zero Trust) for SSO in front of admin panels. Free Zero Trust plan covers teams under 50 users (paid $7/user/month).
