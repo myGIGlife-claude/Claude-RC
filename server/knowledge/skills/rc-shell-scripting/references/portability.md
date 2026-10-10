@@ -19,7 +19,7 @@ Items without a source in SKILL.md "Sources" are from long-standing tool behavio
 | Recursive grep | `grep -r` | `grep -r` | fine; prefer `rg` if installed, never require it |
 | find formatting | `find -printf '%s %p\n'` | not available | `find ... -exec stat ... {} +` or `-print0` + loop |
 | find null output | `-print0` | `-print0` | POSIX since Issue 8 |
-| xargs no-run-if-empty | `xargs -r` | default behaviour (`-r` accepted on newer BSD, unverified) | `find ... -exec cmd {} +` |
+| xargs no-run-if-empty | `xargs -r` | default behaviour (`-r` accepted on newer BSD, unverified) | `-r` is POSIX since Issue 8; else `find ... -exec cmd {} +` |
 | xargs parallel | `xargs -P N` | `xargs -P N` | ok |
 | Version sort | `sort -V` | supported on current macOS (unverified on old) | avoid or fall back to `sort -t. -k1,1n -k2,2n -k3,3n` |
 | Unique stable sort | `sort -u` | `sort -u` | ok |
@@ -47,7 +47,7 @@ Detect GNU: `if sed --version >/dev/null 2>&1; then gnu=1; fi`. On macOS, Homebr
 | Associative arrays | no | no | no | no | yes (4.0) | yes |
 | `local` | no (but common) | yes | yes | yes | yes | yes |
 | `$'...'` | Issue 8 | newer versions (unverified) | yes | yes | yes | yes |
-| `pipefail` | believed Issue 8 (unverified) | newer versions (unverified) | yes | yes | yes | yes |
+| `pipefail` | Issue 8 | upstream since 2024-04 (0.5.13?, unverified) | yes | yes | yes | yes |
 | `read -d` | Issue 8 | check | check | yes | yes | (`read -d`) yes |
 | `mapfile` | no | no | no | no | yes | no (use `${(f)"$(<f)"}`) |
 | `${v,,}` `${v^^}` | no | no | no | no | yes | `${(L)v}` `${(U)v}` |

@@ -1,6 +1,6 @@
 # Data and config formats: pitfalls (as of 2026-10)
 
-Versions: JSON Schema 2020-12 (current), YAML 1.2.2 (2021-10), TOML 1.1.0 (2025-12-24), js-yaml 5.4.3, `yaml` 2.9.1,
+Versions: JSON Schema 2020-12 (current), YAML 1.2.2 (2021-10), TOML 1.1.0 (2025-12-18), js-yaml 5.4.3, `yaml` 2.9.1,
 smol-toml 1.9.1, Ajv 8.20.0, `@bufbuild/protobuf` 2.16.0, msgpackr 2.1.0, cbor-x 1.6.6, papaparse 5.7.0, fast-xml-parser 5.11.2
 (npm/GitHub, checked 2026-10-09). Items marked (unverified) were not checked on a primary source.
 
@@ -28,7 +28,8 @@ diffing. After Brotli/gzip the size gap shrinks: measure before switching.
 - Dates: ISO 8601 / RFC 3339 strings with offset (`2026-10-09T12:00:00Z`); never locale strings or epoch-without-unit.
 - `JSON.stringify` drops `undefined`, functions, symbols; `Map`/`Set` become `{}`; `BigInt` throws (add `toJSON` or convert).
 - JSON5 / JSONC: for human config only (`tsconfig.json`, VS Code settings are JSONC). Parse with `jsonc-parser`/`json5`; never send them over an API.
-- NDJSON / JSON Lines: one compact JSON value per `\n`; stream-parse line by line; content type `application/x-ndjson` (not registered) or `application/jsonl` (unverified registration).
+- NDJSON / JSON Lines: one compact JSON value per `\n`; stream-parse line by line; content type `application/x-ndjson` or `application/jsonl` (neither is in the IANA registry as of 2026-10; the registered
+  cousin is `application/json-seq`, RFC 7464, which uses RS separators).
 - JSON Pointer (RFC 6901) for paths, JSON Patch (RFC 6902) / Merge Patch (RFC 7396) for partial updates: Merge Patch cannot set `null` values.
 - Import in JS: `import cfg from './cfg.json' with { type: 'json' }` (newly 2025-04); old `assert {}` syntax is removed.
 
@@ -49,13 +50,13 @@ diffing. After Brotli/gzip the size gap shrinks: measure before switching.
   default. Alias bombs exist: cap with library limits.
 - Safe loading: PyYAML `yaml.safe_load` (never `yaml.load` without `Loader=SafeLoader`, never `FullLoader`/`UnsafeLoader` on input);
   ruamel.yaml `YAML(typ='safe')`; js-yaml `load` (safe; `!!js/*` tags gone since v4); `yaml` (eemeli) `parse`; Go `gopkg.in/yaml.v3` /
-  `goccy/go-yaml` (go-yaml v3 repo archived 2025 - unverified; check maintenance).
+  `goccy/go-yaml` (the `go-yaml/yaml` repo was archived 2025-04-01 as unmaintained: prefer a maintained fork for new code).
 - Indentation is significant, tabs forbidden; multiple documents with `---`; keys are case-sensitive; a trailing space after `:` matters.
 - Lint with `yamllint`; for k8s/CI validate against the tool's JSON Schema (`check-jsonschema --schemafile`).
 
 ## TOML
-- 1.0.0 (2021-01-12) and 1.1.0 (2025-12-24). 1.1: newlines and trailing commas inside inline tables, `\xHH`, `\e`, seconds optional
-  in times. Keep files 1.0-compatible unless every reader (Cargo, pip/`tomllib`, uv, your parser) supports 1.1 (unverified per tool).
+- 1.0.0 (2021-01-11) and 1.1.0 (2025-12-18, per the toml-lang CHANGELOG). 1.1: newlines and trailing commas inside inline tables, `\xHH`, `\e`, seconds optional
+  in times. Keep files 1.0-compatible unless every reader (Cargo, pip/`tomllib`, uv, your parser) supports 1.1 (verified: Python 3.15 `tomllib`, tomli 2.4.0; others unverified).
 - Tables cannot be redefined; dotted keys and `[table]` headers for the same table must not conflict; arrays of tables `[[bin]]`.
 - Integers are 64-bit signed: JS parsers return `bigint` or lose precision above 2^53 (smol-toml has an option; check).
 - Datetimes: offset datetime, local datetime, local date, local time are 4 distinct types. Python stdlib reads TOML (`tomllib`, 3.11+) but cannot write it (`tomli-w`).
@@ -80,7 +81,7 @@ diffing. After Brotli/gzip the size gap shrinks: measure before switching.
 - INI: no spec; sections `[name]`, `key=value`; comment chars (`;` vs `#`), case sensitivity and duplicate handling vary by parser
   (Python `configparser` lowercases keys and interpolates `%(x)s` by default: use `RawConfigParser`/`interpolation=None`).
 - .env: de facto (dotenv, Docker Compose, systemd `EnvironmentFile` differ on quotes, `export`, multiline and `${VAR}` expansion).
-  Node 20.6+ has `--env-file` and `process.loadEnvFile()`; Python `python-dotenv`. Keep values simple; never commit real `.env`; commit `.env.example` with no secrets.
+  Node has `--env-file` (20.6+) and `process.loadEnvFile()` (20.12+ / 21.7+); Python `python-dotenv`. Keep values simple; never commit real `.env`; commit `.env.example` with no secrets.
 
 ## Protocol Buffers / gRPC
 - Use `edition = "2023"` (or `"2024"` where your protoc/Buf supports it - unverified per language) or `syntax = "proto3"`; proto2 only for legacy.
