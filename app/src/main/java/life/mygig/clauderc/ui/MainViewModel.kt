@@ -129,11 +129,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Google Drive backup. */
     val drive = DriveController(api, tools)
     /** In-app chat: PIN, polling, pending messages, drafts, files. */
-    val chats = ChatController(app, api, tools) { team.clearChat(); webHosts.clearChatHosts() }
+    val chats: ChatController = ChatController(app, api, tools) { team.clearChat(); webHosts.clearChatHosts() }
     /** Team (extra Claude accounts), cluster settings and the open chat's workers. */
-    val team = TeamController(api, store, tools, { apiFor(it) }) { chats.chatSession.value }
+    val team: TeamController = TeamController(api, store, tools, { apiFor(it) }) { chats.chatSession.value }
     /** Hosts: web servers chats can work on (docs/hosts-design.md). */
-    val webHosts = HostsController(app, api, tools) { chats.chatSession.value }
+    val webHosts: HostsController = HostsController(app, api, tools) { chats.chatSession.value }
     /** Developer knowledge: the monthly refresh. */
     val knowledge = KnowledgeController(api, tools)
     /** Login dialogs (Claude, GitHub, AWS, GitLab, Docker, YouTube). */
