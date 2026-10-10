@@ -11,3 +11,6 @@ practice (dated 2026-10), checked against primary sources.
   WebAssembly/graphics/data formats.
 - Where a skill says "(unverified)", or the project is on an older version than the skill describes, check the primary source before relying on it.
   If no skill covers the topic, say so and read the official documentation for the exact version in use. Never invent an API, flag or version.
+
+- Before you write, edit or proofread prose a person will read (emails, complaints, replies, website/app/UI copy, docs, release notes), load
+  `rc-american-english-writing`: natural US English, the user's own voice preserved, plain text unless the deliverable needs markup, nothing invented.

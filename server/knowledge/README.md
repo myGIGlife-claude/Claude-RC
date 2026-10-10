@@ -1,6 +1,6 @@
 # Developer knowledge pack
 
-Thirty skills (`skills/rc-*`: 29 topic skills plus the process skill `rc-dev-playbook`) that cLaudeRC installs for every Claude session and Claude worker on the server, so they code against
+Thirty-one skills (`skills/rc-*`: 29 topic skills plus the process skills `rc-dev-playbook` and `rc-american-english-writing`) that cLaudeRC installs for every Claude session and Claude worker on the server, so they code against
 CURRENT standards (what changed lately, what is now wrong, what to do instead) for web front end, JavaScript/TypeScript, Node, web back end,
 PHP, Python, Go, Java, Android, iOS, UI/UX, security, databases, cloud/DevOps, testing and many more languages (see `COVERAGE.md`).
 
