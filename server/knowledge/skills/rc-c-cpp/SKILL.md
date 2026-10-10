@@ -9,17 +9,17 @@ description: Current C (C17/C23/C2y) and C++ (C++20/23/26) practice, GCC 16/Clan
 
 ## Currency check
 - **Standards**
-  - C23 = ISO/IEC 9899:2024 (adopted 2024). Next C ("C2y", working draft N3886, 2026-05): `_Countof` / `<stdcountof.h>`, named loops
-    (`break label;`), `if` declarations, case ranges, `++/--` on complex. Publication year (unverified; drafts call it 202y).
+  - C23 = ISO/IEC 9899:2024 (adopted 2024). Next C ("C2y", latest working draft N3886, 2026-05-24, pre-Ottawa): `_Countof` /
+    `<stdcountof.h>` (N3469), named loops (`break label;`), `if` declarations, case ranges, `++/--` on complex. Publication year (unverified; drafts call it 202y).
   - C++23 = ISO/IEC 14882:2024. **C++26 technically complete 2026-03** (London/Croydon meeting), sent to DIS ballot; ISO publication
-    expected late 2026 (unverified whether published yet). Final vote 114 for, 12 against, 3 abstain (contracts were the dispute).
+    (unverified whether published yet; WG21 convenor report of 2026-07 still lists 2024 as latest). Ship poll 114 for, 12 against, 3 abstain.
   - C++26 headline: static reflection (P2996), contracts (`pre`/`post`/`contract_assert`, P2900), `std::execution` senders/receivers
     (P2300), **erroneous behavior** for uninitialized locals (P2795: reading one is no longer UB), hardened standard library (P3471),
     `std::simd`, `std::inplace_vector`, `#embed`, pack indexing, `= delete("why")`, `_` placeholder, expansion statements
     (`template for`), `std::optional<T&>`, `std::function_ref`, `std::indirect`/`std::polymorphic`.
   - C++29 work started (3-year cycle): focus on more UB removal and safety profiles.
 - **Compilers** (details: `references/support.md`)
-  - GCC 16.1 2026-04-30, **16.2 2026-08-07**; maintained 15.3, 14.4, 13.5 (2026-09-11). GCC 17 in development.
+  - GCC 16.1 2026-04-30, **16.2 2026-08-07**; maintained 15.3, 14.4; 13.5 (2026-09-11) was the final GCC 13 release (branch closed). GCC 17 in development.
     GCC 16 **defaults to `-std=gnu++20`** (was gnu++17) and C++20 in libstdc++ is no longer experimental; experimental C++26 reflection
     (`-freflection`), contracts, expansion statements, constexpr exceptions, `std::simd`, `std::inplace_vector`.
     GCC 15 **defaults C to `-std=gnu23`** (`bool`/`true`/`false` keywords, `()` means no parameters).
@@ -32,13 +32,13 @@ description: Current C (C17/C23/C2y) and C++ (C++20/23/26) practice, GCC 16/Clan
 - **Tools** (latest, 2026-10): CMake 4.4.4, Ninja 1.13.2, Meson 1.12.1, Bazel 9.3.0, vcpkg 2026.07.29, Conan 2.33.0,
   GoogleTest 1.18.0, Catch2 3.16.1, doctest 2.5.3, Google Benchmark 1.9.5, AFL++ 5.03c, cppcheck 2.22.0, CodeQL CLI 2.27.2,
   include-what-you-use 0.27, Valgrind 3.27.1 (2026-05-20), rr 5.9.0 (2025-02), {fmt} 12.2.0.
-- **Policy**: CISA/NSA joint guide on memory-safe languages (2025-06-23); CISA/FBI expected vendors to publish a memory-safety roadmap
-  by 2026-01-01 (guidance, not law, but now asked in procurement). New critical-infrastructure code in C/C++ needs a justification.
+- **Policy**: CISA/NSA joint guide on reducing memory-related vulnerabilities (2025-06-24); CISA/FBI "Product Security Bad Practices"
+  v2 (2025-01) expected vendors to publish a memory-safety roadmap by end of 2025 (v1 said 2026-01-01; guidance, not law, but asked in procurement). New critical-infrastructure code in C/C++ needs a justification.
 - **Older versions** (do not upgrade unless asked):
   - Ubuntu 24.04 / RHEL 9-era toolchains: GCC 13/14, Clang 18: C++20 mostly, C++23 partial; no `import std` (needs GCC 15 / Clang 18.1.2+ / MSVC 14.36+).
   - GCC < 15: C default gnu17 (`bool` needs `<stdbool.h>`). GCC < 16: C++ default gnu++17, so `std::format`, concepts need `-std=c++20`.
   - VS 2022 (MSVC 14.3x, v143): still supported; C++20 complete, C++23 partial. Code must build there if the project targets it.
-  - libc++ hardening modes need libc++ 18+; older uses `_LIBCPP_ENABLE_ASSERTIONS` (removed). `-D_FORTIFY_SOURCE=3` needs GCC 12+/Clang 9+ and glibc 2.34+ (glibc part unverified).
+  - libc++ hardening modes need libc++ 18+; older uses `_LIBCPP_ENABLE_ASSERTIONS` (hard error by libc++ 20). `-D_FORTIFY_SOURCE=3` needs GCC 12+/Clang 9+ and glibc 2.34+.
   - CMake 3.x projects: fine; CMake 4 errors on `cmake_minimum_required` below 3.5 (escape hatch: `-DCMAKE_POLICY_VERSION_MINIMUM=3.5`).
 
 ## What changed / stop doing
@@ -124,7 +124,7 @@ int main() { if (auto r = sum({}); !r) std::println("error {}", int(r.error()));
 - Coroutines: there is still no standard task type in C++23 (C++26 adds `std::execution::task`, unverified in any shipping lib); use a library
   (cppcoro forks, asio, folly) or `std::generator` (C++23) for lazy sequences.
 - C++26 now: only behind compiler-specific flags (GCC 16 `-std=c++26 -freflection`). Feature-test macros (`__cpp_contracts`,
-  `__cpp_impl_reflection` (name unverified)) not compiler versions.
+  `__cpp_impl_reflection`, `__cpp_expansion_statements`) not compiler versions.
 
 **C (C17/C23)**
 - `-std=c17` or `-std=c23` explicitly. C23 gives `nullptr`, `constexpr` objects, `typeof`, `[[nodiscard]]`, `static_assert` w/o message,
@@ -146,13 +146,14 @@ SF.7 no `using namespace` in headers, C.21 rule of zero/five. Enforce via clang-
 - Export a C ABI (`extern "C"`, opaque handle + create/destroy, no exceptions or STL types across) for FFI to Rust/Python/Go/Swift.
   Catch all exceptions at the boundary. Bindings: pybind11 / nanobind for Python, `cxx`/`bindgen` for Rust.
 - Shared libs: `-fvisibility=hidden` + explicit export macro; SONAME bump on ABI break; check with `abidiff` (libabigail) in CI.
-- libstdc++ dual ABI, MSVC `/MD` vs `/MT` and debug/release runtimes must match across all linked objects. GCC 16 changed some ABI
-  (`std::variant`, atomic wait, `std::format`); C++20 code built with GCC < 16 may not link with GCC 16 objects (check release notes).
+- libstdc++ dual ABI, MSVC `/MD` vs `/MT` and debug/release runtimes must match across all linked objects. GCC 16 changed some ABI:
+  `std::variant` layout in C++17 mode (`_GLIBCXX_USE_VARIANT_CXX17_OLD_ABI` restores it) and the formerly experimental C++20 parts (atomic
+  wait, `std::format` internals, `partial_ordering`); C++20 objects built with GCC < 16 may not mix with GCC 16 ones (check release notes).
 
 **Embedded / freestanding**
 - `-ffreestanding`, no exceptions/RTTI if the platform forbids (`-fno-exceptions -fno-rtti`), no heap after init, `std::array`,
-  `std::span`, `std::expected`, `inplace_vector` (C++26) fit. Rules: MISRA C:2025 / MISRA C++:2023 (unverified edition names),
-  AUTOSAR C++14 now folded into MISRA C++:2023, CERT C/C++ for security. Static analyzers check these, not reviewers.
+  `std::span`, `std::expected`, `inplace_vector` (C++26) fit. Rules: MISRA C:2025 (2025-03) / MISRA C++:2023 (C++17),
+  AUTOSAR C++14 coding rules folded into MISRA C++:2023, CERT C/C++ for security. Static analyzers check these, not reviewers.
 
 **When to pick Rust or Go instead**: new network-facing service or parser with no C++ codebase and no hard C++ dependency: Go (services)
 or Rust (systems, no GC). Stay in C/C++ when extending an existing codebase, using C++-only ecosystems (game engines, CUDA, Qt, HPC),
@@ -168,7 +169,7 @@ or on toolchains Rust lacks. Mixed: new memory-sensitive components in Rust behi
   -fstack-protector-strong -fPIE -pie -Wl,-z,relro,-z,now,-z,noexecstack` + x86_64 `-fcf-protection=full`, AArch64 `-mbranch-protection=standard`.
   GCC 14+ shortcut: `-fhardened` (Linux glibc targets).
 - Hardened library: libc++ `FAST` mode in production (cheap bounds checks), `DEBUG` in tests; libstdc++ `_GLIBCXX_ASSERTIONS`
-  (GCC 15 enables it by default at `-O0`); MSVC `_MSVC_STL_HARDENING=1` (unverified version). Google measured ~0.3% overhead for libc++ hardening (unverified).
+  (GCC 15 enables it by default at `-O0`); MSVC `_MSVC_STL_HARDENING=1` (VS 2022 17.14+, off by default). Google measured 0.30% average overhead for hardened libc++ (2024-11).
 - Never: `system()`/`popen` with user data, format strings from input, `rand()` for secrets (use OS CSPRNG: `getrandom`, `BCryptGenRandom`),
   hand-rolled crypto (use OpenSSL 3 / BoringSSL / libsodium), `memset` to wipe secrets (use `memset_explicit` C23 / `explicit_bzero`).
 - Parsers of untrusted input get a fuzz target and run under ASan+UBSan in CI. Publish a memory-safety roadmap if you sell into gov/critical infra.
@@ -243,3 +244,10 @@ or on toolchains Rust lacks. Mixed: new memory-sensitive components in Rust behi
 - GitHub releases API (2026-10-09): CMake 4.4.4, vcpkg 2026.07.29, Conan 2.33.0, GoogleTest 1.18.0, Catch2 3.16.1, doctest 2.5.3, Meson 1.12.1, Bazel 9.3.0, Ninja 1.13.2, AFL++ 5.03c, cppcheck 2.22.0, rr 5.9.0, fmt 12.2.0, CodeQL 2.27.2, IWYU 0.27, Google Benchmark 1.9.5
 - https://valgrind.org/ : Valgrind 3.27.1, 2026-05-20 (2026-10-09)
 - https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines : rule IDs (from knowledge; not re-fetched, 2026-10-09)
+- Fact-check pass (2026-10-10): https://gcc.gnu.org/pipermail/gcc/2026-September/248876.html (13.5 final, branch closed);
+  https://www.open-std.org/jtc1/sc22/wg14/www/wg14_document_log (N3886 2026-05-24 newest draft);
+  https://learn.microsoft.com/en-us/cpp/overview/cpp-conformance-improvements (`_MSVC_STL_HARDENING` in VS 2022 17.14);
+  https://security.googleblog.com/2024/11/retrofitting-spatial-safety-to-hundreds.html (0.30% hardened libc++);
+  https://www.cisa.gov/resources-tools/resources/product-security-bad-practices (roadmap by end of 2025, v2);
+  https://developers.redhat.com/articles/2022/09/17/gccs-new-fortification-level (FORTIFY 3 in glibc 2.34);
+  https://misra.org.uk/ (MISRA C:2025, MISRA C++:2023)

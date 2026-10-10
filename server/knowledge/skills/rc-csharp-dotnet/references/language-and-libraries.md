@@ -29,7 +29,7 @@ Don't use a feature newer than the project's language version. Sources: SKILL.md
 
 | Area | Current guidance |
 |---|---|
-| JSON | `System.Text.Json`; `JsonSerializerOptions.Web` for web defaults; `[JsonSerializable]` context for AOT/perf; `JsonSerializerOptions.Strict` and duplicate-property rejection in .NET 10 (check exact option names in the docs); JSONL output and union support in .NET 11 |
+| JSON | `System.Text.Json`; `JsonSerializerOptions.Web` for web defaults; `[JsonSerializable]` context for AOT/perf; `JsonSerializerOptions.Strict` and `AllowDuplicateProperties = false` (also on `JsonDocumentOptions`) in .NET 10; JSONL output and union support in .NET 11 |
 | Time | `TimeProvider` (inject; `FakeTimeProvider` in tests), `DateTimeOffset` for instants, `DateOnly`/`TimeOnly` for calendar values; `TimeZoneInfo.FindSystemTimeZoneById` accepts IANA ids on all OSes (ICU) |
 | Collections | `FrozenDictionary`/`FrozenSet` for read-mostly lookups; `SearchValues<T>` for repeated `IndexOfAny`; `PriorityQueue<T,P>`; `OrderedDictionary<K,V>` (generic, .NET 9) |
 | LINQ | `CountBy`, `AggregateBy`, `Index` (.NET 9); `LeftJoin`/`RightJoin` (.NET 10); `FullJoin` and tuple `Join` (.NET 11); `System.Linq.AsyncEnumerable` in-box (.NET 10) |

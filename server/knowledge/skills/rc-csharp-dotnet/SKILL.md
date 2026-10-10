@@ -20,7 +20,7 @@ C# features by version and per-area detail: `references/language-and-libraries.m
 | Out of support | 7, 6, 5, Core 3.1 and older | No security patches |
 | C# | **14** with .NET 10; **15** with .NET 11 | `LangVersion` follows the TFM; don't force `latest` on old TFMs |
 | EF Core | **10** (LTS, until 2028-11-10); 11 in RC | EF10 needs the .NET 10 runtime; no .NET Framework |
-| Aspire | **13.6** (2026-09-29), `Aspire.Hosting` 13.6.1 | Renamed from ".NET Aspire"; polyglot (C#, TS, Python, Java, Rust) |
+| Aspire | **13.6** (2026-09-29), `Aspire.Hosting` 13.6.1 (2026-10-07) | Renamed from ".NET Aspire" in 13; polyglot (C#, TS, Python, Java, Rust) |
 | .NET MAUI | **10** (10.0.110), supported to 2027-05-11 | MAUI 9 ended 2026-05-12 |
 | Windows App SDK (WinUI 3) | 2.5.1 (2026-09-16) | |
 | xUnit v3 | `xunit.v3` **4.0.2** (2026-10-09) | Package went 3.2.x -> 4.0 within the v3 line; .NET 8+ / net472+ |
@@ -41,7 +41,7 @@ Shipped in the last ~12 months (dated):
 ### Older versions (legacy projects)
 - **.NET 8 / C# 12** (until 2026-11-10): has primary constructors, collection expressions, keyed DI, `TimeProvider`, `FrozenDictionary`, Native AOT for minimal APIs, `IExceptionHandler`. No `field`, no extension blocks, no `?.=`, no `Lock` type, no built-in OpenAPI (`Microsoft.AspNetCore.OpenApi` arrived in 9; on 8 use Swashbuckle or NSwag), no HybridCache GA, no `AddValidation()`, no `LeftJoin`. EF Core 8: no complex-type JSON, no named filters; `Contains` on a list uses `OPENJSON`.
 - **.NET 9 / C# 13**: `params` collections, `System.Threading.Lock`, `\e`, `MapStaticAssets`, built-in OpenAPI document (3.0), `BinaryFormatter` always throws. HybridCache shipped after 9 as `Microsoft.Extensions.Caching.Hybrid` (supports net472+ too).
-- **.NET Framework 4.8.x**: maintenance only, follows the Windows lifecycle. No C# beyond what the old compiler supports without polyfills; don't add new projects. Migrate with the .NET Upgrade Assistant / Copilot app modernization (unverified for current tool name).
+- **.NET Framework 4.8.x**: maintenance only, follows the Windows lifecycle. No C# beyond what the old compiler supports without polyfills; don't add new projects. Migrate with GitHub Copilot app modernization (the .NET Upgrade Assistant is deprecated; still the fallback without Copilot or for VB projects).
 - Don't upgrade a project's TFM, C# version or major packages unless the task asks; note the EOL risk instead.
 
 ## What changed / stop doing
@@ -69,13 +69,13 @@ Shipped in the last ~12 months (dated):
 | `Task.Run` wrapping sync I/O in ASP.NET | Real async I/O APIs | always |
 | `services.BuildServiceProvider()` inside registration | Options pattern, factory overloads, `IConfigureOptions<T>` | always |
 | `WebClient`, `HttpWebRequest`, `new HttpClient()` per call | `IHttpClientFactory` / typed clients + `AddStandardResilienceHandler()` (Microsoft.Extensions.Http.Resilience) | Polly v8 based |
-| `.sln` | `.slnx` (XML solution, `dotnet sln migrate`) (unverified as the new-project default) | SDK 9.0.200+ |
+| `.sln` | `.slnx` (XML solution, `dotnet sln migrate`); `dotnet new sln` creates `.slnx` by default in SDK 10 | SDK 9.0.200+ / default SDK 10 |
 | `dotnet add package` | `dotnet package add` (noun-first; old form still works) | SDK 10 |
 | VSTest-only `dotnet test` | Microsoft.Testing.Platform (`"test": {"runner": "Microsoft.Testing.Platform"}` in global.json) | SDK 10 |
 | Razor runtime compilation | Hot Reload / `dotnet watch` | obsolete .NET 10 |
 | MediatR / AutoMapper as reflexive defaults | Plain handlers/services and hand-written mapping (or Mapperly source generator); check license before adding | 2025-07 licensing |
 | WebForms, WCF server, .NET Remoting, AppDomains | Razor Pages/Blazor, gRPC or CoreWCF, HTTP APIs, processes/containers | not in .NET Core |
-| Xamarin | .NET MAUI (or Avalonia/Uno) | Xamarin support ended 2024-05 (unverified) |
+| Xamarin | .NET MAUI (or Avalonia/Uno) | Xamarin support ended 2024-05-01 |
 
 ## Do this
 
@@ -110,7 +110,7 @@ repo/
 - Lock files + `dotnet restore --locked-mode` in CI.
 
 ### Least dependency
-Before adding a package, check the BCL/ASP.NET Core first: JSON (`System.Text.Json`), HTTP resilience (`Microsoft.Extensions.Http.Resilience`), caching (`HybridCache`), validation (`AddValidation()`, DataAnnotations), rate limiting (`AddRateLimiter`), output caching, health checks, OpenAPI, background work (`BackgroundService`), mapping (a constructor or `static` method), mediator (a method call). Don't add MediatR, AutoMapper, FluentAssertions (v8+ is commercial, unverified for current terms), Newtonsoft or Swashbuckle unless the project already uses them or the task asks. Check license changes before upgrading any of them.
+Before adding a package, check the BCL/ASP.NET Core first: JSON (`System.Text.Json`), HTTP resilience (`Microsoft.Extensions.Http.Resilience`), caching (`HybridCache`), validation (`AddValidation()`, DataAnnotations), rate limiting (`AddRateLimiter`), output caching, health checks, OpenAPI, background work (`BackgroundService`), mapping (a constructor or `static` method), mediator (a method call). Don't add MediatR, AutoMapper, FluentAssertions (v8+ needs a paid license for commercial use), Newtonsoft or Swashbuckle unless the project already uses them or the task asks. Check license changes before upgrading any of them.
 
 ### Minimal API (the default for new HTTP APIs)
 ```csharp
@@ -186,7 +186,7 @@ Use for hot read paths or reporting where you want hand-written SQL. Always para
 - Never log tokens, passwords, full request bodies or PII; EF10 redacts inlined constants by default; keep `EnableSensitiveDataLogging` off outside dev.
 
 ### Aspire
-Use it for local orchestration of multi-service apps (AppHost declares Postgres/Redis/containers/projects; dashboard shows logs, traces, metrics) and for deploy manifests. Optional: a single API + DB doesn't need it. 13.6 requires SDK 11.0.100+ for some features (coordinated builds); check before adopting on a net10.0-only machine.
+Use it for local orchestration of multi-service apps (AppHost declares Postgres/Redis/containers/projects; dashboard shows logs, traces, metrics) and for deploy manifests. Optional: a single API + DB doesn't need it. Aspire 13 needs the .NET 10 SDK; 13.6's multithreaded MSBuild (`-mt`) builds only kick in with SDK 11.0.100-rc.1+ (older SDKs keep the old behavior).
 
 ### Async and modern C# idioms
 ```csharp
@@ -220,7 +220,7 @@ static string Describe(Shape s) => s switch               // pattern matching
 using Humanizer;
 Console.WriteLine(TimeSpan.FromMinutes(90).Humanize());
 ```
-`dotnet run tool.cs`; `dotnet project convert tool.cs` turns it into a project (unverified flag set). `#:project` references a csproj; .NET 11 adds `#:include`.
+`dotnet run tool.cs`; `dotnet project convert tool.cs` turns it into a project (`--dry-run`, `-o <dir>`). `#:project` references a csproj; .NET 11 adds `#:include`.
 
 ### Desktop, mobile, games
 - **MAUI**: supported, yearly with .NET; a version is supported until 6 months after the next ships. Fine for line-of-business apps on .NET-heavy teams; weigh Avalonia or Uno Platform (both cross-platform incl. Linux), or a native/Flutter/React Native app (see rc-cross-platform). Blazor Hybrid (`BlazorWebView`) to share Razor UI.
@@ -229,7 +229,7 @@ Console.WriteLine(TimeSpan.FromMinutes(90).Humanize());
 
 ## Security
 - **Injection**: EF/Dapper parameters only; `FromSqlRaw`/`ExecuteSqlRaw` never with user input. Validate identifiers (column/table names) against an allowlist.
-- **Deserialization**: no `BinaryFormatter` (throws), no `TypeNameHandling.All/Auto` in Newtonsoft, STJ polymorphism only with declared `[JsonDerivedType]`. Set `MaxDepth` and request size limits. .NET 10 STJ can reject duplicate properties: turn it on for security-sensitive payloads (unverified option name: `AllowDuplicateProperties = false`).
+- **Deserialization**: no `BinaryFormatter` (throws), no `TypeNameHandling.All/Auto` in Newtonsoft, STJ polymorphism only with declared `[JsonDerivedType]`. Set `MaxDepth` and request size limits. .NET 10 STJ can reject duplicate properties: set `AllowDuplicateProperties = false` (or use `JsonSerializerOptions.Strict`) for security-sensitive payloads.
 - **CSRF**: `UseAntiforgery()` + antiforgery tokens for cookie-authenticated form posts (Razor Pages/MVC/Blazor do it automatically); minimal API `[FromForm]` endpoints require tokens unless `DisableAntiforgery()`. Bearer-token APIs are not CSRF targets: don't also accept cookies there. `SameSite=Lax` minimum.
 - **Data Protection**: in multi-instance or container deploys persist keys (`PersistKeysToDbContext`/blob/Redis) and protect them (`ProtectKeysWith...`); otherwise cookies and antiforgery tokens break on restart and keys sit unencrypted.
 - **Secrets**: user-secrets for dev only, a vault or platform secrets in prod; managed identity over connection-string passwords where available. `NuGetAudit` + `dotnet list package --vulnerable` in CI.
@@ -248,10 +248,10 @@ Console.WriteLine(TimeSpan.FromMinutes(90).Humanize());
 - Analyzers on (`AnalysisLevel latest-recommended`); CA1873 (expensive logging args) and CA18xx perf rules are worth fixing.
 
 ## Testing & tooling
-- `dotnet new xunit3` (xUnit v3, MTP runner) / `nunit` / `mstest`. All three are current; keep what the repo uses. xUnit v3 test projects are executables; `TestContext.Current.CancellationToken` for cancellation.
-- Integration: `WebApplicationFactory<Program>` (add `public partial class Program;` if needed) + Testcontainers (`PostgreSqlBuilder`, `MsSqlBuilder`, `RedisBuilder`) instead of EF InMemory or SQLite stand-ins (different SQL semantics).
+- `dotnet new xunit3` (xUnit v3, MTP runner; on SDK 10 first `dotnet new install xunit.v3.templates`, SDK 11 templates include v3) / `nunit` / `mstest`. All three are current; keep what the repo uses. xUnit v3 test projects are executables; `TestContext.Current.CancellationToken` for cancellation.
+- Integration: `WebApplicationFactory<Program>` (.NET 10 source-generates `public partial class Program`; add it by hand only on .NET 8/9) + Testcontainers (`PostgreSqlBuilder`, `MsSqlBuilder`, `RedisBuilder`) instead of EF InMemory or SQLite stand-ins (different SQL semantics).
 - Time and randomness: `FakeTimeProvider` (Microsoft.Extensions.TimeProvider.Testing). HTTP: a stub `HttpMessageHandler` or WireMock.Net.
-- Assertions: built-in `Assert` is enough; Shouldly/AwesomeAssertions are free alternatives to FluentAssertions (v8 commercial license, unverified current terms).
+- Assertions: built-in `Assert` is enough; Shouldly/AwesomeAssertions are free alternatives to FluentAssertions (v8+: free for OSS/non-commercial, paid for commercial use).
 - Mocks: NSubstitute or Moq; prefer hand-written fakes for your own interfaces.
 - Formatting/linting: `dotnet format` (style + analyzers from .editorconfig) in CI with `--verify-no-changes`; Roslyn analyzers built into the SDK; optional Meziantou.Analyzer / Roslynator.
 - CI: `dotnet restore --locked-mode`, `dotnet build -c Release --no-restore`, `dotnet test --no-build`, coverage via `Microsoft.Testing.Extensions.CodeCoverage` or coverlet. Containers: `dotnet publish /t:PublishContainer` (no Dockerfile needed; chiseled/distroless base images).
@@ -310,3 +310,9 @@ All accessed 2026-10-09.
 - https://www.nuget.org/packages/MediatR , /AutoMapper , /xunit.v3 , /Aspire.Hosting , /Testcontainers , /Dapper , /BenchmarkDotNet , /Hangfire.Core , /Quartz , /Microsoft.WindowsAppSDK : current package versions and licenses.
 - https://xunit.net/releases/ : xUnit v3 release line (3.2.x -> 4.0.x).
 - https://docs.unity3d.com/6000.3/Documentation/Manual/csharp-compiler.html : Unity 6.3 supports C# 9 with listed gaps.
+- Fact-check pass (2026-10-10): https://learn.microsoft.com/en-us/dotnet/core/compatibility/10.0 (`dotnet new sln` -> .slnx);
+  https://learn.microsoft.com/en-us/aspnet/core/breaking-changes/10/overview (WebHostBuilder/WithOpenApi/Razor runtime compilation obsolete);
+  https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-10/libraries (`AllowDuplicateProperties`, `Strict`, ML-KEM/ML-DSA);
+  https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-project-convert ; https://dotnet.microsoft.com/en-us/platform/support/policy/xamarin (ended 2024-05-01);
+  https://learn.microsoft.com/en-us/dotnet/core/porting/upgrade-assistant-overview (deprecated for Copilot app modernization);
+  https://www.nuget.org/packages/FluentAssertions (v8 commercial terms) ; https://aspire.dev/whats-new/aspire-13/ (rename).
