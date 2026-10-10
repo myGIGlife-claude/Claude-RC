@@ -11,6 +11,9 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -19,12 +22,14 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.flow.first
 import life.mygig.clauderc.BuildConfig
 import life.mygig.clauderc.MainActivity
 import life.mygig.clauderc.R
 import life.mygig.clauderc.api.LauncherApi
 import life.mygig.clauderc.api.Updates
 import life.mygig.clauderc.data.SettingsStore
+import life.mygig.clauderc.data.sessionWatchStore
 import life.mygig.clauderc.ssh.SshKeyManager
 
 /**
@@ -42,12 +47,13 @@ class SessionWatcher(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         if (!s.notify || !s.isConfigured || !allowed(ctx)) return Result.success()
         channel(ctx)
         // A new app build: say so once per build.
-        val prefs = ctx.getSharedPreferences("session_watch", Context.MODE_PRIVATE)
+        val prefs = ctx.sessionWatchStore
+        val toldBuild = prefs.data.first()[TOLD_BUILD] ?: 0
         runCatching { Updates.fetch().appVersionCode }.getOrNull()
-            ?.takeIf { it > BuildConfig.VERSION_CODE && it != prefs.getInt("told_build", 0) }
+            ?.takeIf { it > BuildConfig.VERSION_CODE && it != toldBuild }
             ?.let { code ->
                 notify(ctx, "app-update", "cLaudeRC build ${code - 100} is ready", "Open cLaudeRC and tap Install.")
-                prefs.edit().putInt("told_build", code).apply()
+                prefs.edit { it[TOLD_BUILD] = code }
             }
         val keys = SshKeyManager(ctx)
         val api = LauncherApi(config = { store.current().toServerConfig() }, identity = { keys.identity() })
@@ -55,7 +61,7 @@ class SessionWatcher(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         if (Push.active(ctx)) return Result.success()
         // Offline, or the phone is locked (the key can't be used then): try next time.
         val sessions = runCatching { api.sessions().sessions }.getOrNull() ?: return Result.success()
-        val before = prefs.getStringSet("state", emptySet()).orEmpty().associate { it.substringBefore('|') to it.substringAfter('|') }
+        val before = prefs.data.first()[STATE].orEmpty().associate { it.substringBefore('|') to it.substringAfter('|') }
         sessions.forEach { x ->
             val was = before[x.name].orEmpty()
             when {
@@ -63,12 +69,15 @@ class SessionWatcher(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
                 !x.busy && was.contains("b") && !x.waiting -> notify(ctx, x.name, "${x.project} finished", x.preview.lines().lastOrNull { it.isNotBlank() }?.trim() ?: "Claude is done.", FINISHED)
             }
         }
-        prefs.edit().putStringSet("state", sessions.map { it.name + "|" + (if (it.waiting) "w" else "") + (if (it.busy) "b" else "") }.toSet()).apply()
+        prefs.edit { p -> p[STATE] = sessions.map { it.name + "|" + (if (it.waiting) "w" else "") + (if (it.busy) "b" else "") }.toSet() }
         return Result.success()
     }
 
     companion object {
         private const val WORK = "session-watch"
+        // The keys the old SharedPreferences file used, so its values carry over.
+        private val TOLD_BUILD = intPreferencesKey("told_build")
+        private val STATE = stringSetPreferencesKey("state")
         // A channel's importance can't be raised once created, so the pop-up version has a new id.
         internal const val ALERTS = "alerts"       // a session needs an answer (pops up)
         internal const val FINISHED = "finished"   // a session finished
