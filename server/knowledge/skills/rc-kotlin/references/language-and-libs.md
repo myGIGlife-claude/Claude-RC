@@ -17,7 +17,7 @@
 | Context parameters | Stable (not explicit context arguments or callable refs) | 2.4.0 | `context(log: Logger) fun f()` |
 | Explicit backing fields | Stable | 2.4.0 | `val x: StateFlow<Int> field = MutableStateFlow(0)` |
 | `@all:` annotation target, new defaulting rules | Stable | 2.4.0 | `@all:Email val email: String` |
-| Common `Uuid` API | Stable | 2.4.0 | `Uuid.random()`, `Uuid.generateV7()` (check opt-in for v7 on your version) |
+| Common `Uuid` API | Stable | 2.4.0 | `Uuid.parse()`; V4/V7 generators (`generateV4()`/`generateV7()`) still experimental (opt-in); whether `Uuid.random()` still needs opt-in: unverified |
 | `when` via `invokedynamic` on JVM 21+ | Stable, default | 2.4.20 | none |
 | Unused return value checker | Experimental | 2.3.0 | `-Xreturn-value-checker=check` |
 | Context-sensitive resolution | Preview/experimental | 2.2.0 | `-Xcontext-sensitive-resolution` |
@@ -25,8 +25,8 @@
 | Explicit context arguments | Experimental | 2.4.0 | `-Xexplicit-context-arguments` |
 | Name-based destructuring | Experimental in 2.3.20/2.4; **stable in `only-syntax` mode in 2.5.0-Beta1** (2026-09-23) | 2.3.20 | `(val mail = email, val name = username) = user` |
 | Companion blocks/extensions | Experimental | 2.5.0-Beta1 | `-Xcompanion-blocks-and-extensions` |
-| Rich errors (error union types, KEEP-0462) | Design discussion only, no compiler flag (unverified beyond 2026-09) | - | do not write it |
-| Contracts (`contract { }` in your own code) | Experimental API, needs `@OptIn(ExperimentalContracts::class)` (unverified for 2.4) | 1.3 | stdlib contracts are fine to rely on |
+| Rich errors (error union types, KEEP-0462) | Not in the 2.4 or 2.5.0-Beta1 release notes; no flag known (unverified) | - | do not write it |
+| Contracts (`contract { }` in your own code) | Experimental API, needs `@OptIn(ExperimentalContracts::class)` (still so in the 2.4 API docs) | 1.3 | stdlib contracts are fine to rely on |
 
 ### Name-based destructuring timeline (JetBrains blog, 2026-05)
 - 2.3.20: experimental, `-Xname-based-destructuring=only-syntax|name-mismatch|complete`.
@@ -48,7 +48,7 @@
 | Web Kotlin/Wasm | Beta | Beta |
 | watchOS, tvOS | Beta | - |
 
-- Apple: iOS min 14 since 2.3.0; Intel `macosX64`/`tvosX64`/`watchosX64` deprecated in 2.3.20 (`iosX64` tier 3).
+- Apple: iOS min 14 since 2.3.0, raised to iOS/tvOS 15, macOS 12, watchOS 8 in 2.4.0; Intel `macosX64`/`tvosX64`/`watchosX64` deprecated in 2.3.20 (`iosX64` tier 3).
 - Swift export: Alpha (2.4 adds suspend -> async/await, Flow -> AsyncSequence). Most projects still ship an ObjC framework (SKIE is a third-party option, unverified current status).
 - Android library modules in KMP: `com.android.kotlin.multiplatform.library` (required with AGP 9, see rc-android).
 

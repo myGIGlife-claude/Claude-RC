@@ -9,8 +9,8 @@ description: How to write current Dart 3.13 / Flutter 3.47 code: language featur
 
 ## Currency check
 - **Flutter 3.47.7** (2026-10-08) on **Dart 3.13.5**. Flutter 3.47.0 and Dart 3.13.0 shipped 2026-08-12. Cadence: Flutter stable
-  quarterly (3.41 Feb, 3.44 2026-05-20, 3.47 Aug), Dart minor alongside (3.11 2026-02-11, 3.12 2026-05-18). Only the latest stable gets
-  hotfixes; there is no LTS. Next: Flutter ~3.50 / Dart 3.14 around 2026-11 (unverified).
+  quarterly (3.41 Feb, 3.44 2026-05-18, 3.47 Aug), Dart minor alongside (3.11 2026-02-11, 3.12 2026-05-18). Only the latest stable gets
+  hotfixes; there is no LTS. Beta 3.49.0-0.2.pre (2026-10-01); next stable expected 2026-11 (version unverified).
 - **Dart language, newest first**
   - 3.13: **primary constructors** `class Point(var int x, var int y);` (language version >= 3.13). `final`/`var` no longer allowed
     on non-declaring parameters (breaks old `void f(final int x)` style; freezed 4.0 adapted). Type-promotion soundness fixes.
@@ -23,12 +23,12 @@ description: How to write current Dart 3.13 / Flutter 3.47 code: language featur
     (`build_runner`) is still the answer for JSON/immutability; primary constructors remove much hand boilerplate.
 - **Flutter, last ~12 months**
   - 3.47: Material and Cupertino available as standalone packages **`material_ui` / `cupertino_ui` 1.0** (weekly releases; SDK copies
-    still exist; migrate with `dart fix --apply --code=migrate_design_widgets`). **Impeller default on macOS/Windows/Linux.** Widget
-    Previews stable. Min iOS 15, macOS 12; Android needs Java 17, AGP 9.1, Gradle 9.3.1, KGP 2.4. UIScene lifecycle required for iOS 27.
+    still exist, deprecation planned for the November stable; migrate with `dart fix --apply --code=migrate_design_widgets`).
+    **Impeller default on macOS/Windows/Linux.** Widget Previews stable. Multi-window still experimental. Min iOS 15, macOS 12; Android needs Java 17, AGP 9.1, Gradle 9.3.1, KGP 2.4. UIScene lifecycle required for iOS 27.
     `describeEnum` removed (use `enum.name`).
   - 3.44: Swift Package Manager is the default (CocoaPods legacy). Material/Cupertino frozen in the SDK ahead of decoupling. Hybrid
     Composition++ for Android platform views. Android projects move to AGP built-in Kotlin. `cacheExtent` deprecated (scroll cache API changed).
-    `--web-hot-reload` flag deprecated (web hot reload on by default, unverified wording).
+    `--web-hot-reload` flag deprecated (web hot reload is on by default since 3.35).
   - 3.41: Material 3 token update; `findChildIndexCallback` -> `findItemIndexCallback`; Linux merged UI/platform threads.
   - 3.38: Android default page transition is predictive back; `SnackBar` with action no longer auto-dismisses; UISceneDelegate adoption.
 - **Impeller** (2026-10): iOS only engine (no opt-out); Android default on API 29+ with Vulkan, falls back to OpenGL ES otherwise;
@@ -39,8 +39,9 @@ description: How to write current Dart 3.13 / Flutter 3.47 code: language featur
   - Flutter < 3.47: import `package:flutter/material.dart` and stay there; do not migrate to `material_ui` unless asked. iOS 13-14 still OK.
   - Dart < 3.13: no primary constructors; `final` on parameters still legal. < 3.10: no dot shorthands, write `MainAxisAlignment.center`.
     < 3.8: no `?elem`. Check `environment: sdk:` in pubspec before using any of these; the language version gates them.
-  - Flutter < 3.29 (approx): HTML web renderer may still be configured; Impeller on Android may be opt-in on older lines (unverified per version).
-  - Riverpod 2.x: `AutoDisposeNotifier`, `StateProvider` normal imports; freezed < 3: `when/map` exist. Match the project's major versions.
+  - Flutter < 3.29: HTML web renderer may still be configured. Flutter < 3.27: Impeller on Android is opt-in (default on API 29+ since 3.27).
+  - go_router 18 needs Flutter 3.44 / Dart 3.12 and uses material_ui: stay on 17 for older SDKs.
+  - Riverpod 2.x: `AutoDisposeNotifier`, `StateProvider` normal imports; freezed 3.0 alone lacks `when/map` (re-added in 3.1.0). Match the project's major versions.
 
 ## What changed / stop doing
 | Old | New | Since |
@@ -54,20 +55,20 @@ description: How to write current Dart 3.13 / Flutter 3.47 code: language featur
 | `void f(final int x)` | Plain `void f(int x)` (now an error) | Dart 3.13 |
 | Field list + constructor + `this.x` boilerplate | Primary constructor `class C(final int x);` | Dart 3.13 |
 | `MainAxisAlignment.center` everywhere | `.center` (dot shorthand) when the type is inferred | Dart 3.10 |
-| freezed `when`/`map` | Native `switch` patterns; freezed classes must be `abstract`/`sealed` | freezed 3.0 (2025-02) |
+| freezed `when`/`map` | Prefer native `switch` patterns (removed in 3.0, re-added in 3.1.0); freezed classes must be `abstract`/`sealed` | freezed 3.0 (2025-02) |
 | `WillPopScope` | `PopScope(canPop:, onPopInvokedWithResult:)` (predictive back) | 3.16 (`onPopInvokedWithResult` 3.24) |
-| `MaterialStateProperty`, `MaterialState` | `WidgetStateProperty`, `WidgetState` | Flutter 3.19 |
+| `MaterialStateProperty`, `MaterialState` | `WidgetStateProperty`, `WidgetState` | Flutter 3.22 |
 | `Color.withOpacity`, `.value`, `.red` | `color.withValues(alpha: .5)`, `.toARGB32()`, `.r` (wide gamut) | Flutter 3.27 |
 | `useMaterial3: false`, M2 widgets (`RaisedButton`, `FlatButton`) | M3 default; `FilledButton`, `NavigationBar`, `SegmentedButton` | 3.16 (M3 default) |
 | `describeEnum(e)` | `e.name` | removed 3.47 |
 | Navigator 1 `push/pop` only, string routes `onGenerateRoute` | `go_router` (Router API / "Navigator 2") for deep links, web URLs, tabs | - |
 | `Provider` + `ChangeNotifier` for every large app | Riverpod 3 or Bloc 9 for large apps; Provider fine for small/legacy | Riverpod 3 (2025) |
 | Riverpod `StateProvider`, `StateNotifierProvider`, `AutoDispose*` types | `Notifier`/`AsyncNotifier` + `NotifierProvider`; old ones in `legacy.dart` | Riverpod 3.0 |
-| `SharedPreferences.getInstance()` | `SharedPreferencesAsync` or `SharedPreferencesWithCache` | shared_preferences 2.3 (unverified) |
-| `flutter_secure_storage` `encryptedSharedPreferences: true` | Removed; default AES-GCM cipher, migrates on v10 first | v10/v11 (2026) |
+| `SharedPreferences.getInstance()` | `SharedPreferencesAsync` or `SharedPreferencesWithCache` | shared_preferences 2.3 |
+| `flutter_secure_storage` `encryptedSharedPreferences: true` | Deprecated in v10 (AES-GCM default, migrates data); removed in v11: upgrade via v10 first | v10 2025-12 / v11 2026-08 |
 | `isar` 3.x / `hive` 2.x (pub releases 2023 / 2022) | `drift` (SQLite) or `sqflite`; `hive_ce`/`isar_community` forks only for existing data | - |
 | CocoaPods-only iOS plugins | Swift Package Manager default | Flutter 3.44 |
-| `dart:html`, `package:js`, HTML web renderer | `package:web`, `dart:js_interop`, CanvasKit/skwasm | Flutter 3.29 (HTML removed, unverified version) |
+| `dart:html`, `package:js`, HTML web renderer | `package:web`, `dart:js_interop`, CanvasKit/skwasm | Flutter 3.29 (HTML renderer removed) |
 | `pedantic`, `effective_dart`, `lint` packages | `flutter_lints` 6 / `lints` or `very_good_analysis` 11 | - |
 | `flutter_driver` | `integration_test` (+ Patrol for native dialogs) | - |
 | Skia shader warm-up (`--cache-sksl`) | Not needed with Impeller (shaders compiled at build time) | Impeller |
@@ -117,12 +118,12 @@ final (lat, lng) = parseCoords(raw);                                    // recor
 - Adaptive: `Switch.adaptive`, `Slider.adaptive`, `CircularProgressIndicator.adaptive`, `showAdaptiveDialog`; branch on
   `Theme.of(context).platform` for nav patterns. Use `LayoutBuilder`/`MediaQuery.sizeOf` breakpoints (compact < 600, medium < 840,
   expanded) and `NavigationBar` <-> `NavigationRail`. Keep `SafeArea`; Android 15+ is edge-to-edge.
-- Flutter paused Material 3 Expressive and iOS 26 Liquid Glass in core (2025-06); do not invent those widgets. New design work lands in
+- Flutter paused Material 3 Expressive and iOS 26 Liquid Glass in core (2025, exact date unverified); do not invent those widgets. New design work lands in
   `material_ui`/`cupertino_ui` (check their changelogs).
-- Widget Previews: `@Preview(name: ...)` from `package:flutter/widget_previews.dart` on top-level/static functions; `flutter widget-preview start`.
+- Widget Previews: `@Preview(name: ...)` from `package:flutter/widget_previews.dart` on top-level/static functions or public no-arg widget constructors; `flutter widget-preview start`.
 
 ### Navigation
-- `go_router` 18 (Flutter team package, maintenance-mode feature set): `GoRouter(routes: [...], redirect: ...)`, `MaterialApp.router`.
+- `go_router` 18 (Flutter team package; README calls it feature-complete, focus on bug fixes): `GoRouter(routes: [...], redirect: ...)`, `MaterialApp.router`.
   `StatefulShellRoute.indexedStack` for bottom tabs keeping state; typed routes via `go_router_builder` (optional). URLs case-sensitive
   since v15. Use `context.go` (replace stack, deep link) vs `context.push` (stack on top).
 - Auth redirect: `redirect` reads auth state from a `Listenable` passed as `refreshListenable`. Never trust a route guard for security
@@ -168,8 +169,8 @@ test/  integration_test/
 
 ### Platform integration
 - **Pigeon** (29.x) generates typed Dart <-> Kotlin/Swift/C++ channel code: use it instead of hand-written `MethodChannel` string maps.
-- **FFI**: `dart:ffi` + `package:ffigen` (23.x) for C libraries; `jnigen`/`swiftgen` for Java/ObjC/Swift (experimental, unverified status).
-  Native assets / build hooks (`hook/build.dart`) bundle native code without a plugin (stable status: unverified).
+- **FFI**: `dart:ffi` + `package:ffigen` (23.x) for C libraries; `jnigen` (1.0, 2026-10) for Java/Kotlin; `swiftgen` (0.2, pre-1.0) for Swift.
+  Build hooks (`hook/build.dart`, formerly native assets; since Dart 3.10, `package:hooks` 1.0) bundle native code without a plugin.
 - Federated plugin = app-facing package + `_platform_interface` + per-platform packages (`_android`, `_ios`/`_darwin`, `_web`). Write
   one only if publishing; for app-only native code put a Pigeon API in the app's runner.
 - When NOT to add a dependency: no plugin for one native call (Pigeon in-app), no state library for a 3-screen app, no `get_it` when
@@ -217,7 +218,7 @@ test/  integration_test/
 - Release: Android App Bundle (`flutter build appbundle`) signed with an upload key, Play App Signing holds the app key; iOS
   `flutter build ipa` with automatic signing or fastlane `match`. fastlane or Codemagic/Bitrise automate uploads (Play internal track,
   TestFlight). Code push: Shorebird (third-party, store-policy limits apply; unverified current terms). Bump `version: x.y.z+build` every upload.
-- Desktop/web realities: desktop is production-usable (Impeller default 3.47, multi-window still maturing, unverified); web is for
+- Desktop/web realities: desktop is production-usable (Impeller default 3.47, multi-window experimental in 3.47); web is for
   app-like SPAs, not SEO/content sites (canvas rendering, large initial download; use `--wasm` + skwasm when browsers allow).
 
 ## Common mistakes in AI-written code
@@ -227,7 +228,7 @@ test/  integration_test/
 - Calling `setState` after `dispose`, not disposing controllers/subscriptions, creating controllers inside `build`.
 - `MediaQuery.of(context).size` instead of `MediaQuery.sizeOf(context)`; helper methods `_buildX()` instead of widget classes for big parts.
 - Riverpod 2 APIs in a Riverpod 3 project (`StateProvider`, `AutoDisposeNotifier`, `ref.watch` inside callbacks instead of `ref.read`);
-  freezed `when/map` on freezed 3+; `BlocProvider.of` in deep code instead of `context.read/watch/select`.
+  non-`abstract`/`sealed` freezed classes on freezed 3+; `BlocProvider.of` in deep code instead of `context.read/watch/select`.
 - Hallucinated widgets: `CupertinoLiquidGlass`, M3 Expressive components in core, `Navigator.pushNamedAndRemoveUntil` with go_router routes.
 - `withOpacity`, `MaterialStateProperty`, `WillPopScope`, `describeEnum`, `textScaleFactor` (use `TextScaler`).
 - `http.get(Uri.parse(...))` with no timeout or status check; JSON parsing on the UI isolate for huge payloads.
@@ -253,12 +254,15 @@ test/  integration_test/
 - https://dart.dev/language/primary-constructors : syntax, requires language 3.13 (2026-10-09)
 - https://dart.dev/language/macros (via search) : macros work stopped 2025-01-29, augmentations planned separately (2026-10-09)
 - https://docs.flutter.dev/perf/impeller : Impeller per platform, Android Vulkan/GLES fallback, web not Impeller, opt-out flags (2026-10-09)
-- https://docs.flutter.dev/platform-integration/web/renderers : CanvasKit/skwasm, HTML renderer removed, `--wasm` (2026-10-09)
+- https://docs.flutter.dev/platform-integration/web/wasm : `--wasm`, JS fallback without WasmGC, `package:web`/`dart:js_interop` (2026-10-10)
+- https://flutter.dev/blog/whats-new-in-flutter-3-29 : 2025-02-12, HTML web renderer removed (2026-10-10)
+- https://docs.flutter.dev/platform-integration/web/building : web hot reload on by default since 3.35 (2026-10-10)
+- https://dart.dev/tools/hooks : build hooks introduced in Dart 3.10 (2026-10-10)
 - https://docs.flutter.dev/app-architecture/guide : MVVM layers, repositories/services, commands (2026-10-09)
 - https://docs.flutter.dev/tools/widget-previewer : `@Preview`, `flutter widget-preview start` (2026-10-09)
 - https://riverpod.dev/docs/whats_new : Riverpod 3 Notifier unification, legacy providers, retry, mutations, test utils (2026-10-09)
-- https://pub.dev/packages/freezed/changelog : 3.0 (2025-02-25) removed when/map; 4.0 (2026-08-22) no `final` params (2026-10-09)
-- https://pub.dev/packages/go_router/changelog : v15 case-sensitive URLs, v16-v18 changes (2026-10-09)
+- https://pub.dev/packages/freezed/changelog : 3.0 (2025-02-25) removed when/map, 3.1.0 re-added them; 4.0 (2026-08-22) no `final` params (2026-10-09)
+- https://pub.dev/packages/go_router/changelog : v15 case-sensitive URLs, v16-v18 changes, v18 needs Flutter 3.44 (2026-10-10)
 - https://pub.dev/packages/flutter_secure_storage/changelog : v10/v11 Android cipher changes, encryptedSharedPreferences removed (2026-10-09)
 - https://pub.dev/packages/shared_preferences : SharedPreferencesAsync/WithCache recommended, legacy API (2026-10-09)
 - https://pub.dev/api/packages/<name> : versions and publish dates in references/packages.md (2026-10-09)
