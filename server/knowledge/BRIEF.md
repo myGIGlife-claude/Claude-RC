@@ -14,6 +14,15 @@ session and worker so they code against CURRENT standards instead of stale train
 - No personal values (names, hosts, IPs, emails, keys). Public repo.
 - Be prescriptive and compact: bullets and short code, no prose essays. SKILL.md at most ~450 lines; put long tables/details in `references/<name>.md`.
 
+## Added rules (expansion brief)
+- Version-aware: say what differs on the OLDER supported lines (LTS-1, the version a legacy project is likely on) in a short "Older versions" part of
+  "Currency check", so a session working on an old project does not apply only the newest guidance. Never push upgrades the task did not ask for.
+- Privacy-first and least-dependency are defaults: collect only what the feature needs, no trackers or ad SDKs, minimal permissions, and "when NOT to
+  add a dependency" belongs in every skill's "Do this".
+- Production quality, not demos: each skill's "Before you ship" is the bar for finished work (errors, security, tests, accessibility, deploy, rollback).
+- Descriptions are loaded into EVERY session: at most 450 characters, concrete trigger words (file names, tools), no marketing.
+- Process skills (kind: process, e.g. rc-dev-playbook) describe how to work rather than facts: they need "Do this", "Common mistakes" and "Before you ship" only.
+
 ## Required shape of SKILL.md
 ```
 ---
@@ -32,5 +41,6 @@ description: <one or two sentences: WHAT it covers and WHEN to use it, with the 
 ## Sources               URL + what it supports + date accessed (YYYY-MM-DD)
 ```
 
-## Topics (12)
-rc-web-frontend, rc-javascript-typescript, rc-node-backend, rc-web-backend, rc-php, rc-python, rc-go, rc-java, rc-android, rc-ios, rc-ui-ux-design, rc-web-security-perf
+## Topics
+Done (12): rc-web-frontend, rc-javascript-typescript, rc-node-backend, rc-web-backend, rc-php, rc-python, rc-go, rc-java, rc-android, rc-ios, rc-ui-ux-design, rc-web-security-perf.
+Queued: see COVERAGE.md.

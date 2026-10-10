@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 out="$(
-  { echo VERSION; find skills -type f \( -name 'SKILL.md' -o -path 'skills/rc-*/references/*.md' \) | sort; } |
+  { echo VERSION; echo rules/rc-knowledge.md; find skills -type f \( -name 'SKILL.md' -o -path 'skills/rc-*/references/*.md' \) | sort; } |
     while IFS= read -r f; do printf '%s  %s\n' "$(sha256sum "$f" | cut -d' ' -f1)" "$f"; done
 )"
 if [[ "${1:-}" == --check ]]; then

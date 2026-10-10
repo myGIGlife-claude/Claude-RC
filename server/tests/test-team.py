@@ -652,6 +652,7 @@ assert not err, tid
 tool("wait", task_id=tid, timeout_s=30); tool("discard", task_id=tid); tool("discard", task_id=dead)
 # ---- the developer knowledge pack: a Claude worker gets the owner's rc-* skills in its own config folder (copied when VERSION changes) ----
 kp = tmp / "cfg" / "claude-launcher" / "knowledge"; (kp / "skills" / "rc-demo").mkdir(parents=True)
+(kp / "rules").mkdir(); (kp / "rules" / "rc-knowledge.md").write_text("rule v1\n")
 (kp / "VERSION").write_text("2026-10-09\n"); (kp / "skills" / "rc-demo" / "SKILL.md").write_text("---\nname: rc-demo\ndescription: demo\n---\nv1\n")
 attach(repo, {"writer1": {}})   # (the server reads the attach file on every call)
 wsk = cfg / "writer1" / "home" / "skills"
@@ -660,6 +661,7 @@ err, tid = tool("delegate", worker="writer1", task="fresh sync 1"); assert not e
 tool("wait", task_id=tid, timeout_s=30); tool("discard", task_id=tid)
 assert (wsk / "rc-demo" / "SKILL.md").read_text().endswith("v1\n") and (wsk / ".rc-version").read_text() == "2026-10-09\n", "the worker got the pack"
 assert (wsk / "mine" / "SKILL.md").read_text() == "mine\n" and not (wsk / "rc-old").exists(), "its own skills stay, stale rc-* are removed"
+assert (cfg / "writer1" / "home" / "rules" / "rc-knowledge.md").read_text() == "rule v1\n", "the worker also gets the always-on rule"
 (kp / "skills" / "rc-demo" / "SKILL.md").write_text("---\nname: rc-demo\ndescription: demo\n---\nv2\n")
 err, tid = tool("delegate", worker="writer1", task="fresh sync 2")
 tool("wait", task_id=tid, timeout_s=30); tool("discard", task_id=tid)

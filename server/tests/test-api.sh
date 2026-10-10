@@ -794,6 +794,7 @@ grep -q "^restrict,command=\"$IH/bin/claude-launcher-api\" ssh-ed25519 " "$IH/.s
 SK="$IH/.claude/skills"; CANON="$IH/.config/claude-launcher/knowledge"
 [[ "$OUT" == *"developer knowledge pack"* && "$(ls -d "$SK"/rc-*/ | wc -l)" -ge 12 && -f "$SK/rc-go/SKILL.md" ]]; check "install.sh installs the knowledge pack as Claude skills" $?
 cmp -s "$SERVER/knowledge/VERSION" "$CANON/VERSION" && cmp -s "$SERVER/knowledge/skills/rc-go/SKILL.md" "$SK/rc-go/SKILL.md"; check "...exactly the files of the pack, plus a canonical copy and VERSION" $?
+cmp -s "$SERVER/knowledge/rules/rc-knowledge.md" "$IH/.claude/rules/rc-knowledge.md" && cmp -s "$SERVER/knowledge/rules/rc-knowledge.md" "$CANON/rules/rc-knowledge.md"; check "...and the always-on rule that tells sessions to load the skills (~/.claude/rules)" $?
 mkdir -p "$SK/mine" "$SK/rc-dropped"; echo mine >"$SK/mine/SKILL.md"; echo old >"$SK/rc-dropped/SKILL.md"; echo stale >"$SK/rc-go/SKILL.md"
 OUT2="$(HOME="$IH" PATH=/usr/local/bin:/usr/bin:/bin CLAUDERC_BASE="file://$SERVER" bash -s <"$SERVER/install.sh" 2>&1)"
 [[ "$OUT2" == *"Installed the developer knowledge pack"* && "$(cat "$SK/mine/SKILL.md")" == mine && ! -e "$SK/rc-dropped" ]]; check "install.sh leaves other skills alone and removes dropped rc-* topics" $?
@@ -874,6 +875,25 @@ refresh badlint
 [[ $RFRC != 0 && "$(jq -r .state <<<"$RSTAT")" == failed && "$(jq -r .message <<<"$RSTAT")" == *"quality gate"* ]]; check "refresh: a pack that fails the quality gate is not pushed" $?
 refresh ok 1
 [[ $RFRC != 0 && "$(jq -r .state <<<"$RSTAT")" == failed && "$(jq -r .message <<<"$RSTAT")" == *"Claude stopped (exit 3)"* ]]; check "refresh: a failing claude is reported" $?
+
+# ---- the evaluation set: valid scenarios, and the runner's scoring (stub claude answers differently with and without skills) ----
+EV="$SERVER/knowledge/evals"
+jq -e -s 'length >= 20 and all(.[]; (.id | test("^[a-z0-9-]+$")) and (.skill | startswith("rc-")) and (.prompt | length > 20) and (.must | type == "array") and (.must_not | type == "array"))' "$EV/scenarios.jsonl" >/dev/null; check "evals: scenarios.jsonl is valid (ids, skills, prompts, checks)" $?
+BADRE=0; while IFS= read -r re; do grep -Eq -- "$re" </dev/null; [[ $? -le 1 ]] || BADRE=1; done < <(jq -r '.must[], .must_not[]' "$EV/scenarios.jsonl"); [[ $BADRE == 0 ]]; check "evals: every check is a valid regular expression" $?
+[[ "$(jq -r .skill "$EV/scenarios.jsonl" | sort -u | while read -r sk; do [[ -d "$SERVER/knowledge/skills/$sk" ]] || echo missing; done | wc -l)" == 0 ]]; check "evals: every scenario points at an existing skill" $?
+mkdir -p "$WORK/evbin"
+cat >"$WORK/evbin/claude" <<'STUB'
+#!/usr/bin/env bash
+# stub claude -p for the eval runner: a modern answer when the config folder has the pack (skills + rule), an outdated one without
+if [[ -d "$CLAUDE_CONFIG_DIR/skills/rc-go" && -f "$CLAUDE_CONFIG_DIR/rules/rc-knowledge.md" ]]; then printf '{ "compilerOptions": { "module": "nodenext", "moduleResolution": "nodenext", "strict": true } }\n'
+else printf '{ "compilerOptions": { "moduleResolution": "node", "baseUrl": ".", "strict": true } }\n'; fi
+STUB
+chmod +x "$WORK/evbin/claude"
+mkdir -p "$WORK/evlogin"; echo '{}' >"$WORK/evlogin/.credentials.json"
+EVOUT="$(CLAUDE_CONFIG_DIR="$WORK/evlogin" PATH="$WORK/evbin:$PATH" bash "$EV/run-evals.sh" --only ts-tsconfig --out "$WORK/evout" 2>&1)"
+[[ "$EVOUT" == *"with the pack: 1/1 passed   without: 0/1 passed"* && "$EVOUT" == *"ts-tsconfig"* ]]; check "evals: the runner scores with-pack vs baseline (modern answer passes, outdated fails)" $?
+grep -q '^FAIL: ' "$WORK/evout/ts-tsconfig.without.1.result" && [[ "$(cat "$WORK/evout/ts-tsconfig.with.1.result")" == PASS ]]; check "evals: per-check results are kept with the answers" $?
+[[ -z "$(find "$WORK/evout" -name '.credentials.json')" ]]; check "evals: no copy of the login is left behind" $?
 
 echo "team workers"
 for bad in "worker-add" "worker-add ../x" "worker-add -x" "worker-add .x" "worker-add a b" "worker-set a" \

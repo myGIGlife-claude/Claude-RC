@@ -599,6 +599,10 @@ def sync_skills(w):
         if d.is_dir():
             shutil.copytree(d, dst / d.name)
     (dst / ".rc-version").write_text(ver)
+    rule = src / "rules" / "rc-knowledge.md"
+    if rule.is_file():
+        (w / "home" / "rules").mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(rule, w / "home" / "rules" / "rc-knowledge.md")
 
 
 def sandbox_mode():
