@@ -29,15 +29,19 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,10 +67,34 @@ import life.mygig.clauderc.ui.openInClaude
 import life.mygig.clauderc.ui.theme.Term
 import life.mygig.clauderc.ui.theme.WarnAmber
 
+/** Two tabs: General chat (conversations not tied to a repo) and Code chat (the project sessions). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionsScreen(vm: MainViewModel) {
-    val sessions by vm.sessions.collectAsStateWithLifecycle()
+    // Saved for process death; the controller keeps it while you visit other tabs.
+    var tab by rememberSaveable { mutableIntStateOf(vm.general.tab.value) }
+    Column(Modifier.fillMaxSize()) {
+        PrimaryTabRow(selectedTabIndex = tab) {
+            listOf("General chat", "Code chat").forEachIndexed { i, label ->
+                Tab(
+                    selected = tab == i,
+                    onClick = { tab = i; vm.general.selectTab(i) },
+                    text = { OneLine(label) },
+                )
+            }
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (tab == 0) GeneralChatTab(vm) else CodeSessions(vm)
+        }
+    }
+}
+
+/** The project sessions (general chats are in their own tab). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CodeSessions(vm: MainViewModel) {
+    val allSessions by vm.sessions.collectAsStateWithLifecycle()
+    val sessions = remember(allSessions) { allSessions.filterNot { it.general } }
     val pushReady by vm.push.pushReady.collectAsStateWithLifecycle()
     val refreshing by vm.sessionsRefreshing.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()

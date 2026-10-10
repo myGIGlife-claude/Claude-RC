@@ -59,6 +59,14 @@ val SKILLS_SOURCE_RE = Regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 /** Same rule as the server's worker names (Team). */
 val WORKER_NAME_RE = Regex("^[A-Za-z][A-Za-z0-9_-]{0,29}$")
 
+/** Same rule as the server's general chat ids (date-time-random). */
+val GENERAL_CHAT_ID_RE = Regex("^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$")
+const val GENERAL_TITLE_MAX = 80
+
+/** A title as the server gets it: one line, trimmed; null if empty or longer than [GENERAL_TITLE_MAX]. */
+fun cleanGeneralTitle(title: String): String? =
+    title.replace('\r', ' ').replace('\n', ' ').trim().takeIf { it.isNotEmpty() && it.length <= GENERAL_TITLE_MAX }
+
 /** Same rules as the server's host actions (docs/hosts-design.md). */
 val HOST_NAME_RE = Regex("^[a-z][a-z0-9-]{0,29}$")
 val HOST_ADDRESS_RE = Regex("^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
@@ -121,6 +129,23 @@ class LauncherApi(
     suspend fun tail(project: String, lines: Int = 40): TailResult {
         requireName(project)
         return call("tail $project --lines ${lines.coerceIn(1, 200)}")
+    }
+
+    // General chats: Claude conversations not tied to a repo (session "chat-<id>").
+    suspend fun generalList(): GeneralChats = call("general-list")
+    suspend fun generalNew(): GeneralNew = call("general-new", timeoutMs = 120_000)
+    /** Starts the chat if it is stopped (resuming its conversation); returns its session. */
+    suspend fun generalOpen(id: String): GeneralOpen { requireChatId(id); return call("general-open $id", timeoutMs = 120_000) }
+    /** The new title goes on stdin. */
+    suspend fun generalRename(id: String, title: String): JsonObject {
+        requireChatId(id)
+        val t = cleanGeneralTitle(title) ?: throw ApiException(Codes.INVALID_NAME, "Titles are 1 to $GENERAL_TITLE_MAX characters.")
+        return call("general-rename $id", stdin = t)
+    }
+    suspend fun generalStop(id: String): JsonObject { requireChatId(id); return call("general-stop $id") }
+    suspend fun generalDelete(id: String): JsonObject { requireChatId(id); return call("general-delete $id") }
+    private fun requireChatId(id: String) {
+        if (!GENERAL_CHAT_ID_RE.matches(id)) throw ApiException(Codes.INVALID_NAME, "Bad chat id")
     }
 
     suspend fun loginClaudeStart(): LoginUrl = call("login-claude-start")

@@ -34,8 +34,11 @@ save() {
   local tmp
   tmp="$(mktemp)"
   # (tmux turns tabs into "_", so fields are split on a marker instead)
-  tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}' |
-    awk -F'@@' '($3 ~ /claude/ || $4 == "claude") && $1 !~ /^(claude-login|aws-sso-login|mcp-auth|claude-doctor|worker-login-.*)$/ && !seen[$1]++ { print $1 "\t" $2 }' >"$tmp"
+  # General chats (chat-<id> started in .../<id>) are left out: they resume when opened, not at boot.
+  tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}@@#{session_path}' |
+    awk -F'@@' '($3 ~ /claude/ || $4 == "claude") && $1 !~ /^(claude-login|aws-sso-login|mcp-auth|claude-doctor|worker-login-.*)$/ &&
+      !($1 ~ /^chat-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]$/ && $5 ~ ("/" substr($1, 6) "$")) &&
+      !seen[$1]++ { print $1 "\t" $2 }' >"$tmp"
   mv "$tmp" "$LIST"
   log "saved $(wc -l <"$LIST") session(s)"
 }
