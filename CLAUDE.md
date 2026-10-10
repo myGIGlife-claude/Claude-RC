@@ -105,3 +105,4 @@ hostnames, IPs, emails, org names, keys. They live in
   without it), off. Codex's own sandbox can't nest inside ours (needs namespaces), so inside ours it runs with `danger-full-access` and plan mode is a
   read-only mount. Ubuntu 24.04+ may need `kernel.apparmor_restrict_unprivileged_userns=0` for bwrap. Tests run with `CLAUDERC_SANDBOX=off`
   (stub paths live in the hidden home) plus dedicated sandbox checks that skip when bwrap is unusable.
+- `.gitleaksignore` fingerprints contain the commit hash, and PRs are squash-merged: a false positive must be re-ignored under the hash it gets on `main` (find it with `gitleaks git --log-opts=main --gitleaks-ignore-path /dev/null -r out.json -f json .`), not the branch hash.
