@@ -1,10 +1,9 @@
 import java.util.Properties
 
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
-    id("org.jetbrains.kotlin.plugin.serialization")
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 // Release signing: CI writes the keystore from GitHub Actions secrets and passes
@@ -22,7 +21,7 @@ val keystorePath = signingValue("SIGNING_KEYSTORE_FILE", "storeFile")
 
 android {
     namespace = "life.mygig.clauderc"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "life.mygig.clauderc"
@@ -52,7 +51,8 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
@@ -96,30 +96,29 @@ kotlin {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2025.12.00")
-    implementation(composeBom)
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-core")
+    implementation(platform(libs.compose.bom))
+    implementation(libs.compose.ui)
+    implementation(libs.compose.material3)
+    implementation(libs.compose.material.icons.core)
 
-    implementation("androidx.core:core-ktx:1.17.0")
-    implementation("androidx.activity:activity-compose:1.11.0")
-    implementation("androidx.fragment:fragment-ktx:1.9.1")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
-    implementation("androidx.datastore:datastore-preferences:1.1.7")
-    implementation("androidx.work:work-runtime-ktx:2.12.0")
-    implementation("androidx.biometric:biometric:1.1.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.fragment.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.biometric)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.android)
 
     // SSH: maintained JSch fork + Bouncy Castle for Ed25519 / Curve25519 on Android.
-    implementation("com.github.mwiede:jsch:2.28.7")
-    implementation("org.bouncycastle:bcprov-jdk18on:1.86")
+    implementation(libs.jsch)
+    implementation(libs.bouncycastle.bcprov)
 
     // Push alerts. No google-services plugin or json: the server hands the app its
     // (public) Firebase ids and Push.kt starts Firebase from them at run time.
-    implementation(platform("com.google.firebase:firebase-bom:33.16.0"))
-    implementation("com.google.firebase:firebase-messaging")
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
 
-    testImplementation("junit:junit:4.13.2")
+    testImplementation(libs.junit)
 }
