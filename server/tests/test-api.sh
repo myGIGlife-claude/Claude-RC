@@ -245,6 +245,114 @@ api "stop org-app"
 grep -q "^org-app	" "$LIST"; [[ $? -ne 0 ]]; check "last session removed from autostart list" $?
 api "start demo-app2"
 
+echo "general chats"
+GID_RE='^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$'
+for bad in "general-list x" "general-new x" "general-new --start" "general-open" "general-open ../x" "general-open 20260101-010101-abcd extra" \
+  "general-open 20260101-010101-ABCD" "general-open 20260101-010101-abcde" "general-open 2026010-010101-abcd" "general-open -20260101-010101-abcd" \
+  "general-open chat-20260101-010101-abcd" "general-stop ../../etc" "general-delete x" "general-delete 20260101-010101-abcd/../../x" \
+  "general-rename" "general-rename 20260101-010101-abcd title" "general-stop $(printf '1%.0s' {1..40})"; do
+  api "$bad"
+  check "general forbidden: '${bad:0:40}'" "$(jqt '.ok==false and .error.code=="forbidden"')"
+done
+# claude-setup.sh checks the id itself too (it can be run without the runner).
+for bad in "../x" "" "20260101-010101-ABCD" "20260101-010101-abcd/../../x" "$(printf '1%.0s' {1..40})"; do
+  OUT="$("$HOME/bin/claude-setup.sh" --api general-delete "$bad" 2>/dev/null)"
+  check "script refuses id '${bad:0:20}'" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+api "general-open 20260101-010101-abcd"
+check "unknown chat id -> invalid_name" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "general-list"
+check "no chats yet" "$(jqt '.ok and .data.chats==[]')"
+api "general-new"
+check "general-new" "$(jqa --arg re "$GID_RE" --arg h "$HOME" '.ok and (.data.id | test($re)) and .data.session==("chat-" + .data.id) and .data.dir==($h + "/Chat/" + .data.id)')"
+GID="$(jq -r .data.id <<<"$OUT")"; GDIR="$HOME/Chat/$GID"
+[[ -d "$GDIR" && "$(stat -c %a "$HOME/Chat")" == 700 ]]; check "chat folder made, ~/Chat is 700" $?
+grep -q "not a code repository" "$HOME/Chat/CLAUDE.md" && grep -q "rc-us-legal-core" "$HOME/Chat/CLAUDE.md" && grep -q "Documents/" "$HOME/Chat/CLAUDE.md"
+check "Chat/CLAUDE.md written" $?
+tmux has-session -t "=chat-$GID" 2>/dev/null; check "chat session running" $?
+tmux list-panes -t "=chat-$GID" -F '#{pane_start_command}' | grep -q -- "env -u ANTHROPIC_API_KEY claude --remote-control chat-$GID"; check "started like a project (Remote Control, no API key)" $?
+jq -e --arg d "$GDIR" '.projects[$d].hasTrustDialogAccepted' "$HOME/.claude.json" >/dev/null; check "chat folder pre-trusted" $?
+echo "# my own rules" >"$HOME/Chat/CLAUDE.md"
+api "general-new"
+GID2="$(jq -r .data.id <<<"$OUT")"
+[[ "$GID2" =~ $GID_RE && "$GID2" != "$GID" && "$(cat "$HOME/Chat/CLAUDE.md")" == "# my own rules" ]]; check "second chat; CLAUDE.md not overwritten" $?
+"$HOME/.local/bin/claude-autostart" save >/dev/null
+grep -q "^chat-" "$LIST"; [[ $? -ne 0 ]]; check "chats are not in the autostart list" $?
+grep -q "^demo-app2	" "$LIST"; check "...the project session still is" $?
+# A project literally named chat-<id> is a code session (and autostarted), not a General chat.
+PCH=chat-20200101-000000-abcd
+mkdir -p "$HOME/projects/$PCH" "$HOME/Chat/20200101-000000-abcd"
+api "start $PCH"
+check "project named like a chat starts" "$(jqt '.ok and .data.session=="'$PCH'"')"
+"$HOME/.local/bin/claude-autostart" save >/dev/null
+grep -q "^$PCH	" "$LIST"; check "...and is in the autostart list" $?
+api "sessions"
+check "sessions mark General chats" "$(jqa --arg id "$GID" '.ok and ([.data.sessions[] | select(.name == ("chat-" + $id))][0] | .general == true and .chat_id == $id)')"
+check "...and only them" "$(jqt '([.data.sessions[] | select(.name == "demo-app2" or .name == "'$PCH'")] | length == 2 and all(.general == false and has("chat_id") == false))')"
+check "...existing fields kept" "$(jqt '.data.sessions | all(has("name") and has("dir") and has("project") and has("preview") and has("busy") and has("waiting") and has("push_done"))')"
+api "general-open 20200101-000000-abcd"
+check "open refuses a name a project session holds" "$(jqt '.ok==false and .error.code=="internal"')"
+tmux has-session -t "=$PCH" 2>/dev/null; check "...and leaves the project session alone" $?
+api "general-stop 20200101-000000-abcd"
+check "stop leaves the project session alone" "$(jqt '.ok and .data.stopped==false')"
+tmux has-session -t "=$PCH" 2>/dev/null; check "...still running" $?
+api "stop $PCH"; rmdir "$HOME/Chat/20200101-000000-abcd"
+# A conversation: its first message becomes the title.
+GSL="$HOME/.claude/projects/${GDIR//[^A-Za-z0-9]/-}"; GSID=22222222-3333-4444-5555-666666666666
+mkdir -p "$GSL"
+{ echo '{"type":"summary","summary":"x"}'; echo '{"type":"user","message":{"role":"user","content":"<command-name>/model</command-name>"}}'
+  echo '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Help me plan\na trip to the mountains next spring, with a budget and a packing list"}]}}'; } >"$GSL/$GSID.jsonl"
+touch -d '+1 minute' "$GSL/$GSID.jsonl"
+api "general-list"
+check "general-list: both, newest updated first" "$(jqa --arg a "$GID" --arg b "$GID2" '.ok and (.data.chats | map(.id)) == [$a, $b]')"
+check "general-list: title from the first message (one line, 60)" "$(jqa --arg a "$GID" '.data.chats[0].title == ("Help me plan a trip to the mountains next spring, with a budget and a packing list" | .[0:60])')"
+check "general-list: fields" "$(jqa --arg b "$GID2" --arg h "$HOME" '.data.chats[1] | .title == "New chat" and .running and .session == ("chat-" + $b) and .dir == ($h + "/Chat/" + $b)
+  and (.created_at | type) == "number" and .created_at > 1700000000 and .updated_at >= .created_at and (.preview | type) == "string" and .busy == false and .waiting == false')"
+api "general-rename $GID" $'  My\ttrip\nplan \x01  '
+check "rename cleans the title" "$(jqt '.ok and .data.title == "My trip plan"')"
+[[ "$(cat "$GDIR/.title")" == "My trip plan" ]]; check "title saved in .title" $?
+api "general-rename $GID" "   "
+check "rename refuses an empty title" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "general-rename $GID" "$(printf 'x%.0s' {1..81})"
+check "rename refuses 81 characters" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "general-rename $GID" "$(printf 'é%.0s' {1..80})"
+check "rename counts characters, not bytes" "$(jqt '.ok and (.data.title | length) == 80')"
+api "general-rename $GID" "My trip plan"
+api "general-list"
+check "list uses .title" "$(jqa --arg a "$GID" '[.data.chats[] | select(.id == $a)][0].title == "My trip plan"')"
+api "general-stop $GID"
+check "general-stop" "$(jqa --arg a "$GID" '.ok and .data.stopped and .data.id == $a and .data.session == ("chat-" + $a)')"
+tmux has-session -t "=chat-$GID" 2>/dev/null; [[ $? -ne 0 ]]; check "session gone" $?
+api "general-stop $GID"
+check "general-stop again is fine" "$(jqt '.ok and .data.stopped == false')"
+api "general-list"
+check "stopped chat stays listed" "$(jqa --arg a "$GID" '[.data.chats[] | select(.id == $a)][0] | .running == false and .session == "" and .title == "My trip plan"')"
+api "general-open $GID"
+check "general-open starts it" "$(jqa --arg a "$GID" '.ok and .data.id == $a and .data.session == ("chat-" + $a) and .data.already_running == false')"
+tmux list-panes -t "=chat-$GID" -F '#{pane_start_command}' | grep -q -- "--remote-control chat-$GID --resume $GSID"; check "...resuming its conversation" $?
+api "general-open $GID"
+check "general-open again: already running" "$(jqt '.ok and .data.already_running == true')"
+api "general-stop $GID2"; api "general-open $GID2"
+tmux list-panes -t "=chat-$GID2" -F '#{pane_start_command}' | grep -q -- "--resume"; [[ $? -ne 0 ]]; check "a chat with no conversation starts fresh" $?
+api "restart chat-$GID"
+check "restart keeps the chat-<id> name and resumes" "$(jqa --arg a "$GID" --arg s "$GSID" '.ok and .data.session == ("chat-" + $a) and .data.resumed and .data.conversation == $s')"
+tmux has-session -t "=$GID" 2>/dev/null; [[ $? -ne 0 ]]; check "...no session named after the bare folder" $?
+"$HOME/.local/bin/claude-autostart" save >/dev/null
+grep -q "^chat-" "$LIST"; [[ $? -ne 0 ]]; check "still no chats in the autostart list" $?
+mkdir -p "$HOME/.config/claude-launcher/push-done" && touch "$HOME/.config/claude-launcher/push-done/chat-$GID"
+api "general-delete $GID"
+check "general-delete" "$(jqt '.ok and .data == {deleted:true}')"
+[[ ! -e "$GDIR" ]] && compgen -G "$HOME/Chat/.deleted/$GID-*" >/dev/null && [[ -f "$(compgen -G "$HOME/Chat/.deleted/$GID-*" | head -n 1)/.title" ]]
+check "folder moved to ~/Chat/.deleted, not removed" $?
+[[ -f "$GSL/$GSID.jsonl" ]]; check "conversation transcript left alone" $?
+tmux has-session -t "=chat-$GID" 2>/dev/null; [[ $? -ne 0 ]]; check "deleted chat's session stopped" $?
+[[ ! -e "$HOME/.config/claude-launcher/push-done/chat-$GID" ]]; check "its push setting dropped" $?
+api "general-list"
+check "deleted chat gone from the list (.deleted not listed)" "$(jqa --arg b "$GID2" '.ok and (.data.chats | map(.id)) == [$b]')"
+api "general-delete $GID"
+check "delete again -> invalid_name" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "general-delete $GID2"
+
 echo "claude login"
 api "login-claude-start"
 check "login url returned" "$(jqt '.ok and (.data.url | startswith("https://claude.ai/oauth/authorize"))')"
