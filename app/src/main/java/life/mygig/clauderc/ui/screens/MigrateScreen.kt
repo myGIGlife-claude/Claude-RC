@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -124,7 +125,8 @@ fun MigrateScreen(vm: MainViewModel) {
                 }
                 LinearProgressIndicator(progress = { index / MIGRATE_STEPS.size.toFloat() }, modifier = Modifier.fillMaxWidth())
                 Column(
-                    Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll).padding(16.dp),
+                    // Capped and centered so text lines don't stretch across a tablet or a foldable's inner screen.
+                    Modifier.weight(1f).align(Alignment.CenterHorizontally).widthIn(max = 720.dp).fillMaxWidth().verticalScroll(scroll).padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     if (ui.busy) {
