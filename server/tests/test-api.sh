@@ -892,7 +892,7 @@ chmod +x "$WORK/evbin/claude"
 mkdir -p "$WORK/evlogin"; echo '{}' >"$WORK/evlogin/.credentials.json"
 EVOUT="$(CLAUDE_CONFIG_DIR="$WORK/evlogin" PATH="$WORK/evbin:$PATH" bash "$EV/run-evals.sh" --only ts-tsconfig --out "$WORK/evout" 2>&1)"
 [[ "$EVOUT" == *"with the pack: 1/1 passed   without: 0/1 passed"* && "$EVOUT" == *"ts-tsconfig"* ]]; check "evals: the runner scores with-pack vs baseline (modern answer passes, outdated fails)" $?
-grep -q 'FAIL: has' "$WORK/evout/ts-tsconfig.without.1.result" && [[ "$(cat "$WORK/evout/ts-tsconfig.with.1.result")" == PASS ]]; check "evals: per-check results are kept with the answers" $?
+grep -q '^FAIL: ' "$WORK/evout/ts-tsconfig.without.1.result" && [[ "$(cat "$WORK/evout/ts-tsconfig.with.1.result")" == PASS ]]; check "evals: per-check results are kept with the answers" $?
 [[ -z "$(find "$WORK/evout" -name '.credentials.json')" ]]; check "evals: no copy of the login is left behind" $?
 
 echo "team workers"
