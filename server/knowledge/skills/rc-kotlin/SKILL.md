@@ -15,7 +15,7 @@ description: Kotlin language and non-Android Kotlin as of 2026-10: K2 and 2.x fe
 | Kotlin | **2.4.21** (2026-10-08). 2.4.20 tooling 2026-09-07. 2.4.0 language 2026-06-03 | **2.5.0 planned 2026-12** (2.5.0-Beta1 out 2026-09-23). 2.5.20 planned 2027-03 |
 | Cadence | Language release 2.x.0 every 6 months, tooling 2.x.20 three months later, bug fixes 2.x.yz | From 2.4, the JVM stdlib of each line is supported 18 months (2.4 until 2027-12-03) |
 | Compiler | K2 only. **K1 removed in 2.4** (`-language-version=1.9` rejected) | K2 stable since 2.0.0 (2024-05-21) |
-| Stable in 2.4 | Context parameters, explicit backing fields, `@all:` target, common `Uuid`, `isSorted()`, Java 26 target | Collection literals, explicit context args: experimental |
+| Stable in 2.4 | Context parameters, explicit backing fields, `@all:` target, common `Uuid` (V4/V7 generators still opt-in), `isSorted()`; can emit Java 26 bytecode | Collection literals, explicit context args: experimental |
 | Stable in 2.2/2.3 | Guard conditions in `when`, non-local `break`/`continue`, `$$` interpolation (2.2); nested type aliases, `kotlin.time.Instant`/`Clock` (2.3) | |
 | Coming | Name-based destructuring stable (syntax-only) in 2.5; `val (a, b)` turns name-based in 2.7 (end 2027). Rich errors: KEEP discussion only, no flag | Do not write rich-error syntax |
 | Gradle | KGP 2.4.20 tested with Gradle 7.6.3 to 9.7.0. Minimum AGP 8.5.2 | Gradle 9.8.1 is current (rc-android) |
@@ -26,7 +26,7 @@ description: Kotlin language and non-Android Kotlin as of 2026-10: K2 and 2.x fe
 
 ### Older versions (what differs on a legacy project)
 - **Kotlin 1.9 / K1 projects**: can't jump straight to 2.4 if they rely on K1-only compiler plugins or `-language-version=1.9`. Go to 2.0-2.3 first. No guard conditions, context parameters or `$$` strings there. Don't use them.
-- **2.2/2.3**: context parameters need `-Xcontext-parameters`. Explicit backing fields need `-Xexplicit-backing-fields`. Context receivers are deprecated in 2.2 and removed in 2.3.20. `kotlinOptions {}` is an error from 2.2: use `compilerOptions {}`.
+- **2.2/2.3**: context parameters need `-Xcontext-parameters`. Explicit backing fields need `-Xexplicit-backing-fields`. Context receivers are superseded in 2.2 (can't combine with `-Xcontext-parameters`) and removed in 2.3.20. `kotlinOptions {}` is an error from 2.2: use `compilerOptions {}`.
 - **Pre-2.3 time code** uses `kotlinx.datetime.Instant`/`Clock`. Stay with it unless asked to migrate (kotlinx-datetime 0.7+ moved to `kotlin.time`).
 - **Spring Boot 3.x** pairs with Kotlin 1.9/2.x and Jackson 2. Boot 4 requires Kotlin 2.2+. **JUnit 5** has no `suspend` tests: wrap in `runTest`.
 - Don't upgrade Kotlin, Gradle or libraries unless the task asks. Match the project's `libs.versions.toml`.
@@ -115,7 +115,7 @@ suspend fun loadBoth(a: Api) = coroutineScope {        // fails fast, cancels th
 
 ### Kotlin Multiplatform
 - Layout: `src/commonMain`, `commonTest`, `androidMain`, `iosMain`, `jvmMain`. The default hierarchy template creates the intermediate source sets (`iosMain`, `appleMain`, `nativeMain`). Don't hand-wire `dependsOn` unless it's needed.
-- Prefer an interface in common + implementations injected per platform. Use `expect`/`actual` only for small leaf things (`expect fun platformName(): String`). `expect`/`actual` classes are still Beta (unverified for 2.4).
+- Prefer an interface in common + implementations injected per platform. Use `expect`/`actual` only for small leaf things (`expect fun platformName(): String`). `expect`/`actual` classes are still Beta (compiler warns; `-Xexpect-actual-classes` silences it).
 - Share data and domain first (Ktor client, kotlinx.serialization, SQLDelight or Room KMP, DataStore, Koin, lifecycle-viewmodel). Share UI with Compose Multiplatform where the team accepts a non-native look on iOS.
 - Compose MP 1.12: Android/iOS/desktop Stable. Web via Wasm is Beta: fine for internal tools, plan for a fallback on public sites (Wasm GC needs current browsers).
 - iOS: ship an XCFramework (or SwiftPM via KMMBridge-style tooling). Swift export is Alpha: don't make it the only path. Expose suspend/Flow to Swift through a thin wrapper or a tested bridge.
@@ -166,8 +166,8 @@ tasks.test { useJUnitPlatform() }
 ## Security
 - **Injection**: Exposed/jOOQ/JDBC with bound parameters only. Never build SQL, shell commands (`ProcessBuilder` with a list, no `sh -c`), LDAP or paths from strings with user input. Normalize and check paths stay under a base dir.
 - **Deserialization**: kotlinx.serialization has no gadget chain, but polymorphic `Any`/open polymorphism with class names from input is a risk. Register subclasses explicitly. Never Java `ObjectInputStream` on untrusted data. Set size limits on request bodies (Ktor: limit in the engine/`receive`).
-- **Error leakage**: kotlinx.serialization error messages can echo user input. Hide them from clients (`StatusPages` generic message). 1.11 added `exceptionsWithDebugInfo` to turn that off, and it will default to enabled later.
-- **Secrets**: from env/secret store, never in `application.conf`, `gradle.properties` in VCS or logs. `data class` `toString()` prints every field: override it or wrap secrets (`value class Secret(val v: String) { override fun toString() = "***" }`).
+- **Error leakage**: kotlinx.serialization error messages can echo user input. Hide them from clients (`StatusPages` generic message). 1.11 added `exceptionsWithDebugInfo` to `Json {}`: set it to `false` to keep input out of messages (hiding becomes the default once it is stable).
+- **Secrets**: from env/secret store, never in `application.conf`, `gradle.properties` in VCS or logs. `data class` `toString()` prints every field: override it or wrap secrets (`@JvmInline value class Secret(val v: String) { override fun toString() = "***" }`).
 - **Auth (Ktor)**: verify JWT issuer, audience, algorithm and expiry. `CORS` with explicit hosts (`anyHost()` only for public read-only APIs). CSRF protection for cookie sessions. Session cookies `secure`, `httpOnly`, `SameSite`.
 - **Crypto**: `java.security.SecureRandom`/`Uuid.random()` for tokens, never `kotlin.random.Random`. Constant-time compare (`MessageDigest.isEqual`). Password hashing with Argon2/bcrypt libraries, not SHA.
 - **Coroutines**: one unbounded `launch` per request becomes a DoS. Bound concurrency (`Semaphore`, `limitedParallelism`, channel capacity) and set timeouts.
@@ -227,7 +227,7 @@ tasks.test { useJUnitPlatform() }
 ## Sources
 All accessed 2026-10-09.
 - https://kotlinlang.org/docs/releases.html: 2.4.21/2.4.20/2.4.0 dates, cadence, 2.5.0 (2026-12) and 2.5.20 plans, 18-month stdlib support
-- https://kotlinlang.org/docs/whatsnew24.html: 2.4 stable/experimental features, K1 removal, Gradle/AGP minimums, CMS GC, Swift export alpha (page shows a 2026-07-14 date, releases page says 2026-06-03 for 2.4.0)
+- https://kotlinlang.org/docs/whatsnew24.html: 2.4 stable/experimental features, K1 removal, Gradle/AGP minimums, CMS GC, Swift export alpha, Apple minimums iOS 15 (page shows "Released: July 14, 2026", which is the 2.4.10 date; releases page and GitHub tag v2.4.0 say 2026-06-03, rechecked 2026-10-10)
 - https://kotlinlang.org/docs/whatsnew2420.html: 2.4.20 features, Gradle 7.6.3 to 9.7.0
 - https://kotlinlang.org/docs/whatsnew2320.html: name-based destructuring experimental, context receivers removed, `checkKotlinAbi`, Intel Apple targets deprecated, Lombok Alpha
 - https://kotlinlang.org/docs/whatsnew23.html: nested type aliases, `kotlin.time.Instant`, explicit backing fields experimental, iOS 14 minimum
@@ -238,6 +238,7 @@ All accessed 2026-10-09.
 - https://kotlinlang.org/docs/destructuring-declarations.html: current syntax and flags
 - https://kotlinlang.org/docs/roadmap.html (2026-08-20): Wasm to Stable, Swift export to Beta, kapt performance work; rich errors not listed (KEEP-0462 discussion per search results)
 - https://kotlinlang.org/docs/components-stability.html: component stability levels
+- https://kotlinlang.org/docs/multiplatform/multiplatform-expect-actual.html: expect/actual classes Beta, `-Xexpect-actual-classes` (2026-10-10)
 - https://kotlinlang.org/docs/multiplatform/supported-platforms.html: KMP and Compose MP stability per platform
 - https://kotlinlang.org/docs/gradle-binary-compatibility-validation.html: `abiValidation`, experimental
 - https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-test/kotlinx.coroutines.test/run-test.html: runTest timeout, backgroundScope, virtual time
