@@ -71,16 +71,16 @@ private class Page(
 @Composable
 fun DetailScreen(vm: MainViewModel, d: Detail) {
     val status by vm.status.collectAsStateWithLifecycle()
-    val mcp by vm.mcp.collectAsStateWithLifecycle()
+    val mcp by vm.connections.mcp.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
-    val mcpAuth by vm.mcpAuth.collectAsStateWithLifecycle()
-    val plugins by vm.plugins.collectAsStateWithLifecycle()
+    val mcpAuth by vm.connections.mcpAuth.collectAsStateWithLifecycle()
+    val plugins by vm.connections.plugins.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var confirm by remember { mutableStateOf(false) }
-    BackHandler { vm.openDetail(null) }
+    BackHandler { vm.connections.openDetail(null) }
     val s = status ?: return
     val sv = s.services.orEmpty()
-    val login = { k: LoginKind -> { vm.showLogin(k) } }
+    val login = { k: LoginKind -> { vm.logins.showLogin(k) } }
 
     val page: Page = when (d) {
         is Detail.Service -> {
@@ -96,9 +96,9 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
                     def?.install?.let { "Tool" to (if (svc?.installed == true) "$it installed" else "$it not installed") },
                 ),
                 vars = Catalog.envVars[d.id].orEmpty(),
-                edit = "Edit credentials" to { vm.openDetail(null); vm.showTokenService(d.id) },
+                edit = "Edit credentials" to { vm.connections.openDetail(null); vm.services.showTokenService(d.id) },
                 test = "Test now" to { vm.refreshAll() },
-                remove = "Disconnect ${def?.name ?: d.id}" to { vm.disconnect(d.id, def?.name ?: d.id) },
+                remove = "Disconnect ${def?.name ?: d.id}" to { vm.connections.disconnect(d.id, def?.name ?: d.id) },
                 removeConfirm = "Its credentials are deleted from the server. Sessions lose them after their next restart.",
             )
         }
@@ -126,13 +126,13 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
                 vars = Catalog.envVars["youtube"].orEmpty(),
                 note = "Videos from unaudited Google projects stay private until audited. 100 uploads a day.",
                 edit = "Sign in again" to login(LoginKind.YOUTUBE),
-                remove = "Disconnect YouTube" to { vm.disconnect("youtube", "YouTube") },
+                remove = "Disconnect YouTube" to { vm.connections.disconnect("youtube", "YouTube") },
                 removeConfirm = "The YouTube login is deleted from the server.")
         }
         is Detail.Mcp -> {
             val m = mcp?.servers?.firstOrNull { it.name == d.server.name } ?: d.server
             val signIn = m.health == "needs_auth" && (m.scope == "user" || m.scope == "plugin")
-            if (m.scope == "plugin") LaunchedEffect(Unit) { if (plugins == null) vm.loadPlugins() }
+            if (m.scope == "plugin") LaunchedEffect(Unit) { if (plugins == null) vm.connections.loadPlugins() }
             val pluginId = plugins?.installed?.firstOrNull { it.name == m.plugin && it.enabled }?.id
             Page(
                 title = m.label,
@@ -157,10 +157,10 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
                     m.scope == "claude.ai" -> "Added and removed in claude.ai › Settings › Connectors."
                     else -> null
                 },
-                test = "Test now" to { vm.refreshMcp(check = true) },
+                test = "Test now" to { vm.connections.refreshMcp(check = true) },
                 remove = when {
-                    m.scope == "user" -> "Remove ${m.label}" to { vm.removeMcp(m.name) }
-                    pluginId != null -> "Disable the ${m.plugin} plugin" to { vm.disablePlugin(pluginId) }
+                    m.scope == "user" -> "Remove ${m.label}" to { vm.connections.removeMcp(m.name) }
+                    pluginId != null -> "Disable the ${m.plugin} plugin" to { vm.connections.disablePlugin(pluginId) }
                     else -> null
                 },
                 removeConfirm = if (m.scope == "user") "claude mcp remove ${m.name} -s user. Sessions lose it after their next restart."
@@ -170,8 +170,8 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
                     else -> null
                 },
                 edit = when {
-                    signIn -> "Sign in" to { vm.mcpAuthStart(m.name) }
-                    m.scope == "plugin" -> "Open the Claude tab" to { vm.openDetail(null); vm.selectTab(Tab.COMMAND) }
+                    signIn -> "Sign in" to { vm.connections.mcpAuthStart(m.name) }
+                    m.scope == "plugin" -> "Open the Claude tab" to { vm.connections.openDetail(null); vm.selectTab(Tab.COMMAND) }
                     else -> null
                 },
                 extra = mcpAuth?.takeIf { signIn && it.first == m.name }?.let { (_, url) -> @Composable { McpSignIn(vm, url, busy == null) } },
@@ -182,14 +182,14 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
             about = "An App Store Connect API key, for signing iOS builds and uploading them to TestFlight and the App Store.",
             vars = listOf("APPLE_API_KEY_ID", "APPLE_API_ISSUER_ID", "APPLE_API_KEY_FILE", "APPLE_TEAM_ID"),
             note = "Apple only lets you download the .p8 once: keep your own copy.",
-            edit = "Replace or remove" to { vm.openDetail(null); vm.showApple(true) },
+            edit = "Replace or remove" to { vm.connections.openDetail(null); vm.services.showApple(true) },
         )
         is Detail.Keystore -> Page(
             title = "Signing: ${d.name}", health = Health.OK, statusLine = "Saved and checked",
             about = "An Android upload key for signing app bundles.",
             vars = listOf("${d.name}_KEYSTORE_FILE", "${d.name}_KEYSTORE_PASSWORD", "${d.name}_KEY_ALIAS", "${d.name}_KEY_PASSWORD"),
             note = "Keep your own backup: Google Play only accepts bundles signed with this key.",
-            edit = "Replace or remove" to { vm.openDetail(null); vm.showKeystores(true) },
+            edit = "Replace or remove" to { vm.connections.openDetail(null); vm.services.showKeystores(true) },
         )
     }
 
@@ -274,7 +274,7 @@ private fun McpSignIn(vm: MainViewModel, url: String, enabled: Boolean) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
             )
             Button(
-                onClick = { vm.mcpAuthFinish(callback) },
+                onClick = { vm.connections.mcpAuthFinish(callback) },
                 enabled = enabled && (callback.startsWith("http://localhost") || callback.startsWith("http://127.0.0.1")),
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Finish sign-in") }

@@ -75,10 +75,10 @@ fun ConnectionsScreen(vm: MainViewModel) {
     val status by vm.status.collectAsStateWithLifecycle()
     val refreshing by vm.statusRefreshing.collectAsStateWithLifecycle()
     val latest by vm.latest.collectAsStateWithLifecycle()
-    val mcp by vm.mcp.collectAsStateWithLifecycle()
+    val mcp by vm.connections.mcp.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    val login = { kind: LoginKind -> vm.showLogin(kind) }
-    val detail = { d: Detail -> vm.openDetail(d) }
+    val login = { kind: LoginKind -> vm.logins.showLogin(kind) }
+    val detail = { d: Detail -> vm.connections.openDetail(d) }
 
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = { vm.refreshAll() }, modifier = Modifier.fillMaxSize()) {
         LazyVerticalGrid(
@@ -140,7 +140,7 @@ fun ConnectionsScreen(vm: MainViewModel) {
                 if (s.apple) add(Tile("Apple developer", "App Store Connect key", Health.OK) { detail(Detail.Apple) })
                 s.keystores.forEach { n -> add(Tile("Signing: $n", "Android upload key", Health.OK) { detail(Detail.Keystore(n)) }) }
                 if (s.custom.isNotEmpty()) {
-                    add(Tile("Custom keys", "${s.custom.size} key" + if (s.custom.size == 1) "" else "s", Health.OK) { vm.showCustomKeys(true) })
+                    add(Tile("Custom keys", "${s.custom.size} key" + if (s.custom.size == 1) "" else "s", Health.OK) { vm.services.showCustomKeys(true) })
                 }
             }
             if (tab == 2) section("Keys", keys)

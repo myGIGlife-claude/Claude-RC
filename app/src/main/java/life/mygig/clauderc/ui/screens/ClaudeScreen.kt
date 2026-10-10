@@ -75,22 +75,22 @@ import life.mygig.clauderc.ui.theme.Term
 @Composable
 fun ClaudeScreen(vm: MainViewModel) {
     val status by vm.status.collectAsStateWithLifecycle()
-    val plugins by vm.plugins.collectAsStateWithLifecycle()
-    val loading by vm.pluginsLoading.collectAsStateWithLifecycle()
-    val result by vm.ccResult.collectAsStateWithLifecycle()
+    val plugins by vm.connections.plugins.collectAsStateWithLifecycle()
+    val loading by vm.connections.pluginsLoading.collectAsStateWithLifecycle()
+    val result by vm.connections.ccResult.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     var install by remember { mutableStateOf(false) }
     var open by remember { mutableStateOf<InstalledPlugin?>(null) }
     var addMarket by remember { mutableStateOf(false) }
     var custom by remember { mutableStateOf(false) }
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    val change = { args: String -> vm.claudeCommand(args) }
+    val change = { args: String -> vm.connections.claudeCommand(args) }
 
-    LaunchedEffect(status?.scriptApi) { vm.loadPlugins() }
+    LaunchedEffect(status?.scriptApi) { vm.connections.loadPlugins() }
 
 
     val p = plugins
-    PullToRefreshBox(isRefreshing = loading, onRefresh = { vm.loadPlugins() }, modifier = Modifier.fillMaxSize()) {
+    PullToRefreshBox(isRefreshing = loading, onRefresh = { vm.connections.loadPlugins() }, modifier = Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(2),
             modifier = Modifier.fillMaxSize(),
@@ -126,7 +126,7 @@ fun ClaudeScreen(vm: MainViewModel) {
                     fullItem {
                         CardBox {
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                ToolRow("Doctor", "Checks the install", "Run", busy == null) { vm.claudeCommand("doctor") }
+                                ToolRow("Doctor", "Checks the install", "Run", busy == null) { vm.connections.claudeCommand("doctor") }
                                 ToolRow("Full checkup", "/doctor in a chat of its own; Claude can fix what it finds", "Start", busy == null) { vm.startCheckup() }
                                 ToolRow("Update Claude", "Installs the newest version", "Update", busy == null) { change("update") }
                                 ToolRow("Other command", "claude … (doctor, plugin, mcp list)", "Run…", true) { custom = true }
@@ -193,7 +193,7 @@ fun ClaudeScreen(vm: MainViewModel) {
     }
     result?.let { (args, r) ->
         AlertDialog(
-            onDismissRequest = { vm.clearCcResult() },
+            onDismissRequest = { vm.connections.clearCcResult() },
             title = { Text("claude $args", fontFamily = FontFamily.Monospace, fontSize = 16.sp) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -206,8 +206,8 @@ fun ClaudeScreen(vm: MainViewModel) {
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { vm.clearCcResult() }) { Text("Close") } },
-            dismissButton = if (r.exitCode == 0 && args.startsWith("plugin")) ({ TextButton(onClick = { vm.clearCcResult(); vm.selectTab(Tab.SESSIONS) }) { Text("Go to Sessions") } }) else null,
+            confirmButton = { TextButton(onClick = { vm.connections.clearCcResult() }) { Text("Close") } },
+            dismissButton = if (r.exitCode == 0 && args.startsWith("plugin")) ({ TextButton(onClick = { vm.connections.clearCcResult(); vm.selectTab(Tab.SESSIONS) }) { Text("Go to Sessions") } }) else null,
         )
     }
 }
@@ -234,7 +234,7 @@ private fun PluginSheet(vm: MainViewModel, pl: InstalledPlugin, p: PluginsData?,
     val busy by vm.busy.collectAsStateWithLifecycle()
     var confirm by remember { mutableStateOf(false) }
     val desc = p?.available?.firstOrNull { it.id == pl.id }?.description
-    val change = { args: String -> onClose(); vm.claudeCommand(args) }
+    val change = { args: String -> onClose(); vm.connections.claudeCommand(args) }
     ModalBottomSheet(onDismissRequest = onClose, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(pl.name, style = MaterialTheme.typography.headlineSmall)
@@ -256,7 +256,7 @@ private fun PluginSheet(vm: MainViewModel, pl: InstalledPlugin, p: PluginsData?,
             val toggleLabel = if (pl.enabled) "Disable" else "Enable"
             val toggle = { change(if (pl.enabled) "plugin disable ${pl.id}" else "plugin enable ${pl.id}") }
             val viaSkills = pl.via == "skills" && pl.source.isNotBlank()
-            val update = { if (viaSkills) { onClose(); vm.updateSkills(pl.source) } else change("plugin update ${pl.id}") }
+            val update = { if (viaSkills) { onClose(); vm.connections.updateSkills(pl.source) } else change("plugin update ${pl.id}") }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (pl.update == "available") {
                     Button(onClick = update, enabled = busy == null, modifier = Modifier.weight(1f)) { Text("Update") }
@@ -318,7 +318,7 @@ private fun InstallPluginSheet(vm: MainViewModel, p: PluginsData, onClose: () ->
                             if (a.installed) {
                                 Text("Installed", color = Color(0xFF7FD4A8), style = MaterialTheme.typography.bodySmall)
                             } else {
-                                Button(onClick = { onClose(); vm.claudeCommand("plugin install ${a.id}") }, enabled = busy == null) { Text("Install") }
+                                Button(onClick = { onClose(); vm.connections.claudeCommand("plugin install ${a.id}") }, enabled = busy == null) { Text("Install") }
                             }
                         }
                     }

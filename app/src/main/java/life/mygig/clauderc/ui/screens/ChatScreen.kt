@@ -89,14 +89,14 @@ import life.mygig.clauderc.ui.theme.WarnAmber
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ChatScreen(vm: MainViewModel, session: String) {
-    val pinNeeded by vm.chatPinNeeded.collectAsStateWithLifecycle()
-    val chat by vm.chat.collectAsStateWithLifecycle()
-    val error by vm.chatError.collectAsStateWithLifecycle()
+    val pinNeeded by vm.chats.chatPinNeeded.collectAsStateWithLifecycle()
+    val chat by vm.chats.chat.collectAsStateWithLifecycle()
+    val error by vm.chats.chatError.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
-    val pending by vm.chatPending.collectAsStateWithLifecycle()
+    val pending by vm.chats.chatPending.collectAsStateWithLifecycle()
     val context = LocalContext.current
     // The speaker switch stays as the owner left it: across chats and app restarts, until tapped again.
-    val voicePrefs = remember { vm.voicePrefs }
+    val voicePrefs = remember { vm.chats.voicePrefs }
     var speak by remember { mutableStateOf(voicePrefs.getBoolean("speak", false)) }
     val voice = remember { ChatVoice(context) { vm.say("No text-to-speech voice on this phone.") } }
     DisposableEffect(voice) { onDispose { voice.shutdown() } }
@@ -112,7 +112,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
         if (!speak) { spoken += replies.map { it.first }; return@LaunchedEffect }   // heard by reading; Play still works
         replies.filter { it.first !in spoken }.forEach { (k, t) -> spoken += k; voice.speak(k, forSpeech(t), flush = false) }
     }
-    Dialog(onDismissRequest = { vm.closeChat() }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+    Dialog(onDismissRequest = { vm.chats.closeChat() }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         DialogKeyboardFix()
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
           // One column, capped so lines don't stretch across a tablet or a foldable's inner screen.
@@ -122,7 +122,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                     Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer).padding(start = 4.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(onClick = { vm.closeChat() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                    IconButton(onClick = { vm.chats.closeChat() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                     Column(Modifier.weight(1f)) {
                         Text(session, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
                         val c = chat
@@ -148,7 +148,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                                     }
                                     DropdownMenu(expanded = pickModel, onDismissRequest = { pickModel = false }) {
                                         listOf("opus" to "Opus", "sonnet" to "Sonnet", "haiku" to "Haiku", "opusplan" to "Opus plans, Sonnet builds").forEach { (alias, label) ->
-                                            DropdownMenuItem(text = { Text(label) }, onClick = { pickModel = false; vm.chatCommand("/model $alias") })
+                                            DropdownMenuItem(text = { Text(label) }, onClick = { pickModel = false; vm.chats.chatCommand("/model $alias") })
                                         }
                                     }
                                 }
@@ -156,7 +156,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
                                     color = if (c.mode == "bypass") MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
-                                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = busy == null) { vm.chatKey("BTab") },
+                                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = busy == null) { vm.chats.chatKey("BTab") },
                                 ) {
                                     Text(
                                         when (c.mode) { "auto" -> "Auto"; "plan" -> "Plan"; "edits" -> "Accept edits"; "bypass" -> "Bypass"; else -> "Ask first" } + " ⇄",
@@ -169,7 +169,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                     val st by vm.status.collectAsStateWithLifecycle()
                     var showCluster by remember { mutableStateOf(false) }
                     if ((st?.scriptApi ?: 0) >= life.mygig.clauderc.api.Updates.MIN_SCRIPT_API && pinNeeded == null) {
-                        TextButton(onClick = { showCluster = true; vm.loadChatWorkers(); vm.loadChatHosts() }) { Text("👥", fontSize = 20.sp) }
+                        TextButton(onClick = { showCluster = true; vm.team.loadChatWorkers(); vm.webHosts.loadChatHosts() }) { Text("👥", fontSize = 20.sp) }
                     }
                     if (showCluster) ChatClusterSheet(vm, onClose = { showCluster = false })
                     TextButton(onClick = { speak = !speak }) { Text(if (speak) "🔊" else "🔈", fontSize = 20.sp) }
@@ -185,7 +185,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                 if (need != null) {
                     PinGate(vm, need, error)
                 } else {
-                    androidx.compose.runtime.key(vm.chatSession.collectAsStateWithLifecycle().value) { Messages(vm, voice, chat?.messages.orEmpty(), pending, Modifier.weight(1f)) }
+                    androidx.compose.runtime.key(vm.chats.chatSession.collectAsStateWithLifecycle().value) { Messages(vm, voice, chat?.messages.orEmpty(), pending, Modifier.weight(1f)) }
                     chat?.takeIf { it.waiting }?.let { c -> c.ask?.takeIf { it.isNotEmpty() }?.let { AskCard(vm, it, busy == null) } ?: PromptCard(vm, c.screen.orEmpty(), busy == null) }
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp)) }
                     Composer(vm, working = chat?.busy == true, enabled = busy == null && chat != null)
@@ -249,7 +249,7 @@ private fun Messages(vm: MainViewModel, voice: ChatVoice, messages: List<ChatMes
                         Surface(shape = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp), color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.widthIn(max = 320.dp)) {
                             SelectionContainer { Text(linkify(r.m.text), modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium) }
                         }
-                        if (r.pending) Text("queued · tap here to remove", modifier = Modifier.clickable { vm.dismissPending(r.m.text) }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (r.pending) Text("queued · tap here to remove", modifier = Modifier.clickable { vm.chats.dismissPending(r.m.text) }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
                     val key = r.m.id + r.m.text.hashCode()
@@ -315,10 +315,10 @@ private fun PromptCard(vm: MainViewModel, screen: String, enabled: Boolean) {
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("1" to "1", "2" to "2", "3" to "3", "Up" to "↑", "Down" to "↓", "Escape" to "Esc").forEach { (k, l) ->
-                    OutlinedButton(onClick = { vm.chatKey(k) }, enabled = enabled, contentPadding = PaddingValues(horizontal = 10.dp), modifier = Modifier.weight(1f)) { Text(l, maxLines = 1) }
+                    OutlinedButton(onClick = { vm.chats.chatKey(k) }, enabled = enabled, contentPadding = PaddingValues(horizontal = 10.dp), modifier = Modifier.weight(1f)) { Text(l, maxLines = 1) }
                 }
             }
-            Button(onClick = { vm.chatKey("Enter") }, enabled = enabled, modifier = Modifier.fillMaxWidth()) { Text("Enter ⏎") }
+            Button(onClick = { vm.chats.chatKey("Enter") }, enabled = enabled, modifier = Modifier.fillMaxWidth()) { Text("Enter ⏎") }
         }
     }
 }
@@ -326,9 +326,9 @@ private fun PromptCard(vm: MainViewModel, screen: String, enabled: Boolean) {
 @Composable
 private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
     val context = LocalContext.current
-    val session = vm.chatSession.value.orEmpty()
-    var text by remember(session) { mutableStateOf(vm.draft(session)) }
-    LaunchedEffect(session, text) { if (session.isNotEmpty()) vm.setDraft(session, text) }
+    val session = vm.chats.chatSession.value.orEmpty()
+    var text by remember(session) { mutableStateOf(vm.chats.draft(session)) }
+    LaunchedEffect(session, text) { if (session.isNotEmpty()) vm.chats.setDraft(session, text) }
     // Attach: the file goes into the project's uploads/ folder; its path goes in the message.
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -352,11 +352,11 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
         if (bytes == null || bytes.isEmpty() || bytes.size > 15 * 1024 * 1024) {
             vm.say("That file couldn't be read, or it's bigger than 15 MB.")
         } else {
-            vm.uploadToChat(name, bytes) { path -> text = (text.trimEnd() + " [attached: $path]").trim() }
+            vm.chats.uploadToChat(name, bytes) { path -> text = (text.trimEnd() + " [attached: $path]").trim() }
         }
     }
     // Typing "/" suggests commands: the best match shows as faded text in the box, all matches as chips above it.
-    val extra by vm.chatCommands.collectAsStateWithLifecycle()
+    val extra by vm.chats.chatCommands.collectAsStateWithLifecycle()
     val matches = if (text.startsWith("/") && !text.contains(' ')) {
         (SLASH_COMMANDS + extra.map { it.name to it.hint }).distinctBy { it.first }.filter { it.first.startsWith(text.lowercase()) }
     } else emptyList()
@@ -371,7 +371,7 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
             }
         }
         Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            IconButton(onClick = { vm.externalScreen(); pick.launch(arrayOf("*/*")) }, enabled = enabled, modifier = Modifier.height(52.dp)) {
+            IconButton(onClick = { vm.chats.externalScreen(); pick.launch(arrayOf("*/*")) }, enabled = enabled, modifier = Modifier.height(52.dp)) {
                 Icon(Icons.Filled.AttachFile, contentDescription = "Attach a file or photo")
             }
             OutlinedTextField(
@@ -379,10 +379,10 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
                 modifier = Modifier.weight(1f), maxLines = 6, shape = RoundedCornerShape(22.dp),
             )
             if (working) {
-                FilledIconButton(onClick = { vm.interruptChat() }, modifier = Modifier.height(52.dp)) { Icon(Icons.Filled.Stop, contentDescription = "Stop Claude") }
+                FilledIconButton(onClick = { vm.chats.interruptChat() }, modifier = Modifier.height(52.dp)) { Icon(Icons.Filled.Stop, contentDescription = "Stop Claude") }
             }
             FilledIconButton(
-                onClick = { val t = text; vm.sendChat(t, onSent = { text = "" }, onFail = { if (text.isBlank()) text = t }) },
+                onClick = { val t = text; vm.chats.sendChat(t, onSent = { text = "" }, onFail = { if (text.isBlank()) text = t }) },
                 enabled = enabled && text.isNotBlank(), modifier = Modifier.height(52.dp),
             ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
         }
@@ -455,7 +455,7 @@ private fun PinGate(vm: MainViewModel, status: PinStatus, error: String?) {
         Button(
             onClick = {
                 val p = pin
-                if (setup) vm.setChatPin(p) else vm.unlockChat(p, keep)
+                if (setup) vm.chats.setChatPin(p) else vm.chats.unlockChat(p, keep)
                 pin = ""; again = ""
             },
             enabled = pin.length >= 6 && (!setup || again == pin),

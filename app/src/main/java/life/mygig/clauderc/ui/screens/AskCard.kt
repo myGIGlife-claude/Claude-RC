@@ -71,9 +71,9 @@ fun AskCard(vm: MainViewModel, questions: List<AskQuestion>, enabled: Boolean) {
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { vm.chatKey("Escape") }, enabled = enabled) { Text("Cancel") }
+                OutlinedButton(onClick = { vm.chats.chatKey("Escape") }, enabled = enabled) { Text("Cancel") }
                 Button(
-                    onClick = { vm.answerAsk(questions, picks.map { it.value }, others.map { it.value }) },
+                    onClick = { vm.chats.answerAsk(questions, picks.map { it.value }, others.map { it.value }) },
                     enabled = enabled && ready, modifier = Modifier.weight(1f),
                 ) { Text("Send answers") }
             }
