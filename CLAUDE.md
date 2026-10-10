@@ -106,3 +106,4 @@ hostnames, IPs, emails, org names, keys. They live in
   read-only mount. Ubuntu 24.04+ may need `kernel.apparmor_restrict_unprivileged_userns=0` for bwrap. Tests run with `CLAUDERC_SANDBOX=off`
   (stub paths live in the hidden home) plus dedicated sandbox checks that skip when bwrap is unusable.
 - `.gitleaksignore` fingerprints contain the commit hash, and PRs are squash-merged: a false positive must be re-ignored under the hash it gets on `main` (find it with `gitleaks git --log-opts=main --gitleaks-ignore-path /dev/null -r out.json -f json .`), not the branch hash.
+- Android toolchain: AGP 9 with built-in Kotlin (no `kotlin.android` plugin) and a version catalog (`gradle/libs.versions.toml`); release builds use R8 (`app/proguard-rules.pro`: JSch, Bouncy Castle and serialization keeps). If a release-only crash appears, suspect a missing keep rule first.
