@@ -9,8 +9,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.height
@@ -49,6 +53,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -210,6 +217,18 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             BackHandler(enabled = canCancelSetup) { vm.removeServer(s.activeId) }
             var serverMenu by remember { mutableStateOf(false) }
 
+            // Phones keep the bottom bar; wider windows (foldable inner screen, tablet, landscape) get a side rail,
+            // and expanded ones show an opened Connections tile next to the list instead of over it.
+            val layout = currentLayoutKind()
+            val navVisible = !showSettings && !setupNeeded
+            val useRail = layout != LayoutKind.COMPACT
+            val twoPane = layout == LayoutKind.EXPANDED && navVisible && tab == Tab.STATUS
+            // A dot on Connections when an app or server update is waiting there.
+            val lt = latest
+            val st = status
+            val updateWaiting = (lt?.appVersionCode ?: 0) > BuildConfig.VERSION_CODE ||
+                (st != null && (st.scriptApi < Updates.MIN_SCRIPT_API || (lt?.serverCommit != null && lt.serverCommit != st.commit)))
+
             Scaffold(
                 topBar = {
                     Column {
@@ -293,15 +312,10 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                     }
                 },
                 bottomBar = {
-                    if (!showSettings && !setupNeeded) {
+                    if (navVisible && !useRail) {
                         NavigationBar {
                             // Narrow screens (e.g. a foldable's cover display) get the short label.
                             val narrow = LocalConfiguration.current.screenWidthDp < 400
-                            // A dot on Connections when an app or server update is waiting there.
-                            val lt = latest
-                            val st = status
-                            val updateWaiting = (lt?.appVersionCode ?: 0) > BuildConfig.VERSION_CODE ||
-                                (st != null && (st.scriptApi < Updates.MIN_SCRIPT_API || (lt?.serverCommit != null && lt.serverCommit != st.commit)))
                             // Most used first; New in the middle; setup last.
                             TabItem(tab, Tab.SESSIONS, "Sessions", Icons.Filled.Terminal, vm)
                             TabItem(tab, Tab.PROJECTS, "Projects", Icons.Filled.Folder, vm)
@@ -313,20 +327,59 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                 },
                 snackbarHost = { SnackbarHost(snackbar) },
             ) { padding ->
-                // imePadding keeps focused fields above the keyboard (edge-to-edge
-                // windows don't resize for it on their own).
-                Column(Modifier.padding(padding).consumeWindowInsets(padding).imePadding().fillMaxSize()) {
-                  if (!showSettings && !setupNeeded && detail == null) UpdateBar(vm, latest, status, tab)
-                  Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-                    Box(Modifier.widthIn(max = 640.dp).fillMaxSize()) {
-                        when {
-                            showSettings || setupNeeded -> SettingsScreen(vm, s, firstRun = setupNeeded)
-                            detail != null -> DetailScreen(vm, detail!!)
-                            tab == Tab.STATUS -> ConnectionsScreen(vm)
-                            tab == Tab.NEW -> NewProjectScreen(vm)
-                            tab == Tab.PROJECTS -> ProjectsScreen(vm)
-                            tab == Tab.SESSIONS -> SessionsScreen(vm)
-                            tab == Tab.COMMAND -> ClaudeScreen(vm)
+                Row(Modifier.padding(padding).consumeWindowInsets(padding).fillMaxSize()) {
+                  if (navVisible && useRail) {
+                    // Scaffold's padding already holds the system bars, so the rail adds no insets of its own.
+                    NavigationRail(windowInsets = WindowInsets(0, 0, 0, 0)) {
+                        // Scrolls when a short window (landscape, large font) can't fit all five.
+                        Column(
+                            Modifier.verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            RailItem(tab, Tab.SESSIONS, "Sessions", Icons.Filled.Terminal, vm)
+                            RailItem(tab, Tab.PROJECTS, "Projects", Icons.Filled.Folder, vm)
+                            RailItem(tab, Tab.NEW, "New", Icons.Filled.AddCircle, vm)
+                            RailItem(tab, Tab.COMMAND, "Claude", Icons.Filled.AutoAwesome, vm)
+                            RailItem(tab, Tab.STATUS, "Connect", Icons.Filled.Hub, vm, dot = updateWaiting)
+                        }
+                    }
+                  }
+                  // imePadding keeps focused fields above the keyboard (edge-to-edge
+                  // windows don't resize for it on their own).
+                  Column(Modifier.weight(1f).fillMaxHeight().imePadding()) {
+                    if (navVisible && (detail == null || twoPane)) UpdateBar(vm, latest, status, tab)
+                    if (twoPane) {
+                        // List and opened tile side by side; each pane keeps the phone-friendly width cap.
+                        val d = detail
+                        Row(Modifier.weight(1f).fillMaxWidth()) {
+                            Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
+                                Box(Modifier.widthIn(max = 640.dp).fillMaxSize()) { ConnectionsScreen(vm) }
+                            }
+                            VerticalDivider()
+                            Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
+                                Box(Modifier.widthIn(max = 640.dp).fillMaxSize()) {
+                                    if (d != null) DetailScreen(vm, d)
+                                    else Text(
+                                        "Tap a tile to see it here.",
+                                        modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    } else Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                        Box(Modifier.widthIn(max = 640.dp).fillMaxSize()) {
+                            when {
+                                showSettings || setupNeeded -> SettingsScreen(vm, s, firstRun = setupNeeded)
+                                detail != null -> DetailScreen(vm, detail!!)
+                                tab == Tab.STATUS -> ConnectionsScreen(vm)
+                                tab == Tab.NEW -> NewProjectScreen(vm)
+                                tab == Tab.PROJECTS -> ProjectsScreen(vm)
+                                tab == Tab.SESSIONS -> SessionsScreen(vm)
+                                tab == Tab.COMMAND -> ClaudeScreen(vm)
+                            }
                         }
                     }
                   }
@@ -449,6 +502,26 @@ private fun androidx.compose.foundation.layout.RowScope.TabItem(
     dot: Boolean = false,
 ) {
     NavigationBarItem(
+        selected = current == tab,
+        onClick = { vm.openDetail(null); vm.selectTab(tab) },
+        icon = {
+            BadgedBox(badge = { if (dot) Badge() }) { Icon(icon, contentDescription = if (dot) "$label, update available" else null) }
+        },
+        label = { Text(label, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip) },
+    )
+}
+
+/** [TabItem] for the side rail of wider windows: same tabs, dot and behavior. */
+@Composable
+private fun RailItem(
+    current: Tab,
+    tab: Tab,
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    vm: MainViewModel,
+    dot: Boolean = false,
+) {
+    NavigationRailItem(
         selected = current == tab,
         onClick = { vm.openDetail(null); vm.selectTab(tab) },
         icon = {

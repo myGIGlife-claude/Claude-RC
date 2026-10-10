@@ -115,7 +115,9 @@ fun ChatScreen(vm: MainViewModel, session: String) {
     Dialog(onDismissRequest = { vm.closeChat() }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         DialogKeyboardFix()
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
+          // One column, capped so lines don't stretch across a tablet or a foldable's inner screen.
+          Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+            Column(Modifier.widthIn(max = 720.dp).fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
                 Row(
                     Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer).padding(start = 4.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -189,6 +191,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                     Composer(vm, working = chat?.busy == true, enabled = busy == null && chat != null)
                 }
             }
+          }
         }
     }
 }
