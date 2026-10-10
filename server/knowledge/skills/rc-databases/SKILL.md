@@ -20,7 +20,7 @@ description: Databases as of 2026-10 - choosing a store (Postgres, MySQL/MariaDB
 | SQL Server | 2025 (17.x, GA 2025-11) | 2022 mainstream to 2028-01-11; 2019 extended to 2030-01-08; **2016 EOL 2026-07-14** | Commercial; Express now 50 GB per DB; Web edition discontinued. |
 | MongoDB | 9.0 (GA 2026-09-28) | 9.0 to 2031-10-31; 8.0 and 8.3 to 2029-10-31; 7.0 to 2027-08-31; 6.0 EOL 2025-07 | SSPL (not OSI). Patch MongoBleed CVE-2025-14847 (8.2.3+ and backports). |
 | Redis | 8.10 (8.10.2, 2026-09-17) | latest minor + previous minor + previous major get fixes | 8.x: RSALv2 / SSPLv1 / **AGPLv3** tri-licence; <= 7.2 was BSD. |
-| Valkey | 9.1.2 (2026-09-01); 9.2 at RC1 (2026-09-16) | 9.0, 8.1, 8.0 still patched | BSD-3, Linux Foundation fork of Redis 7.2.4. |
+| Valkey | 9.1.2 (2026-08-31); 9.2 at RC1 (2026-09-16) | 9.0, 8.1, 8.0 still patched | BSD-3, Linux Foundation fork of Redis 7.2.4. |
 | Elasticsearch | 9.5 / 9.4 maintained; 8.19 to 2027-07-15 | | ELv2 / SSPL / **AGPLv3** (AGPL added 2024-08). |
 | OpenSearch | 3.9.0 (2026-09-29); 2.19.x maintenance | | Apache-2.0, Linux Foundation. |
 | pgvector | 0.8.7 (2026-10-01, IVFFlat buffer-overflow fix) | | PostgreSQL licence. |
@@ -43,16 +43,16 @@ What shipped in the last ~12 months (dated):
 ### Older versions (legacy projects: do not upgrade unless asked)
 - PG 14-16: no `uuidv7()` (use bigint identity or an app-side UUIDv7); no virtual generated columns; `MERGE` from 15, `MERGE ... RETURNING` and `JSON_TABLE` from 17; `NULLS NOT DISTINCT` from 15; md5 still silent. PG 14 dies 2026-11-12: flag it, do not silently upgrade.
 - MySQL 8.0 (EOL) / 8.4: 8.4 has `mysql_native_password` disabled by default but loadable; 8.0 still has it enabled. No `VECTOR` type before 9.0. `utf8` means `utf8mb3` on all of them: still write `utf8mb4`.
-- MariaDB 10.6/10.11: `UUID` type from 10.7, `VECTOR` type + vector index from 11.7 (GA line: 11.8 LTS), `RETURNING` on INSERT/DELETE (not UPDATE).
+- MariaDB 10.6/10.11: `UUID` type from 10.7, `VECTOR` type + vector index from 11.7 (GA line: 11.8 LTS), `RETURNING` on INSERT/DELETE (single-table `UPDATE ... RETURNING` only from 13.0 rolling).
 - SQL Server 2019/2022: no `json`/`vector` types (JSON is `nvarchar` + `ISJSON`), no `REGEXP_*`; 2022 has `GREATEST/LEAST`, `DATE_BUCKET`, `IS DISTINCT FROM`.
 - MongoDB 7.0: no `constraint` validation level; use `validationLevel: "strict"` + `validationAction: "error"`.
-- Redis 7.2 or Valkey 7.2/8.x: no hash-field TTL (`HEXPIRE`, `HSETEX`) before Redis 7.4 / Valkey 9.0.
+- Redis 7.2 or Valkey 7.2/8.x: no hash-field TTL before Redis 7.4 (`HEXPIRE`; `HSETEX` from Redis 8.0) / Valkey 9.0.
 
 ## What changed / stop doing
 
 | Old advice | Do instead | Since |
 |---|---|---|
-| MySQL `utf8` / `utf8_general_ci` | `utf8mb4` + `utf8mb4_0900_ai_ci` (MySQL) / `utf8mb4_uca1400_ai_ci` (MariaDB default since 11.5; 11.8 is the first LTS with it) | MySQL 8.0 default |
+| MySQL `utf8` / `utf8_general_ci` | `utf8mb4` + `utf8mb4_0900_ai_ci` (MySQL) / `utf8mb4_uca1400_ai_ci` (MariaDB default from 11.5/11.6, docs and tracker disagree; 11.8 is the first LTS with it) | MySQL 8.0 default |
 | MyISAM tables | InnoDB (transactions, crash safety, row locks, FKs) | MySQL 5.5 default |
 | `mysql_native_password`, Postgres `md5` | `caching_sha2_password` (MySQL); `scram-sha-256` (PG) | MySQL 9.0 removed; PG 18 deprecated |
 | MongoDB "schemaless" collections | `$jsonSchema` validators, `validationAction: "error"`; 9.0 `constraint` level | MongoDB 3.6+, 9.0 |
@@ -163,7 +163,7 @@ SQL Server default is READ COMMITTED with locking; turn on `READ_COMMITTED_SNAPS
 | TypeScript | Prisma 7, Drizzle 0.45 (1.0 RC), Kysely, TypeORM, MikroORM | Prisma: N+1 via nested awaits in loops, use `include`/`relationLoadStrategy: "join"`; `prisma migrate dev` must never run in prod (`migrate deploy`); `db push` is not a migration. |
 | Python | SQLAlchemy 2.1 / 2.0, Django ORM, SQLModel | Lazy loading in loops: `selectinload`/`joinedload`; Django `select_related`/`prefetch_related`; async SQLAlchemy raises on implicit lazy loads. Alembic autogenerate misses renames (emits drop+add). |
 | Java/Kotlin | Hibernate/JPA, jOOQ, Spring Data JDBC, Exposed | `FetchType.EAGER` and open-session-in-view hide N+1; use fetch joins / entity graphs; Flyway/Liquibase for DDL, never `ddl-auto=update` in prod. |
-| .NET | EF Core 10 (unverified GA 2025-11), Dapper | Lazy-loading proxies N+1; `AsNoTracking` for reads; split queries for big includes; `EnsureCreated` is not migrations. |
+| .NET | EF Core 10 (LTS, GA 2025-11, supported to 2028-11-10), Dapper | Lazy-loading proxies N+1; `AsNoTracking` for reads; split queries for big includes; `EnsureCreated` is not migrations. |
 | Go | `database/sql` + sqlc, pgx, GORM, ent | GORM silently ignores zero values on update and `AutoMigrate` is not a migration tool; close `rows`. |
 | PHP | Eloquent (Laravel), Doctrine | `with()` eager loading; `Model::preventLazyLoading()` in dev. |
 | Ruby | Active Record | `includes`/`preload`; `strict_loading`. |
@@ -191,7 +191,7 @@ Universal: log SQL in dev, assert query counts in tests for list endpoints, keep
 - Each test in a transaction rolled back, or a template DB clone (PG `CREATE DATABASE ... TEMPLATE`) for speed.
 - Migration CI: apply all migrations on an empty DB and on a prod-schema snapshot; lint (squawk, Atlas); check for long locks.
 - RLS tests: pgTAP or app tests that connect as the app role and assert cross-tenant reads return 0 rows and writes fail.
-- Formatting/linting SQL: sqlfluff (unverified current version); schema diff: Atlas, migra-style tools.
+- Formatting/linting SQL: sqlfluff (4.4.0 latest on PyPI, 2026-10-10); schema diff: Atlas, migra-style tools.
 - Supabase: `supabase db lint`, Security/Performance Advisors, pgTAP tests in `supabase/tests/`.
 
 ## Common mistakes in AI-written code
@@ -208,7 +208,7 @@ Universal: log SQL in dev, assert query counts in tests for list endpoints, keep
 - Redis/Valkey used as the source of truth without persistence understood (RDB/AOF settings), `KEYS *` in production (use `SCAN`).
 - Elasticsearch/OpenSearch treated as transactional primary storage; mapping explosions from dynamic mappings on user JSON.
 - pgvector: no index (exact scan), IVFFlat built on an empty table (build after loading data), filtered ANN queries returning too few rows (enable `hnsw.iterative_scan`), distance operator not matching the index opclass.
-- Invented APIs: `pg_dump --pitr`, "Postgres `UPSERT` statement", `ON CONFLICT` without a matching unique index, MySQL `RETURNING` (MySQL has none; MariaDB does on INSERT/DELETE).
+- Invented APIs: `pg_dump --pitr`, "Postgres `UPSERT` statement", `ON CONFLICT` without a matching unique index, MySQL `RETURNING` (MySQL has none; MariaDB does on INSERT/DELETE, and single-table UPDATE from 13.0).
 
 ## Before you ship
 - [ ] Store choice justified by access patterns; one DB unless measured otherwise.
@@ -259,3 +259,9 @@ All accessed 2026-10-09.
 - https://github.com/drizzle-team/drizzle-orm/releases - Drizzle 0.45.4 stable, 1.0 RC.
 - https://registry.npmjs.org/prisma - Prisma 7.0.0 published 2025-11-19, 7.10.0 latest stable, 8.0.0 only as RC (`latest` tag = RC).
 - https://valkey.io/ and https://github.com/valkey-io/valkey/releases/tag/9.0.0 - Valkey 9.0.0 (2025-10-21) hash-field expiration commands.
+- https://dev.mysql.com/doc/refman/9.7/en/vector-functions.html - MySQL `DISTANCE()` only on HeatWave/MySQL AI (accessed 2026-10-10).
+- https://www.sqlite.org/wal.html - WAL-reset bug: affected 3.7.0-3.51.2, fixed 3.51.3, backports 3.50.7/3.44.6 (accessed 2026-10-10).
+- https://mariadb.com/docs/release-notes/community-server/13.0/13.0.2 - single-table `UPDATE ... RETURNING` in 13.0 (accessed 2026-10-10).
+- https://learn.microsoft.com/en-us/ef/core/what-is-new/ef-core-10.0/whatsnew - EF Core 10 LTS, Nov 2025 (accessed 2026-10-10).
+- https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_TransactWriteItems.html - 100 actions, 4 MB per transaction (accessed 2026-10-10).
+- https://redis.io/docs/latest/commands/hsetex/ - `HSETEX` since Redis 8.0.0 (accessed 2026-10-10).
