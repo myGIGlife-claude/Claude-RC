@@ -14,28 +14,28 @@ Library versions and per-library notes: `references/ecosystem.md`.
 | Thing | Current (2026-10) | Notes |
 |---|---|---|
 | Scala 3 LTS | **3.9.0** (2026-09-03) | New LTS line, maintained at least 3 years. Needs **JDK 17+** |
-| Scala 3 previous LTS | 3.3.8 (2026-06-10) | Maintained one more year after 3.9.0 (to ~2027-09); runs on JDK 8+ |
-| Scala 3 Next | 3.10.0-RC1 | Next line: may break source (stdlib changes); libraries should publish on LTS |
-| Scala 2.13 | 2.13.18 (2025-11) | 2.13.19 planned. VirtusLab took over Scala 2 maintenance (2026-10-07) "as long as necessary" |
-| Scala 2.12 | 2.12.21 (2025-12) | Only for sbt 1 plugins, Flink Scala APIs and legacy Spark 3 |
+| Scala 3 previous LTS | 3.3.8 (2026-06-10) | Maintained one more year after 3.9.0 (to ~2027-09; 3.3.9 announced, fewer backports); runs on JDK 8+ |
+| Scala 3 Next | 3.10.0-RC1 | Next line: more breaking changes than 3.9 (stdlib); libraries should publish on LTS |
+| Scala 2.13 | 2.13.18 (2025-11-24) | 2.13.19 planned. VirtusLab took over Scala 2 maintenance (2026-10-07) "as long as necessary" |
+| Scala 2.12 | 2.12.21 (2025-12-11) | Only for sbt 1 plugins, Flink Scala APIs and legacy Spark 3 |
 | sbt | **2.0.10** (2026-10-02); 1.13.0 (2026-08-21) | sbt 2.0.0 GA 2026-06-14 (JDK 17+, Scala 3 build DSL); 2.1.0-M3 milestone |
-| Mill | 1.1.x (1.1.10) | 1.x is the stable line; 1.3.0-M1 pre-release |
+| Mill | 1.1.x (1.1.10, 2026-09-25) | 1.x is the stable line; 1.2.0-RC1 and 1.3.0-M1 are pre-releases |
 | scala-cli | Is the `scala` command since Scala 3.5; 1.14.0 bundled with 3.8.4 | Ammonite support dropped |
 | Scala.js | **1.22.0** (2026-06-20) | WebAssembly backend now stable; sbt 2 support; JDK < 17 deprecated (1.21) |
-| Scala Native | 0.5.12 (2026-05-22) | Supports Scala up to 3.8.3 / 2.13.18; 3.9 support (unverified) |
-| JDK support | Scala 3.8+: JDK 17+. 2.13.18 / 2.12.21: JDK 8-26 | JDK 25 needs 2.13.17+ / 2.12.21+ / 3.8.0+ (on 3.x the 17 floor applies); JDK 27 support (unverified) |
+| Scala Native | 0.5.12 (2026-05-22) | Supports Scala 3 up to 3.8.3, 2.13 up to 2.13.18; no 3.9 support listed as of 2026-10 |
+| JDK support | Scala 3.8+: JDK 17+. 3.3 LTS, 2.13.18, 2.12.21: JDK 8-26 | JDK 25 needs 2.13.17+ / 2.12.21+ / 3.3.7+ / 3.7.1+; JDK 26 needs 2.13.18 / 2.12.21 / 3.3.8 / 3.8.0. JDK 27 not yet listed |
 
 Shipped in the last ~12 months (dated):
-- **Scala 3.8** (2026-01-22): JDK 17 minimum; stdlib now compiled by Scala 3 (context bounds desugar to `given`); REPL split into `scala3-repl`; stabilized **better fors** (SIP-62) and `runtimeChecked` (SIP-57). 3.8.0/3.8.1 had runtime regressions: use the latest 3.8 patch.
+- **Scala 3.8** (2026-01-22): JDK 17 minimum; stdlib now compiled by Scala 3 (context bounds desugar to `given`); REPL split into `scala3-repl`; stabilized **better fors** (SIP-62) and `runtimeChecked` (SIP-57); `into` (SIP-71) preview. 3.8.0/3.8.1 had runtime regressions: use the latest 3.8 patch.
 - **Scala 3.8.4** (2026-06-05): security-audit fixes (hardened TASTy reading, Scaladoc stored XSS), `-<flag>:help`.
-- **sbt 2.0** (2026-06-14): client/server default (sbtn), Bazel-compatible local/remote cache, incremental `test` (`testFull` runs all), built-in project matrix, `%%` works for JS/Native too, plugins publish as `_sbt2_3`.
-- **sbt RCE GHSA-m2pw-22cj-jq4v** (2026-08-10): builds with `serverConnectionType := ConnectionType.Tcp`. Fixed in sbt 1.12.15+ / 2.0.6+.
+- **sbt 2.0** (2.0.0 tagged 2026-06-14, announced 2026-06-29): JDK 17+, build DSL on Scala 3.8, client/server default (sbtn), Bazel-compatible local/remote cache, incremental `test` (`testFull` runs all), built-in project matrix, `%%` works for JS/Native too, plugins publish as `_sbt2_3`.
+- **sbt RCE GHSA-m2pw-22cj-jq4v** (2026-08-10): only builds that set `Global / serverConnectionType := ConnectionType.Tcp`. Fixed in sbt 1.12.15+ / 2.0.6+.
 - **Scala 3.9 LTS** (2026-09-03): `into` (SIP-71, explicit implicit conversions) stable; inaccessible companion implicits warn under `-deprecation` and stop resolving in 3.10. Named tuples (stable since 3.7) and better fors are in the LTS.
 - **Scala 2.13 `-Ytasty-reader`** reads Scala 3 artifacts only up to 3.7: a 2.13 project cannot depend on libraries built with 3.8+.
 
 ### Older versions (what differs on lines you will meet)
 - **3.3 LTS projects**: no named tuples, no better fors, no `into`, no `runtimeChecked`; `-Wunused` exists but is less complete. Runs on JDK 8/11. Don't use 3.4+ syntax there; keep libraries on 3.3 until the project moves to 3.9 (that move also moves the JDK floor to 17).
-- **Libraries**: publishing on 3.9 forces all users to 3.9+ and JDK 17+. Libraries that must serve old users stay on 3.3.x for now (unverified ecosystem convention; check what the library's deps already require).
+- **Libraries**: publishing on 3.9 forces all users to 3.9+ and JDK 17+. Libraries that must serve old users can stay on 3.3.x (a judgment call, not an official rule; check what the library's deps already require).
 - **2.13 projects**: use `-Xsource:3` (plus `-Xsource-features:` as needed) to get Scala 3 semantics early; can consume Scala 3 libs only up to 3.7 via `-Ytasty-reader`. `scala-reflect` runtime reflection may fail against 3.8+ artifacts.
 - **sbt 1.x builds**: still fully supported (1.13.0) and build Scala 2 and 3. The `sbt` launcher picks the right client from `project/build.properties`. Do not migrate to sbt 2 unless asked: plugins must have `_sbt2_3` builds (Play was at 3.1.0-M9 for sbt 2 at launch).
 - **Spark** is 2.13-only from 4.0; Spark 3.5 offers 2.12 and 2.13. No Scala 3 Spark build.
@@ -119,15 +119,15 @@ lazy val app  = project.dependsOn(core)
   .settings(libraryDependencies += "org.typelevel" %% "cats-effect" % "3.7.1")
 ```
 - Cross-building 2.13 + 3: `crossScalaVersions := Seq("2.13.18", "3.3.8")` (3.3 keeps 2.13 users able to read your TASTy; `-Ytasty-reader` stops at 3.7). Use `scala-2`/`scala-3` source dirs only for the few files that differ.
-- Pin dependency updates with Scala Steward or Dependabot (Dependabot supports sbt); commit a lock with `sbt-dependency-lock` only if reproducibility is required.
+- Pin dependency updates with Scala Steward or Dependabot (sbt version updates since 2026-05-26; vuln alerts still need `sbt-dependency-submission`); commit a lock with `sbt-dependency-lock` only if reproducibility is required.
 - **Mill** (`build.mill`, Scala-based config, fast) is a good choice for new multi-module builds if the team agrees; **scala-cli** for scripts, single-module tools, and teaching. **Bazel** (rules_scala) only for big polyglot monorepos.
 - Never set `Global / serverConnectionType := ConnectionType.Tcp` (RCE advisory).
 
 ### Data: Spark and Flink
-- Spark 4.x: Scala **2.13** only, JDK 17/21/25 (25 needs 25.0.3+ as of Spark 4.2). Mark Spark deps `% Provided`; build an assembly jar with shading for conflicting libs (Jackson, Guava, protobuf).
+- Spark 4.x: Scala **2.13** only, JDK 17/21/25 (Spark 4.2 deprecates JDK 25 builds before 25.0.3). Mark Spark deps `% Provided`; build an assembly jar with shading for conflicting libs (Jackson, Guava, protobuf).
 - Prefer the Dataset/DataFrame API over RDDs; avoid UDFs when a built-in function exists (UDFs block Catalyst optimization). Don't `collect()` big data to the driver.
 - Closures capture enclosing classes: put functions in `object`s to avoid `Task not serializable`.
-- Flink 2.x: Table API Scala modules are `_2.12` only; for DataStream jobs use the Java API from Scala (Scala DataStream API removed in 2.0 (unverified)).
+- Flink 2.x: Table API Scala modules are `_2.12` only; for DataStream jobs use the Java API from Scala (Scala DataStream and DataSet APIs were removed in 2.0).
 
 ### JVM interop
 - Use `scala.jdk.CollectionConverters`, `scala.jdk.FutureConverters`, `scala.jdk.OptionConverters`.
@@ -155,18 +155,18 @@ lazy val app  = project.dependsOn(core)
 - Allocation: boxing in generic code (`List[Int]`), tuples, closures in hot loops, `Option` per element. Use `Array`/`ArrayBuffer`, `while` loops or `inline` in proven hotspots only; measure with async-profiler / JFR (`-XX:StartFlightRecording`).
 - Collections: `List` is O(n) for `apply`/`:+`/`length`; use `Vector` or `ArrayBuffer` for indexed access and appends; `.view` to fuse chains on large data; `Map` lookups over `find` on lists.
 - Effects: Cats Effect 3.6+/ZIO 2.1 runtimes use work-stealing pools; block only inside `IO.blocking` / `ZIO.attemptBlocking`; enable CE fiber dumps / ZIO runtime metrics.
-- Compile time: deep implicit/given search, big macro derivations and huge `match` types slow builds. Use `-Vprofile` style flags (`-Yprofile-*` on 3, unverified names) and split modules.
+- Compile time: deep implicit/given search, big macro derivations and huge `match` types slow builds. On 3: `-Vprofile` (per-file complexity), `-Yprofile-enabled -Yprofile-trace:<file>` (3.6.3+/3.3.6+, open in ui.perfetto.dev); split modules.
 - Targets: p99 latency and allocation rate per request from load tests; compile times tracked in CI.
 
 ## Testing & tooling
 - IDE: **Metals** (VS Code, Neovim, others) or IntelliJ IDEA + Scala plugin. Metals works with sbt via BSP, Mill and scala-cli.
 - Format: **scalafmt** (`.scalafmt.conf` with `version = ...` and `runner.dialect = scala3`); CI runs `scalafmtCheckAll`.
-- Lint/refactor: **Scalafix** (`OrganizeImports` is built in since 0.11; `RemoveUnused` needs `-Wunused:all`); WartRemover for extra bans; scapegoat (unverified Scala 3 status).
+- Lint/refactor: **Scalafix** (`OrganizeImports` is built in since 0.11; `RemoveUnused` needs `-Wunused:all`); WartRemover for extra bans; scapegoat (published for 3.9, but only 5 inspections on Scala 3 vs 123 on Scala 2).
 - Compiler flags are the first linter: `-deprecation -feature -Wunused:all -Wvalue-discard -Wnonunit-statement -Werror` (3.x); on 2.13 `-Xlint -Wunused -Xsource:3 -Werror`.
 - Tests: **MUnit** (light, default in many templates), ScalaTest 3.2 (many styles; pick one, `AnyFunSuite`/`AnyFlatSpec`), **weaver-test** for Cats Effect, **zio-test** for ZIO, `munit-cats-effect` for CE + MUnit.
 - Property-based: **ScalaCheck** (`munit-scalacheck`, `scalatestplus-scalacheck`) or zio-test `check`. Use for parsers, codecs (round-trip), and pure domain rules.
 - Integration: testcontainers-scala; http4s `HttpApp` tests in-memory without a socket.
-- Migration: Scala 3 `-source:3.0-migration -rewrite` (then `-source:3.x-migration` per step); 2.13 side `-Xsource:3`; Scalafix rules; scala3-migrate sbt plugin (maintenance status unverified).
+- Migration: Scala 3 `-source:3.0-migration -rewrite` (then `-source:3.x-migration` per step); 2.13 side `-Xsource:3`; Scalafix rules; scala3-migrate sbt plugin (scalacenter, not archived, commits in 2026-10).
 - CI: `sbt -Dsbt.ci=true +test scalafmtCheckAll "scalafixAll --check"`; cache `~/.cache/coursier`, `~/.ivy2`, `~/.sbt` (sbt 2 also has its own cache dir).
 
 ## Common mistakes in AI-written code
@@ -221,6 +221,9 @@ All accessed 2026-10-09.
 - https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/configuration/overview/ : Flink 2.3 Scala Table API `_2.12`.
 - https://akka.io/bsl-license-faq : Akka BSL 1.1, 3-year change date, production license.
 - https://pekko.apache.org/download.html : Pekko 1.7.1, Pekko HTTP 1.4.1.
+- Fact-check pass 2026-10-10: https://nightlies.apache.org/flink/flink-docs-master/release-notes/flink-2.0/ (Scala DataStream removed),
+  https://www.scala-lang.org/news/3.6.3/ (`-Yprofile-trace`), https://github.blog/changelog/2026-05-26-dependabot-version-updates-now-support-the-sbt-ecosystem ,
+  https://github.com/scapegoat-scala/scapegoat , https://github.com/scalacenter/scala3-migrate , https://api.github.com/repos/sbt/sbt/releases (sbt dates).
 - Library release pages listed in `references/ecosystem.md`.
 
-Unverified in this pass: Scala 3.9 on Scala Native and JDK 27; Flink 2.0 Scala DataStream removal; scala3-migrate and scapegoat status; exact Scala 3 profiling flag names; library-on-3.3-vs-3.9 convention.
+Open as of 2026-10-10: Scala Native 0.5.12 does not list Scala 3.9, and the JDK compatibility table has no JDK 27 row yet; recheck before relying on either.
