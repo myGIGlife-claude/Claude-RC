@@ -1,8 +1,8 @@
 # Developer knowledge pack
 
-Thirteen skills (`skills/rc-*`: twelve topic skills plus the process skill `rc-dev-playbook`) that cLaudeRC installs for every Claude session and Claude worker on the server, so they code against
+Thirty skills (`skills/rc-*`: 29 topic skills plus the process skill `rc-dev-playbook`) that cLaudeRC installs for every Claude session and Claude worker on the server, so they code against
 CURRENT standards (what changed lately, what is now wrong, what to do instead) for web front end, JavaScript/TypeScript, Node, web back end,
-PHP, Python, Go, Java, Android, iOS, UI/UX and web security/performance.
+PHP, Python, Go, Java, Android, iOS, UI/UX, security, databases, cloud/DevOps, testing and many more languages (see `COVERAGE.md`).
 
 - Installed by `server/install.sh` (Update now): every file is checked against `MANIFEST` (sha256). It goes to `~/.config/claude-launcher/knowledge`
   and to `~/.claude/skills/rc-*` (only folders named `rc-*` are ever touched). Claude workers get a copy in their own config folder at launch.
@@ -22,5 +22,4 @@ only pack files changed, runs `lint.sh`, rebuilds `MANIFEST`, pushes `knowledge-
 ## Coverage and what is next
 `COVERAGE.md` tracks every part of the expansion brief as done / partial / planned / unsupported / unverified, honestly. `rc-dev-playbook` is the entry skill:
 how to approach any task, detect the project type, load the right topic skills, privacy-first and minimal-dependency defaults, root-cause debugging and a
-production-quality definition of done. Next (queued, researched in small batches with a fact-check pass each): more languages, cross-platform,
-databases, cloud/DevOps, testing/debugging, architecture, security engineering, then an evaluation set (`evals/`) that measures whether the pack improves results.
+production-quality definition of done. All brief sections are covered; every skill had an independent fact-check pass. Next: monthly refresh keeps them current; re-run `evals/` after big changes.
