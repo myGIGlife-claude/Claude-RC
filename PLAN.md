@@ -1,10 +1,10 @@
-Last updated: 2026-10-08 12:54 UTC
+Last updated: 2026-10-10 06:00 UTC
 
 ## Goal
 cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage Claude Code sessions on your own server from a phone.
 
 ## Current task
-Audit fixes are merged (#139-#159): server hardening, team-tool hardening, Android fixes, CI hardening, worker isolation (private clones + bubblewrap sandbox), host key download. Next: (1) owner tries on the phone after Update now + Restart sessions: Drive backup (needs the Google keys), Hosts (Set up/Add my key/Download key), voice, drafts, sandbox setting; (2) the planned TOOLCHAIN upgrade in one PR (AGP 9.4 + Gradle 9.x + Kotlin 2.4 + Compose BOM 2026.09 + version catalog; use the android-skills agp-9-upgrade skill), then R8 shrinking and window-size-class layout for the foldable; (3) decisions pending: branch protection ruleset on main, iOS (main vs the iOS branch).
+Audit fixes are merged (#139-#159): server hardening, team-tool hardening, Android fixes, CI hardening, worker isolation (private clones + bubblewrap sandbox), host key download. Next: (1) owner tries on the phone after Update now + Restart sessions: Drive backup (needs the Google keys), Hosts (Set up/Add my key/Download key), voice, drafts, sandbox setting; (2) DONE #167: toolchain (AGP 9.4.1, Gradle 9.8.1, Kotlin 2.4.21, BOM 2026.09, catalog) + R8 on for release; owner must test the release APK on the phone after Update now (SSH connect, chat, push: R8 could break JSch/serialization at runtime, CI cannot tell), then window-size-class layout for the foldable, more unit tests, split MainViewModel (1.8k lines) when next edited; (3) decisions pending: branch protection ruleset on main, iOS (main vs the iOS branch).
 
 ## Tasks
 - [ ] NEXT (owner): Google Drive backup (#136, SCRIPT_API 43) needs real Google. In the Google Cloud project used for the app's Firebase: enable Drive API, consent screen (scope drive.appdata only), OAuth client type "TVs and Limited Input devices"; add GOOGLE_DRIVE_CLIENT_ID / GOOGLE_DRIVE_CLIENT_SECRET as custom keys; Update now + Restart; Settings > Google Drive backup > Connect > passphrase > Back up now. Untested against real Google (stubs only). Phase 2: native Google sign-in (needs Android OAuth client + SHA-1 of the release cert, read from the release APK). Also try: Settings > Back up this app (export/import encrypted file).
