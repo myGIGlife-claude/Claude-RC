@@ -27,10 +27,10 @@ Long tables (broker comparison, payments flow, HA/DR tiers, ADR template) are in
 | Service mesh | Istio **ambient mode GA in 1.24** (2024-11): ztunnel per node (L4 mTLS) + optional waypoints (L7), no sidecars | |
 | Real-time | **WebTransport Baseline**: Safari 26.4 (2026-03-24) completed support | WebSocket/SSE remain defaults; WebTransport for unreliable/multiplexed streams. |
 | Stripe | API version **2026-09-30.endive** (new major); 2026-03-25.dahlia before it; monthly non-breaking versions, two breaking majors a year since 2024-09 (acacia) | Stripe now recommends **Checkout Sessions** (+ Payment Element) over raw PaymentIntents for most integrations. |
-| PCI DSS | v4.0.1; future-dated reqs mandatory since 2025-03-31. SAQ A (2025-01 revision) dropped 6.4.3/11.6.1 but merchants embedding a payment iframe must confirm their site is not susceptible to script attacks | Redirect/hosted page = smallest scope. |
+| PCI DSS | v4.0.1; future-dated reqs mandatory after 2025-03-31. SAQ A (2025-01 revision) dropped 6.4.3/11.6.1 but merchants embedding a payment iframe must confirm their site is not susceptible to script attacks | Redirect/hosted page = smallest scope. |
 
 ### Older versions
-- Kafka 3.x clusters may still run ZooKeeper; 3.9 was the bridge release for migration to KRaft. Do not suggest share groups below 4.2 (early access in 4.0; 4.1 status unverified).
+- Kafka 3.x clusters may still run ZooKeeper; 3.9 was the bridge release for migration to KRaft. Do not suggest share groups below 4.2 (early access in 4.0, preview in 4.1: not for production).
 - RabbitMQ 3.13 and older: mirrored classic queues exist but are deprecated; plan quorum queues before a 4.x upgrade. 3.13 and 4.0/4.1 are out of community support.
 - SQS clients pinned to old SDK limits: 256 KiB; Extended Client Library (S3 offload) still needed there.
 - Self-hosted MinIO already running: keep it patched from source or a vendor build, plan migration; do not add it to new projects.
@@ -172,7 +172,7 @@ Detail matrix in `references/decisions.md`.
   message group ids. Test cross-tenant access explicitly.
 
 ### Payments (Stripe-style)
-- Use hosted Checkout or Checkout Sessions + Payment Element; card data never touches your servers (SAQ A scope). Server creates the session/intent with
+- Use hosted Checkout or Checkout Sessions + Payment Element; card data never touches your servers (SAQ A scope; with an embedded form you must also confirm the page resists script attacks). Server creates the session/intent with
   amount from **your** DB (never the client), plus an `Idempotency-Key`.
 - **Webhooks are the source of truth** for fulfilment (`checkout.session.completed`, `payment_intent.succeeded`, `invoice.paid`, disputes, refunds), not
   the client redirect. Verify signature on the raw body, dedupe by event id, handle out-of-order and replays, respond 2xx fast and process async.
@@ -305,12 +305,12 @@ Detail matrix in `references/decisions.md`.
 - [ ] Privacy: data minimised, PII not spread into events/logs/indexes without retention and erasure rules.
 
 ## Sources
-All accessed 2026-10-09.
+All accessed 2026-10-09; re-checked 2026-10-10.
 - https://kafka.apache.org/community/downloads/ - Kafka 4.3.1/4.3.0/4.2.2/4.1.2 versions and dates.
 - https://kafka.apache.org/blog/2026/02/17/apache-kafka-4.2.0-release-announcement/ - 4.2.0 date, share groups production-ready (corroborated by confluent.io release blog).
 - https://www.rabbitmq.com/release-information - RabbitMQ series, patches, community support dates.
 - https://github.com/rabbitmq/rabbitmq-server/releases (v4.0.1, v4.2.0, v4.3.0 notes) - mirrored queue removal, AMQP 1.0 core, Khepri default in 4.2 and only store in 4.3; LICENSE file: MPL-2.0.
-- https://kafka.apache.org/blog/2025/03/18/apache-kafka-4.0.0-release-announcement/ - KRaft only, share groups early access in 4.0.
+- https://kafka.apache.org/blog/2025/03/18/apache-kafka-4.0.0-release-announcement/ - KRaft only, share groups early access in 4.0; https://kafka.apache.org/blog/2025/09/04/apache-kafka-4.1.0-release-announcement/ - Queues for Kafka preview in 4.1.
 - https://github.com/nats-io/nats-server/releases (GitHub API) - NATS 2.15.1/2.14.8 dates; https://docs.nats.io/release-notes/whats_new/whats_new_212 - 2.12 atomic batch, counters.
 - https://www.cncf.io/blog/2025/05/01/protecting-nats-and-the-integrity-of-open-source-cncfs-commitment-to-the-community/ and https://thenewstack.io/cncf-and-synadia-reach-an-agreement-on-nats/ - NATS settlement.
 - GitHub releases API: redis/redis, valkey-io/valkey, apache/pulsar, temporalio/temporal, debezium tags, elastic/elasticsearch, opensearch-project/OpenSearch, meilisearch, typesense - versions and dates.
@@ -318,10 +318,10 @@ All accessed 2026-10-09.
 - https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/quotas-messages.html - SQS max message 1,048,576 bytes; Extended Client Library up to 2 GB.
 - https://developer.mozilla.org/en-US/docs/Web/API/WebTransport - WebTransport "Baseline newly available" since 2026-03.
 - https://github.com/redpanda-data/redpanda/tree/dev/licenses - Redpanda core BSL, enterprise features RCL.
-- https://pureinsights.com/blog/2024/elastics-journey-from-apache-2-0-to-agpl-3/ - Elasticsearch AGPL option 2024-08 (secondary); https://en.wikipedia.org/wiki/OpenSearch_(software) - OpenSearch foundation (lead).
-- GitHub API `repos/minio/minio` archived=true; https://itsfoss.com/news/minio-moves-away-from-open-source/ - MinIO binaries/maintenance timeline (secondary).
+- https://www.elastic.co/blog/elasticsearch-is-open-source-again - Elasticsearch AGPL option (2024-08-29); https://www.linuxfoundation.org/press/linux-foundation-announces-opensearch-software-foundation-to-foster-open-collaboration-in-search-and-analytics - OpenSearch Software Foundation (2024-09-16).
+- GitHub API `repos/minio/minio` (archived=true, last push 2026-04-24) and its README commit history (source-only 2025-10-15, maintenance mode 2025-12-03) - MinIO timeline.
 - https://istio.io/latest/blog/2024/ambient-reaches-ga/ - Istio ambient GA in 1.24.
 - https://webkit.org/blog/17862/webkit-features-for-safari-26-4/ - Safari 26.4 WebTransport (2026-03-24).
-- https://docs.stripe.com/api/versioning and https://docs.stripe.com/changelog/dahlia - Stripe release model; 2026-09-30.endive from search result (verify on docs.stripe.com/changelog).
+- https://docs.stripe.com/api/versioning and https://docs.stripe.com/changelog - Stripe release model (monthly + two majors a year since 2024-09-30.acacia); current version 2026-09-30.endive.
 - https://docs.stripe.com/payments/checkout-sessions-and-payment-intents-comparison - Checkout Sessions recommended.
-- https://www.akamai.com/blog/security/pci-dss-v4-0-1-changes-qualify-saq-a - SAQ A changes (secondary; PCI SSC document library is primary).
+- https://blog.pcisecuritystandards.org/important-updates-announced-for-merchants-validating-to-self-assessment-questionnaire-a and https://blog.pcisecuritystandards.org/faq-clarifies-new-saq-a-eligibility-criteria-for-e-commerce-merchants - SAQ A 2025-01: 6.4.3/11.6.1 removed; script-attack eligibility criterion applies to embedded payment forms, not redirects.

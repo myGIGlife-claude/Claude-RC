@@ -14,15 +14,15 @@ description: Current Elixir (1.20) and Erlang/OTP (27-29) practice: BEAM process
 - What shipped in the last ~18 months:
   - **Elixir 1.20**: "gradually typed language": every program is type-checked by inference (set-theoretic types, `dynamic()`), no annotations;
     guards, `tuple_size`, `is_map_key` and pattern matching refine types; warns about verified bugs, dead code and redundant clauses.
-    Faster parallel compile. `elixirc_options: [module_definition: :interpreted]` option. User-written type signatures are NOT there yet.
+    Faster compiles, especially on many-core machines. `elixirc_options: [module_definition: :interpreted]` option. User-written type signatures are NOT there yet.
   - **Elixir 1.19**: type checks protocol dispatch (e.g. interpolating a non-`String.Chars` value) and anonymous functions; lazy module loading
     (2x+ faster compiles); `MIX_OS_DEPS_COMPILE_PARTITION_COUNT=N` compiles deps in parallel (up to 4x); OpenChain-certified SBoMs.
   - **Elixir 1.18**: stdlib `JSON` module (`JSON.encode!/1`, `JSON.decode/1`, `@derive {JSON.Encoder, only: [...]}`); type checking of calls;
     ExUnit parameterized tests (`use ExUnit.Case, parameterize: [...]`) and `:group`; `mix format --migrate`.
   - **Elixir 1.17**: `Duration`, `Date/Time/DateTime.shift/2`, `Kernel.to_timeout/1`, `Process.set_label/1` (OTP 27+), `is_non_struct_map/1`.
-  - **OTP 29**: experimental native records (`-record #name{}`); compiler warns on old-style `catch` and `and`/`or`; `is_integer/3` guard;
+  - **OTP 29**: experimental native records (`-record #name{}`); compiler warns on old-style `catch` (on `and`/`or` only with `warn_obsolete_bool_op`); `is_integer/3` guard;
     `io_ansi`, `graph` modules; consistent map iteration order; **TLS hybrid PQ key exchange (ML-KEM-768 + X25519) by default**;
-    **SSH daemon has shell/exec/sftp disabled by default** (enable explicitly); cwd moved to the end of the code path; Secure Coding guide.
+    **SSH daemon has shell/exec/sftp disabled by default** (enable explicitly); cwd moved to the end of the code path; Secure Coding guidelines (since 28.5).
   - **OTP 28**: priority messages (`alias([priority])`), strict generators `<:-`, zip generators `&&`, `erlang:hibernate/0`, PCRE2 regex
     (stricter: some old regexes now fail to compile), TLS 1.3 15-25% faster, `-nominal` types.
   - **OTP 27**: `json` module, `proc_lib:set_label/1`, triple-quoted strings and sigils, `-doc` attributes, `maybe` on by default, `tprof`, `trace` sessions.
@@ -34,7 +34,7 @@ description: Current Elixir (1.20) and Erlang/OTP (27-29) practice: BEAM process
 ### Older versions (legacy projects)
 - Stay inside the project's existing Elixir/OTP pins (`.tool-versions`, `mix.exs` `elixir:`); do not upgrade unless asked.
 - Elixir < 1.18: no `JSON` module, use the `Jason` dep already there. < 1.17: no `Duration`/`shift`/`to_timeout`. < 1.15: no `Logger` handlers config.
-- OTP < 27: no `json`, no process labels. OTP < 28 TLS lacks PQ default; < 29 the SSH daemon still allows shell/exec by default (disable it yourself).
+- OTP < 27: no `json`, no process labels. OTP < 29 TLS lacks the hybrid PQ default; < 29 the SSH daemon still allows shell/exec by default (disable it yourself).
 - Phoenix 1.7 apps: no scopes, password-based `phx.gen.auth`, nested `app.html.heex` layout, Tailwind 3 `tailwind.config.js`. Keep that style
   in an existing 1.7 app; do not half-port 1.8 generators into it.
 - LiveView 0.x (< 1.0): `phx-` bindings mostly the same, but `phx-feedback-for` was removed in 1.0.0-rc.0 in favour of `used_input?/1` (compat shim provided); tests used Floki.
@@ -49,14 +49,14 @@ description: Current Elixir (1.20) and Erlang/OTP (27-29) practice: BEAM process
 | Cowboy via `plug_cowboy` in new apps | `Bandit` (`Bandit.PhoenixAdapter`) | Phoenix 1.7.11 (2024-02) |
 | `Repo.transaction(fn -> ... end)` | `Repo.transact(fn -> {:ok, x} end)` returns `{:ok, _}`/`{:error, _}` | Ecto 3.13 |
 | `unless cond do` | `if !cond do` (`mix format --migrate` rewrites) | Elixir 1.18 soft-deprecated (no hard deprecation yet) |
-| `'charlist'` single quotes | `~c"charlist"` | Elixir 1.15+ (migrate) |
+| `'charlist'` single quotes | `~c"charlist"` | Elixir 1.17 deprecated |
 | `<%# comment %>` in EEx/HEEx | `<%!-- comment --%>` | Elixir 1.18 deprecated |
 | `Tuple.append/2` | `Tuple.insert_at(t, tuple_size(t), x)` | 1.18 deprecated |
 | `<<x::size(y)>>` pattern with outer var | `<<x::size(^y)>>` | 1.20 deprecated |
 | `config :logger, backends: [...]`, `Logger.enable/disable` | `:default_handler` config / `:logger_backends` pkg; `Logger.put_process_level` | 1.15/1.19-1.20 |
 | `mix do a, b` | `mix do a + b` | 1.19 deprecated |
 | Manual `:timer.hours(1)` everywhere | `to_timeout(hour: 1)`; `DateTime.shift(dt, month: 1)` | 1.17 |
-| Phoenix nested layouts (`app.html.heex` auto-wrap) | single `root.html.heex` + `<Layouts.app flash={@flash}>` in templates | Phoenix 1.8 |
+| Phoenix nested layouts (`app.html.heex` auto-wrap) | `root.html.heex` unchanged; app layout is a function component called explicitly: `<Layouts.app flash={@flash}>` | Phoenix 1.8 |
 | `tailwind.config.js` + Tailwind 3 | Tailwind v4 CSS-first config in `assets/css/app.css` (+ daisyUI in generated apps) | Phoenix 1.8 |
 | Password-first `phx.gen.auth`; `current_user` assigns | magic links default, `require_sudo_mode`, `%Scope{}` in `current_scope` | Phoenix 1.8 |
 | `config` var in endpoint `init/2`; `:trailing_slash` | `Application.compile_env/3`; verified routes `~p` | Phoenix 1.8 |
@@ -69,7 +69,7 @@ description: Current Elixir (1.20) and Erlang/OTP (27-29) practice: BEAM process
 | Large lists in assigns | `stream/3`, `stream_insert/4`, `phx-update="stream"` | LiveView 0.18+ |
 | `Oban.Plugins.Cron`, `Oban.Plugins.Pruner` names | top-level `Oban.Cron`, `Oban.Pruner`, `Oban.Lifeline`, `Oban.Reindexer`, unified config (old names deprecated, still delegate) | Oban 2.24 |
 | Req `run_finch`/`put_plug` steps | `Req.Finch` / `Req.Plug` adapters; Req 0.8 rc moves steps to modules (`Req.Retry`...) | Req 0.7 / 0.8-rc |
-| `catch Expr` in Erlang | `try ... catch ... end` (warns in OTP 29) | OTP 28/29 |
+| `catch Expr` in Erlang | `try ... catch ... end` (warns in OTP 29) | OTP 29 |
 | `jsx`/`jiffy` in new Erlang code | OTP `json` module | OTP 27 |
 
 ## Do this
@@ -132,19 +132,20 @@ Supervisor.start_link(children, strategy: :one_for_one, name: MyApp.Supervisor)
 - `Repo.stream` only inside a transaction; batch big updates with `update_all`/`insert_all` (chunks of a few thousand).
 
 ### HTTP, releases, deployment
-- `Req.get!(url, receive_timeout: 15_000, retry: :transient)` (pin `~> 0.7`; 0.8 is a redesign in RC). Set timeouts on every external call.
+- `Req.get!(url, receive_timeout: 15_000)` (pin `~> 0.7`; 0.8 is a redesign in RC). Set timeouts on every external call. The default
+  `retry: :safe_transient` retries only GET/HEAD; `retry: :transient` also retries POST etc., so use it only for idempotent calls.
 - Release: `MIX_ENV=prod mix release`; `bin/app eval "MyApp.Release.migrate()"` before start; multi-stage Docker (build on `hexpm/elixir`
   image, run on slim Debian with matching OpenSSL/glibc, non-root user). `mix phx.gen.release --docker` writes this.
 - Clustering: `dns_cluster` (default in Phoenix, works on Fly.io/k8s headless services) or `libcluster` for gossip/k8s strategies.
   Set `RELEASE_COOKIE` from a secret; distribution traffic is unencrypted by default (use TLS dist or a private network).
-- Fly.io: `fly launch` detects Phoenix and generates the Dockerfile + `rel/env.sh.eex` for clustering (verify on fly.io docs).
+- Fly.io: `fly launch` detects Phoenix, adjusts the release Dockerfile (IPv6 env vars) and generates `rel/env.sh.eex` for distributed Elixir.
 - Nerves: build firmware for embedded Linux boards (Raspberry Pi, BeagleBone) as a minimal BEAM-only image; push updates with
   `mix upload` or NervesHub; supervise hardware access in GenServers. Gleam is a typed BEAM language that interops with Elixir/Erlang;
   consider it only if the team wants static types now and accepts a smaller ecosystem.
 
 ## Security
 - **Atom exhaustion**: atoms are never GC'd (default limit ~1M, then the VM dies). Never `String.to_atom/1` on input; use
-  `String.to_existing_atom/1` or an explicit map. Same for `Jason.decode(keys: :atoms)` and `JSON` decoders on untrusted data.
+  `String.to_existing_atom/1` or an explicit map. Same for `Jason.decode(keys: :atoms)` and custom `JSON.decode/3` decoders on untrusted data.
 - **Code evaluation**: never `Code.eval_string`, `EEx.eval_string`, or `:erlang.binary_to_term/1` on user data. Use
   `Plug.Crypto.non_executable_binary_to_term(bin, [:safe])` if you must decode terms.
 - **Mass assignment**: `cast/3` only the fields the user may set; never cast `:role`, `:user_id`, `:admin`.
@@ -187,7 +188,7 @@ Supervisor.start_link(children, strategy: :one_for_one, name: MyApp.Supervisor)
   Real ones: `Repo.get/get_by/all_by`, `validate_required`, `assign_new(socket, key, fn -> ... end)`, `JSON.decode/1`.
 - `Repo.transaction` returning `{:ok, {:ok, x}}` double-wrapped; on Ecto 3.13+ use `Repo.transact`.
 - Generating Phoenix 1.6/1.7 code in a 1.8 app: `Routes.*` helpers, `@current_user` instead of `@current_scope`, `live_patch`/`live_redirect`
-  (deprecated since LiveView 0.18: use `<.link patch=...>`/`navigate`), `phx-feedback-for`, `Phoenix.HTML.Form.text_input` (use `<.input field={@form[:x]}>`).
+  (deprecated since LiveView 0.20: use `<.link patch=...>`/`navigate`), `phx-feedback-for`, `Phoenix.HTML.Form.text_input` (use `<.input field={@form[:x]}>`).
 - Assigning a full list then appending in LiveView (re-renders everything); use streams.
 - `Enum` over huge data loaded into memory instead of `Repo.stream`/`Stream`; `++` in a loop (quadratic).
 - Using `Application.get_env` at compile time in module bodies (stale value in releases); use `compile_env` or read at runtime.
@@ -227,3 +228,5 @@ Supervisor.start_link(children, strategy: :one_for_one, name: MyApp.Supervisor)
 - https://raw.githubusercontent.com/wojtekmach/req/main/CHANGELOG.md : Req 0.6 security fixes, 0.7 adapters, 0.8-rc redesign (2026-10-09)
 - https://hex.pm/api/packages/<name> : current versions/dates of all listed packages (2026-10-09)
 - https://api.github.com/repos/gleam-lang/gleam/releases/latest : Gleam v1.19.1, 2026-10-07 (2026-10-09)
+- https://raw.githubusercontent.com/phoenixframework/phoenix_live_view/v1.0/CHANGELOG.md : phx-feedback-for removed 1.0.0-rc.0, live_patch/live_redirect deprecated 0.20.0 (2026-10-10)
+- https://docs.fly.io/elixir/getting-started : `fly launch` Phoenix detection, rel/env.sh.eex (2026-10-10)
