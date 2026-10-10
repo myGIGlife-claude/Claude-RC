@@ -28,7 +28,8 @@ SELECT * FROM (
   FROM orders o
 ) x WHERE rn <= 3;
 
--- delete duplicates keeping the lowest id
+-- delete duplicates keeping the lowest id (PG syntax; destructive: run the
+-- matching SELECT first, inside BEGIN, and check the row count before COMMIT)
 DELETE FROM contacts c USING contacts d
 WHERE c.email = d.email AND c.id > d.id;
 ```
@@ -97,7 +98,7 @@ SELECT id FROM events WHERE payload @> '{"type":"signup"}';
 ALTER TABLE events ADD COLUMN kind text GENERATED ALWAYS AS (payload->>'type') STORED;
 CREATE INDEX CONCURRENTLY ON events (kind);
 ```
-- PG 18 generated columns default to VIRTUAL; virtual columns cannot be indexed (unverified for PG 19): say `STORED` when you will index.
+- PG 18 generated columns default to VIRTUAL; PG 18 rejects indexes on virtual columns (PG 19 status unverified; its release notes list no change): say `STORED` when you will index.
 - PG 17+: `JSON_TABLE` turns JSON arrays into rows. MySQL: multi-valued indexes on JSON arrays (8.0.17+); functional index on `(CAST(doc->>'$.type' AS CHAR(32)))`. SQL Server 2025: native `json` type; earlier, computed column + index.
 
 ## Index cookbook (PG)
@@ -119,7 +120,7 @@ BEGIN;
 EXPLAIN (ANALYZE, BUFFERS, VERBOSE) UPDATE ...;   -- ANALYZE really runs it
 ROLLBACK;
 ```
-Check in order: (1) estimated vs actual rows per node, a 10x+ gap means stale or missing stats (`ANALYZE t;`, extended statistics `CREATE STATISTICS` for correlated columns); (2) the node with the most time (`actual time` x `loops`); (3) Seq Scan with high `Rows Removed by Filter` -> index; (4) `Sort Method: external merge` -> more `work_mem` for that query or an index providing the order; (5) `Heap Fetches` high on index-only scans -> vacuum. Visualizers: explain.dalibo.com, pgMustard (unverified current names).
+Check in order: (1) estimated vs actual rows per node, a 10x+ gap means stale or missing stats (`ANALYZE t;`, extended statistics `CREATE STATISTICS` for correlated columns); (2) the node with the most time (`actual time` x `loops`); (3) Seq Scan with high `Rows Removed by Filter` -> index; (4) `Sort Method: external merge` -> more `work_mem` for that query or an index providing the order; (5) `Heap Fetches` high on index-only scans -> vacuum. Visualizers: explain.dalibo.com (PEV2; stores uploaded plans, or run its standalone HTML locally), pgMustard (paid, PG 9.6-18). Plans can contain literal values: strip sensitive data before uploading.
 
 ## Pitfalls
 - `NOT IN (SELECT x ...)` where x can be NULL -> empty result. Use `NOT EXISTS`.

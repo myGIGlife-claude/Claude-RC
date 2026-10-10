@@ -11,17 +11,17 @@
 - MariaDB is no longer a drop-in MySQL replacement: diverged JSON (stored as LONGTEXT), GTID format, auth plugins, optimizer. Pick one and test with it. LTS: 10.11, 11.4, 11.8, 12.3; 13.0 is a rolling release.
 - Must-haves: InnoDB only, `utf8mb4` everywhere (server, database, table, connection), `sql_mode` strict (default since 5.7), `innodb_buffer_pool_size` ~60-75% RAM on a dedicated host, binlog `ROW` format + GTIDs for replication/PITR.
 - Clustered PK: the table is stored in PK order; random UUID PKs cause page splits. Use `BIGINT AUTO_INCREMENT` or time-ordered UUIDs stored as `BINARY(16)` (`UUID_TO_BIN(uuid, 1)` swaps time bits for v1 UUIDs; for v7 store as-is).
-- No `RETURNING` in MySQL (MariaDB has it for INSERT/DELETE). No transactional DDL: a failed multi-statement migration leaves partial state; one DDL per migration step.
+- No `RETURNING` in MySQL (MariaDB has it for INSERT/DELETE; single-table UPDATE only from 13.0 rolling). No transactional DDL: a failed multi-statement migration leaves partial state; one DDL per migration step.
 - HA: InnoDB Cluster / Group Replication, or managed (RDS/Aurora, Cloud SQL). Online DDL tools: gh-ost, pt-online-schema-change.
-- MySQL 9.x adds a `VECTOR` type; vector search functions are limited in Community edition (unverified details: check docs before relying on it). MariaDB: `VECTOR(N)` + `VECTOR INDEX` from 11.7, GA in 11.8 LTS.
+- MySQL 9.x adds a `VECTOR` type (`STRING_TO_VECTOR`, `VECTOR_DIM` in Community), but `DISTANCE()` exists only on HeatWave/MySQL AI, not in Community or Commercial builds: no similarity search in plain MySQL. MariaDB: `VECTOR(N)` + `VECTOR INDEX` from 11.7, GA in 11.8 LTS.
 
 ## SQLite (and libSQL/Turso)
 - Production-ready for: single-server web apps, embedded, mobile, desktop, edge caches, tests of SQLite-specific code. Not for: many writers across machines.
 - Per connection: `PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;`. Use `BEGIN IMMEDIATE` for write transactions to avoid `SQLITE_BUSY` upgrades mid-transaction. One writer at a time: serialize writes in the app (single writer connection) for predictability.
 - `STRICT` tables (3.37+) for type enforcement; otherwise columns accept anything.
 - Backups: Litestream (continuous WAL shipping to S3), `VACUUM INTO` or the backup API for snapshots; never copy the file while it is being written without the WAL.
-- Upgrade to >= 3.51.3 (2026-03-13) or 3.53.0 (2026-04-09): both fixed a WAL-reset corruption bug; 3.52.x is not fixed.
-- libSQL (fork with server mode, embedded replicas) vs Turso Database (Rust rewrite, MIT, pre-1.0, concurrent writes, vector search): Turso says the rewrite replaces libSQL as their direction. For new production use, plain SQLite unless you need their sync/replication features; keep independent backups.
+- Upgrade to >= 3.51.3 (2026-03-13) or 3.53.0 (2026-04-09): both fix a WAL-reset corruption bug present since 3.7.0 (rare: WAL mode, two connections writing/checkpointing at the same instant); backports 3.50.7 and 3.44.6; 3.52.0 was withdrawn.
+- libSQL (fork with server mode, embedded replicas) vs Turso Database (Rust rewrite, MIT, pre-1.0, `BEGIN CONCURRENT` writes, exact vector search; ANN index not yet): Turso says the rewrite replaces libSQL as their direction. For new production use, plain SQLite unless you need their sync/replication features; keep independent backups.
 
 ## Microsoft SQL Server / Azure SQL
 - 2025 (17.x) current; 2022 widely deployed; 2016 out of support 2026-07-14.
@@ -57,8 +57,8 @@
 - Design from a written list of access patterns; if you cannot list them, you want SQL.
 - Single-table design is an optimization, not a requirement: AWS docs also endorse multiple tables. It pays off when items are fetched together in one Query; it costs readability, analytics and evolving patterns.
 - Partition key must spread load (no date-only or status-only PKs); sort key for ranges. GSIs are eventually consistent; since 2025-11 GSIs can use up to 4 partition + 4 sort key attributes (equality on all PK parts, range only on the last sort part).
-- Transactions: `TransactWriteItems` (up to 100 items, unverified current limit), conditional writes for uniqueness/optimistic locking. Streams + Lambda for derived views.
-- On-demand capacity unless traffic is steady and you have measured; enable PITR (35 days) and deletion protection; export to S3 for analytics instead of `Scan`.
+- Transactions: `TransactWriteItems` (up to 100 actions, 4 MB total, no two on the same item), conditional writes for uniqueness/optimistic locking. Streams + Lambda for derived views.
+- On-demand capacity unless traffic is steady and you have measured; enable PITR (recovery period 1-35 days) and deletion protection; export to S3 for analytics instead of `Scan`.
 
 ## Firestore
 - Editions: Standard and Enterprise; Enterprise adds Pipeline queries (GA 2026-04-20) and the MongoDB-compatible API (GA 2025-08-26).
