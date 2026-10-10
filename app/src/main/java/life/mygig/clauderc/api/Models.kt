@@ -112,6 +112,39 @@ data class Session(
     val busy: Boolean = false,
     /** "Finished" push alerts are on for this session. */
     @SerialName("push_done") val pushDone: Boolean = false,
+    /** A general chat (not tied to a repo); missing on servers before SCRIPT_API 47. */
+    val general: Boolean = false,
+    /** The general chat's id when [general]. */
+    @SerialName("chat_id") val chatId: String = "",
+)
+
+/** A saved general chat: a Claude conversation in its own folder, not tied to a repo. */
+@Serializable
+data class GeneralChat(
+    val id: String,
+    val title: String = "",
+    val dir: String = "",
+    val running: Boolean = false,
+    /** "chat-<id>" while running, "" when stopped. */
+    val session: String = "",
+    @SerialName("created_at") val createdAt: Long = 0,
+    @SerialName("updated_at") val updatedAt: Long = 0,
+    val preview: String = "",
+    val busy: Boolean = false,
+    val waiting: Boolean = false,
+)
+
+@Serializable
+data class GeneralChats(val chats: List<GeneralChat> = emptyList())
+
+@Serializable
+data class GeneralNew(val id: String, val session: String = "", val dir: String = "")
+
+@Serializable
+data class GeneralOpen(
+    val id: String = "",
+    val session: String = "",
+    @SerialName("already_running") val alreadyRunning: Boolean = false,
 )
 
 /** The (public) Firebase ids the server hands the phone; [configured] is false until push is set up there. */
