@@ -75,7 +75,7 @@ private const val GITHUB_TOKEN_URL =
 fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
     val busy by vm.busy.collectAsStateWithLifecycle()
     AlertDialog(
-        onDismissRequest = { if (busy == null) vm.showLogin(null) },
+        onDismissRequest = { if (busy == null) vm.logins.showLogin(null) },
         title = {
             Text(
                 when (kind) {
@@ -89,7 +89,7 @@ fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
             )
         },
         text = {
-            val error by vm.loginError.collectAsStateWithLifecycle()
+            val error by vm.logins.loginError.collectAsStateWithLifecycle()
             Column(
                 Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -112,7 +112,7 @@ fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = { vm.showLogin(null) }) { Text("Close") } },
+        dismissButton = { TextButton(onClick = { vm.logins.showLogin(null) }) { Text("Close") } },
     )
 }
 
@@ -125,35 +125,35 @@ fun AddServiceDialog(vm: MainViewModel) {
     val sv = st?.services.orEmpty()
     // name, hint, what a tap does
     val options = buildList<Triple<String, String, () -> Unit>> {
-        if (st?.aws?.loggedIn != true) add(Triple("AWS", "Access keys or SSO for the AWS CLI") { vm.addService(LoginKind.AWS) })
+        if (st?.aws?.loggedIn != true) add(Triple("AWS", "Access keys or SSO for the AWS CLI") { vm.services.addService(LoginKind.AWS) })
         if (sv["gitlab"]?.loggedIn != true) {
             add(Triple("GitLab", if (sv["gitlab"]?.installed == false) "Installs glab, then asks for a token" else "Personal access token") {
-                vm.addService(LoginKind.GITLAB)
+                vm.services.addService(LoginKind.GITLAB)
             })
         }
         if (sv["docker"]?.loggedIn != true) {
             add(Triple("Docker Hub / GHCR", if (sv["docker"]?.installed == false) "Installs Docker (asks for your sudo password)" else "Push and pull images") {
-                vm.addService(LoginKind.DOCKER)
+                vm.services.addService(LoginKind.DOCKER)
             })
         }
         if (sv["youtube"]?.loggedIn != true) {
-            add(Triple("YouTube", "Upload videos to your channel (youtube-upload)") { vm.showAddService(false); vm.showLogin(LoginKind.YOUTUBE) })
+            add(Triple("YouTube", "Upload videos to your channel (youtube-upload)") { vm.services.showAddService(false); vm.logins.showLogin(LoginKind.YOUTUBE) })
         }
-        add(Triple("Apple developer account", "App Store Connect API key for signing and uploading iOS apps") { vm.showApple(true) })
-        add(Triple("Android signing key", "Upload keystore (.jks) for signing app bundles") { vm.showKeystores(true) })
-        add(Triple("Custom API key", "Any other API: a name like ACME_API_KEY and its value") { vm.showCustomKeys(true) })
+        add(Triple("Apple developer account", "App Store Connect API key for signing and uploading iOS apps") { vm.services.showApple(true) })
+        add(Triple("Android signing key", "Upload keystore (.jks) for signing app bundles") { vm.services.showKeystores(true) })
+        add(Triple("Custom API key", "Any other API: a name like ACME_API_KEY and its value") { vm.services.showCustomKeys(true) })
         Catalog.services.forEach { def ->
             val svc = sv[def.id]
             if (svc?.loggedIn != true) {
                 val hint = if (def.install != null && svc?.installed == false) "Installs ${def.install}, then asks for credentials" else def.hint
-                add(Triple(def.name, hint) { vm.addTokenService(def) })
+                add(Triple(def.name, hint) { vm.services.addTokenService(def) })
             }
         }
     }
     var query by remember { mutableStateOf("") }
     val shown = options.filter { query.isBlank() || it.first.contains(query.trim(), true) || it.second.contains(query.trim(), true) }
         .sortedBy { it.first.lowercase() }
-    ModalBottomSheet(onDismissRequest = { vm.showAddService(false) }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    ModalBottomSheet(onDismissRequest = { vm.services.showAddService(false) }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxHeight(0.92f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Connect a service", style = MaterialTheme.typography.titleLarge)
             OutlinedTextField(
@@ -220,7 +220,7 @@ fun KeystoresDialog(vm: MainViewModel) {
     val nameOk = Regex("^[A-Z][A-Z0-9_]{0,30}$").matches(name) && !name.startsWith("CLAUDE") && !name.startsWith("ANTHROPIC")
     val pwOk = storePw.isNotEmpty() && !storePw.contains('\'') && !keyPw.contains('\'')
     AlertDialog(
-        onDismissRequest = { if (busy == null) vm.showKeystores(false) },
+        onDismissRequest = { if (busy == null) vm.services.showKeystores(false) },
         title = { Text("Android signing keys") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -265,7 +265,7 @@ fun KeystoresDialog(vm: MainViewModel) {
                 Button(
                     onClick = {
                         val f = file ?: return@Button
-                        vm.saveKeystore(name, alias, storePw, keyPw, f)
+                        vm.services.saveKeystore(name, alias, storePw, keyPw, f)
                         storePw = ""; keyPw = ""; file = null; fileName = ""
                     },
                     enabled = busy == null && nameOk && file != null && alias.isNotBlank() && pwOk,
@@ -274,14 +274,14 @@ fun KeystoresDialog(vm: MainViewModel) {
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = { vm.showKeystores(false) }) { Text("Close") } },
+        dismissButton = { TextButton(onClick = { vm.services.showKeystores(false) }) { Text("Close") } },
     )
     confirmRemove?.let { n ->
         AlertDialog(
             onDismissRequest = { confirmRemove = null },
             title = { Text("Remove the $n signing key?") },
             text = { Text("It's deleted from the server. Keep your own backup: Google Play only accepts bundles signed with this upload key.") },
-            confirmButton = { TextButton(onClick = { confirmRemove = null; vm.removeKeystore(n) }) { Text("Remove") } },
+            confirmButton = { TextButton(onClick = { confirmRemove = null; vm.services.removeKeystore(n) }) { Text("Remove") } },
             dismissButton = { TextButton(onClick = { confirmRemove = null }) { Text("Cancel") } },
         )
     }
@@ -314,7 +314,7 @@ fun AppleDialog(vm: MainViewModel) {
     val issuerOk = Regex("^[0-9a-fA-F-]{36}$").matches(issuer)
     val teamOk = team.isEmpty() || Regex("^[A-Z0-9]{10}$").matches(team)
     AlertDialog(
-        onDismissRequest = { if (busy == null) vm.showApple(false) },
+        onDismissRequest = { if (busy == null) vm.services.showApple(false) },
         title = { Text("Apple developer account") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -354,7 +354,7 @@ fun AppleDialog(vm: MainViewModel) {
                 Button(
                     onClick = {
                         val f = file ?: return@Button
-                        vm.saveApple(keyId, issuer, team, f)
+                        vm.services.saveApple(keyId, issuer, team, f)
                         file = null; fileName = ""
                     },
                     enabled = busy == null && idOk && issuerOk && teamOk && file != null,
@@ -363,14 +363,14 @@ fun AppleDialog(vm: MainViewModel) {
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = { vm.showApple(false) }) { Text("Close") } },
+        dismissButton = { TextButton(onClick = { vm.services.showApple(false) }) { Text("Close") } },
     )
     if (confirmRemove) {
         AlertDialog(
             onDismissRequest = { confirmRemove = false },
             title = { Text("Remove the Apple developer key?") },
             text = { Text("It's deleted from the server. You can create a new key in App Store Connect any time.") },
-            confirmButton = { TextButton(onClick = { confirmRemove = false; vm.removeApple() }) { Text("Remove") } },
+            confirmButton = { TextButton(onClick = { confirmRemove = false; vm.services.removeApple() }) { Text("Remove") } },
             dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("Cancel") } },
         )
     }
@@ -392,13 +392,13 @@ fun CustomKeysDialog(vm: MainViewModel) {
             if (bytes == null || bytes.isEmpty() || bytes.size > 100_000) {
                 vm.say("That file couldn't be read (or it's over 100 KB).")
             } else {
-                vm.setSecretFile(name, bytes)
+                vm.services.setSecretFile(name, bytes)
                 name = ""
             }
         }
     }
     AlertDialog(
-        onDismissRequest = { if (busy == null) vm.showCustomKeys(false) },
+        onDismissRequest = { if (busy == null) vm.services.showCustomKeys(false) },
         title = { Text("Custom API keys") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -437,7 +437,7 @@ fun CustomKeysDialog(vm: MainViewModel) {
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
                 )
                 Button(
-                    onClick = { vm.setSecret(name, value); name = ""; value = "" },
+                    onClick = { vm.services.setSecret(name, value); name = ""; value = "" },
                     enabled = busy == null && nameOk && value.isNotEmpty() && !value.contains('\''),
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Save") }
@@ -454,14 +454,14 @@ fun CustomKeysDialog(vm: MainViewModel) {
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = { vm.showCustomKeys(false) }) { Text("Close") } },
+        dismissButton = { TextButton(onClick = { vm.services.showCustomKeys(false) }) { Text("Close") } },
     )
     confirmRemove?.let { n ->
         AlertDialog(
             onDismissRequest = { confirmRemove = null },
             title = { Text("Remove $n?") },
             text = { Text("Sessions lose it after their next restart.") },
-            confirmButton = { TextButton(onClick = { confirmRemove = null; vm.removeSecret(n) }) { Text("Remove") } },
+            confirmButton = { TextButton(onClick = { confirmRemove = null; vm.services.removeSecret(n) }) { Text("Remove") } },
             dismissButton = { TextButton(onClick = { confirmRemove = null }) { Text("Cancel") } },
         )
     }
@@ -472,7 +472,7 @@ fun CustomKeysDialog(vm: MainViewModel) {
 fun TokenServiceDialog(vm: MainViewModel, def: ServiceDef) {
     val context = LocalContext.current
     val busy by vm.busy.collectAsStateWithLifecycle()
-    val error by vm.tokenError.collectAsStateWithLifecycle()
+    val error by vm.services.tokenError.collectAsStateWithLifecycle()
     val values = remember(def.id) { mutableStateListOf(*Array(def.fields.size) { "" }) }
     var needs by remember { mutableStateOf(false) }
     // JSON keys can be picked as a file instead of pasted (the field that's multiline).
@@ -484,7 +484,7 @@ fun TokenServiceDialog(vm: MainViewModel, def: ServiceDef) {
         }
     }
     AlertDialog(
-        onDismissRequest = { if (busy == null) vm.showTokenService(null) },
+        onDismissRequest = { if (busy == null) vm.services.showTokenService(null) },
         title = { Text("Connect ${def.name}") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -515,7 +515,7 @@ fun TokenServiceDialog(vm: MainViewModel, def: ServiceDef) {
                     )
                 }
                 Button(
-                    onClick = { vm.tokenLogin(def, values.toList()) },
+                    onClick = { vm.services.tokenLogin(def, values.toList()) },
                     enabled = busy == null && def.fields.indices.all { values[it].trim().length >= def.fields[it].minLength },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Connect") }
@@ -527,7 +527,7 @@ fun TokenServiceDialog(vm: MainViewModel, def: ServiceDef) {
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = { vm.showTokenService(null) }) { Text("Close") } },
+        dismissButton = { TextButton(onClick = { vm.services.showTokenService(null) }) { Text("Close") } },
     )
 }
 
@@ -537,7 +537,7 @@ fun SetupDialog(vm: MainViewModel, kind: LoginKind) {
     val busy by vm.busy.collectAsStateWithLifecycle()
     var sudoPw by remember { mutableStateOf("") }
     AlertDialog(
-        onDismissRequest = { if (busy == null) vm.showSetup(null) },
+        onDismissRequest = { if (busy == null) vm.services.showSetup(null) },
         title = { Text(if (kind == LoginKind.GITLAB) "Set up the GitLab CLI" else "Set up Docker") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -547,7 +547,7 @@ fun SetupDialog(vm: MainViewModel, kind: LoginKind) {
                             "official release from gitlab.com into ~/.local/bin, checks it against the release's " +
                             "checksums, and needs no sudo. Then you can log in.",
                     )
-                    Button(onClick = { vm.installGlab() }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = { vm.services.installGlab() }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) {
                         Text("Install glab")
                     }
                 } else {
@@ -563,7 +563,7 @@ fun SetupDialog(vm: MainViewModel, kind: LoginKind) {
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
                     )
                     Button(
-                        onClick = { vm.installCli("docker", sudoPw) { vm.showSetup(null); vm.showLogin(LoginKind.DOCKER) } },
+                        onClick = { vm.services.installCli("docker", sudoPw) { vm.services.showSetup(null); vm.logins.showLogin(LoginKind.DOCKER) } },
                         enabled = busy == null,
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Install Docker") }
@@ -572,19 +572,19 @@ fun SetupDialog(vm: MainViewModel, kind: LoginKind) {
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = { vm.showSetup(null) }) { Text("Close") } },
+        dismissButton = { TextButton(onClick = { vm.services.showSetup(null) }) { Text("Close") } },
     )
 }
 
 @Composable
 private fun ClaudeLogin(vm: MainViewModel, busy: Boolean) {
     val context = LocalContext.current
-    val url by vm.loginUrl.collectAsStateWithLifecycle()
+    val url by vm.logins.loginUrl.collectAsStateWithLifecycle()
     var code by remember { mutableStateOf("") }
     val u = url
     if (u == null) {
         Text("Starts `claude auth login` on the server using your claude.ai subscription (never an API key).")
-        Button(onClick = { vm.claudeLoginStart() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+        Button(onClick = { vm.logins.claudeLoginStart() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
             Text("Start login")
         }
     } else {
@@ -597,7 +597,7 @@ private fun ClaudeLogin(vm: MainViewModel, busy: Boolean) {
             keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
         )
         Button(
-            onClick = { vm.claudeLoginCode(code) },
+            onClick = { vm.logins.claudeLoginCode(code) },
             enabled = !busy && code.length >= 4,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Submit code") }
@@ -622,7 +622,7 @@ private fun GithubLogin(vm: MainViewModel, busy: Boolean) {
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
     )
     Button(
-        onClick = { vm.githubLogin(token) },
+        onClick = { vm.logins.githubLogin(token) },
         enabled = !busy && token.length >= 20,
         modifier = Modifier.fillMaxWidth(),
     ) { Text("Save token") }
@@ -730,7 +730,7 @@ private fun PlainField(value: String, label: String, onChange: (String) -> Unit)
 @Composable
 private fun YoutubeLogin(vm: MainViewModel, busy: Boolean) {
     val context = LocalContext.current
-    val url by vm.loginUrl.collectAsStateWithLifecycle()
+    val url by vm.logins.loginUrl.collectAsStateWithLifecycle()
     var id by remember { mutableStateOf("") }
     var secret by remember { mutableStateOf("") }
     val u = url
@@ -743,7 +743,7 @@ private fun YoutubeLogin(vm: MainViewModel, busy: Boolean) {
         PlainField(id, "Client ID (…apps.googleusercontent.com)") { id = it }
         SecretField(secret, "Client secret") { secret = it }
         Button(
-            onClick = { vm.youtubeStart(id, secret) },
+            onClick = { vm.logins.youtubeStart(id, secret) },
             enabled = !busy && id.endsWith(".apps.googleusercontent.com") && secret.length >= 10,
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Start sign-in") }
@@ -771,7 +771,7 @@ private fun GitlabLogin(vm: MainViewModel, busy: Boolean) {
     PermissionsLink(LoginKind.GITLAB)
     PlainField(host, "GitLab host") { host = it }
     SecretField(token, "Token") { token = it }
-    Button(onClick = { vm.gitlabLogin(token, host) }, enabled = !busy && token.length >= 20, modifier = Modifier.fillMaxWidth()) {
+    Button(onClick = { vm.logins.gitlabLogin(token, host) }, enabled = !busy && token.length >= 20, modifier = Modifier.fillMaxWidth()) {
         Text("Connect")
     }
 }
@@ -794,7 +794,7 @@ private fun DockerLogin(vm: MainViewModel, busy: Boolean) {
     PlainField(user, "Username") { user = it }
     SecretField(token, "Token or password") { token = it }
     Button(
-        onClick = { vm.dockerLogin(registry, user, token) },
+        onClick = { vm.logins.dockerLogin(registry, user, token) },
         enabled = !busy && user.isNotBlank() && token.length >= 8,
         modifier = Modifier.fillMaxWidth(),
     ) { Text("Connect") }
@@ -804,7 +804,7 @@ private fun DockerLogin(vm: MainViewModel, busy: Boolean) {
 private fun AwsLogin(vm: MainViewModel, busy: Boolean) {
     val context = LocalContext.current
     val status by vm.status.collectAsStateWithLifecycle()
-    val url by vm.loginUrl.collectAsStateWithLifecycle()
+    val url by vm.logins.loginUrl.collectAsStateWithLifecycle()
     var sso by remember { mutableStateOf(status?.aws?.ssoConfigured == true) }
     var keyId by remember { mutableStateOf("") }
     var secret by remember { mutableStateOf("") }
@@ -836,7 +836,7 @@ private fun AwsLogin(vm: MainViewModel, busy: Boolean) {
             label = { Text("Region") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
         )
         Button(
-            onClick = { vm.awsKeysLogin(keyId, secret, region) },
+            onClick = { vm.logins.awsKeysLogin(keyId, secret, region) },
             enabled = !busy && keyId.length >= 16 && secret.length >= 16 && region.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Save keys") }
@@ -847,7 +847,7 @@ private fun AwsLogin(vm: MainViewModel, busy: Boolean) {
             if (status?.aws?.ssoConfigured == false) {
                 Text("SSO isn't configured on the server yet. Use access keys, or run `aws configure sso` there once.")
             }
-            Button(onClick = { vm.awsSsoStart() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = { vm.logins.awsSsoStart() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                 Text("Start SSO login")
             }
         } else {

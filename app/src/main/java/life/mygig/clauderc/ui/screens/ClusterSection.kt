@@ -69,6 +69,7 @@ import life.mygig.clauderc.ui.components.CardBox
 import life.mygig.clauderc.ui.openUrl
 import life.mygig.clauderc.ui.theme.BadRed
 import life.mygig.clauderc.ui.theme.WarnAmber
+import life.mygig.clauderc.ui.vm.HostsController
 
 private val MODES = listOf("acceptEdits", "plan", "bypassPermissions")
 private fun modeHint(m: String) = when (m) {
@@ -81,14 +82,14 @@ private fun modeHint(m: String) = when (m) {
 /** cLaudeCluster: every Claude account you're connected to, with what's left of its usage, plus the workers the main Claude hands work to. */
 @Composable
 fun ClusterSection(vm: MainViewModel) {
-    val groups by vm.cluster.collectAsStateWithLifecycle()
+    val groups by vm.team.cluster.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
-    val login by vm.workerLogin.collectAsStateWithLifecycle()
-    val keyFor by vm.workerKey.collectAsStateWithLifecycle()
+    val login by vm.team.workerLogin.collectAsStateWithLifecycle()
+    val keyFor by vm.team.workerKey.collectAsStateWithLifecycle()
     var apiKey by remember { mutableStateOf("") }
-    val runs by vm.workerRuns.collectAsStateWithLifecycle()
+    val runs by vm.team.workerRuns.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
-    val config by vm.clusterConfig.collectAsStateWithLifecycle()
+    val config by vm.team.clusterConfig.collectAsStateWithLifecycle()
     var add by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
     var role by remember { mutableStateOf("") }
@@ -97,10 +98,10 @@ fun ClusterSection(vm: MainViewModel) {
     var confirmRemove by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val ready = (status?.scriptApi ?: 0) >= Updates.MIN_SCRIPT_API
-    val hostAddOpen by vm.hostAddOpen.collectAsStateWithLifecycle()
-    val hostSetup by vm.hostSetup.collectAsStateWithLifecycle()
+    val hostAddOpen by vm.webHosts.hostAddOpen.collectAsStateWithLifecycle()
+    val hostSetup by vm.webHosts.hostSetup.collectAsStateWithLifecycle()
     var confirmRemoveHost by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(ready) { if (ready) { vm.loadCluster(); vm.loadHosts() } }
+    LaunchedEffect(ready) { if (ready) { vm.team.loadCluster(); vm.webHosts.loadHosts() } }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -113,7 +114,7 @@ fun ClusterSection(vm: MainViewModel) {
             }
             Column(horizontalAlignment = Alignment.End) {
                 OutlinedButton(onClick = { add = true }, enabled = ready && busy == null) { Text("+ Add account") }
-                TextButton(onClick = { vm.loadCluster() }, enabled = ready && busy == null) { Text("Refresh") }
+                TextButton(onClick = { vm.team.loadCluster() }, enabled = ready && busy == null) { Text("Refresh") }
             }
         }
         if (!ready) Text("Server scripts need an update (Connections tab).", style = MaterialTheme.typography.bodySmall)
@@ -125,7 +126,7 @@ fun ClusterSection(vm: MainViewModel) {
             g.accounts?.forEach { a ->
                 AccountCard(vm, a, canManage = g.active, onRemove = { confirmRemove = a.name })
             }
-            if (!g.active) TextButton(onClick = { vm.removeFromCluster(g.serverId) }) { Text("Remove ${g.host} from cluster") }
+            if (!g.active) TextButton(onClick = { vm.team.removeFromCluster(g.serverId) }) { Text("Remove ${g.host} from cluster") }
         }
         if (ready) HostsCard(vm, idle = busy == null, onRemove = { confirmRemoveHost = it })
     }
@@ -137,7 +138,7 @@ fun ClusterSection(vm: MainViewModel) {
     confirmRemoveHost?.let { who ->
         AlertDialog(
             onDismissRequest = { confirmRemoveHost = null },
-            confirmButton = { TextButton(onClick = { vm.removeHost(who); confirmRemoveHost = null }) { Text("Remove") } },
+            confirmButton = { TextButton(onClick = { vm.webHosts.removeHost(who); confirmRemoveHost = null }) { Text("Remove") } },
             dismissButton = { TextButton(onClick = { confirmRemoveHost = null }) { Text("Keep") } },
             title = { Text("Remove $who?") },
             text = {
@@ -154,7 +155,7 @@ fun ClusterSection(vm: MainViewModel) {
             onDismissRequest = { add = false },
             confirmButton = {
                 TextButton(
-                    onClick = { vm.addWorker(name, role, kind); name = ""; role = ""; kind = "claude"; add = false },
+                    onClick = { vm.team.addWorker(name, role, kind); name = ""; role = ""; kind = "claude"; add = false },
                     enabled = WORKER_NAME_RE.matches(name) && busy == null,
                 ) { Text("Add and sign in") }
             },
@@ -181,9 +182,9 @@ fun ClusterSection(vm: MainViewModel) {
 
     keyFor?.let { who ->
         AlertDialog(
-            onDismissRequest = { vm.closeWorkerKey(); apiKey = "" },
-            confirmButton = { TextButton(onClick = { vm.saveWorkerKey(who, apiKey); apiKey = "" }, enabled = apiKey.length >= 20 && busy == null) { Text("Save key") } },
-            dismissButton = { TextButton(onClick = { vm.closeWorkerKey(); apiKey = "" }) { Text("Cancel") } },
+            onDismissRequest = { vm.team.closeWorkerKey(); apiKey = "" },
+            confirmButton = { TextButton(onClick = { vm.team.saveWorkerKey(who, apiKey); apiKey = "" }, enabled = apiKey.length >= 20 && busy == null) { Text("Save key") } },
+            dismissButton = { TextButton(onClick = { vm.team.closeWorkerKey(); apiKey = "" }) { Text("Cancel") } },
             title = { Text("Gemini key for $who") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -201,13 +202,13 @@ fun ClusterSection(vm: MainViewModel) {
 
     login?.let { (who, url) ->
         AlertDialog(
-            onDismissRequest = { vm.closeWorkerLogin(); code = "" },
+            onDismissRequest = { vm.team.closeWorkerLogin(); code = "" },
             confirmButton = {
-                TextButton(onClick = { vm.workerLoginCode(who, code); code = "" }, enabled = url.deviceCode != null || code.length >= 4) {
+                TextButton(onClick = { vm.team.workerLoginCode(who, code); code = "" }, enabled = url.deviceCode != null || code.length >= 4) {
                     Text(if (url.deviceCode != null) "I've signed in" else "Submit code")
                 }
             },
-            dismissButton = { TextButton(onClick = { vm.closeWorkerLogin(); code = "" }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { vm.team.closeWorkerLogin(); code = "" }) { Text("Cancel") } },
             title = { Text("Sign in $who") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -232,8 +233,8 @@ fun ClusterSection(vm: MainViewModel) {
 
     runs?.let { (who, list) ->
         AlertDialog(
-            onDismissRequest = vm::closeWorkerRuns,
-            confirmButton = { TextButton(onClick = vm::closeWorkerRuns) { Text("Close") } },
+            onDismissRequest = vm.team::closeWorkerRuns,
+            confirmButton = { TextButton(onClick = vm.team::closeWorkerRuns) { Text("Close") } },
             title = { Text("$who: recent tasks") },
             text = {
                 Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -254,7 +255,7 @@ fun ClusterSection(vm: MainViewModel) {
     confirmRemove?.let { who ->
         AlertDialog(
             onDismissRequest = { confirmRemove = null },
-            confirmButton = { TextButton(onClick = { vm.removeWorker(who); confirmRemove = null }) { Text("Remove") } },
+            confirmButton = { TextButton(onClick = { vm.team.removeWorker(who); confirmRemove = null }) { Text("Remove") } },
             dismissButton = { TextButton(onClick = { confirmRemove = null }) { Text("Keep") } },
             title = { Text("Remove $who?") },
             text = { Text("Signs the account out on the server and forgets its past tasks.") },
@@ -269,12 +270,12 @@ private fun ClusterSettingsCard(vm: MainViewModel, c: ClusterConfig, idle: Boole
             Text("Cluster settings", style = MaterialTheme.typography.titleSmall)
             Text("Parallel tasks per chat", style = MaterialTheme.typography.labelLarge)
             Stepper(c.maxParallel.toString(), idle, canDown = c.maxParallel > 1, canUp = c.maxParallel < 10,
-                onDown = { vm.setClusterConfig("max_parallel", (c.maxParallel - 1).toString()) },
-                onUp = { vm.setClusterConfig("max_parallel", (c.maxParallel + 1).toString()) })
+                onDown = { vm.team.setClusterConfig("max_parallel", (c.maxParallel - 1).toString()) },
+                onUp = { vm.team.setClusterConfig("max_parallel", (c.maxParallel + 1).toString()) })
             Text("How many tasks one chat may hand to workers at the same time.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Hand work back to the main Claude near the limit", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-                androidx.compose.material3.Switch(checked = c.handback, onCheckedChange = { vm.setClusterConfig("handback", it.toString()) }, enabled = idle)
+                androidx.compose.material3.Switch(checked = c.handback, onCheckedChange = { vm.team.setClusterConfig("handback", it.toString()) }, enabled = idle)
             }
             Text(
                 "When a worker's 5-hour usage reaches the percentage below, the main Claude stops delegating and does the work itself.",
@@ -282,8 +283,8 @@ private fun ClusterSettingsCard(vm: MainViewModel, c: ClusterConfig, idle: Boole
             )
             if (c.handback) {
                 Stepper("Hand back at ${c.handbackPct}%", idle, canDown = c.handbackPct > 50, canUp = c.handbackPct < 100,
-                    onDown = { vm.setClusterConfig("handback_pct", (c.handbackPct - 5).coerceAtLeast(50).toString()) },
-                    onUp = { vm.setClusterConfig("handback_pct", (c.handbackPct + 5).coerceAtMost(100).toString()) })
+                    onDown = { vm.team.setClusterConfig("handback_pct", (c.handbackPct - 5).coerceAtLeast(50).toString()) },
+                    onUp = { vm.team.setClusterConfig("handback_pct", (c.handbackPct + 5).coerceAtMost(100).toString()) })
             }
             Text("Sandbox for workers", style = MaterialTheme.typography.labelLarge)
             Text(
@@ -293,7 +294,7 @@ private fun ClusterSettingsCard(vm: MainViewModel, c: ClusterConfig, idle: Boole
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for ((value, label) in listOf("auto" to "Auto", "on" to "Required", "off" to "Off")) {
-                    FilterChip(selected = c.sandbox == value, onClick = { vm.setClusterConfig("sandbox", value) }, label = { Text(label) }, enabled = idle)
+                    FilterChip(selected = c.sandbox == value, onClick = { vm.team.setClusterConfig("sandbox", value) }, label = { Text(label) }, enabled = idle)
                 }
             }
         }
@@ -304,28 +305,28 @@ private fun ClusterSettingsCard(vm: MainViewModel, c: ClusterConfig, idle: Boole
 @Composable
 private fun HostsCard(vm: MainViewModel, idle: Boolean, onRemove: (String) -> Unit) {
     val st by vm.status.collectAsStateWithLifecycle()
-    val authTarget by vm.hostAuthTarget.collectAsStateWithLifecycle()
+    val authTarget by vm.webHosts.hostAuthTarget.collectAsStateWithLifecycle()
     authTarget?.let { HostAuthorizeDialog(vm, it) }
     // "Download key": after a fresh unlock the key is fetched, then written to a file the owner picks (e.g. in Downloads or Drive).
-    val keyFile by vm.hostKeyFile.collectAsStateWithLifecycle()
+    val keyFile by vm.webHosts.hostKeyFile.collectAsStateWithLifecycle()
     val keyContext = LocalContext.current
     val appLock = life.mygig.clauderc.ui.LocalAppLock.current
     val keyScope = androidx.compose.runtime.rememberCoroutineScope()
     val saveKey = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        val f = vm.hostKeyFile.value
+        val f = vm.webHosts.hostKeyFile.value
         if (uri != null && f != null) {
             val ok = runCatching { keyContext.contentResolver.openOutputStream(uri)?.use { it.write(f.bytes) } ?: error("no stream") }.isSuccess
             vm.say(if (ok) "Key saved. Use it with: ${f.hint}. Keep the file private (on a computer: chmod 600)." else "Couldn't save the key file.")
         }
-        vm.clearHostKeyFile()
+        vm.webHosts.clearHostKeyFile()
     }
     LaunchedEffect(keyFile) { keyFile?.let { saveKey.launch(it.name + "-key") } }
-    val hosts by vm.hosts.collectAsStateWithLifecycle()
+    val hosts by vm.webHosts.hosts.collectAsStateWithLifecycle()
     CardBox {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Hosting servers", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                OutlinedButton(onClick = { vm.openHostAdd() }, enabled = idle) { Text("+ Add host") }
+                OutlinedButton(onClick = { vm.webHosts.openHostAdd() }, enabled = idle) { Text("+ Add host") }
             }
             Text(
                 "Web servers chats can work on: attach one with 👥 in a chat. Claude runs commands there in its own folder.",
@@ -350,17 +351,17 @@ private fun HostsCard(vm: MainViewModel, idle: Boolean, onRemove: (String) -> Un
                     )
                     var menu by remember { mutableStateOf(false) }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        TextButton(onClick = { vm.testHost(h.name) }, enabled = idle) { Text("Test", maxLines = 1) }
-                        if (!setupDone) TextButton(onClick = { vm.openHostSetup(h.name, h.port) }, enabled = idle) { Text("Set up", maxLines = 1) }
+                        TextButton(onClick = { vm.webHosts.testHost(h.name) }, enabled = idle) { Text("Test", maxLines = 1) }
+                        if (!setupDone) TextButton(onClick = { vm.webHosts.openHostSetup(h.name, h.port) }, enabled = idle) { Text("Set up", maxLines = 1) }
                         Box {
                             IconButton(onClick = { menu = true }, enabled = idle) { Icon(Icons.Filled.MoreVert, contentDescription = "More for ${h.name}") }
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                                 if ((st?.scriptApi ?: 0) >= 45) DropdownMenuItem(text = { Text("Download key") }, onClick = {
                                     menu = false
-                                    keyScope.launch { if (appLock?.unlock("Download the key for ${h.name}") != false) vm.exportHostKey(h) }
+                                    keyScope.launch { if (appLock?.unlock("Download the key for ${h.name}") != false) vm.webHosts.exportHostKey(h) }
                                 })
-                                if ((st?.scriptApi ?: 0) >= 44) DropdownMenuItem(text = { Text("Add my key") }, onClick = { menu = false; vm.openHostAuthorize(h.name) })
-                                if (setupDone) DropdownMenuItem(text = { Text("Run set-up again") }, onClick = { menu = false; vm.openHostSetup(h.name, h.port) })
+                                if ((st?.scriptApi ?: 0) >= 44) DropdownMenuItem(text = { Text("Add my key") }, onClick = { menu = false; vm.webHosts.openHostAuthorize(h.name) })
+                                if (setupDone) DropdownMenuItem(text = { Text("Run set-up again") }, onClick = { menu = false; vm.webHosts.openHostSetup(h.name, h.port) })
                                 DropdownMenuItem(text = { Text("Remove") }, onClick = { menu = false; onRemove(h.name) })
                             }
                         }
@@ -376,17 +377,17 @@ private fun HostsCard(vm: MainViewModel, idle: Boolean, onRemove: (String) -> Un
 @Composable
 private fun HostAddDialog(vm: MainViewModel) {
     val busy by vm.busy.collectAsStateWithLifecycle()
-    val probe by vm.hostProbe.collectAsStateWithLifecycle()
-    val error by vm.hostError.collectAsStateWithLifecycle()
-    val hostKey by vm.hostKey.collectAsStateWithLifecycle()
-    val draft = remember { vm.hostDraft() }   // what was typed before the app was left (no secrets)
+    val probe by vm.webHosts.hostProbe.collectAsStateWithLifecycle()
+    val error by vm.webHosts.hostError.collectAsStateWithLifecycle()
+    val hostKey by vm.webHosts.hostKey.collectAsStateWithLifecycle()
+    val draft = remember { vm.webHosts.hostDraft() }   // what was typed before the app was left (no secrets)
     var name by rememberSaveable { mutableStateOf(draft.name) }
     var address by rememberSaveable { mutableStateOf(draft.address) }
     var port by rememberSaveable { mutableStateOf(draft.port) }
     var user by rememberSaveable { mutableStateOf(draft.user) }
     var confirmed by remember { mutableStateOf(false) }
     var auth by rememberSaveable { mutableStateOf(draft.auth) }
-    LaunchedEffect(name, address, port, user, auth) { vm.saveHostDraft(MainViewModel.HostDraft(name, address, port, user, auth)) }
+    LaunchedEffect(name, address, port, user, auth) { vm.webHosts.saveHostDraft(HostsController.HostDraft(name, address, port, user, auth)) }
     var keyText by remember { mutableStateOf("") }
     var keyFile by remember { mutableStateOf<String?>(null) }   // base64 of a picked key file
     var password by remember { mutableStateOf("") }
@@ -446,18 +447,18 @@ private fun HostAddDialog(vm: MainViewModel) {
     val scroll = rememberScrollState()
     LaunchedEffect(error) { if (error != null) scroll.animateScrollTo(scroll.maxValue) }   // the message is at the bottom of a tall dialog: bring it into view
     AlertDialog(
-        onDismissRequest = { if (busy == null) vm.closeHostAdd(keepDraft = true) },
+        onDismissRequest = { if (busy == null) vm.webHosts.closeHostAdd(keepDraft = true) },
         confirmButton = {
-            if (p == null) TextButton(onClick = { vm.probeHost(address, portNum ?: 22) }, enabled = addressOk && busy == null) { Text("Check") }
-            else TextButton(onClick = { vm.addHost(name, address, portNum ?: 22, user, p.fingerprint, mode, secret) }, enabled = canSave) { Text("Save") }
+            if (p == null) TextButton(onClick = { vm.webHosts.probeHost(address, portNum ?: 22) }, enabled = addressOk && busy == null) { Text("Check") }
+            else TextButton(onClick = { vm.webHosts.addHost(name, address, portNum ?: 22, user, p.fingerprint, mode, secret) }, enabled = canSave) { Text("Save") }
         },
-        dismissButton = { TextButton(onClick = { vm.closeHostAdd() }) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = { vm.webHosts.closeHostAdd() }) { Text("Cancel") } },
         title = { Text("Add a server") },
         text = {
             Column(Modifier.heightIn(max = 520.dp).verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 NoAutofill()
                 OutlinedTextField(
-                    value = name, onValueChange = { if (it.trim() != name) vm.clearHostKey(); name = it.trim() }, label = { Text("Name (shop, blog…)") },
+                    value = name, onValueChange = { if (it.trim() != name) vm.webHosts.clearHostKey(); name = it.trim() }, label = { Text("Name (shop, blog…)") },
                     singleLine = true, modifier = Modifier.fillMaxWidth(), isError = name.isNotEmpty() && !HOST_NAME_RE.matches(name),
                     keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
                 )
@@ -467,7 +468,7 @@ private fun HostAddDialog(vm: MainViewModel) {
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { importOpen = false; vm.generateHostKey(name) }, enabled = HOST_NAME_RE.matches(name) && busy == null, modifier = Modifier.weight(1f)) {
+                        OutlinedButton(onClick = { importOpen = false; vm.webHosts.generateHostKey(name) }, enabled = HOST_NAME_RE.matches(name) && busy == null, modifier = Modifier.weight(1f)) {
                             Text("Generate new key")
                         }
                         OutlinedButton(onClick = { importOpen = !importOpen }, enabled = busy == null, modifier = Modifier.weight(1f)) {
@@ -486,7 +487,7 @@ private fun HostAddDialog(vm: MainViewModel) {
                         importFileError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
                         Text("Keys with a passphrase aren't supported. The key is kept on this server only and never shown again.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Button(
-                            onClick = { vm.importHostKey(name, importSecret) },
+                            onClick = { vm.webHosts.importHostKey(name, importSecret) },
                             enabled = HOST_NAME_RE.matches(name) && importSecret.isNotEmpty() && busy == null, modifier = Modifier.fillMaxWidth(),
                         ) { Text("Use this key") }
                     }
@@ -504,12 +505,12 @@ private fun HostAddDialog(vm: MainViewModel) {
                     )
                 }
                 OutlinedTextField(
-                    value = address, onValueChange = { address = it.trim(); confirmed = false; vm.clearHostProbe() }, label = { Text("Address") },
+                    value = address, onValueChange = { address = it.trim(); confirmed = false; vm.webHosts.clearHostProbe() }, label = { Text("Address") },
                     singleLine = true, modifier = Modifier.fillMaxWidth(), isError = address.isNotEmpty() && !hostAddressOk(address),
                     keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
                 )
                 OutlinedTextField(
-                    value = port, onValueChange = { port = it.filter { c -> c.isDigit() }.take(5); confirmed = false; vm.clearHostProbe() }, label = { Text("Port") },
+                    value = port, onValueChange = { port = it.filter { c -> c.isDigit() }.take(5); confirmed = false; vm.webHosts.clearHostProbe() }, label = { Text("Port") },
                     singleLine = true, modifier = Modifier.fillMaxWidth(), isError = portNum == null || portNum !in 1..65535,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )
@@ -580,8 +581,8 @@ private fun keyTextBase64(text: String): String = Base64.encodeToString((text.tr
 @Composable
 private fun HostSetupDialog(vm: MainViewModel, name: String, sshPort: Int) {
     val busy by vm.busy.collectAsStateWithLifecycle()
-    val result by vm.hostHarden.collectAsStateWithLifecycle()
-    val error by vm.hostSetupError.collectAsStateWithLifecycle()
+    val result by vm.webHosts.hostHarden.collectAsStateWithLifecycle()
+    val error by vm.webHosts.hostSetupError.collectAsStateWithLifecycle()
     var harden by remember { mutableStateOf(true) }
     var tune by remember { mutableStateOf(true) }
     var web by remember { mutableStateOf(false) }
@@ -594,12 +595,12 @@ private fun HostSetupDialog(vm: MainViewModel, name: String, sshPort: Int) {
     val steps = listOfNotNull(if (harden) "harden" else null, if (tune) "optimize" else null, if (web) "web" else null)
     val r = result
     AlertDialog(
-        onDismissRequest = { if (busy == null) vm.closeHostSetup() },
+        onDismissRequest = { if (busy == null) vm.webHosts.closeHostSetup() },
         confirmButton = {
-            if (r != null) TextButton(onClick = { vm.closeHostSetup() }) { Text("Done") }
-            else TextButton(onClick = { vm.hardenHost(name, ports, steps) }, enabled = portsOk && busy == null) { Text("Set up") }
+            if (r != null) TextButton(onClick = { vm.webHosts.closeHostSetup() }) { Text("Done") }
+            else TextButton(onClick = { vm.webHosts.hardenHost(name, ports, steps) }, enabled = portsOk && busy == null) { Text("Set up") }
         },
-        dismissButton = { if (r == null) TextButton(onClick = { vm.closeHostSetup() }, enabled = busy == null) { Text("Skip") } },
+        dismissButton = { if (r == null) TextButton(onClick = { vm.webHosts.closeHostSetup() }, enabled = busy == null) { Text("Skip") } },
         title = { Text("Set up $name") },
         text = {
             Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -705,11 +706,11 @@ private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean
             if (worker && canManage) {
                 Text("Mode: ${a.mode} (${modeHint(a.mode)})", style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    OutlinedButton(onClick = { vm.workerLoginStart(a.name, a.kind) }, enabled = idle) { Text(if (a.kind == "gemini") (if (a.signedIn) "Change key" else "Add key") else if (a.signedIn) "Re-sign in" else "Sign in") }
-                    OutlinedButton(onClick = { vm.setWorker(a.name, "mode", MODES[(MODES.indexOf(a.mode) + 1) % MODES.size]) }, enabled = idle) { Text("Mode") }
+                    OutlinedButton(onClick = { vm.team.workerLoginStart(a.name, a.kind) }, enabled = idle) { Text(if (a.kind == "gemini") (if (a.signedIn) "Change key" else "Add key") else if (a.signedIn) "Re-sign in" else "Sign in") }
+                    OutlinedButton(onClick = { vm.team.setWorker(a.name, "mode", MODES[(MODES.indexOf(a.mode) + 1) % MODES.size]) }, enabled = idle) { Text("Mode") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(onClick = { vm.showWorkerRuns(a.name) }) { Text("Tasks") }
+                    TextButton(onClick = { vm.team.showWorkerRuns(a.name) }) { Text("Tasks") }
                     TextButton(onClick = onRemove, enabled = idle) { Text("Remove") }
                 }
             }
@@ -744,9 +745,9 @@ private val MODE_LABELS = listOf("acceptEdits" to "Edit files", "plan" to "Read-
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun ChatClusterSheet(vm: MainViewModel, onClose: () -> Unit) {
-    val workers by vm.chatWorkers.collectAsStateWithLifecycle()
-    val tasks by vm.chatTasks.collectAsStateWithLifecycle()
-    val hosts by vm.chatHosts.collectAsStateWithLifecycle()
+    val workers by vm.team.chatWorkers.collectAsStateWithLifecycle()
+    val tasks by vm.team.chatTasks.collectAsStateWithLifecycle()
+    val hosts by vm.webHosts.chatHosts.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onClose,
@@ -787,7 +788,7 @@ fun ChatClusterSheet(vm: MainViewModel, onClose: () -> Unit) {
                                 if (!w.signedIn) Text("Not signed in (Claude tab › Accounts)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                             }
                             androidx.compose.material3.Switch(
-                                checked = w.attached, onCheckedChange = { vm.attachWorker(w.name, it) },
+                                checked = w.attached, onCheckedChange = { vm.team.attachWorker(w.name, it) },
                                 enabled = busy == null && (w.signedIn || w.attached),
                             )
                         }
@@ -795,13 +796,13 @@ fun ChatClusterSheet(vm: MainViewModel, onClose: () -> Unit) {
                             var role by remember(w.role) { mutableStateOf(w.role) }
                             OutlinedTextField(
                                 value = role, onValueChange = { role = it }, label = { Text("What it does here") }, singleLine = true,
-                                modifier = Modifier.fillMaxWidth().onFocusChanged { if (!it.isFocused && role != w.role) vm.assignWorker(w.name, "role", role) },
+                                modifier = Modifier.fillMaxWidth().onFocusChanged { if (!it.isFocused && role != w.role) vm.team.assignWorker(w.name, "role", role) },
                                 keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
-                                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { if (role != w.role) vm.assignWorker(w.name, "role", role) }),
+                                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { if (role != w.role) vm.team.assignWorker(w.name, "role", role) }),
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 MODE_LABELS.forEach { (m, label) ->
-                                    androidx.compose.material3.FilterChip(selected = w.mode == m, onClick = { vm.assignWorker(w.name, "mode", m) }, label = { Text(label) }, enabled = busy == null)
+                                    androidx.compose.material3.FilterChip(selected = w.mode == m, onClick = { vm.team.assignWorker(w.name, "mode", m) }, label = { Text(label) }, enabled = busy == null)
                                 }
                             }
                             Text(modeHint(w.mode), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -824,7 +825,7 @@ fun ChatClusterSheet(vm: MainViewModel, onClose: () -> Unit) {
                             Text(h.name, style = MaterialTheme.typography.titleSmall)
                             Text("${h.user}@${h.address}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        androidx.compose.material3.Switch(checked = h.attached, onCheckedChange = { vm.attachHost(h.name, it) }, enabled = busy == null)
+                        androidx.compose.material3.Switch(checked = h.attached, onCheckedChange = { vm.webHosts.attachHost(h.name, it) }, enabled = busy == null)
                     }
                 }
             }
@@ -836,16 +837,16 @@ fun ChatClusterSheet(vm: MainViewModel, onClose: () -> Unit) {
 @Composable
 private fun HostAuthorizeDialog(vm: MainViewModel, name: String) {
     val busy by vm.busy.collectAsStateWithLifecycle()
-    val error by vm.hostAuthError.collectAsStateWithLifecycle()
-    val done by vm.hostAuthDone.collectAsStateWithLifecycle()
+    val error by vm.webHosts.hostAuthError.collectAsStateWithLifecycle()
+    val done by vm.webHosts.hostAuthDone.collectAsStateWithLifecycle()
     var key by rememberSaveable { mutableStateOf("") }
     AlertDialog(
-        onDismissRequest = { if (busy == null) vm.closeHostAuthorize() },
+        onDismissRequest = { if (busy == null) vm.webHosts.closeHostAuthorize() },
         confirmButton = {
-            if (done != null) TextButton(onClick = { vm.closeHostAuthorize() }) { Text("Done") }
-            else TextButton(onClick = { vm.authorizeHostKey(name, key) }, enabled = key.trim().length >= 40 && busy == null) { Text("Add key") }
+            if (done != null) TextButton(onClick = { vm.webHosts.closeHostAuthorize() }) { Text("Done") }
+            else TextButton(onClick = { vm.webHosts.authorizeHostKey(name, key) }, enabled = key.trim().length >= 40 && busy == null) { Text("Add key") }
         },
-        dismissButton = { if (done == null) TextButton(onClick = { vm.closeHostAuthorize() }) { Text("Cancel") } },
+        dismissButton = { if (done == null) TextButton(onClick = { vm.webHosts.closeHostAuthorize() }) { Text("Cancel") } },
         title = { Text("Add my key to $name") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

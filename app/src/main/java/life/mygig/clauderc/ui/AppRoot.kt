@@ -170,21 +170,21 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             val showSettings by vm.showSettings.collectAsStateWithLifecycle()
             val status by vm.status.collectAsStateWithLifecycle()
             val latest by vm.latest.collectAsStateWithLifecycle()
-            val login by vm.login.collectAsStateWithLifecycle()
-            val setup by vm.setup.collectAsStateWithLifecycle()
-            val showAdd by vm.showAdd.collectAsStateWithLifecycle()
-            val detail by vm.detail.collectAsStateWithLifecycle()
+            val login by vm.logins.login.collectAsStateWithLifecycle()
+            val setup by vm.services.setup.collectAsStateWithLifecycle()
+            val showAdd by vm.services.showAdd.collectAsStateWithLifecycle()
+            val detail by vm.connections.detail.collectAsStateWithLifecycle()
             val showRun by vm.showRun.collectAsStateWithLifecycle()
-            val chatSession by vm.chatSession.collectAsStateWithLifecycle()
-            val showCustom by vm.showCustom.collectAsStateWithLifecycle()
-            val showKeystores by vm.showKeystores.collectAsStateWithLifecycle()
-            val showApple by vm.showApple.collectAsStateWithLifecycle()
+            val chatSession by vm.chats.chatSession.collectAsStateWithLifecycle()
+            val showCustom by vm.services.showCustom.collectAsStateWithLifecycle()
+            val showKeystores by vm.services.showKeystores.collectAsStateWithLifecycle()
+            val showApple by vm.services.showApple.collectAsStateWithLifecycle()
             // Only the open flag: the wizard screen follows the rest of its state itself.
             val showMigrate by remember(vm) { vm.migrate.map { it.open }.distinctUntilChanged() }.collectAsStateWithLifecycle(vm.migrate.value.open)
-            val tokenService by vm.tokenService.collectAsStateWithLifecycle()
+            val tokenService by vm.services.tokenService.collectAsStateWithLifecycle()
             val tail by vm.tail.collectAsStateWithLifecycle()
             val pendingKey by vm.pendingHostKey.collectAsStateWithLifecycle()
-            val clusterOffer by vm.clusterOffer.collectAsStateWithLifecycle()
+            val clusterOffer by vm.team.clusterOffer.collectAsStateWithLifecycle()
 
             LaunchedEffect(Unit) {
                 vm.messages.collect { m ->
@@ -198,7 +198,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                     )
                     if (r == SnackbarResult.ActionPerformed) {
                         when (val f = m.fix) {
-                            is Fix.Login -> vm.showLogin(f.kind)
+                            is Fix.Login -> vm.logins.showLogin(f.kind)
                             is Fix.GoTo -> vm.selectTab(f.tab)
                             is Fix.StartAnyway -> vm.startProject(f.project)
                             is Fix.Retry -> f.block()
@@ -278,7 +278,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Cancel adding server")
                                     }
                                 } else if (detail != null && !showSettings && !setupNeeded) {
-                                    IconButton(onClick = { vm.openDetail(null) }) {
+                                    IconButton(onClick = { vm.connections.openDetail(null) }) {
                                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                                     }
                                 } else if (showSettings && !setupNeeded) {
@@ -292,7 +292,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                             },
                             actions = {
                                 if (!showSettings && !setupNeeded) {
-                                    IconButton(onClick = { vm.selectTab(Tab.STATUS); vm.showAddService(true) }) {
+                                    IconButton(onClick = { vm.selectTab(Tab.STATUS); vm.services.showAddService(true) }) {
                                         Icon(Icons.Filled.Add, contentDescription = "Connect a service")
                                     }
                                     IconButton(onClick = { unlockThen("Open settings") { vm.openSettings(true) } }) {
@@ -399,9 +399,9 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             chatSession?.let { ChatScreen(vm, it) }
             clusterOffer?.let { o ->
                 AlertDialog(
-                    onDismissRequest = { vm.answerClusterOffer(false) },
-                    confirmButton = { TextButton(onClick = { vm.answerClusterOffer(true) }) { Text("Add to cluster") } },
-                    dismissButton = { TextButton(onClick = { vm.answerClusterOffer(false) }) { Text("Not now") } },
+                    onDismissRequest = { vm.team.answerClusterOffer(false) },
+                    confirmButton = { TextButton(onClick = { vm.team.answerClusterOffer(true) }) { Text("Add to cluster") } },
+                    dismissButton = { TextButton(onClick = { vm.team.answerClusterOffer(false) }) { Text("Not now") } },
                     title = { Text("A different Claude account") },
                     text = { Text("${o.host} is signed in as ${o.email}, not the account on your other servers. Add it to cLaudeCluster to see its usage next to the others?") },
                 )
@@ -503,7 +503,7 @@ private fun androidx.compose.foundation.layout.RowScope.TabItem(
 ) {
     NavigationBarItem(
         selected = current == tab,
-        onClick = { vm.openDetail(null); vm.selectTab(tab) },
+        onClick = { vm.connections.openDetail(null); vm.selectTab(tab) },
         icon = {
             BadgedBox(badge = { if (dot) Badge() }) { Icon(icon, contentDescription = if (dot) "$label, update available" else null) }
         },
@@ -523,7 +523,7 @@ private fun RailItem(
 ) {
     NavigationRailItem(
         selected = current == tab,
-        onClick = { vm.openDetail(null); vm.selectTab(tab) },
+        onClick = { vm.connections.openDetail(null); vm.selectTab(tab) },
         icon = {
             BadgedBox(badge = { if (dot) Badge() }) { Icon(icon, contentDescription = if (dot) "$label, update available" else null) }
         },
