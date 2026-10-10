@@ -19,7 +19,7 @@ Browsers: Chrome 155, Firefox 157, Safari 27 (web-features 3.42.0). Baseline "ne
 | WASI | 0.3.0 shipped 2026-06-11 (native async: `stream`/`future`), 0.3.1 2026-08-11; 0.2.0 2024-01, last 0.2.x = 0.2.12 | 0.3.x every 2 months (0.3.2 planned 2026-10-13). WASI 1.0 has no date |
 | Wasmtime | 49.0.2 stable, 50.0.0-rc (monthly majors on the 20th) | LTS every 12th major, 24 months (36, 48); other majors 2 months |
 | Wasmer / WasmEdge | 7.5.0 (2026-10-01) / 0.18.0 (2026-10-05) | |
-| Rust | wasm-bindgen 0.2.129, wasm-pack 0.15.0, trunk 0.21.14 | `rustwasm` org archived 2025-09; wasm-bindgen and wasm-pack live in the `wasm-bindgen` GitHub org, `twiggy` is archived (2026-02) |
+| Rust | wasm-bindgen 0.2.129, wasm-pack 0.15.0, trunk 0.21.14 | `rustwasm` org archived 2025-09; wasm-bindgen and wasm-pack live in the `wasm-bindgen` GitHub org, `twiggy` (now `AlexEne/twiggy`) is archived, last commit 2026-02 |
 | Emscripten | 6.0.12 (2026-10-08) | |
 | Binaryen (`wasm-opt`) | version_133 (2026-09-21); npm `binaryen` 132.0.0 | crate `wasm-opt` 0.116.1 is stale (2024): prefer the Binaryen release binary |
 | jco (JS host for components) | 1.37.0 | `jco transpile` turns a component into ES modules |
@@ -44,12 +44,13 @@ Browser support of what matters here (web-features 3.42.0):
 | WasmGC, tail calls | newly (2024-12) - Safari 18.2; typed function refs newly (2024-09) - Safari 18 |
 | exnref exceptions | newly (2025-05) - Chrome 137, Firefox 131, Safari 18.4 |
 | JSPI (JS Promise Integration) | newly (2026-09-14) - Chrome 137, Firefox 153, Safari 27 |
-| memory64, multi-memory, relaxed SIMD, JS string builtins | Chrome + Firefox only, **not Safari** |
+| memory64, multi-memory, relaxed SIMD | Chrome + Firefox only, **not Safari** |
+| JS string builtins | Chrome 130, Firefox 134, Safari 26.2 (all core browsers since 2025-12) |
 | WebGL 2 | widely (2024-03) |
 | WebGPU | Chrome/Edge 113+ desktop (Linux from 144, Intel Gen12+), Chrome Android 121, Safari 26 (macOS/iOS); Firefox 141 Windows, 145+/147 Apple-silicon macOS only, no Linux, no Android. **Not Baseline** |
 | OffscreenCanvas | widely (2025-09) |
 | AVIF / WebP | widely |
-| JPEG XL | Safari 17+, Chrome 155 (newly back); Firefox not yet (MDN lists 158): not Baseline |
+| JPEG XL | Safari 17+, Chrome 155 (2026-10-06); not Edge, not Firefox: not Baseline |
 | HEIC | Safari only; Chrome and Firefox do not decode it |
 | Form-associated custom elements | widely (2025-09) |
 | Custom states `:state()` | newly (2024-05) |
@@ -271,7 +272,7 @@ customElements.define('rc-counter', RcCounter);
 - Web Components: `@open-wc/testing` or Vitest browser mode; Custom Elements Manifest (`@custom-elements-manifest/analyzer`) for docs/types.
 
 ## Common mistakes in AI-written code
-- Claiming memory64, multi-memory, relaxed SIMD or JS string builtins "work in all browsers": not in Safari (2026-10).
+- Claiming memory64, multi-memory or relaxed SIMD "work in all browsers": not in Safari (2026-10). (JS string builtins do: Safari 26.2+.)
 - Saying WebGPU is Baseline or works in Firefox everywhere: Firefox is Windows + Apple-silicon macOS only.
 - `WebAssembly.instantiate(await (await fetch(u)).arrayBuffer())` instead of `instantiateStreaming`; serving `.wasm` as `application/octet-stream`.
 - Keeping a `Uint8Array` view over `memory.buffer` across calls that may grow memory (detached buffer errors).
@@ -319,6 +320,9 @@ customElements.define('rc-counter', RcCounter);
 - https://docs.python.org/3.15/whatsnew/3.15.html - Python 3.15 (2026-10-09) tomllib reads TOML 1.1 - 2026-10-09
 - https://github.com/mdn/browser-compat-data - moveBefore/connectedMoveCallback (Chrome 133, Firefox 144), ShadowRoot.referenceTarget (Chrome 152) - 2026-10-09
 - https://developer.chrome.com/blog/supercharge-web-ai-testing - WebGPU flags for headless Chrome - 2026-10-09
-- https://webkit.org/blog/15865/webkit-features-in-safari-18-0/ - Safari decodes HEIC and JPEG XL - 2026-10-09
+- https://webkit.org/blog/14445/webkit-features-in-safari-17-0/ - Safari 17.0 adds JPEG XL and HEIC - 2026-10-10
+- https://webkit.org/blog/17640/webkit-features-for-safari-26-2/ - Safari 26.2 ships Wasm JS String Builtins - 2026-10-10
+- https://github.com/mdn/browser-compat-data `webassembly/*.json` - exnref (Chrome 137, Firefox 131, Safari 18.4), tail calls, typed refs, JS string builtins (Safari 26.2), relaxed SIMD/multi-memory (Safari preview only) - 2026-10-10
+- https://web-platform-dx.github.io/web-features-explorer/ (wasm-jspi, wasm-memory64, webgpu, jpegxl, offscreen-canvas, scoped-custom-element-registries) - Baseline status/dates - 2026-10-10
 
 Unverified in this pass (rules of thumb only): Basis/KTX2 advice, size/perf numbers.

@@ -12,24 +12,24 @@ description: Writing and reviewing scripts in Bash, POSIX sh (dash, busybox ash)
 
 | Thing | Current (verified 2026-10-09) | Notes |
 |---|---|---|
-| Bash | **5.3** (2025-07-30), patches to 5.3.9 (patch dir updated 2026-09-14) | 5.2 (2022-09-26, last tarball 5.2.37) is what Debian 13 ships (unverified); Ubuntu 26.04 ships 5.3 |
+| Bash | **5.3** (2025-07-30), official patches up to `bash53-020` = 5.3.20 (2026-09-14) | 5.2 (2022-09-26, last tarball 5.2.37) is what Debian 13 ships (5.2.37); Ubuntu 26.04 ships 5.3 |
 | Bash 5.3 new | `${ cmd; }` (command substitution in the current shell, no fork), `${\| cmd; }` (result in `REPLY`), `GLOBSORT`, `source -p PATH`, `read -E`, `array_expand_once` (replaces `assoc_expand_once`), `BASH_MONOSECONDS`, `BASH_TRAPSIG`, `compgen -V` | `${ ...; }` and `GLOBSORT` are 5.3-only: guard or avoid in scripts that run elsewhere |
 | Bash 5.2 changes | `patsub_replacement` **on by default** (`&` in `${v//pat/rep}` means "the match"), `globskipdots` on by default, `${v@k}`, `varredir_close` | `${path//x/&}` silently changed meaning in 5.2: quote the replacement (`"&"`) or escape `\&` |
 | Bash 5.1 / 5.0 | 5.1: `wait -p VAR`, `SRANDOM`, `${v@U}`/`@L`; 5.0: `EPOCHSECONDS`, `EPOCHREALTIME` | |
-| macOS | `/bin/bash` is still **3.2.57** (GPLv2 era); zsh is the login shell since 10.15 | No assoc arrays, `mapfile`, `${v,,}`, `wait -n`, `${v@Q}` in 3.2. Use Homebrew bash + `#!/usr/bin/env bash` if you need 4+/5 |
+| macOS | `/bin/bash` has long been **3.2.57** (GPLv2 era; not re-checked on macOS 26, run `/bin/bash --version`); zsh is the login shell since 10.15 | No assoc arrays, `mapfile`, `${v,,}`, `wait -n`, `${v@Q}` in 3.2. Use Homebrew bash + `#!/usr/bin/env bash` if you need 4+/5 |
 | zsh | **5.9.2** latest tag (zsh-users/zsh) | |
-| POSIX | **POSIX.1-2024 (Issue 8)**: adds `$'...'`, `read -d`, `find -print0`, `readlink`, `realpath`, `timeout` (verified on spec pages); `set -o pipefail`, `xargs -0` also believed added (unverified) | dash / busybox ash support of Issue 8 features varies: test on the target shell |
-| dash / busybox | Debian/Ubuntu `/bin/sh` = dash; Alpine `/bin/sh` = busybox ash | dash has no arrays, no `[[`, no `local -n`, no `pipefail` on older versions (unverified which version added it) |
-| PowerShell | **7.6 LTS** (2026-03-18, .NET 10, EOS 2028-11-14; current 7.6.6); 7.5 stable (EOS **2026-11-10**); 7.4 LTS (EOS **2026-11-10**); 7.7 preview.3 | 7.6: `Microsoft.PowerShell.ThreadJob` replaces `ThreadJob`, `Join-Path -ChildPath` takes `string[]`, `PSRedirectToVariable` / `PSNativeWindowsTildeExpansion` now mainstream, ships PSResourceGet 1.2.0 |
-| Windows PowerShell | **5.1** (2016) only; in-box on Windows, follows the Windows lifecycle, no new features | PowerShell 2.0 engine removed from current Windows 11/Server builds (unverified exact build) |
+| POSIX | **POSIX.1-2024 (Issue 8)**: adds `$'...'`, `read -d`, `find -print0`, `readlink`, `realpath`, `timeout`, `set -o pipefail`, `xargs -0` and `xargs -r` (all verified on spec pages) | dash / busybox ash support of Issue 8 features varies: test on the target shell |
+| dash / busybox | Debian/Ubuntu `/bin/sh` = dash; Alpine `/bin/sh` = busybox ash | dash has no arrays, no `[[`, no `local -n`; `pipefail` landed upstream 2024-04 (first release believed 0.5.13, unverified): older dash lacks it |
+| PowerShell | **7.6 LTS** (2026-03-18, .NET 10, EOS 2028-11-14; current 7.6.6); 7.5 stable (7.5.11, EOS **2026-11-10**); 7.4 LTS (EOS **2026-11-10**); 7.7 preview (7.7.0-preview.5, 2026-09-23, .NET 11) | 7.6: `Microsoft.PowerShell.ThreadJob` replaces `ThreadJob`, `Join-Path -ChildPath` takes `string[]`, `PSRedirectToVariable` / `PSNativeWindowsTildeExpansion` now mainstream, ships PSResourceGet 1.2.0 |
+| Windows PowerShell | **5.1** (2016) only; in-box on Windows, follows the Windows lifecycle, no new features | PowerShell 2.0 engine removed from Windows 11 24H2 (2025-08 update) and Windows Server 2025 (2025-09); scripts asking for 2.0 get 5.1 |
 | Pester | **6.2.0** (2026-09-09); 6.0.0 (2026-07-07) | Runs on 5.1 and 7.4+. New `Should-*` assertions (`Should-Be`); old `Should -Be` still works |
 | PSScriptAnalyzer | **1.25.0** (2026-03-20) | |
-| Perl | **5.44.0** (2026-07-15); maintenance 5.42.3 and 5.40.5 (2026-08-02) | 5.44: named parameters in signatures, multi-var `foreach` with ref aliases, `enhanced_xx`; `goto` into a loop body now forbidden |
+| Perl | **5.44.0** (2026-07-15); maintenance 5.42.3 and 5.40.5 (2026-08-02) | 5.44: named parameters in signatures (experimental), multi-var `foreach` with ref aliases, `enhanced_xx` (experimental), Unicode 17; `goto` into a loop body now throws |
 | ShellCheck | **0.11.0** (2025-08-04) | New: SC2327/2328 (capture vs redirect), SC2329 (function never called), SC2331 (`-e` not `-a`); SC2002 (useless cat) now optional |
 | shfmt | **3.14.1** (2026-09-06) | Parses zsh since 3.13 |
 | bats-core | **1.14.0** (2026-07-21) | **Breaking:** `run` now honours `set -e` inside your functions; fails when no tests found unless `--allow-empty-suite` |
 | ShellSpec | 0.28.1 (2021-01-11), no release since | Works, but prefer bats-core for new suites |
-| jq / yq | jq **1.8.2** (2026-06-20, 16 security fixes: upgrade); yq (mikefarah) **4.54.1** (2026-09-29, adds jq-style `if-then-elif-else-end`) | Two different "yq" exist (Python wrapper vs Go mikefarah): check `yq --version` |
+| jq / yq | jq **1.8.2** (2026-06-20, 22 security fixes incl. 16 CVEs: upgrade); yq (mikefarah) **4.54.1** (2026-09-29, adds jq-style `if-then-elif-else-end`) | Two different "yq" exist (Python wrapper vs Go mikefarah): check `yq --version` |
 | just / Task | just **1.58.0** (2026-08-03); Task **3.54.0** (2026-10-01) | |
 
 ### Older versions (what differs on legacy hosts)
@@ -58,7 +58,7 @@ description: Writing and reviewing scripts in Bash, POSIX sh (dash, busybox ash)
 | `local out=$(cmd)` (masks exit code) | `local out; out=$(cmd)` | |
 | `$[ a + b ]`, `expr` | `$(( a + b ))` | |
 | `curl url \| sudo bash` | download, verify checksum/signature, read, then run; or a distro package | supply chain |
-| `curl -s url` | `curl -fsSL --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60` (`--fail-with-body` to keep error body) | curl 7.71 / 7.76 (unverified) |
+| `curl -s url` | `curl -fsSL --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60` (`--fail-with-body` to keep error body) | curl 7.71 (`--retry-all-errors`) / 7.76 (`--fail-with-body`) |
 | `mktemp` path guessing `/tmp/foo.$$` | `mktemp` / `mktemp -d` + `trap` cleanup | races |
 | `set -e` alone as "error handling" | `set -Eeuo pipefail` + `shopt -s inherit_errexit` + explicit checks (see pitfalls) | bash 4.4 |
 | PowerShell `Install-Module` (PowerShellGet 2) | `Install-PSResource` (Microsoft.PowerShell.PSResourceGet, in-box since 7.4) | PS 7.4 |
@@ -173,7 +173,7 @@ for k in "${keys[@]}"; do [[ -v seen[$k] ]] && continue; seen[$k]=1; done   # -v
 ### POSIX sh (dash, busybox ash) when you need it
 - Shebang `#!/bin/sh`, then **only** POSIX: `[ ]`, `$(( ))`, `case` for patterns, `.` not `source`, no arrays (use `"$@"` via `set --`),
   `local` is not POSIX but dash/ash support it. Check with `shellcheck -s sh` and run under `dash -n` and `busybox sh`.
-- `set -o pipefail` in sh: only if the target shell supports it (`(set -o pipefail) 2>/dev/null && set -o pipefail`).
+- `set -o pipefail` is POSIX since Issue 8, but older dash/ash lack it: guard it (`(set -o pipefail) 2>/dev/null && set -o pipefail`).
 
 ### zsh essentials (interactive config and zsh scripts)
 - Unquoted `$var` does **not** word-split in zsh (unless `setopt sh_word_split`); arrays are 1-based; a glob with no match is an error
@@ -214,7 +214,7 @@ try {
 ### Modern Perl
 ```perl
 #!/usr/bin/env perl
-use v5.36;                       # strict, warnings, say, signatures; no indirect, no bareword filehandles
+use v5.36;                       # strict, warnings, say, signatures, no indirect (bareword FHs off from v5.38)
 use autodie;                     # open/close/unlink die on failure
 sub slurp ($path) { open my $fh, '<:encoding(UTF-8)', $path; local $/; <$fh> }
 my @out = qx{git rev-parse HEAD};             # avoid; prefer list form below
@@ -224,7 +224,7 @@ system('git', 'tag', '--', $name) == 0 or die "git failed: $?";   # list form, n
 - Taint mode (`#!perl -T`) for setuid/CGI-style scripts handling untrusted input; untaint only through a strict regex capture.
 - CPAN hygiene: `cpanfile` + `cpanm --installdeps .` or Carton (`carton install`, commit `cpanfile.snapshot`); never `sudo cpan` into system perl;
   use `local::lib` or perlbrew/plenv. Prefer core modules (`File::Temp`, `JSON::PP`, `Getopt::Long`, `Time::Piece`, `List::Util`).
-- Perl 5.44 named signature params and `class` (experimental since 5.38): do not use in code that must run on older perls.
+- Perl 5.44 named signature params (experimental) and `class` (experimental since 5.38): do not use in code that must run on older perls.
 
 ### JSON, YAML, HTTP
 - `jq -r --arg name "$name" '.items[] | select(.name == $name) | .id'` (pass data with `--arg`/`--argjson`, never splice into the filter).
@@ -340,7 +340,7 @@ exec "$@"        # replace the shell: the app becomes PID 1 and receives SIGTERM
 - https://ftp.gnu.org/gnu/bash/ - release dates 5.2 (2022-09-26), 5.3 (2025-07-30), 5.3 patches dir (2026-10-09)
 - https://learn.microsoft.com/en-us/powershell/scripting/install/powershell-support-lifecycle - PS versions, LTS, EOS dates (2026-10-09)
 - https://learn.microsoft.com/en-us/powershell/scripting/whats-new/what-s-new-in-powershell-76 - 7.6 changes (2026-10-09)
-- https://github.com/PowerShell/PowerShell/releases - v7.6.6 2026-09-08 (2026-10-09)
+- https://github.com/PowerShell/PowerShell/releases - v7.6.6 2026-09-08, v7.7.0-preview.5 2026-09-23 (2026-10-10)
 - https://github.com/pester/Pester/releases - 6.0.0 (2026-07-07) notes, 6.2.0 (2026-09-09) (2026-10-09)
 - https://github.com/PowerShell/PSScriptAnalyzer/releases - 1.25.0 (2026-10-09)
 - https://metacpan.org/dist/perl and https://perldoc.perl.org/perldelta - Perl 5.44.0 date and changes, 5.42.3/5.40.5 (2026-10-09)
@@ -355,5 +355,12 @@ exec "$@"        # replace the shell: the app becomes PID 1 and receives SIGTERM
 - https://github.com/zsh-users/zsh/tags - zsh-5.9.2 (2026-10-09)
 - https://pubs.opengroup.org/onlinepubs/9799919799/xrat/V4_xcu_chap01.html - Issue 8: `$'...'`, readlink/realpath/timeout (2026-10-09)
 - https://pubs.opengroup.org/onlinepubs/9799919799/utilities/read.html and .../find.html - `read -d`, `-print0` added in Issue 8 (2026-10-09)
-- Not re-verified this run (from prior knowledge, treat as leads): macOS bash 3.2.57, curl option introduction versions, `scp` SFTP default in
-  OpenSSH 9.0, GNU grep 3.8 egrep warning, Debian 13 bash version, `pipefail` in POSIX Issue 8.
+- https://ftp.gnu.org/gnu/bash/bash-5.3-patches/ - patches 001-020, newest 2026-09-14 (2026-10-10)
+- https://www.gnu.org/software/bash/manual/html_node/The-Shopt-Builtin.html - `patsub_replacement`, `globskipdots` on by default (2026-10-10)
+- https://packages.debian.org/trixie/bash and https://packages.ubuntu.com/resolute/bash - Debian 13 bash 5.2.37, Ubuntu 26.04 bash 5.3 (2026-10-10)
+- https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html and .../utilities/xargs.html - `set -o pipefail`, `xargs -0`/`-r` in Issue 8 (2026-10-10)
+- https://curl.se/docs/manpage.html - `--retry-all-errors` 7.71.0, `--fail-with-body` 7.76.0 (2026-10-10)
+- https://www.openssh.org/txt/release-9.0 - scp uses SFTP by default, 2022-04-08 (2026-10-10)
+- https://lists.gnu.org/archive/html/info-gnu/2022-09/msg00001.html - grep 3.8: egrep/fgrep warn as obsolescent (2026-10-10)
+- https://support.microsoft.com/help/5065506 - PowerShell 2.0 removed from Windows 11 24H2 / Server 2025 (2026-10-10)
+- Still unverified (leads only): macOS 26 `/bin/bash` version, first dash release with `pipefail`, RHEL 8 perl 5.26.
