@@ -1,6 +1,6 @@
 # Developer knowledge pack
 
-Thirty-one skills (`skills/rc-*`: 29 topic skills plus the process skills `rc-dev-playbook` and `rc-american-english-writing`) that cLaudeRC installs for every Claude session and Claude worker on the server, so they code against
+Thirty-seven skills (`skills/rc-*`: 34 topic skills plus the process skills `rc-dev-playbook`, `rc-american-english-writing` and `rc-us-legal-core`) that cLaudeRC installs for every Claude session and Claude worker on the server, so they code against
 CURRENT standards (what changed lately, what is now wrong, what to do instead) for web front end, JavaScript/TypeScript, Node, web back end,
 PHP, Python, Go, Java, Android, iOS, UI/UX, security, databases, cloud/DevOps, testing and many more languages (see `COVERAGE.md`).
 
@@ -23,3 +23,10 @@ only pack files changed, runs `lint.sh`, rebuilds `MANIFEST`, pushes `knowledge-
 `COVERAGE.md` tracks every part of the expansion brief as done / partial / planned / unsupported / unverified, honestly. `rc-dev-playbook` is the entry skill:
 how to approach any task, detect the project type, load the right topic skills, privacy-first and minimal-dependency defaults, root-cause debugging and a
 production-quality definition of done. All brief sections are covered; every skill had an independent fact-check pass. Next: monthly refresh keeps them current; re-run `evals/` after big changes.
+
+## U.S. law skills (added 2026-10-10)
+`rc-us-legal-core` (entry skill: role boundary, research and cite-check method, deadline protocol, document hygiene, routing) plus `rc-ohio-child-support` (with the Ohio-North Carolina
+interstate module), `rc-us-litigation-procedure` (federal, Ohio, North Carolina), `rc-us-motor-vehicle-carrier-law`, `rc-us-business-law` and `rc-us-platform-policy-law`.
+Each was written by a research agent and then independently fact-checked against official sources, which corrected real errors (wrong dates, a misdescribed case, a mis-stated
+service add-on rule). They are research and drafting support, not legal advice, and say so. Law changes fast: the monthly refresh re-checks them, and a session must still verify
+anything it relies on for a filing. Items the checkers could not confirm are marked `(unverified)`.

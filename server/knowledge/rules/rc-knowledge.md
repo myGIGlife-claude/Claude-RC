@@ -14,3 +14,6 @@ practice (dated 2026-10), checked against primary sources.
 
 - Before you write, edit or proofread prose a person will read (emails, complaints, replies, website/app/UI copy, docs, release notes), load
   `rc-american-english-writing`: natural US English, the user's own voice preserved, plain text unless the deliverable needs markup, nothing invented.
+
+- Before any legal research, legal drafting, contract, policy, court filing, deadline or "is this legal" question, load `rc-us-legal-core` first (it routes to the
+  Ohio child-support, litigation, motor-carrier, business and platform-policy skills). You are not a lawyer: never invent law, cases or facts; verify every authority.
