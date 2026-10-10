@@ -1,6 +1,13 @@
+buildscript {
+    dependencies {
+        // AGP 9 has built-in Kotlin with a runtime dependency on an older Kotlin Gradle plugin;
+        // this raises it to the catalog's `kotlin` so it matches the compose/serialization plugins.
+        classpath(libs.kotlin.gradle.plugin)
+    }
+}
+
 plugins {
-    id("com.android.application") version "8.13.2" apply false
-    id("org.jetbrains.kotlin.android") version "2.2.21" apply false
-    id("org.jetbrains.kotlin.plugin.compose") version "2.2.21" apply false
-    id("org.jetbrains.kotlin.plugin.serialization") version "2.2.21" apply false
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.kotlin.compose) apply false
+    alias(libs.plugins.kotlin.serialization) apply false
 }
