@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id)
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=46
+SCRIPT_API=47
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 CLAUDERC_API="${CLAUDERC_API:-https://api.github.com}"
@@ -62,6 +62,9 @@ PROJECT_RE='^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$'
 REPO_RE='^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._][A-Za-z0-9._-]*$'
 OWNER_RE='^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'
 AUTOSTART_LIST="$HOME/.config/claude-setup/sessions.tsv"
+# General chats: plain conversations, each in its own folder <chat dir>/<id>, run by the tmux session chat-<id>.
+GENERAL_ID_RE='^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$'
+GENERAL_SESS_RE='^chat-[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$'
 REQUIRED_SCOPES=(repo read:org workflow)
 
 EMITTED=0
@@ -76,6 +79,7 @@ step()   { printf "\n\033[1;36m==> %s\033[0m\n" "$*"; }
 # ======================================================================
 load_config() {
   PROJECTS_DIR="$HOME/projects"
+  CHAT_DIR="${CLAUDERC_CHAT_DIR:-$HOME/Chat}"   # General chats (the config may set CHAT_DIR too)
   DEFAULT_OWNER=""
   AWS_PROFILE_NAME=""
   AWS_DEFAULT_REGION_NAME="us-east-1"
@@ -103,6 +107,8 @@ EOF
 
   PROJECTS_DIR="${PROJECTS_DIR%/}"
   [[ "$PROJECTS_DIR" == /?* ]] || PROJECTS_DIR="$HOME/projects"   # must be absolute
+  CHAT_DIR="${CHAT_DIR%/}"
+  [[ "$CHAT_DIR" == /?* ]] || CHAT_DIR="$HOME/Chat"
   mkdir -p "$STATE_DIR" "$API_STATE_DIR" "$CACHE_DIR"
   AWS_ARGS=()
   [[ -n "$AWS_PROFILE_NAME" ]] && AWS_ARGS=(--profile "$AWS_PROFILE_NAME")
@@ -123,9 +129,20 @@ session_name() { local n="$1"; echo "${n//[.:]/-}"; }   # tmux can't use . or :
 # The folder Claude keeps a project's conversations in: every character that isn't a letter or digit becomes "-".
 claude_proj_slug() { printf '%s' "${1//[^A-Za-z0-9]/-}"; }
 
-# A session's project folder: claude-autostart's list first, else where the pane is.
+# general_dir_of <session>: the folder of a running General chat session (named chat-<id> AND started in
+# <chat dir>/<id>), else nothing. A project literally named chat-<id> lives elsewhere, so it never counts.
+general_dir_of() {
+  local id="${1#chat-}" sp
+  [[ "$1" == chat-* && "$id" =~ $GENERAL_ID_RE ]] || return 1
+  sp="$(tmux display-message -p -t "=$1:" '#{session_path}' 2>/dev/null)" || return 1
+  [[ "$sp" == "$CHAT_DIR/$id" || "$sp" == "$(realpath -m -- "$CHAT_DIR")/$id" ]] || return 1
+  realpath -m -- "$CHAT_DIR/$id"   # the real path: Claude names its conversation folder after it
+}
+
+# A session's project folder: a General chat's own folder, claude-autostart's list, else where the pane is.
 session_dir() {
   local d
+  general_dir_of "$1" && return 0
   d="$(awk -F'\t' -v s="$1" '$1 == s {print $2; exit}' "$AUTOSTART_LIST" 2>/dev/null)"
   [[ -n "$d" ]] || d="$(tmux display-message -p -t "=$1:" '#{pane_current_path}' 2>/dev/null)"
   printf '%s' "$d"
@@ -193,10 +210,16 @@ trust_folder() {
 }
 
 # Tell claude-autostart about the change now instead of at its next 2-minute save.
+# General chats (chat-<id> in <chat dir>/<id>) are never restored at boot: they resume when opened.
+# claude-autostart skips them itself; this also cleans a list saved by an older copy of it.
 autostart_save() {
-  local bin
+  local bin tmp
   bin="$(command -v claude-autostart 2>/dev/null || true)"
   [[ -n "$bin" ]] && "$bin" save >/dev/null 2>&1 </dev/null || true
+  [[ -f "$AUTOSTART_LIST" ]] || return 0
+  tmp="$(mktemp "$AUTOSTART_LIST.XXXXXX")" || return 0
+  awk -F'\t' '!($1 ~ /^chat-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]$/ && $2 ~ ("/" substr($1, 6) "$"))' \
+    "$AUTOSTART_LIST" >"$tmp" && mv "$tmp" "$AUTOSTART_LIST" || rm -f "$tmp"
 }
 
 # Drop a session from claude-autostart's list. Needed when it can't see the
@@ -856,34 +879,205 @@ do_repos() {
 sessions_list_json() {
   local s
   # Same detection as claude-autostart: any session whose pane started claude.
-  s="$({ tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}@@#{session_created}@@#{session_attached}' 2>/dev/null || true; } |
+  # A General chat is a session named chat-<id> started in <chat dir>/<id> (session_path, which doesn't move with cd).
+  s="$({ tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}@@#{session_created}@@#{session_attached}@@#{session_path}' 2>/dev/null || true; } |
     awk -F'@@' -v l1="$CLAUDE_LOGIN_SESSION" -v l2="$AWS_LOGIN_SESSION" \
       '($3 ~ /claude/ || $4 == "claude") && $1 != l1 && $1 != l2 && $1 != "mcp-auth" && $1 !~ /^worker-login-/ && !seen[$1]++' |
-    jq -Rc 'split("@@") | {name:.[0], dir:.[1], project:(.[1] | split("/") | last),
-      started_at:(.[4] | tonumber), attached:((.[5] | tonumber) > 0)}' |
+    jq -Rc --arg cd "$CHAT_DIR" --arg cr "$(realpath -m -- "$CHAT_DIR")" --arg re "$GENERAL_SESS_RE" 'split("@@")
+      | ((.[0] | select(test($re)) | ltrimstr("chat-")) // null) as $id
+      | ($id != null and (.[6] == ($cd + "/" + $id) or .[6] == ($cr + "/" + $id))) as $g
+      | {name:.[0], dir:.[1], project:(.[1] | split("/") | last),
+      started_at:(.[4] | tonumber), attached:((.[5] | tonumber) > 0), general:$g} + (if $g then {chat_id:$id} else {} end)' |
     jq -sc --argjson now "$(date +%s)" 'map(. + {uptime_seconds:($now - .started_at)}) | sort_by(.started_at)')"
   # Each session's last lines, and whether it's waiting on a question or working.
-  local out="[]" row name screen tail4 waiting busy
+  local out="[]" row name
   while IFS= read -r row; do
     [[ -n "$row" ]] || continue
     name="$(jq -r .name <<<"$row")"
-    screen="$(tmux capture-pane -p -J -t "=$name:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15)"
-    # Drop Claude's input box and status bar: separators, the empty ❯ prompt, mode/shortcut hints.
-    tail4="$(grep -v '^[[:space:]]*$' <<<"$screen" | grep -vE '^[─━╭╰│ ]+$|^ *❯|⏵⏵|shift\+tab|for shortcuts|← for agents|esc to interrupt|^ *⎿? *Tip:|/clear to save|Restart to update' |
-      sed -e 's/[[:space:]]*$//' -e 's/^[[:space:]]\{8,\}//' | tail -n 3 | cut -c1-120)"
-    waiting=false busy=false
-    grep -qE "$WAIT_RE" <<<"$screen" && waiting=true
-    grep -q "esc to interrupt" <<<"$screen" && busy=true
-    out="$(jq -c --argjson r "$row" --arg p "$tail4" --argjson w "$waiting" --argjson b "$busy" \
-      '. + [$r + {preview:$p, waiting:$w, busy:$b}]' <<<"$out")"
+    out="$(jq -c --argjson r "$row" --argjson st "$(session_state_json "$name")" '. + [$r + $st]' <<<"$out")"
     out="$(jq -c --argjson d "$([[ -e "$PUSH_DIR/$name" ]] && echo true || echo false)" \
       '.[-1].push_done = $d' <<<"$out")"
   done < <(jq -c '.[]' <<<"${s:-[]}")
   printf '%s' "$out"
 }
 
+# session_state_json <session>: {preview, waiting, busy}: its last lines, and whether it's waiting on a question or working.
+session_state_json() {
+  local screen tail4 waiting=false busy=false
+  screen="$(tmux capture-pane -p -J -t "=$1:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15)"
+  # Drop Claude's input box and status bar: separators, the empty ❯ prompt, mode/shortcut hints.
+  tail4="$(grep -v '^[[:space:]]*$' <<<"$screen" | grep -vE '^[─━╭╰│ ]+$|^ *❯|⏵⏵|shift\+tab|for shortcuts|← for agents|esc to interrupt|^ *⎿? *Tip:|/clear to save|Restart to update' |
+    sed -e 's/[[:space:]]*$//' -e 's/^[[:space:]]\{8,\}//' | tail -n 3 | cut -c1-120)"
+  grep -qE "$WAIT_RE" <<<"$screen" && waiting=true
+  grep -q "esc to interrupt" <<<"$screen" && busy=true
+  jq -cn --arg p "$tail4" --argjson w "$waiting" --argjson b "$busy" '{preview:$p, waiting:$w, busy:$b}'
+}
+
 do_sessions() {
   api_ok "$(jq -cn --argjson s "$(sessions_list_json)" --argjson now "$(date +%s)" '{now:$now, sessions:$s}')"
+}
+
+# General chats: plain Claude conversations, not tied to a repo. Each is a folder <chat dir>/<id> (so it has its own
+# conversation history) run by the tmux session chat-<id>. A stopped chat stays listed and resumes when opened; chats
+# are never restored at boot.
+
+# The rules every General chat loads: <chat dir>/CLAUDE.md, written once and never overwritten (the owner may edit it).
+general_rules() {
+  cat <<'EOF'
+# General chat
+
+This folder is a conversation workspace, not a code repository. These rules apply to every chat in
+its subfolders and override the global coding-workflow instructions for these chats:
+
+- Do not read PLAN.md. Do not follow the global "session start" task picking, git commit or planning
+  rules in this folder.
+- Do not write code or create repositories unless the owner asks for it.
+- For writing, load the rc-american-english-writing skill. For legal questions, load rc-us-legal-core
+  first. For code or tech questions, use the matching rc-* skill.
+- Save any file you create for the owner (documents, drafts, exports) under Documents/ inside the
+  current chat folder, and tell the owner the file name so the app can fetch it.
+- Keep replies short and plain.
+- Never invent facts, laws or citations. Say what you could not verify.
+EOF
+}
+
+# general_arg <id>: an existing chat, checked before any path is built (else the call ends). Sets GEN_ID, GEN_DIR,
+# GEN_SESS. Not echoed: api_err inside $(…) would only end a subshell.
+general_arg() {
+  [[ "$1" =~ $GENERAL_ID_RE ]] || api_err invalid_name "Invalid chat id."
+  GEN_ID="$1" GEN_DIR="$CHAT_DIR/$1" GEN_SESS="chat-$1"
+  [[ -d "$GEN_DIR" && ! -L "$GEN_DIR" ]] || api_err invalid_name "No chat with that id."
+}
+
+# The chat's own session is up (not a project that happens to be named chat-<id>).
+general_running() { general_dir_of "$GEN_SESS" >/dev/null; }
+
+# general_transcript <dir>: the chat's live conversation file, or nothing.
+general_transcript() {
+  ls -t "$HOME/.claude/projects/$(claude_proj_slug "$(realpath -m -- "$1")")/"*.jsonl 2>/dev/null | head -n 1
+}
+
+# general_title <dir> <transcript>: its .title, else the first thing you said (one line, 60 characters), else "New chat".
+general_title() {
+  local t=""
+  [[ -f "$1/.title" ]] && t="$(head -c 400 "$1/.title" | tr -d '\000-\037\177')"
+  if [[ -z "$t" && -n "$2" ]]; then
+    t="$(head -n 400 "$2" 2>/dev/null | jq -Rrn 'first(inputs | fromjson? | select(.type == "user") | .message.content
+      | if type == "string" then . else ([.[]? | select(.type == "text") | .text] | .[0] // "") end
+      | select(length > 0 and (startswith("<") | not))) // ""
+      | gsub("\\s+"; " ") | sub("^ "; "") | .[0:60] | sub(" $"; "")' 2>/dev/null)"
+  fi
+  printf '%s' "${t:-New chat}"
+}
+
+do_general_list() {
+  [[ $# -eq 0 ]] || bad_args "general-list takes no arguments"
+  local d id f sess state created updated tmp
+  tmp="$(mktemp)"
+  for d in "$CHAT_DIR"/*/; do
+    d="${d%/}"; id="${d##*/}"
+    [[ "$id" =~ $GENERAL_ID_RE && ! -L "$d" ]] || continue
+    f="$(general_transcript "$d")"
+    created="$(date -u -d "${id:0:4}-${id:4:2}-${id:6:2} ${id:9:2}:${id:11:2}:${id:13:2}" +%s 2>/dev/null)" || created=0
+    updated="$(stat -c %Y -- "${f:-$d}" 2>/dev/null)" || updated=0
+    sess="" state='{"preview":"","waiting":false,"busy":false}'
+    if general_dir_of "chat-$id" >/dev/null; then sess="chat-$id"; state="$(session_state_json "$sess")"; fi
+    jq -cn --arg id "$id" --arg t "$(general_title "$d" "$f")" --arg d "$d" --arg s "$sess" \
+      --argjson c "${created:-0}" --argjson u "${updated:-0}" --argjson st "$state" \
+      '{id:$id, title:$t, dir:$d, running:($s != ""), session:$s, created_at:$c, updated_at:$u} + $st' >>"$tmp"
+  done
+  jq -sc '{chats:sort_by(-.updated_at, -.created_at)}' "$tmp" >"$tmp.out"
+  rm -f "$tmp"
+  api_ok_file "$tmp.out"
+}
+
+do_general_new() {
+  [[ $# -eq 0 ]] || bad_args "general-new takes no arguments"
+  need tmux
+  command -v claude >/dev/null 2>&1 || api_err internal "'claude' is not installed on the server."
+  local id="" c i rc=0
+  [[ -d "$CHAT_DIR" ]] || { mkdir -p -- "$(dirname -- "$CHAT_DIR")" && mkdir -m 700 -- "$CHAT_DIR"; } || api_err internal "Couldn't create the chat folder."
+  # noclobber: never overwrite the owner's copy, even when two chats start at once.
+  [[ -e "$CHAT_DIR/CLAUDE.md" ]] || (set -C; general_rules >"$CHAT_DIR/CLAUDE.md") 2>/dev/null
+  for i in 1 2 3 4 5 6 7 8; do
+    c="$(date -u +%Y%m%d-%H%M%S)-$(od -An -N2 -tx1 /dev/urandom | tr -d ' \n')"
+    # mkdir is atomic, so two calls never share a folder; a project session named chat-<id> rules that id out.
+    if [[ "$c" =~ $GENERAL_ID_RE ]] && ! tmux has-session -t "=chat-$c" 2>/dev/null && mkdir -m 700 -- "$CHAT_DIR/$c" 2>/dev/null; then
+      id="$c"; break
+    fi
+  done
+  [[ -n "$id" ]] || api_err internal "Couldn't create a new chat folder (tried $i times)."
+  mkdir -p -- "$CHAT_DIR/$id/Documents"
+  launch_session "chat-$id" "$CHAT_DIR/$id" || rc=$?
+  if ((rc != 0)); then
+    rmdir -- "$CHAT_DIR/$id/Documents" "$CHAT_DIR/$id" 2>/dev/null
+    api_err internal "tmux could not start the chat."
+  fi
+  api_confirm_remote_control "chat-$id"
+  api_ok "$(jq -cn --arg id "$id" --arg d "$CHAT_DIR/$id" '{id:$id, session:("chat-" + $id), dir:$d}')"
+}
+
+# general-open <id>: start the chat if it isn't running, resuming its conversation (fresh if it has none yet).
+do_general_open() {
+  [[ $# -eq 1 ]] || bad_args "usage: general-open <id>"
+  general_arg "$1"
+  need tmux
+  command -v claude >/dev/null 2>&1 || api_err internal "'claude' is not installed on the server."
+  local sid rc=0 already=false
+  if general_running; then
+    already=true
+  else
+    tmux has-session -t "=$GEN_SESS" 2>/dev/null && api_err internal "Another session is already named '$GEN_SESS'."
+    sid="$(conversation_id "$(realpath -m -- "$GEN_DIR")")"
+    if [[ -z "$sid" ]] || ! resume_session "$GEN_SESS" "$GEN_DIR" "$sid"; then
+      launch_session "$GEN_SESS" "$GEN_DIR" || rc=$?
+      ((rc == 0)) || api_err internal "tmux could not start the chat."
+    fi
+    api_confirm_remote_control "$GEN_SESS"
+  fi
+  api_ok "$(jq -cn --arg id "$GEN_ID" --arg s "$GEN_SESS" --argjson a "$already" '{id:$id, session:$s, already_running:$a}')"
+}
+
+# general-rename <id>: stdin = the new title (one line, 1-80 characters).
+do_general_rename() {
+  [[ $# -eq 1 ]] || bad_args "usage: general-rename <id>"
+  local raw t n tmp
+  raw="$(head -c 200 | tr -d '\000')"
+  exec 0</dev/null
+  general_arg "$1"
+  # Line breaks become spaces, other control characters (and a character cut in half at 200 bytes) go.
+  t="$(jq -rn --arg t "$raw" '$t | gsub("[\\t\\n\\r]"; " ") | gsub("[[:cntrl:]�]"; "") | sub("^\\s+"; "") | sub("\\s+$"; "")')"
+  n="$(jq -rn --arg t "$t" '$t | length')"
+  [[ "$n" =~ ^[0-9]+$ ]] && ((n >= 1 && n <= 80)) || api_err invalid_name "The title must be 1 to 80 characters."
+  tmp="$(mktemp "$GEN_DIR/.title.XXXXXX")" || api_err internal "Couldn't save the title."
+  printf '%s\n' "$t" >"$tmp" && mv -f -- "$tmp" "$GEN_DIR/.title" || { rm -f "$tmp"; api_err internal "Couldn't save the title."; }
+  api_ok "$(jq -cn --arg id "$GEN_ID" --arg t "$t" '{id:$id, title:$t}')"
+}
+
+# general-stop <id>: ends the session only; the chat stays listed.
+do_general_stop() {
+  [[ $# -eq 1 ]] || bad_args "usage: general-stop <id>"
+  general_arg "$1"
+  local stopped=false
+  if general_running && tmux kill-session -t "=$GEN_SESS" 2>/dev/null; then
+    stopped=true
+    autostart_forget "$GEN_SESS"
+  fi
+  api_ok "$(jq -cn --arg id "$GEN_ID" --arg s "$GEN_SESS" --argjson st "$stopped" '{id:$id, session:$s, stopped:$st}')"
+}
+
+# general-delete <id>: stops it and moves its folder to <chat dir>/.deleted (never removed; Claude's transcript stays too).
+do_general_delete() {
+  [[ $# -eq 1 ]] || bad_args "usage: general-delete <id>"
+  general_arg "$1"
+  local dest
+  if general_running; then tmux kill-session -t "=$GEN_SESS" 2>/dev/null; autostart_forget "$GEN_SESS"; fi
+  [[ -d "$CHAT_DIR/.deleted" ]] || mkdir -m 700 -- "$CHAT_DIR/.deleted" || api_err internal "Couldn't create $CHAT_DIR/.deleted."
+  dest="$CHAT_DIR/.deleted/$GEN_ID-$(date +%s)"
+  [[ ! -e "$dest" ]] || dest="$dest-$$"
+  mv -T -- "$GEN_DIR" "$dest" || api_err internal "Couldn't move the chat to $CHAT_DIR/.deleted."
+  rm -f -- "$PUSH_DIR/$GEN_SESS"
+  api_ok '{"deleted":true}'
 }
 
 # Push alerts (Firebase Cloud Messaging; claude-push sends them from Claude's hooks).
@@ -976,6 +1170,31 @@ do_stop() {
   api_ok "$(jq -cn --arg s "$sess" --argjson st "$stopped" '{session:$s, stopped:$st}')"
 }
 
+# conversation_id <dir>: the folder's live conversation (the newest transcript in Claude's folder for it), or nothing.
+conversation_id() {
+  local sid
+  sid="$(ls -t "$HOME/.claude/projects/$(claude_proj_slug "$1")/"*.jsonl 2>/dev/null | head -n 1 | xargs -r basename | sed 's/\.jsonl$//')"
+  [[ "$sid" =~ ^[0-9a-f-]{36}$ ]] && printf '%s' "$sid"
+}
+
+# resume_session <name> <dir> <conversation id>: start <name>'s session in <dir> resuming that conversation.
+# Fails, leaving nothing running under that name, if Claude didn't stay up (the caller then starts fresh).
+resume_session() {
+  local name="$1" dir="$2" sid="$3" sess pp=""
+  sess="$(session_name "$name")"
+  trust_folder "$dir"
+  if tmux new-session -d -s "$sess" -c "$dir" \
+    "env -u ANTHROPIC_API_KEY claude --remote-control $(printf %q "$name") --resume $sid; exec bash"; then
+    autostart_save
+    sleep 4
+    pp="$(tmux display-message -p -t "=$sess:" '#{pane_pid}' 2>/dev/null)"
+  fi   # (a name already taken leaves pp empty: never judge another session's Claude)
+  # Claude runs as a child of the pane's shell; once it exits the shell becomes bash with no child.
+  [[ -n "$pp" ]] && pgrep -P "$pp" >/dev/null 2>&1 && return 0
+  tmux kill-session -t "=$sess" 2>/dev/null   # resuming didn't stick: start fresh rather than leave nothing running
+  return 1
+}
+
 # Safe restart: stop a session and start it again in the same folder,
 # resuming the exact conversation it had (claude --resume <session id>), so
 # Claude picks up new plugins, skills and MCP servers without losing context.
@@ -983,7 +1202,7 @@ do_stop() {
 do_restart() {
   [[ $# -eq 1 || ($# -eq 2 && "$2" == --force) ]] || bad_args "usage: restart <project or session> [--force]"
   valid_project "$1" || api_err invalid_name "Invalid project name."
-  local sess dir name sid="" pp resumed=false
+  local sess dir name sid="" resumed=false
   sess="$(resolve_session "$1")"
   tmux has-session -t "=$sess" 2>/dev/null || api_err invalid_name "No running session named '$1'."
   if [[ "${2:-}" != --force ]] && tmux capture-pane -p -t "=$sess:" 2>/dev/null |
@@ -995,27 +1214,12 @@ do_restart() {
   [[ -d "$dir" ]] || api_err internal "Couldn't find the folder of session '$sess'."
   name="$(basename "$dir")"
   valid_project "$name" || api_err invalid_name "The folder name '$name' can't be used as a session name."
-  # The live conversation is the newest transcript in Claude's folder for this project.
-  sid="$(ls -t "$HOME/.claude/projects/$(claude_proj_slug "$dir")/"*.jsonl 2>/dev/null | head -n 1 | xargs -r basename | sed 's/\.jsonl$//')"
-  [[ "$sid" =~ ^[0-9a-f-]{36}$ ]] || sid=""
+  # A General chat keeps its chat-<id> name (its folder is just <id>).
+  general_dir_of "$sess" >/dev/null && name="$sess"
+  sid="$(conversation_id "$dir")"
   tmux kill-session -t "=$sess" 2>/dev/null
   STARTED_SESSION="$(session_name "$name")"
-  if [[ -n "$sid" ]]; then
-    trust_folder "$dir"
-    pp=""
-    if tmux new-session -d -s "$STARTED_SESSION" -c "$dir" \
-      "env -u ANTHROPIC_API_KEY claude --remote-control $(printf %q "$name") --resume $sid; exec bash"; then
-      autostart_save
-      sleep 4
-      pp="$(tmux display-message -p -t "=$STARTED_SESSION:" '#{pane_pid}' 2>/dev/null)"
-    fi   # (a name already taken leaves pp empty: never judge another session's Claude)
-    # Claude runs as a child of the pane's shell; once it exits the shell becomes bash with no child.
-    if [[ -n "$pp" ]] && pgrep -P "$pp" >/dev/null 2>&1; then
-      resumed=true
-    else   # resuming didn't stick: start fresh rather than leave nothing running
-      tmux kill-session -t "=$STARTED_SESSION" 2>/dev/null
-    fi
-  fi
+  [[ -n "$sid" ]] && resume_session "$name" "$dir" "$sid" && resumed=true
   if ! $resumed; then
     launch_session "$name" "$dir" || api_err internal "tmux could not start the session again."
   fi
@@ -5020,7 +5224,7 @@ api_main() {
   shift || true
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | set-secret-file | login-keystore | login-apple | youtube-login-start | \
-      chat-pin-set | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
+      chat-pin-set | chat-open | chat-history | general-rename | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
       migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | host-probe | host-add | host-keyimport | host-authorize | host-harden | drive-passphrase) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
@@ -5035,6 +5239,12 @@ api_main() {
     push-session)        do_push_session "$@" ;;
     push-test)           [[ $# -eq 0 ]] || bad_args "push-test takes no arguments"; do_push_test ;;
     sessions)            [[ $# -eq 0 ]] || bad_args "sessions takes no arguments"; do_sessions ;;
+    general-list)        do_general_list "$@" ;;
+    general-new)         do_general_new "$@" ;;
+    general-open)        do_general_open "$@" ;;
+    general-rename)      do_general_rename "$@" ;;
+    general-stop)        do_general_stop "$@" ;;
+    general-delete)      do_general_delete "$@" ;;
     new)                 do_new "$@" ;;
     open)                do_open "$@" ;;
     clone-status)        do_clone_status "$@" ;;
