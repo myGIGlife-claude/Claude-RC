@@ -332,7 +332,10 @@ private fun PromptCard(vm: MainViewModel, screen: String, enabled: Boolean) {
 private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
     val context = LocalContext.current
     val session = vm.chats.chatSession.value.orEmpty()
-    var text by remember(session) { mutableStateOf(vm.chats.draft(session)) }
+    var field by remember(session) { vm.chats.draft(session).let { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(it, androidx.compose.ui.text.TextRange(it.length))) } }
+    val text = field.text
+    // Programmatic changes (chips, attach, clear) put the cursor at the end; a plain String field would keep the old position.
+    fun setText(s: String) { field = androidx.compose.ui.text.input.TextFieldValue(s, androidx.compose.ui.text.TextRange(s.length)) }
     LaunchedEffect(session, text) { if (session.isNotEmpty()) vm.chats.setDraft(session, text) }
     // Attach: the file goes into the project's uploads/ folder; its path goes in the message.
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -357,7 +360,7 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
         if (bytes == null || bytes.isEmpty() || bytes.size > 15 * 1024 * 1024) {
             vm.say("That file couldn't be read, or it's bigger than 15 MB.")
         } else {
-            vm.chats.uploadToChat(name, bytes) { path -> text = (text.trimEnd() + " [attached: $path]").trim() }
+            vm.chats.uploadToChat(name, bytes) { path -> setText((text.trimEnd() + " [attached: $path]").trim()) }
         }
     }
     // Typing "/" suggests commands: the best match shows as faded text in the box, all matches as chips above it.
@@ -371,7 +374,7 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
         if (matches.isNotEmpty() && !(matches.size == 1 && ghost.isEmpty())) {
             androidx.compose.foundation.lazy.LazyRow(Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(matches) { (cmd, hint) ->
-                    androidx.compose.material3.AssistChip(onClick = { text = "$cmd " }, label = { Text(cmd) }, modifier = Modifier.semantics { contentDescription = "$cmd: $hint" })
+                    androidx.compose.material3.AssistChip(onClick = { setText("$cmd ") }, label = { Text(cmd) }, modifier = Modifier.semantics { contentDescription = "$cmd: $hint" })
                 }
             }
         }
@@ -380,14 +383,14 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
                 Icon(Icons.Filled.AttachFile, contentDescription = "Attach a file or photo")
             }
             OutlinedTextField(
-                value = text, onValueChange = { text = it }, visualTransformation = GhostText(ghost, ghostColor), placeholder = { Text("Message Claude") },
+                value = field, onValueChange = { field = it }, visualTransformation = GhostText(ghost, ghostColor), placeholder = { Text("Message Claude") },
                 modifier = Modifier.weight(1f), maxLines = 6, shape = RoundedCornerShape(22.dp),
             )
             if (working) {
                 FilledIconButton(onClick = { vm.chats.interruptChat() }, modifier = Modifier.height(52.dp)) { Icon(Icons.Filled.Stop, contentDescription = "Stop Claude") }
             }
             FilledIconButton(
-                onClick = { val t = text; vm.chats.sendChat(t, onSent = { text = "" }, onFail = { if (text.isBlank()) text = t }) },
+                onClick = { val t = text; vm.chats.sendChat(t, onSent = { setText("") }, onFail = { if (text.isBlank()) setText(t) }) },
                 enabled = enabled && text.isNotBlank(), modifier = Modifier.height(52.dp),
             ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
         }
