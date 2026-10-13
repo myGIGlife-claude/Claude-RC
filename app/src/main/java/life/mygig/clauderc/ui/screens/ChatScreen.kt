@@ -152,6 +152,12 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                                         }
                                     }
                                 }
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { vm.chats.openPermissions() },
+                                ) {
+                                    Text("Permissions", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), maxLines = 1)
+                                }
                                 // Claude's permission mode; tap to cycle it (Shift+Tab).
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
@@ -177,6 +183,8 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                         TextButton(onClick = { showCluster = true; vm.team.loadChatWorkers(); vm.webHosts.loadChatHosts() }) { Text("👥", fontSize = 20.sp) }
                     }
                     if (showCluster) ChatClusterSheet(vm, onClose = { showCluster = false })
+                    val permsOpen by vm.chats.permissionsOpen.collectAsStateWithLifecycle()
+                    if (permsOpen) PermissionsSheet(vm, onClose = { vm.chats.clearPermissions() })
                     TextButton(onClick = { speak = !speak }) { Text(if (speak) "🔊" else "🔈", fontSize = 20.sp) }
                     Icon(Icons.Filled.Lock, contentDescription = "PIN-protected", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

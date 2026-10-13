@@ -315,6 +315,28 @@ data class ChatCommand(val name: String, val hint: String = "")
 @Serializable
 data class ChatCommands(val commands: List<ChatCommand> = emptyList())
 
+/** One settings file's permission rules (user = all projects, project = shared, local = just you here). */
+@Serializable
+data class PermScope(
+    val exists: Boolean = false,
+    val invalid: Boolean = false,
+    val allow: List<String> = emptyList(),
+    val ask: List<String> = emptyList(),
+    val deny: List<String> = emptyList(),
+    val mode: String = "",
+    val dirs: List<String> = emptyList(),
+) {
+    fun list(name: String): List<String> = when (name) { "allow" -> allow; "ask" -> ask; else -> deny }
+}
+
+@Serializable
+data class PermScopes(val user: PermScope = PermScope(), val project: PermScope = PermScope(), val local: PermScope = PermScope()) {
+    fun get(name: String): PermScope = when (name) { "user" -> user; "project" -> project; else -> local }
+}
+
+@Serializable
+data class Permissions(val dir: String = "", val scopes: PermScopes = PermScopes())
+
 @Serializable
 data class ChatData(
     val session: String = "",
