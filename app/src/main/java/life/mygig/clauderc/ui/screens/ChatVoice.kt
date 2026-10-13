@@ -31,6 +31,7 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
     private lateinit var tts: TextToSpeech
 
     init {
+        if (prefs.getBoolean("natural", false) && NaturalVoice.isInstalled(context)) ready = true   // the natural voice doesn't need the phone's engine
         tts = TextToSpeech(context) { st ->
             if (st == TextToSpeech.SUCCESS) {
                 tts.language = Locale.getDefault()
@@ -43,7 +44,7 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
                     @Deprecated("Deprecated in Java") override fun onError(id: String) { if (playing == split(id).first) playing = null }
                 })
                 ready = true
-            } else onFail("No text-to-speech voice on this phone.")
+            } else if (!ready) onFail("No text-to-speech voice on this phone.")
         }
     }
 
@@ -53,13 +54,14 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
 
     /** Speaks [text] under [key]. [flush]: cut off what's playing first (the Play button); else queue behind it. */
     fun speak(key: String, text: String, flush: Boolean, fromStart: Boolean = false) {
-        if (!ready) return
+        val natural = naturalOn()
+        if (!ready && !natural) return
         // Android's speech engine refuses one piece over getMaxSpeechInputLength() (4000): a stretch with no full stop is cut into smaller ones.
         val parts = text.split(Regex("(?<=[.!?:])\\s+|\\n+")).filter { it.isNotBlank() }.flatMap { it.chunked(3000) }
         if (parts.isEmpty()) return
         count[key] = parts.size
         val from = if (fromStart) 0 else (resume[key] ?: 0).takeIf { it < parts.size } ?: 0
-        if (naturalOn()) { speakNatural(key, parts, from, flush); return }
+        if (natural) { speakNatural(key, parts, from, flush); return }
         if (flush) tts.stop()
         parts.forEachIndexed { i, p -> if (i >= from) tts.speak(p, TextToSpeech.QUEUE_ADD, null, "$key|$i") }
     }
@@ -106,10 +108,12 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
                     var off = 0
                     while (off < audio.samples.size && gen == generation) {
                         val n = t.write(audio.samples, off, audio.samples.size - off, AudioTrack.WRITE_BLOCKING)
-                        if (n < 0) return@execute
+                        if (n < 0) { note = "Playback error: AudioTrack.write gave $n"; return@execute }
                         off += n
                     }
                     written += audio.samples.size
+                    val peak = audio.samples.maxOfOrNull { kotlin.math.abs(it) } ?: 0f
+                    note += "; loudest sample ${"%.2f".format(peak)}; player ${if (t.playState == AudioTrack.PLAYSTATE_PLAYING) "playing" else "state ${t.playState}"}, sent $written samples"
                 }
                 // Everything is queued: wait for it to be heard, then mark the reply done.
                 val t = track
