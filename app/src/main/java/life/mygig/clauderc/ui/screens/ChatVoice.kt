@@ -1,18 +1,27 @@
 package life.mygig.clauderc.ui.screens
 
 import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.util.Locale
+import java.util.concurrent.Executors
+import life.mygig.clauderc.data.CachedPrefs
+import life.mygig.clauderc.voice.NATURAL_DEFAULT_SID
+import life.mygig.clauderc.voice.NaturalVoice
 
 /**
  * Reads Claude's replies aloud. A reply is spoken sentence by sentence, so Pause (stop) remembers
  * where it was and Play carries on from that sentence. [playing] is the key of the reply being read.
+ * With the natural voice downloaded and switched on (Settings › App › Voice) the sentences are made by
+ * Kokoro on the phone; otherwise, or if that fails, the phone's own speech engine reads them.
  */
-class ChatVoice(context: Context, private val onFail: () -> Unit) {
+class ChatVoice(private val context: Context, private val prefs: CachedPrefs, private val onFail: (String) -> Unit) {
     var ready by mutableStateOf(false); private set
     var playing by mutableStateOf<String?>(null); private set
     private val resume = mutableMapOf<String, Int>()
@@ -32,11 +41,13 @@ class ChatVoice(context: Context, private val onFail: () -> Unit) {
                     @Deprecated("Deprecated in Java") override fun onError(id: String) { if (playing == split(id).first) playing = null }
                 })
                 ready = true
-            } else onFail()
+            } else onFail("No text-to-speech voice on this phone.")
         }
     }
 
     private fun split(id: String) = id.substringBeforeLast('|') to (id.substringAfterLast('|').toIntOrNull() ?: 0)
+
+    private fun naturalOn() = prefs.getBoolean("natural", false) && NaturalVoice.isInstalled(context) && !naturalBroken
 
     /** Speaks [text] under [key]. [flush]: cut off what's playing first (the Play button); else queue behind it. */
     fun speak(key: String, text: String, flush: Boolean, fromStart: Boolean = false) {
@@ -46,11 +57,82 @@ class ChatVoice(context: Context, private val onFail: () -> Unit) {
         if (parts.isEmpty()) return
         count[key] = parts.size
         val from = if (fromStart) 0 else (resume[key] ?: 0).takeIf { it < parts.size } ?: 0
+        if (naturalOn()) { speakNatural(key, parts, from, flush); return }
         if (flush) tts.stop()
         parts.forEachIndexed { i, p -> if (i >= from) tts.speak(p, TextToSpeech.QUEUE_ADD, null, "$key|$i") }
     }
 
-    fun pause() { tts.stop(); playing = null }
+    // --- natural voice ---------------------------------------------------------------------------------------------
+    private val worker = Executors.newSingleThreadExecutor()
+    /** Bumped by every flush and pause: work queued under an older number is dropped. */
+    @Volatile private var generation = 0
+    @Volatile private var naturalBroken = false
+    @Volatile private var track: AudioTrack? = null
+    private var written = 0L
+    private val starts = mutableListOf<Triple<String, Int, Long>>()   // (reply, sentence, first frame of it)
 
-    fun shutdown() { tts.stop(); tts.shutdown() }
+    private fun newTrack(rate: Int): AudioTrack {
+        val bytes = rate * 4 * 30   // 30 s of float samples: write() returns early, so the next sentence is made while this one plays
+        return AudioTrack.Builder()
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+            .setBufferSizeInBytes(bytes).setTransferMode(AudioTrack.MODE_STREAM).build()
+    }
+
+    private fun speakNatural(key: String, parts: List<String>, from: Int, flush: Boolean) {
+        if (flush) stopNatural()
+        val gen = generation
+        val sid = prefs.getInt("sid", NATURAL_DEFAULT_SID)
+        playing = key
+        worker.execute {
+            try {
+                val engine = NaturalVoice.engine(context)
+                for (i in from until parts.size) {
+                    if (gen != generation) return@execute
+                    val audio = engine.generate(parts[i], sid, 1.0f)
+                    if (gen != generation) return@execute
+                    val t = track ?: newTrack(audio.sampleRate).also { track = it; written = 0; starts.clear(); it.play() }
+                    synchronized(starts) { starts += Triple(key, i, written) }
+                    var off = 0
+                    while (off < audio.samples.size && gen == generation) {
+                        val n = t.write(audio.samples, off, audio.samples.size - off, AudioTrack.WRITE_BLOCKING)
+                        if (n < 0) return@execute
+                        off += n
+                    }
+                    written += audio.samples.size
+                }
+                // Everything is queued: wait for it to be heard, then mark the reply done.
+                val t = track
+                while (t != null && gen == generation && t.playbackHeadPosition < written) Thread.sleep(100)
+                if (gen == generation) { resume.remove(key); if (playing == key) playing = null }
+            } catch (e: Throwable) {
+                // The engine or the files are broken: fall back to the phone's voice for good (until the app restarts).
+                naturalBroken = true
+                if (gen == generation) { playing = null; onFail("The natural voice couldn't start, so the phone's voice is used. Try deleting and downloading it again in Settings › App › Voice.") }
+            }
+        }
+    }
+
+    /** Silences the natural voice and remembers which sentence of which reply was being heard. */
+    private fun stopNatural() {
+        generation++
+        val t = track ?: return
+        val head = t.playbackHeadPosition.toLong()
+        synchronized(starts) {
+            starts.lastOrNull { it.third <= head }?.let { (k, i, _) -> resume[k] = i }
+            starts.clear()
+        }
+        runCatching { t.pause(); t.flush(); t.release() }
+        track = null
+        written = 0
+    }
+
+    fun pause() { tts.stop(); stopNatural(); playing = null }
+
+    fun shutdown() {
+        tts.stop(); tts.shutdown()
+        stopNatural()
+        worker.execute { NaturalVoice.release() }
+        worker.shutdown()
+    }
 }

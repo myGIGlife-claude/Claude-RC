@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
@@ -81,13 +82,20 @@ class CachedPrefs internal constructor(private val store: DataStore<Preferences>
 
     // SharedPreferences-style calls, so the chat's speaker switch reads as it did.
     fun getBoolean(key: String, default: Boolean): Boolean = get()[booleanPreferencesKey(key)] ?: default
+    fun getInt(key: String, default: Int): Int = get()[intPreferencesKey(key)] ?: default
     fun edit() = Editor()
     inner class Editor {
         private val values = mutableMapOf<String, Boolean>()
+        private val ints = mutableMapOf<String, Int>()
         fun putBoolean(key: String, value: Boolean) = also { values[key] = value }
+        fun putInt(key: String, value: Int) = also { ints[key] = value }
         fun apply() {
             val v = values.toMap()
-            edit { p -> v.forEach { (k, b) -> p[booleanPreferencesKey(k)] = b } }
+            val n = ints.toMap()
+            edit { p ->
+                v.forEach { (k, b) -> p[booleanPreferencesKey(k)] = b }
+                n.forEach { (k, i) -> p[intPreferencesKey(k)] = i }
+            }
         }
     }
 }
