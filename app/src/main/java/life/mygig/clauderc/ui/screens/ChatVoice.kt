@@ -108,10 +108,12 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
                     var off = 0
                     while (off < audio.samples.size && gen == generation) {
                         val n = t.write(audio.samples, off, audio.samples.size - off, AudioTrack.WRITE_BLOCKING)
-                        if (n < 0) return@execute
+                        if (n < 0) { note = "Playback error: AudioTrack.write gave $n"; return@execute }
                         off += n
                     }
                     written += audio.samples.size
+                    val peak = audio.samples.maxOfOrNull { kotlin.math.abs(it) } ?: 0f
+                    note += "; loudest sample ${"%.2f".format(peak)}; player ${if (t.playState == AudioTrack.PLAYSTATE_PLAYING) "playing" else "state ${t.playState}"}, sent $written samples"
                 }
                 // Everything is queued: wait for it to be heard, then mark the reply done.
                 val t = track
