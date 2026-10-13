@@ -76,10 +76,11 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
     private val starts = mutableListOf<Triple<String, Int, Long>>()   // (reply, sentence, first frame of it)
 
     private fun newTrack(rate: Int): AudioTrack {
-        val bytes = rate * 4 * 30   // 30 s of float samples: write() returns early, so the next sentence is made while this one plays
+        // 16-bit samples (every phone plays them) and about 2 s of buffer: write() waits when it is full.
+        val bytes = maxOf(AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT) * 4, rate * 2 * 2)
         return AudioTrack.Builder()
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-            .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+            .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
             .setBufferSizeInBytes(bytes).setTransferMode(AudioTrack.MODE_STREAM).build()
     }
 
@@ -105,9 +106,10 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
                     if (gen != generation) return@execute
                     val t = track ?: newTrack(audio.sampleRate).also { track = it; written = 0; starts.clear(); it.play() }
                     synchronized(starts) { starts += Triple(key, i, written) }
+                    val pcm = ShortArray(audio.samples.size) { (audio.samples[it].coerceIn(-1f, 1f) * 32767f).toInt().toShort() }
                     var off = 0
-                    while (off < audio.samples.size && gen == generation) {
-                        val n = t.write(audio.samples, off, audio.samples.size - off, AudioTrack.WRITE_BLOCKING)
+                    while (off < pcm.size && gen == generation) {
+                        val n = t.write(pcm, off, pcm.size - off, AudioTrack.WRITE_BLOCKING)
                         if (n < 0) { note = "Playback error: AudioTrack.write gave $n"; return@execute }
                         off += n
                     }
