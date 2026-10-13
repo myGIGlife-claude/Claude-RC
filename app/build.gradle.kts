@@ -63,7 +63,7 @@ android {
         ndk { abiFilters += "arm64-v8a" }
     }
 
-    sourceSets.getByName("main").jniLibs.srcDir(sherpaLibsDir)
+    sourceSets.getByName("main").jniLibs.srcDir(sherpaLibsDir.get().asFile)
 
     signingConfigs {
         getByName("debug") {
