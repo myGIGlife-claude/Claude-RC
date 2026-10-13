@@ -31,6 +31,7 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
     private lateinit var tts: TextToSpeech
 
     init {
+        if (prefs.getBoolean("natural", false) && NaturalVoice.isInstalled(context)) ready = true   // the natural voice doesn't need the phone's engine
         tts = TextToSpeech(context) { st ->
             if (st == TextToSpeech.SUCCESS) {
                 tts.language = Locale.getDefault()
@@ -43,7 +44,7 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
                     @Deprecated("Deprecated in Java") override fun onError(id: String) { if (playing == split(id).first) playing = null }
                 })
                 ready = true
-            } else onFail("No text-to-speech voice on this phone.")
+            } else if (!ready) onFail("No text-to-speech voice on this phone.")
         }
     }
 
@@ -53,13 +54,14 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
 
     /** Speaks [text] under [key]. [flush]: cut off what's playing first (the Play button); else queue behind it. */
     fun speak(key: String, text: String, flush: Boolean, fromStart: Boolean = false) {
-        if (!ready) return
+        val natural = naturalOn()
+        if (!ready && !natural) return
         // Android's speech engine refuses one piece over getMaxSpeechInputLength() (4000): a stretch with no full stop is cut into smaller ones.
         val parts = text.split(Regex("(?<=[.!?:])\\s+|\\n+")).filter { it.isNotBlank() }.flatMap { it.chunked(3000) }
         if (parts.isEmpty()) return
         count[key] = parts.size
         val from = if (fromStart) 0 else (resume[key] ?: 0).takeIf { it < parts.size } ?: 0
-        if (naturalOn()) { speakNatural(key, parts, from, flush); return }
+        if (natural) { speakNatural(key, parts, from, flush); return }
         if (flush) tts.stop()
         parts.forEachIndexed { i, p -> if (i >= from) tts.speak(p, TextToSpeech.QUEUE_ADD, null, "$key|$i") }
     }
