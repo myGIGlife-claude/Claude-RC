@@ -5,6 +5,7 @@ import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
+import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
@@ -45,6 +46,7 @@ object NaturalVoice {
     private const val URL_MODEL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_0.tar.bz2"
     private const val SHA256 = "c5f7e2d2caf082bc1d20fb70334a61d99d20b484500aad32e7cf84c128ea3298"
     private const val TOP = "kokoro-multi-lang-v1_0/"
+    private const val EXPECTED_BYTES = 349_906_910L
     private const val NEEDED_BYTES = 700L * 1024 * 1024
     /** What speech needs from the archive; the Chinese dictionaries and the rest stay out. */
     private val WANTED = Regex("^(model\\.onnx|voices\\.bin|tokens\\.txt|lexicon-(us-en|gb-en|zh)\\.txt|espeak-ng-data/.+)$")
@@ -96,14 +98,15 @@ object NaturalVoice {
         val conn = URL(URL_MODEL).openConnection() as HttpURLConnection
         conn.connectTimeout = 20_000; conn.readTimeout = 60_000
         check(conn.responseCode == 200) { "The download server answered ${conn.responseCode}." }
-        length = conn.contentLengthLong
-        return CountingStream(conn.inputStream)
+        // The CDN may answer without a Content-Length: then use the archive's known size for the progress bar.
+        length = conn.contentLengthLong.takeIf { it > 0 } ?: EXPECTED_BYTES
+        return CountingStream(BufferedInputStream(conn.inputStream, 1 shl 16))
     }
 
     /** Counts what came off the network, to show progress. */
     private class CountingStream(private val inner: InputStream) : InputStream() {
         @Volatile var n = 0L
-        override fun read(): Int = inner.read().also { if (it >= 0) n++ }
+        override fun read(): Int = inner.read().also { if (it >= 0) { n++; if (n and 0xFFFF == 0L) report() } }
         override fun read(b: ByteArray, off: Int, len: Int): Int = inner.read(b, off, len).also { if (it > 0) { n += it; report() } }
         override fun close() = inner.close()
         private var last = -1
@@ -118,7 +121,7 @@ object NaturalVoice {
         val md = MessageDigest.getInstance("SHA-256")
         val root = out.canonicalPath + File.separator
         val digesting = DigestInputStream(net, md)
-        TarArchiveInputStream(BZip2CompressorInputStream(digesting)).use { tar ->
+        TarArchiveInputStream(BZip2CompressorInputStream(BufferedInputStream(digesting, 1 shl 16))).use { tar ->
             while (true) {
                 val e = tar.nextEntry ?: break
                 val name = e.name.removePrefix("./").removePrefix(TOP)
