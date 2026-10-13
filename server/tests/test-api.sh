@@ -725,6 +725,32 @@ printf '%s\n' '{"type":"user","uuid":"b1","timestamp":"2026-09-29T10:00:11Z","me
 api "chat-history demo-app2" "482913"; check "chat history: a ! command shows as typed, then its output" "$(jqt '.data.messages[-2].text=="!echo hello" and .data.messages[-2].role=="user" and (.data.messages[-1].text|contains("hello"))')"
 mkdir -p "$HOME/.claude/skills/demoskill"; printf -- '---\nname: demoskill\ndescription: >\n  Does a demo thing.\n---\n' >"$HOME/.claude/skills/demoskill/SKILL.md"
 api "chat-commands demo-app2" "482913"; check "chat-commands lists your skills with their hint" "$(jqt '.ok and (.data.commands | map(select(.name=="/demoskill" and .hint=="Does a demo thing.")) | length)==1')"
+PD="$(tmux display-message -p -t "=demo-app2:" '#{pane_current_path}')"; mkdir -p "$PD/.claude" "$HOME/.claude"
+printf '{"env":{"KEEP":"1"},"hooks":{"Stop":[]},"permissions":{"allow":["Read"]}}\n' >"$HOME/.claude/settings.json"; chmod 600 "$HOME/.claude/settings.json"
+rm -f "$PD/.claude/settings.local.json" "$PD/.claude/settings.json"
+api "permissions-get demo-app2" "482913"; check "permissions-get reads each scope; a missing file is empty" "$(jqt '.ok and .data.scopes.user.allow==["Read"] and .data.scopes.local.exists==false and .data.scopes.project.deny==[]')"
+api "permissions-get demo-app2" "000000"; check "permissions-get needs the PIN" "$(jqt '.ok==false')"
+perm() { api "permissions-set demo-app2" "$(printf '482913\n%s' "$1")"; }
+perm '{"scope":"local","op":"add","list":"allow","rule":"Bash(git status:*)"}'; check "permissions-set add creates the local file" "$(jqt '.ok')"
+perm '{"scope":"local","op":"add","list":"allow","rule":"Bash(git status:*)"}'
+check "add is deduplicated" "$(jq -e '.permissions.allow==["Bash(git status:*)"]' "$PD/.claude/settings.local.json" >/dev/null 2>&1; echo $?)"
+perm '{"scope":"local","op":"edit","list":"allow","rule":"Bash(git status:*)","new":"Bash(git diff:*)"}'
+perm '{"scope":"local","op":"move","list":"allow","rule":"Bash(git diff:*)","new":"deny"}'
+check "edit then move: rule ends in deny only" "$(jq -e '.permissions.allow==[] and .permissions.deny==["Bash(git diff:*)"]' "$PD/.claude/settings.local.json" >/dev/null 2>&1; echo $?)"
+perm '{"scope":"local","op":"mode","mode":"plan"}'; check "default mode set" "$(jq -e '.permissions.defaultMode=="plan"' "$PD/.claude/settings.local.json" >/dev/null 2>&1; echo $?)"
+perm '{"scope":"local","op":"remove","list":"deny","rule":"Bash(git diff:*)"}'
+check "remove empties the list" "$(jq -e '.permissions.deny==[]' "$PD/.claude/settings.local.json" >/dev/null 2>&1; echo $?)"
+perm '{"scope":"user","op":"add","list":"ask","rule":"WebFetch"}'
+check "user scope keeps env, hooks and other rules" "$(jq -e '.env.KEEP=="1" and (.hooks|has("Stop")) and .permissions.allow==["Read"] and .permissions.ask==["WebFetch"]' "$HOME/.claude/settings.json" >/dev/null 2>&1; echo $?)"
+check "user settings stay mode 600" "$([[ "$(stat -c %a "$HOME/.claude/settings.json")" == 600 ]]; echo $?)"
+for bad in '{"scope":"local","op":"add","list":"allow","rule":"Bash($(id))x"}' '{"scope":"local","op":"add","list":"allow","rule":"a b"}' '{"scope":"local","op":"add","list":"nope","rule":"Read"}' '{"scope":"../x","op":"add","list":"allow","rule":"Read"}' '{"scope":"local","op":"mode","mode":"bypassPermissions"}' 'not json'; do
+  perm "$bad"; check "permissions-set refuses: $bad" "$(jqt '.ok==false')"
+done
+check "bad requests left the local file alone" "$(jq -e '.permissions.allow==[] and .permissions.deny==[]' "$PD/.claude/settings.local.json" >/dev/null 2>&1; echo $?)"
+printf '{broken' >"$PD/.claude/settings.json"; perm '{"scope":"project","op":"add","list":"allow","rule":"Read"}'
+check "invalid JSON file is refused" "$(jqt '.ok==false')"
+check "invalid JSON file is left untouched" "$([[ "$(cat "$PD/.claude/settings.json")" == '{broken' ]]; echo $?)"
+rm -f "$PD/.claude/settings.json"
 api "chat-send demo-app2" $'482913\nline one\nline two'; check "chat send" "$(jqt '.ok and .data.sent')"
 api "chat-history demo-app2" "482913"; check "chat history carries Claude's permission mode" "$(jqt '.ok and (.data.mode | IN("default","auto","plan","edits","bypass"))')"
 tmux send-keys -t "=demo-app2:" -l "⏸ plan mode on (shift+tab to cycle)"; sleep 0.3

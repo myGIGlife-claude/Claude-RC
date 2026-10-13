@@ -19,7 +19,7 @@ set -uo pipefail
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
 # 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id)
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=47
+SCRIPT_API=48
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 CLAUDERC_API="${CLAUDERC_API:-https://api.github.com}"
@@ -4322,6 +4322,87 @@ skill_hint() {
     | sed 's/^["'"'"']//; s/["'"'"']$//' | tr -d '\t' | sed 's/^ *//' | cut -c1-80
 }
 
+# perm_file <scope> <dir>: the settings file for user (all projects), project (shared) or local (just you, here).
+perm_file() {
+  case "$1" in
+    user) PERM_FILE="$HOME/.claude/settings.json" ;;
+    project) PERM_FILE="$2/.claude/settings.json" ;;
+    local) PERM_FILE="$2/.claude/settings.local.json" ;;
+    *) api_err invalid_name "Scope must be user, project or local." ;;
+  esac
+}
+
+# perm_dir <session>: the folder the session runs in (never $HOME: the user scope is its own file).
+perm_dir() {
+  PERM_DIR="$(tmux display-message -p -t "=$1:" '#{pane_current_path}' 2>/dev/null || true)"
+  [[ -n "$PERM_DIR" && -d "$PERM_DIR" ]] || api_err internal "Couldn't find the session's folder."
+}
+
+# permissions-get <session>: stdin = PIN. Allow/ask/deny rules, default mode and extra folders from each scope's settings file.
+do_permissions_get() {
+  [[ $# -eq 1 ]] || bad_args "usage: permissions-get <session>"
+  local pin sess sc out="{}" one; pin="$(read_secret_line)"; exec 0</dev/null
+  chat_session "$1"; sess="$CHAT_SESS"
+  check_pin "$pin"
+  perm_dir "$sess"
+  for sc in user project local; do
+    perm_file "$sc" "$PERM_DIR"
+    if [[ ! -f "$PERM_FILE" ]]; then
+      one='{"exists":false,"allow":[],"ask":[],"deny":[],"mode":"","dirs":[]}'
+    else
+      one="$(jq -c '{exists:true, allow:(.permissions.allow // []), ask:(.permissions.ask // []), deny:(.permissions.deny // []),
+          mode:(.permissions.defaultMode // ""), dirs:(.permissions.additionalDirectories // [])}' "$PERM_FILE" 2>/dev/null)" ||
+        one='{"exists":true,"invalid":true,"allow":[],"ask":[],"deny":[],"mode":"","dirs":[]}'
+    fi
+    out="$(jq -c --arg k "$sc" --argjson v "$one" '.[$k]=$v' <<<"$out")"
+  done
+  api_ok "$(jq -cn --arg d "$PERM_DIR" --argjson s "$out" '{dir:$d, scopes:$s}')"
+}
+
+# permissions-set <session>: stdin = PIN, then one JSON line {scope, op, list, rule, new, mode}.
+# op: add | remove | edit (rule -> new) | move (rule from list to new = another list) | mode. Other keys in the file are kept.
+do_permissions_set() {
+  [[ $# -eq 1 ]] || bad_args "usage: permissions-set <session>"
+  local pin req sess scope op list rule new mode tmp
+  pin="$(read_secret_line)"; req="$(head -c 2000 | tr -d '\000')"; exec 0</dev/null
+  chat_session "$1"; sess="$CHAT_SESS"
+  check_pin "$pin"
+  jq -e 'type=="object"' >/dev/null 2>&1 <<<"$req" || api_err invalid_name "The request isn't valid."
+  scope="$(jq -r '.scope // ""' <<<"$req")"; op="$(jq -r '.op // ""' <<<"$req")"; list="$(jq -r '.list // ""' <<<"$req")"
+  rule="$(jq -r '.rule // ""' <<<"$req")"; new="$(jq -r '.new // ""' <<<"$req")"; mode="$(jq -r '.mode // ""' <<<"$req")"
+  perm_dir "$sess"; perm_file "$scope" "$PERM_DIR"
+  local rx='^[A-Za-z][A-Za-z0-9_.:-]{0,79}(\([^()]{1,250}\))?$'
+  case "$op" in
+    add | remove | edit | move)
+      [[ "$list" == allow || "$list" == ask || "$list" == deny ]] || api_err invalid_name "List must be allow, ask or deny."
+      [[ "$rule" =~ $rx ]] || api_err invalid_name "A rule looks like Bash(git status:*), Read or Edit(src/**)."
+      if [[ "$op" == edit ]]; then [[ "$new" =~ $rx ]] || api_err invalid_name "The new rule isn't valid."; fi
+      if [[ "$op" == move ]]; then [[ "$new" == allow || "$new" == ask || "$new" == deny ]] || api_err invalid_name "Move to allow, ask or deny."; fi
+      ;;
+    mode)
+      case "$mode" in "" | default | acceptEdits | plan) ;; *) api_err invalid_name "Mode must be default, acceptEdits or plan." ;; esac
+      ;;
+    *) api_err invalid_name "Unknown change." ;;
+  esac
+  mkdir -p -- "$(dirname "$PERM_FILE")" || api_err internal "Couldn't create the settings folder."
+  [[ -f "$PERM_FILE" ]] || printf '{}\n' >"$PERM_FILE" || api_err internal "Couldn't create the settings file."
+  jq -e 'type=="object"' "$PERM_FILE" >/dev/null 2>&1 || api_err invalid_name "That settings file isn't valid JSON; fix it by hand first."
+  tmp="$(mktemp "$PERM_FILE.XXXXXX")" || api_err internal "Couldn't write the settings."
+  jq --arg op "$op" --arg l "$list" --arg r "$rule" --arg n "$new" --arg m "$mode" '
+    def add($k; $v): .permissions[$k] = (((.permissions[$k] // []) + [$v]) | unique_by(.));
+    def del($k; $v): .permissions[$k] = ((.permissions[$k] // []) | map(select(. != $v)));
+    .permissions = (.permissions // {}) |
+    if $op=="add" then add($l; $r)
+    elif $op=="remove" then del($l; $r)
+    elif $op=="edit" then del($l; $r) | add($l; $n)
+    elif $op=="move" then del($l; $r) | add($n; $r)
+    else (if $m=="" then del(.permissions.defaultMode) else .permissions.defaultMode=$m end) end' "$PERM_FILE" >"$tmp" 2>/dev/null &&
+    jq -e . "$tmp" >/dev/null 2>&1 || { rm -f -- "$tmp"; api_err internal "Couldn't update the settings."; }
+  chmod --reference="$PERM_FILE" -- "$tmp" 2>/dev/null || true
+  mv -f -- "$tmp" "$PERM_FILE" || { rm -f -- "$tmp"; api_err internal "Couldn't save the settings."; }
+  api_ok '{"saved":true}'
+}
+
 # chat-interrupt <session>: stdin = PIN. Stops what Claude is doing (Esc).
 do_chat_interrupt() {
   [[ $# -eq 1 ]] || bad_args "usage: chat-interrupt <session>"
@@ -5224,7 +5305,7 @@ api_main() {
   shift || true
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | set-secret-file | login-keystore | login-apple | youtube-login-start | \
-      chat-pin-set | chat-open | chat-history | general-rename | chat-send | chat-interrupt | chat-commands | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
+      chat-pin-set | chat-open | chat-history | general-rename | chat-send | chat-interrupt | chat-commands | permissions-get | permissions-set | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
       migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | host-probe | host-add | host-keyimport | host-authorize | host-harden | drive-passphrase) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
@@ -5344,6 +5425,8 @@ api_main() {
     chat-send)           do_chat_send "$@" ;;
     chat-interrupt)      do_chat_interrupt "$@" ;;
     chat-commands)       do_chat_commands "$@" ;;
+    permissions-get)     do_permissions_get "$@" ;;
+    permissions-set)     do_permissions_set "$@" ;;
     upload)              do_upload "$@" ;;
     chat-file)           do_chat_file "$@" ;;
     chat-log)            do_chat_log "$@" ;;

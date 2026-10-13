@@ -339,6 +339,9 @@ class LauncherApi(
     }
     suspend fun chatLog(): List<ChatLogEntry> = call("chat-log")
     suspend fun chatCommands(session: String, pin: String): ChatCommands { requireName(session); return call("chat-commands $session", stdin = pin) }
+    suspend fun permissionsGet(session: String, pin: String): Permissions { requireName(session); return call("permissions-get $session", stdin = pin) }
+    /** One change to a settings file's permissions; [json] is {scope, op, list, rule, new, mode} (see permissionChange). */
+    suspend fun permissionsSet(session: String, pin: String, json: String): JsonObject { requireName(session); return call("permissions-set $session", stdin = pin + "\n" + json) }
     suspend fun chatInterrupt(session: String, pin: String): JsonObject { requireName(session); return call("chat-interrupt $session", stdin = pin) }
     suspend fun loginKeystore(name: String, alias: String, storePassword: String, keyPassword: String, fileBase64: String): JsonObject =
         call("login-keystore $name", stdin = listOf(alias.trim(), storePassword, keyPassword, fileBase64).joinToString("\n"))

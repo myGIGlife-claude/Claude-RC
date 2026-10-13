@@ -17,6 +17,7 @@ import life.mygig.clauderc.api.ChatData
 import life.mygig.clauderc.api.ChatLogEntry
 import life.mygig.clauderc.api.LauncherApi
 import life.mygig.clauderc.api.PinStatus
+import life.mygig.clauderc.api.Permissions
 import life.mygig.clauderc.data.ChatPinVault
 import life.mygig.clauderc.data.cached
 import life.mygig.clauderc.data.chatDraftsStore
@@ -221,6 +222,28 @@ class ChatController(
         }
     }
 
+    /** The open chat's permission rules (user, project and local settings), loaded when its Permissions sheet opens. */
+    private val _permissions = MutableStateFlow<Permissions?>(null)
+    val permissions = _permissions.asStateFlow()
+    private val _permissionsOpen = MutableStateFlow(false)
+    val permissionsOpen = _permissionsOpen.asStateFlow()
+    fun openPermissions() { _permissionsOpen.value = true }
+    fun clearPermissions() { _permissions.value = null; _permissionsOpen.value = false }
+    fun loadPermissions() {
+        val session = _chatSession.value ?: return
+        val pin = chatPin ?: return
+        tools.action("Loading permissions…") { _permissions.value = api.permissionsGet(session, pin) }
+    }
+    /** One change (see permissionChange); the screen shows the file as the server saved it. */
+    fun changePermissions(json: String) {
+        val session = _chatSession.value ?: return
+        val pin = chatPin ?: return
+        tools.action("Saving…") {
+            api.permissionsSet(session, pin, json)
+            _permissions.value = api.permissionsGet(session, pin)
+        }
+    }
+
     /** A slash command like /model: it never shows as a message, so it isn't tracked as pending. */
     fun chatCommand(text: String) {
         val session = _chatSession.value ?: return
@@ -237,6 +260,7 @@ class ChatController(
         val session = _chatSession.value ?: return
         val pin = chatPin ?: return
         val t = text.trim()
+        if (t == "/permissions") { onSent(); openPermissions(); return }   // our own screen instead of the terminal menu
         val tracked = !t.startsWith("/")   // a slash command never shows up as a message, so it would stay "queued" for good
         onSent()
         if (tracked) _chatPending.value = _chatPending.value + t
