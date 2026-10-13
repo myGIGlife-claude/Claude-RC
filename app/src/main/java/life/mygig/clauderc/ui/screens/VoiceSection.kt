@@ -81,6 +81,7 @@ fun VoiceSection(vm: MainViewModel) {
                         }) { Text(if (voice.playing == "preview") "Playing…" else "Hear it") }
                         OutlinedButton(onClick = { confirmDelete = true }) { Text("Delete download") }
                     }
+                    if (voice.note.isNotEmpty()) Text(voice.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 else -> {
                     if (download is NaturalDownload.Failed) Text((download as NaturalDownload.Failed).message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)

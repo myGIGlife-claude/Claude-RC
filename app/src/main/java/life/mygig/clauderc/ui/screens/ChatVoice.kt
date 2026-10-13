@@ -24,6 +24,8 @@ import life.mygig.clauderc.voice.NaturalVoice
 class ChatVoice(private val context: Context, private val prefs: CachedPrefs, private val onFail: (String) -> Unit) {
     var ready by mutableStateOf(false); private set
     var playing by mutableStateOf<String?>(null); private set
+    /** What the natural voice last did (load time, speed) or why it failed: shown in Settings › App › Voice. */
+    var note by mutableStateOf(""); private set
     private val resume = mutableMapOf<String, Int>()
     private val count = mutableMapOf<String, Int>()
     private lateinit var tts: TextToSpeech
@@ -74,7 +76,7 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
     private fun newTrack(rate: Int): AudioTrack {
         val bytes = rate * 4 * 30   // 30 s of float samples: write() returns early, so the next sentence is made while this one plays
         return AudioTrack.Builder()
-            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
             .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
             .setBufferSizeInBytes(bytes).setTransferMode(AudioTrack.MODE_STREAM).build()
     }
@@ -86,10 +88,18 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
         playing = key
         worker.execute {
             try {
+                val t0 = System.nanoTime()
+                note = "Loading the voice…"
                 val engine = NaturalVoice.engine(context)
+                val loaded = (System.nanoTime() - t0) / 1_000_000
                 for (i in from until parts.size) {
                     if (gen != generation) return@execute
+                    note = "Making sentence ${i + 1} of ${parts.size}…"
+                    val t1 = System.nanoTime()
                     val audio = engine.generate(parts[i], sid, 1.0f)
+                    val made = (System.nanoTime() - t1) / 1_000_000
+                    val secs = audio.samples.size.toDouble() / audio.sampleRate
+                    note = "Voice loaded in ${loaded / 1000.0} s; ${"%.1f".format(secs)} s of speech made in ${made / 1000.0} s"
                     if (gen != generation) return@execute
                     val t = track ?: newTrack(audio.sampleRate).also { track = it; written = 0; starts.clear(); it.play() }
                     synchronized(starts) { starts += Triple(key, i, written) }
@@ -108,6 +118,7 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
             } catch (e: Throwable) {
                 // The engine or the files are broken: fall back to the phone's voice for good (until the app restarts).
                 naturalBroken = true
+                note = "Failed: $e"
                 if (gen == generation) { playing = null; onFail("The natural voice couldn't start, so the phone's voice is used. Try deleting and downloading it again in Settings › App › Voice.") }
             }
         }
