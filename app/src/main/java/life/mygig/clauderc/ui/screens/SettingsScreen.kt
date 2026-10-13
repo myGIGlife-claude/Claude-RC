@@ -356,6 +356,8 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
         if (t == 2) {
             SectionLabel("Backup")
             AppBackupSection(vm)
+            SectionLabel("Voice")
+            VoiceSection(vm)
             SectionLabel("Theme")
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 ThemeMode.entries.forEachIndexed { i, m ->

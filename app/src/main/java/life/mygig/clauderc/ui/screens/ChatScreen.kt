@@ -98,7 +98,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
     // The speaker switch stays as the owner left it: across chats and app restarts, until tapped again.
     val voicePrefs = remember { vm.chats.voicePrefs }
     var speak by remember { mutableStateOf(voicePrefs.getBoolean("speak", false)) }
-    val voice = remember { ChatVoice(context) { vm.say("No text-to-speech voice on this phone.") } }
+    val voice = remember { ChatVoice(context, voicePrefs) { vm.say(it) } }
     DisposableEffect(voice) { onDispose { voice.shutdown() } }
     LaunchedEffect(pinNeeded) { if (pinNeeded != null) voice.pause() }   // locked: stop reading aloud
     LaunchedEffect(speak) { voicePrefs.edit().putBoolean("speak", speak).apply(); if (!speak) voice.pause() }
