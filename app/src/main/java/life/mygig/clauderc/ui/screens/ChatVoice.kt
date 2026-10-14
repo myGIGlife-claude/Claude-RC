@@ -63,16 +63,25 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
         return out + rest.chunked(3000)
     }
 
+    /** Respellings so the voice says these words right (add more as they come up): "puddin'" for instance is read wrongly as written. */
+    private val pronunciations = listOf(
+        Regex("\\bpuddin['’]?", RegexOption.IGNORE_CASE) to "pudding",
+        Regex("cLaudeRC", RegexOption.IGNORE_CASE) to "Claude R C",
+    )
+
+    private fun pronounce(text: String) = pronunciations.fold(text) { t, (re, to) -> re.replace(t, to) }
+
     private fun split(id: String) = id.substringBeforeLast('|') to (id.substringAfterLast('|').toIntOrNull() ?: 0)
 
     private fun naturalOn() = prefs.getBoolean("natural", false) && NaturalVoice.isInstalled(context) && !naturalBroken
 
     /** Speaks [text] under [key]. [flush]: cut off what's playing first (the Play button); else queue behind it. */
     fun speak(key: String, text: String, flush: Boolean, fromStart: Boolean = false) {
+        val spoken = pronounce(text)
         val natural = naturalOn()
         if (!ready && !natural) return
         // Android's speech engine refuses one piece over getMaxSpeechInputLength() (4000): a stretch with no full stop is cut into smaller ones.
-        val parts = text.split(Regex("(?<=[.!?:])\\s+|\\n+")).filter { it.isNotBlank() }.let { ss -> ss.mapIndexed { i, x -> if (i == 0) shortPieces(x) else x.chunked(3000) }.flatten() }
+        val parts = spoken.split(Regex("(?<=[.!?:])\\s+|\\n+")).filter { it.isNotBlank() }.let { ss -> ss.mapIndexed { i, x -> if (i == 0) shortPieces(x) else x.chunked(3000) }.flatten() }
         if (parts.isEmpty()) return
         count[key] = parts.size
         val from = if (fromStart) 0 else (resume[key] ?: 0).takeIf { it < parts.size } ?: 0
