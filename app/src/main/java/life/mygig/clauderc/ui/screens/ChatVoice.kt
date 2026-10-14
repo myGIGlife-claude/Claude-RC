@@ -65,7 +65,7 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
 
     /** Respellings so the voice says these words right (add more as they come up): "puddin'" for instance is read wrongly as written. */
     private val pronunciations = listOf(
-        Regex("\\bpuddin['’]?", RegexOption.IGNORE_CASE) to "pudding",
+        Regex("\\bpuddin(?!g)['’]?", RegexOption.IGNORE_CASE) to "pudding",
         Regex("cLaudeRC", RegexOption.IGNORE_CASE) to "Claude R C",
     )
 
