@@ -29,9 +29,13 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
     private val resume = mutableMapOf<String, Int>()
     private val count = mutableMapOf<String, Int>()
     private lateinit var tts: TextToSpeech
+    private val worker = Executors.newSingleThreadExecutor()
 
     init {
-        if (prefs.getBoolean("natural", false) && NaturalVoice.isInstalled(context)) ready = true   // the natural voice doesn't need the phone's engine
+        if (prefs.getBoolean("natural", false) && NaturalVoice.isInstalled(context)) {
+            ready = true   // the natural voice doesn't need the phone's engine
+            worker.execute { runCatching { NaturalVoice.engine(context) } }   // load the model now so the first Play doesn't wait for it
+        }
         tts = TextToSpeech(context) { st ->
             if (st == TextToSpeech.SUCCESS) {
                 tts.language = Locale.getDefault()
@@ -48,6 +52,17 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
         }
     }
 
+    /** A long sentence is cut at a comma or dash so speech can start sooner; one with none is cut by size (3000 is the phone engine's limit). */
+    private fun shortPieces(sentence: String): List<String> {
+        val out = mutableListOf<String>()
+        var rest = sentence.trim()
+        while (rest.length > 140) {
+            val cut = Regex("[,;—–] ").findAll(rest.take(140)).lastOrNull()?.range?.last?.takeIf { it > 40 } ?: break
+            out += rest.take(cut + 1).trim(); rest = rest.drop(cut + 1).trim()
+        }
+        return out + rest.chunked(3000)
+    }
+
     private fun split(id: String) = id.substringBeforeLast('|') to (id.substringAfterLast('|').toIntOrNull() ?: 0)
 
     private fun naturalOn() = prefs.getBoolean("natural", false) && NaturalVoice.isInstalled(context) && !naturalBroken
@@ -57,7 +72,7 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
         val natural = naturalOn()
         if (!ready && !natural) return
         // Android's speech engine refuses one piece over getMaxSpeechInputLength() (4000): a stretch with no full stop is cut into smaller ones.
-        val parts = text.split(Regex("(?<=[.!?:])\\s+|\\n+")).filter { it.isNotBlank() }.flatMap { it.chunked(3000) }
+        val parts = text.split(Regex("(?<=[.!?:])\\s+|\\n+")).filter { it.isNotBlank() }.flatMap { shortPieces(it) }
         if (parts.isEmpty()) return
         count[key] = parts.size
         val from = if (fromStart) 0 else (resume[key] ?: 0).takeIf { it < parts.size } ?: 0
@@ -67,7 +82,6 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
     }
 
     // --- natural voice ---------------------------------------------------------------------------------------------
-    private val worker = Executors.newSingleThreadExecutor()
     /** Bumped by every flush and pause: work queued under an older number is dropped. */
     @Volatile private var generation = 0
     @Volatile private var naturalBroken = false
