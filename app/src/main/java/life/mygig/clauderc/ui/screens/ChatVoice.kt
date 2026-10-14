@@ -14,6 +14,8 @@ import java.util.concurrent.Executors
 import life.mygig.clauderc.data.CachedPrefs
 import life.mygig.clauderc.voice.NATURAL_DEFAULT_SID
 import life.mygig.clauderc.voice.NaturalVoice
+import life.mygig.clauderc.voice.firstPieces
+import life.mygig.clauderc.voice.speechText
 
 /**
  * Reads Claude's replies aloud. A reply is spoken sentence by sentence, so Pause (stop) remembers
@@ -34,7 +36,7 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
     init {
         if (prefs.getBoolean("natural", false) && NaturalVoice.isInstalled(context)) {
             ready = true   // the natural voice doesn't need the phone's engine
-            worker.execute { runCatching { NaturalVoice.engine(context) } }   // load the model now so the first Play doesn't wait for it
+            worker.execute { runCatching { NaturalVoice.engine(context).generate("Hi.", prefs.getInt("sid", NATURAL_DEFAULT_SID), 1.0f) } }   // load and warm the model now: the first run is the slow one, so the first Play shouldn't pay for it
         }
         tts = TextToSpeech(context) { st ->
             if (st == TextToSpeech.SUCCESS) {
@@ -52,36 +54,17 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
         }
     }
 
-    /** The FIRST sentence, if long, is cut at a comma or dash so speech starts sooner (later ones stay whole: cuts there only add pauses); one with none is cut by size (3000 is the phone engine's limit). */
-    private fun shortPieces(sentence: String): List<String> {
-        val out = mutableListOf<String>()
-        var rest = sentence.trim()
-        while (rest.length > 140) {
-            val cut = Regex("[,;—–] ").findAll(rest.take(140)).lastOrNull()?.range?.last?.takeIf { it > 40 } ?: break
-            out += rest.take(cut + 1).trim(); rest = rest.drop(cut + 1).trim()
-        }
-        return out + rest.chunked(3000)
-    }
-
-    /** Respellings so the voice says these words right (add more as they come up): "puddin'" for instance is read wrongly as written. */
-    private val pronunciations = listOf(
-        Regex("\\bpuddin(?!g)['’]?", RegexOption.IGNORE_CASE) to "pudding",
-        Regex("cLaudeRC", RegexOption.IGNORE_CASE) to "Claude R C",
-    )
-
-    private fun pronounce(text: String) = pronunciations.fold(text) { t, (re, to) -> re.replace(t, to) }
-
     private fun split(id: String) = id.substringBeforeLast('|') to (id.substringAfterLast('|').toIntOrNull() ?: 0)
 
     private fun naturalOn() = prefs.getBoolean("natural", false) && NaturalVoice.isInstalled(context) && !naturalBroken
 
     /** Speaks [text] under [key]. [flush]: cut off what's playing first (the Play button); else queue behind it. */
     fun speak(key: String, text: String, flush: Boolean, fromStart: Boolean = false) {
-        val spoken = pronounce(text)
+        val spoken = speechText(text)
         val natural = naturalOn()
         if (!ready && !natural) return
         // Android's speech engine refuses one piece over getMaxSpeechInputLength() (4000): a stretch with no full stop is cut into smaller ones.
-        val parts = spoken.split(Regex("(?<=[.!?:])\\s+|\\n+")).filter { it.isNotBlank() }.let { ss -> ss.mapIndexed { i, x -> if (i == 0) shortPieces(x) else x.chunked(3000) }.flatten() }
+        val parts = spoken.split(Regex("(?<=[.!?:])\\s+|\\n+")).filter { it.isNotBlank() }.let { ss -> ss.mapIndexed { i, x -> if (i == 0) firstPieces(x) else x.chunked(3000) }.flatten() }
         if (parts.isEmpty()) return
         count[key] = parts.size
         val from = if (fromStart) 0 else (resume[key] ?: 0).takeIf { it < parts.size } ?: 0
