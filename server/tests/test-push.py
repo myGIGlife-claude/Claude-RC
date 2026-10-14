@@ -68,6 +68,10 @@ os.remove(os.path.join(cfg, "push.json"))
 ids = json.loads(run("--setup"))
 assert ids == {"project_id": "p1", "app_id": "1:2:android:3", "api_key": "AIzaK", "sender_id": "2"}, ids
 assert created == ["life.mygig.clauderc"] and json.load(open(os.path.join(cfg, "push.json"))) == ids, "app registered, ids saved"
+open(os.path.join(cfg, "push-project"), "w").write("other-proj\n")
+assert json.loads(run("--setup"))["project_id"] == "other-proj", "push-project overrides the key's project"
+os.remove(os.path.join(cfg, "push-project"))
+json.dump({"project_id": "p1"}, open(os.path.join(cfg, "push.json"), "w"))
 assert json.loads(run("--test"))["sent"] == 1
 assert open(os.path.join(cfg, "push-tokens")).read() == "phone1\n", "dead token dropped"
 run(ev={"hook_event_name": "Notification", "notification_type": "permission_prompt"})
