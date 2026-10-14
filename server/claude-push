@@ -79,7 +79,12 @@ def setup():
     """Find or create the Android app in the key's Firebase project and save its (public) ids."""
     with open(os.path.join(CFG, "fcm-key.json")) as f:
         key = json.load(f)
-    pid = key["project_id"]
+    # The key's own project, unless push-project names another one (a sender key from one project can serve another).
+    try:
+        with open(os.path.join(CFG, "push-project")) as f:
+            pid = f.read().strip() or key["project_id"]
+    except OSError:
+        pid = key["project_id"]
     bearer = access_token(key, "https://www.googleapis.com/auth/cloud-platform")
     base = "%s/projects/%s/androidApps" % (FB_URL, pid)
 

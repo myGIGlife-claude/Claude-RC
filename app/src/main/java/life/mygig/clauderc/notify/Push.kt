@@ -61,6 +61,9 @@ object Push {
             ctx.pushStore.edit { it[REGISTERED] = false }
             return false
         }
+        // The server moved to another Firebase project: the running Firebase app (and the token it hands out) belongs to the old one, so drop it and start from the new ids.
+        val running = FirebaseApp.getApps(ctx).firstOrNull()
+        if (running != null && running.options.projectId != c.projectId) runCatching { running.delete() }
         val p = ctx.pushStore.edit {
             it[APP_ID] = c.appId
             it[API_KEY] = c.apiKey
