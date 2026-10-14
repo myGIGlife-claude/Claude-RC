@@ -79,7 +79,7 @@ hostnames, IPs, emails, org names, keys. They live in
   Config in `~/.config/claude-launcher/`: `fcm-key.json` (600), `push.json`,
   `push-tokens`, `push-done/`. `ensure_push_hook` adds the hooks to
   `~/.claude/settings.json` (via `status`). An FCM token has a `:`, so
-  `claude-launcher-api` skips its generic TOKEN_RE for `push-register`.
+  `claude-launcher-api` skips its generic TOKEN_RE for `push-register`. Sender key and project may differ: `push-project` (one line, optional) names the Firebase project for `--setup`, and `push.json` holds the ids the app starts Firebase from; the app restarts Firebase when `push-config` reports another project id. Old settings from a switch go in `push-old/`.
 - iOS (branch `iOS`): `ios/` is a native SwiftUI port (no Mac here, so it is only
   ever compiled by `.github/workflows/ios.yml` on a macOS runner: unsigned IPA
   artifact). The Xcode project is generated from `ios/project.yml` with XcodeGen.
