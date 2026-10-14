@@ -16,7 +16,7 @@ private val PRONUNCIATIONS = listOf(
  * reads them out), and a few words respelled so they come out right. Add to PRONUNCIATIONS as words come up.
  */
 fun speechText(raw: String): String {
-    var t = FENCE.replace(raw, ".\n")
+    var t = FENCE.replace(raw, "\n")
     t = LINK.replace(t, "$1")
     t = URL.replace(t, "a link")
     t = BULLET.replace(t, "")

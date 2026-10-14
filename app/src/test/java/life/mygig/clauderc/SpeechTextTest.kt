@@ -9,12 +9,12 @@ import org.junit.Test
 class SpeechTextTest {
     @Test fun stripsMarkdown() {
         assertEquals("Done: the build passed.", speechText("**Done**: the `build` passed."))
-        assertEquals("one\ntwo", speechText("- one\n* two".replace("* ", "- ")))
+        assertEquals("one\ntwo", speechText("- one\n- two"))
         assertEquals("see the docs for details", speechText("see [the docs](https://example.com/x) for details"))
     }
 
     @Test fun dropsCodeBlocksUrlsAndEmoji() {
-        assertEquals("before.\nafter", speechText("before\n```\nval x = 1\n```\nafter"))
+        assertEquals("before\nafter", speechText("before\n```\nval x = 1\n```\nafter"))
         assertEquals("open a link now", speechText("open https://example.com/a?b=1 now"))
         assertEquals("Hiya David", speechText("Hiya David 🃏"))
         assertEquals("", speechText("---\n***"))
@@ -32,6 +32,6 @@ class SpeechTextTest {
         val p = firstPieces(long)
         assertEquals(2, p.size)
         assertTrue(p[0].length <= 90 && p[0].endsWith(","))
-        assertEquals(long.replace(",", ",").length, (p[0] + " " + p[1]).length)
+        assertEquals(long.length, (p[0] + " " + p[1]).length)
     }
 }
