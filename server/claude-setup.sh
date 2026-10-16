@@ -19,7 +19,7 @@ set -uo pipefail
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
 # 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id)
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=48
+SCRIPT_API=49
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 CLAUDERC_API="${CLAUDERC_API:-https://api.github.com}"
@@ -42,7 +42,7 @@ SECRET_FILES_DIR="$LAUNCHER_CONFIG_DIR/secret-files"   # files saved with set-se
 # A custom key's name: upper case, a credential-like suffix, never something
 # that changes how programs run (PATH, LD_*, CLAUDE_*, …).
 CUSTOM_NAME_RE='^[A-Z][A-Z0-9_]{0,55}_(KEY|TOKEN|SECRET|PASSWORD|USERNAME|USER|SERVER|HOST|URL|ID|EMAIL|REGION|PROJECT|ENDPOINT|ORG|ACCOUNT|AUTHKEY|APIKEY|FILE|CREDENTIALS)$'
-TOKEN_SERVICES="cloudflare vercel netlify fly railway supabase neon npm stripe huggingface b2 gcp firebase mxroute googleplay youtube"
+TOKEN_SERVICES="cloudflare vercel netlify fly railway supabase neon npm stripe huggingface b2 gcp firebase mxroute ovh googleplay youtube"
 
 # A question on Claude's screen: a confirm footer, a y/n, a numbered menu with the cursor on it, or the auto-mode opt-in.
 WAIT_RE='Enter to confirm|\(y/n\)|^ *❯ [0-9]+\. |Auto mode lets Claude'
@@ -2707,6 +2707,9 @@ svc_def() {
     youtube) SVC_VARS=(YOUTUBE_REFRESH_TOKEN YOUTUBE_CLIENT_ID YOUTUBE_CLIENT_SECRET) SVC_CLI=youtube-upload ;;
     mxroute) SVC_VARS=(MXROUTE_API_KEY MXROUTE_SERVER MXROUTE_USERNAME)
       SVC_RES=('^[A-Za-z0-9]{16,64}$' '^[a-z0-9][a-z0-9.-]{2,252}$' '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') ;;
+    # OVHcloud API: the region (ovh-eu, ovh-ca or ovh-us) and the three values of a token made at api.ovh.com/createToken.
+    ovh) SVC_VARS=(OVH_ENDPOINT OVH_APPLICATION_KEY OVH_APPLICATION_SECRET OVH_CONSUMER_KEY)
+      SVC_RES=('^ovh-(eu|ca|us)$' '^[A-Za-z0-9]{8,64}$' '^[A-Za-z0-9]{16,64}$' '^[A-Za-z0-9]{16,64}$') ;;
     *) return 1 ;;
   esac
 }
@@ -2747,6 +2750,13 @@ svc_verify() {
       jq -er '"account " + .accountId' ;;
     mxroute) printf 'header = "X-API-Key: %s"\nheader = "X-Server: %s"\nheader = "X-Username: %s"\n' "$1" "$2" "$3" |
       curl -fsS --max-time 15 -K - https://api.mxroute.com/domains >/dev/null 2>&1 && echo "$3@$2" ;;
+    # A signed GET of /auth/currentCredential, which any validated consumer key may read (no access rule needed).
+    ovh) local base ts
+      case "$1" in ovh-eu) base=https://eu.api.ovh.com/1.0 ;; ovh-ca) base=https://ca.api.ovh.com/1.0 ;; ovh-us) base=https://api.us.ovhcloud.com/1.0 ;; *) return 1 ;; esac
+      ts="$(curl -fsS --max-time 10 "$base/auth/time" 2>/dev/null)" && [[ "$ts" =~ ^[0-9]+$ ]] || return 1
+      printf 'header = "X-Ovh-Application: %s"\nheader = "X-Ovh-Consumer: %s"\nheader = "X-Ovh-Timestamp: %s"\nheader = "X-Ovh-Signature: $1$%s"\n' \
+        "$2" "$4" "$ts" "$(printf '%s+%s+GET+%s/auth/currentCredential++%s' "$3" "$4" "$base" "$ts" | sha1sum | cut -d' ' -f1)" |
+        curl -fsS --max-time 15 -K - "$base/auth/currentCredential" 2>/dev/null | jq -er 'select(.status == "validated") | "OVH key valid until " + (.expiration // "it is revoked")' ;;
     googleplay) jq -e 'select(.type == "service_account" and .client_email and .private_key)' <<<"$1" >/dev/null &&
       sa_token_ok "$1" https://www.googleapis.com/auth/androidpublisher && jq -r '.client_email' <<<"$1" ;;
     gcp | firebase) jq -er 'select(.type == "service_account" and .project_id and .client_email) | .client_email' <<<"$1" ;;
