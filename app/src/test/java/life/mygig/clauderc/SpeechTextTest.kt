@@ -20,6 +20,23 @@ class SpeechTextTest {
         assertEquals("", speechText("---\n***"))
     }
 
+    @Test fun saysMoneyAsWords() {
+        assertEquals("10 dollars", speechText("$10"))
+        assertEquals("1 dollar", speechText("$1"))
+        assertEquals("10 dollars and 50 cents", speechText("$10.50"))
+        assertEquals("99 cents", speechText("$0.99"))
+        assertEquals("10 dollars and 5 cents", speechText("$10.05"))
+        assertEquals("3 dollars and 50 cents", speechText("$3.5"))
+        assertEquals("1250 dollars", speechText("$1,250"))
+        assertEquals("1.5 million dollars", speechText("$1.5M"))
+        assertEquals("5 thousand dollars", speechText("$5k"))
+        assertEquals("20 dollars per month", speechText("$20/month"))
+        assertEquals("3 euros", speechText("€3.00"))
+        assertEquals("1 pound", speechText("£1"))
+        assertEquals("costs 10 dollars, then 20 dollars.", speechText("costs $10, then $20."))
+        assertEquals("a 5 build", speechText("a 5 build"))
+    }
+
     @Test fun respellsWords() {
         assertEquals("Okay pudding, ready", speechText("Okay puddin', ready"))
         assertEquals("Not pudding twice", speechText("Not pudding twice"))
