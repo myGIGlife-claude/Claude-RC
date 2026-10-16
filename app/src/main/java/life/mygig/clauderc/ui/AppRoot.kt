@@ -415,6 +415,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
 @Composable
 private fun UpdateBar(vm: MainViewModel, lt: Latest?, st: StatusData?, tab: Tab) {
     val busy by vm.busy.collectAsStateWithLifecycle()
+    val note by vm.downloadNote.collectAsStateWithLifecycle()
     val newApp = lt?.appVersionCode?.takeIf { it > BuildConfig.VERSION_CODE }
     val apk = lt?.apkUrl
     val server = st != null && (st.scriptApi < Updates.MIN_SCRIPT_API || (lt?.serverCommit != null && lt.serverCommit != st.commit))
@@ -422,6 +423,7 @@ private fun UpdateBar(vm: MainViewModel, lt: Latest?, st: StatusData?, tab: Tab)
     val label: String
     val go: () -> Unit
     when {
+        note != null -> { text = note!!; label = "Cancel"; go = { vm.cancelDownload() } }
         newApp != null && apk != null -> {
             text = "Update: build ${newApp - 100} is ready"; label = "Install"; go = { vm.downloadAndInstall(apk) }
         }
