@@ -338,6 +338,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         return downloadApk(url).also { downloadJob = it }
     }
 
+    /** What the update bar shows while the new build downloads (null when nothing is downloading). */
+    private val _downloadNote = MutableStateFlow<String?>(null)
+    val downloadNote = _downloadNote.asStateFlow()
+    private var downloadId = -1L
+
+    fun cancelDownload() {
+        downloadJob?.cancel()
+        runCatching { getApplication<Application>().getSystemService(DownloadManager::class.java).remove(downloadId) }
+        _downloadNote.value = null
+    }
+
     private fun downloadApk(url: String): Job = viewModelScope.launch {
         val ctx = getApplication<Application>()
         val dm = ctx.getSystemService(DownloadManager::class.java)
@@ -356,29 +367,64 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             say("Couldn't start the download: ${e.message}")
             return@launch
         }
-        say("Downloading $name…")
-        while (true) {
-            delay(1_000)
-            val status = dm.query(DownloadManager.Query().setFilterById(id))?.use { c ->
-                if (c.moveToFirst()) c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) else null
-            }
-            when (status) {
-                DownloadManager.STATUS_SUCCESSFUL -> {
-                    val uri = dm.getUriForDownloadedFile(id) ?: break
-                    try {
-                        ctx.startActivity(
-                            Intent(Intent.ACTION_VIEW).setDataAndType(uri, APK_MIME)
-                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK),
-                        )
-                    } catch (e: Exception) {
-                        say("Downloaded, but the installer didn't open: ${e.message}")
+        downloadId = id
+        _downloadNote.value = "Starting the download…"
+        var lastBytes = -1L
+        var lastMove = System.currentTimeMillis()
+        try {
+            while (true) {
+                delay(1_000)
+                var status: Int? = null; var reason = 0; var got = 0L; var total = 0L
+                dm.query(DownloadManager.Query().setFilterById(id))?.use { c ->
+                    if (c.moveToFirst()) {
+                        status = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                        reason = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
+                        got = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+                        total = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
                     }
-                    return@launch
                 }
-                DownloadManager.STATUS_FAILED, null -> break
+                when (status) {
+                    DownloadManager.STATUS_SUCCESSFUL -> {
+                        val uri = dm.getUriForDownloadedFile(id) ?: break
+                        _downloadNote.value = null
+                        try {
+                            ctx.startActivity(
+                                Intent(Intent.ACTION_VIEW).setDataAndType(uri, APK_MIME)
+                                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        } catch (e: Exception) {
+                            say("Downloaded, but the installer didn't open: ${e.message}")
+                        }
+                        return@launch
+                    }
+                    DownloadManager.STATUS_FAILED, null -> break
+                    else -> {
+                        if (got != lastBytes) { lastBytes = got; lastMove = System.currentTimeMillis() }
+                        _downloadNote.value = when {
+                            status == DownloadManager.STATUS_PAUSED -> "Download paused: " + when (reason) {
+                                DownloadManager.PAUSED_QUEUED_FOR_WIFI -> "waiting for Wi-Fi"
+                                DownloadManager.PAUSED_WAITING_FOR_NETWORK -> "waiting for a network"
+                                else -> "waiting to retry"
+                            }
+                            got > 0 && total > 0 -> "Downloading ${got / 1_000_000} of ${total / 1_000_000} MB"
+                            else -> "Waiting for the download to start…"
+                        }
+                        // Stuck (queued, paused or silent) for a minute: stop it and let the owner retry instead of waiting forever.
+                        if (System.currentTimeMillis() - lastMove > 60_000) {
+                            val why = _downloadNote.value ?: "no progress for a minute"
+                            runCatching { dm.remove(id) }
+                            _downloadNote.value = null
+                            say("The download stalled ($why).", "Retry", Fix.Retry { downloadAndInstall(url) })
+                            return@launch
+                        }
+                    }
+                }
             }
+            _downloadNote.value = null
+            say("The download failed.", "Retry", Fix.Retry { downloadAndInstall(url) })
+        } finally {
+            _downloadNote.value = null
         }
-        say("The download failed.", "Retry", Fix.Retry { downloadAndInstall(url) })
     }
 
     fun updateServerScripts(commit: String) = action("Updating the server scripts…") {
