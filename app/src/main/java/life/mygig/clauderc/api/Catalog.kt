@@ -178,6 +178,26 @@ object Catalog {
                 "use them (like an MXroute MCP server).",
         ),
         ServiceDef(
+            "ovh", "OVHcloud", "Create and manage servers, IPs, DNS and firewalls via the OVHcloud API",
+            listOf(
+                FieldDef("Region: ovh-eu, ovh-ca or ovh-us", secret = false, minLength = 6),
+                FieldDef("Application key", minLength = 8),
+                FieldDef("Application secret", minLength = 16),
+                FieldDef("Consumer key", minLength = 16),
+            ),
+            "https://api.ovh.com/createToken/", "Create an OVHcloud API token",
+            "1. Open the link (Canada: ca.api.ovh.com/createToken, US: api.us.ovhcloud.com/createToken). First create an " +
+                "application there if asked: OVH shows an Application key and Application secret.\n" +
+                "2. On the token page set Validity to Unlimited (or a date) and add access rules, one per line (method, path):\n" +
+                "• Look only: GET /*\n" +
+                "• Create and change servers: also POST /*, PUT /*\n" +
+                "• Delete things: also DELETE /* (leave it out until you want it)\n" +
+                "Narrow the paths if you prefer, e.g. /vps/*, /cloud/*, /ip/*.\n" +
+                "3. Create keys, copy the Consumer key. Enter the region matching your OVH account and the three values here.\n" +
+                "The app checks them with OVH. Saved as OVH_ENDPOINT, OVH_APPLICATION_KEY, OVH_APPLICATION_SECRET and " +
+                "OVH_CONSUMER_KEY, which also reach the OVH tool for Claude (an MCP server) after a session restart.",
+        ),
+        ServiceDef(
             "googleplay", "Google Play Console", "Publish Android apps (fastlane, Gradle Play Publisher)",
             listOf(FieldDef("Service account JSON key", multiline = true, minLength = 50)),
             "https://developers.google.com/android-publisher/getting_started", "Open Google's setup guide",
@@ -218,6 +238,7 @@ object Catalog {
         "gcp" to listOf("CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE", "CLOUDSDK_CORE_PROJECT"),
         "firebase" to listOf("GOOGLE_APPLICATION_CREDENTIALS"),
         "mxroute" to listOf("MXROUTE_API_KEY", "MXROUTE_SERVER", "MXROUTE_USERNAME"),
+        "ovh" to listOf("OVH_ENDPOINT", "OVH_APPLICATION_KEY", "OVH_APPLICATION_SECRET", "OVH_CONSUMER_KEY"),
         "googleplay" to listOf("GOOGLE_PLAY_JSON_KEY", "SUPPLY_JSON_KEY", "ANDROID_PUBLISHER_CREDENTIALS"),
         "youtube" to listOf("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN"),
     )

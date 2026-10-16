@@ -823,6 +823,10 @@ api "login-token cloudflare" $'cfat_abcdefghijklmnopqrstuvwxyz0123456789ABCD\nno
 check "cloudflare account ID must be 32 hex" "$(jqt '.error.code=="invalid_name"')"
 api "login-token mxroute" $'Mx8d989005f0cded8371b7d7271c50K1\n-evil.example\nuser'
 check "mxroute server can't start with -" "$(jqt '.error.code=="invalid_name"')"
+api "login-token ovh" $'ovh-xx\nabcdefgh12345678\nabcdefghijklmnopqrstuvwxyz123456\nabcdefghijklmnopqrstuvwxyz123456'
+check "ovh region must be ovh-eu, ovh-ca or ovh-us" "$(jqt '.error.code=="invalid_name"')"
+api "login-token ovh" $'ovh-eu\nabcdefgh12345678\nabcdefghijklmnopqrstuvwxyz123456\nabcdefghijklmnopqrstuvwxyz123456'
+check "ovh: provider rejects (no network) → nothing saved" "$(jqt '.error.code=="not_logged_in"')"
 api "login-token b2" $'onlyonevalue'
 check "b2 needs two valid values" "$(jqt '.error.code=="invalid_name"')"
 KEY='{"type":"service_account","project_id":"demo-proj","private_key":"x","client_email":"bot@demo-proj.iam.gserviceaccount.com"}'
