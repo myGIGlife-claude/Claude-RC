@@ -233,6 +233,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                 topBar = {
                     Column {
                         TopAppBar(
+                            colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                             title = {
                                 Column {
                                     Text("cLaudeRC")
@@ -313,7 +314,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                 },
                 bottomBar = {
                     if (navVisible && !useRail) {
-                        NavigationBar {
+                        NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                             // Narrow screens (e.g. a foldable's cover display) get the short label.
                             val narrow = LocalConfiguration.current.screenWidthDp < 400
                             // Most used first; New in the middle; setup last.
@@ -510,6 +511,11 @@ private fun androidx.compose.foundation.layout.RowScope.TabItem(
             BadgedBox(badge = { if (dot) Badge() }) { Icon(icon, contentDescription = if (dot) "$label, update available" else null) }
         },
         label = { Text(label, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip) },
+        colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
+            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+            selectedIconColor = MaterialTheme.colorScheme.primary,
+            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+        ),
     )
 }
 
@@ -530,5 +536,10 @@ private fun RailItem(
             BadgedBox(badge = { if (dot) Badge() }) { Icon(icon, contentDescription = if (dot) "$label, update available" else null) }
         },
         label = { Text(label, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip) },
+        colors = androidx.compose.material3.NavigationRailItemDefaults.colors(
+            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+            selectedIconColor = MaterialTheme.colorScheme.primary,
+            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+        ),
     )
 }

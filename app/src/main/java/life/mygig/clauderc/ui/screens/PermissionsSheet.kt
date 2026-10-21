@@ -35,7 +35,10 @@ import life.mygig.clauderc.api.isValidPermissionRule
 import life.mygig.clauderc.api.permissionChange
 import life.mygig.clauderc.api.permissionRule
 import life.mygig.clauderc.ui.MainViewModel
+import life.mygig.clauderc.ui.components.CalmDivider
+import life.mygig.clauderc.ui.components.CalmGroup
 import life.mygig.clauderc.ui.components.CardBox
+import life.mygig.clauderc.ui.components.SectionLabel
 import life.mygig.clauderc.ui.components.PillTabs
 
 private val PERM_SCOPES = listOf("project" to "This project", "local" to "Just me here", "user" to "All projects")
@@ -88,18 +91,17 @@ fun PermissionsSheet(vm: MainViewModel, onClose: () -> Unit) {
                 PERM_LISTS.forEach { (key, title) ->
                     val rules = scope.list(key)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Text(title, style = MaterialTheme.typography.titleSmall)
+                        SectionLabel(title)
                         TextButton(onClick = { adding = key }, modifier = Modifier.semantics { contentDescription = "Add a rule to $title" }) { Text("Add rule") }
                     }
                     if (rules.isEmpty()) {
-                        Text("None.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    } else CardBox {
-                        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            rules.forEach { r ->
-                                Column(Modifier.fillMaxWidth().clickable { picked = key to r }.semantics { contentDescription = "$title rule $r. Tap to change." }) {
-                                    Text(r, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
-                                    Text(describePermissionRule(r), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
+                        Text("None.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp))
+                    } else CalmGroup {
+                        rules.forEachIndexed { i, r ->
+                            if (i > 0) CalmDivider()
+                            Column(Modifier.fillMaxWidth().clickable { picked = key to r }.padding(horizontal = 16.dp, vertical = 12.dp).semantics { contentDescription = "$title rule $r. Tap to change." }) {
+                                Text(r, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+                                Text(describePermissionRule(r), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }

@@ -152,3 +152,10 @@ fun InfoRows(rows: List<Pair<String, String>>) {
         }
     }
 }
+
+/** The corner shape of row [index] of [count] in one soft group: rounded only at the top of the first and the bottom of the last. */
+fun groupedShape(index: Int, count: Int, radius: androidx.compose.ui.unit.Dp = 20.dp): androidx.compose.ui.graphics.Shape =
+    RoundedCornerShape(
+        topStart = if (index == 0) radius else 0.dp, topEnd = if (index == 0) radius else 0.dp,
+        bottomStart = if (index == count - 1) radius else 0.dp, bottomEnd = if (index == count - 1) radius else 0.dp,
+    )

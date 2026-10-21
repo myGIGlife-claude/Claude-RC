@@ -41,6 +41,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -693,8 +696,8 @@ private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    UsageBar("5-hour", u.fiveHour)
-                    UsageBar("Weekly", u.sevenDay)
+                    UsageBar("5 hours", u.fiveHour)
+                    UsageBar("Week", u.sevenDay)
                 }
                 a.tokens?.let { t ->
                     Text(
@@ -721,13 +724,19 @@ private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean
 @Composable
 private fun UsageBar(label: String, w: UsageWindow) {
     val used = (w.pct ?: return).coerceIn(0.0, 100.0)
+    val color = when { used >= 90 -> BadRed; used >= 75 -> WarnAmber; else -> MaterialTheme.colorScheme.primary }
     // The bar fills as usage is spent, so a full bar means nothing is left.
-    Column {
-        Text("$label: ${used.roundToInt()}% used" + (resetsIn(w.resetsAt)?.let { " · resets in $it" } ?: ""), style = MaterialTheme.typography.labelMedium)
-        LinearProgressIndicator(
-            progress = { (used / 100).toFloat() }, modifier = Modifier.fillMaxWidth(),
-            color = when { used >= 90 -> BadRed; used >= 75 -> WarnAmber; else -> MaterialTheme.colorScheme.primary },
-        )
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(56.dp))
+            LinearProgressIndicator(
+                progress = { (used / 100).toFloat() },
+                modifier = Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(3.dp)),
+                color = color, trackColor = MaterialTheme.colorScheme.surfaceContainerHighest, gapSize = 0.dp, drawStopIndicator = {},
+            )
+            Text("${used.roundToInt()}%", style = MaterialTheme.typography.bodySmall, color = if (used >= 75) color else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(40.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
+        }
+        resetsIn(w.resetsAt)?.let { Text("resets in $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 66.dp)) }
     }
 }
 

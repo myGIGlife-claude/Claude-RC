@@ -43,6 +43,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import life.mygig.clauderc.ui.components.groupedShape
+import life.mygig.clauderc.ui.components.PillTabs
+import life.mygig.clauderc.ui.components.CalmDivider
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -94,23 +98,21 @@ fun ProjectsScreen(vm: MainViewModel) {
             placeholder = { Text("Search repos") },
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            shape = RoundedCornerShape(26.dp),
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = androidx.compose.ui.graphics.Color.Transparent, unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh, unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
         )
-        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Filter.entries.forEach { f ->
-                FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.label) })
-            }
-        }
+        PillTabs(Filter.entries.map { it.label }, filter.ordinal, { filter = Filter.entries[it] }, Modifier.padding(horizontal = 16.dp))
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = { vm.refreshRepos(true) }, modifier = Modifier.fillMaxSize()) {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
+            androidx.compose.foundation.lazy.LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (shown.isEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
+                    item {
                         Text(when {
                             refreshing -> "Loading repos…"
                             filter == Filter.RUNNING && query.isBlank() -> "No projects running. Start one from All, or from Sessions."
@@ -118,16 +120,16 @@ fun ProjectsScreen(vm: MainViewModel) {
                         })
                     }
                 }
-                items(shown, key = { it.fullName }) { repo ->
-                    RepoTile(
-                        repo,
+                itemsIndexed(shown, key = { _, r -> r.fullName }) { i, repo ->
+                    RepoRow(
+                        repo, i, shown.size,
                         onClick = { selected = repo },
                         onLongClick = { if (repo.running) vm.loadTail(repo.name) else selected = repo },
                     )
                 }
-                item(span = { GridItemSpan(maxLineSpan) }) {
+                item {
                     Text("Tap a project for Open in Claude, clone/pull + start, stop, terminal or GitHub. Long-press a running one for its terminal.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp, start = 4.dp))
                 }
             }
         }
@@ -138,36 +140,29 @@ fun ProjectsScreen(vm: MainViewModel) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun RepoTile(repo: Repo, onClick: () -> Unit, onLongClick: () -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).combinedClickable(onClick = onClick, onLongClick = onLongClick),
-    ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun RepoRow(repo: Repo, index: Int, count: Int, onClick: () -> Unit, onLongClick: () -> Unit) {
+    val shape = groupedShape(index, count)
+    Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth().clip(shape).combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+        Column {
+            if (index > 0) CalmDivider()
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 StatusDot(when { repo.running -> Health.OK; repo.cloning -> Health.WARN; repo.local -> Health.OFF; else -> Health.NONE })
-                Text(repo.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Text(
-                when { repo.cloning -> "Cloning…"; repo.running -> "Running"; repo.local -> "On server"; else -> "GitHub only" } +
-                    (repo.pushedAt?.take(10)?.let { " · $it" } ?: ""),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Badge(if (repo.private) "Private" else "Public")
-                if (repo.archived) Badge("Archived")
-                if (repo.isOrg) Badge(repo.owner)
+                Column(Modifier.weight(1f)) {
+                    Text(repo.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        listOfNotNull(
+                            when { repo.cloning -> "Cloning…"; repo.running -> "Running"; repo.local -> "On server"; else -> "GitHub only" },
+                            repo.pushedAt?.take(10),
+                            if (repo.private) "Private" else "Public",
+                            if (repo.archived) "Archived" else null,
+                            if (repo.isOrg) repo.owner else null,
+                        ).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-    }
-}
-
-/** A plain label (not a button) so screen readers don't announce it as tappable. */
-@Composable
-private fun Badge(text: String) {
-    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
-        Text(text, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), maxLines = 1)
     }
 }
 
