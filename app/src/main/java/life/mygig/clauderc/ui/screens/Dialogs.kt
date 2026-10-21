@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -168,7 +169,7 @@ fun AddServiceDialog(vm: MainViewModel) {
             if (st == null) Text("Check the server first (pull down on Connections).")
             if (options.isEmpty() && st != null) Text("Everything here is already connected.")
             androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f)) {
-                androidx.compose.foundation.lazy.itemsIndexed(shown) { i, (name, hint, go) ->
+                itemsIndexed(shown) { i, (name, hint, go) ->
                     Surface(
                         onClick = { go() },
                         enabled = st != null,

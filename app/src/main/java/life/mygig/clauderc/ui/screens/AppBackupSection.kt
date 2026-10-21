@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui.screens
 
+import life.mygig.clauderc.ui.components.CardBox
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
