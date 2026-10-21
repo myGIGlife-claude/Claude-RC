@@ -155,38 +155,42 @@ fun AddServiceDialog(vm: MainViewModel) {
         .sortedBy { it.first.lowercase() }
     ModalBottomSheet(onDismissRequest = { vm.services.showAddService(false) }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxHeight(0.92f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Connect a service", style = MaterialTheme.typography.titleLarge)
+            Text("Connect a service", style = MaterialTheme.typography.headlineSmall, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
             OutlinedTextField(
                 value = query, onValueChange = { query = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Search services") }, shape = RoundedCornerShape(24.dp),
+                placeholder = { Text("Search services") }, shape = RoundedCornerShape(26.dp),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = androidx.compose.ui.graphics.Color.Transparent, unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh, unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                ),
                 keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
             )
             if (st == null) Text("Check the server first (pull down on Connections).")
             if (options.isEmpty() && st != null) Text("Everything here is already connected.")
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(shown.size) { i ->
-                    val (name, hint, go) = shown[i]
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f)) {
+                androidx.compose.foundation.lazy.itemsIndexed(shown) { i, (name, hint, go) ->
                     Surface(
                         onClick = { go() },
                         enabled = st != null,
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        shape = life.mygig.clauderc.ui.components.groupedShape(i, shown.size),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text(name, style = MaterialTheme.typography.titleSmall, maxLines = 1)
-                            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                        Column {
+                            if (i > 0) life.mygig.clauderc.ui.components.CalmDivider()
+                            Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(name, style = MaterialTheme.typography.bodyLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium, maxLines = 1)
+                                    Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                                }
+                                Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                     }
                 }
-                item(span = { GridItemSpan(maxLineSpan) }) {
+                item {
                     Text("A–Z · connected ones move to the Connections tab", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 24.dp))
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp, bottom = 24.dp, start = 4.dp))
                 }
             }
         }
