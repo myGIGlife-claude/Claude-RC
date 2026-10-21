@@ -215,17 +215,16 @@ fun RunScreen(vm: MainViewModel) {
                 focusedTextColor = Term.Fg, unfocusedTextColor = Term.Fg, focusedBorderColor = Term.Fg, unfocusedBorderColor = Term.Border,
                 focusedLabelColor = Term.Label, unfocusedLabelColor = Term.Label, cursorColor = Term.Fg,
                 focusedContainerColor = Term.Field, unfocusedContainerColor = Term.Field,
-                focusedShape = RoundedCornerShape(20.dp), unfocusedShape = RoundedCornerShape(20.dp), disabledShape = RoundedCornerShape(20.dp), errorShape = RoundedCornerShape(20.dp),
             )
             OutlinedTextField(
                 value = command, onValueChange = { command = it }, label = { Text("Command (type or paste)") },
-                minLines = 2, maxLines = 5, modifier = Modifier.fillMaxWidth(), colors = fieldColors,
+                minLines = 2, maxLines = 5, modifier = Modifier.fillMaxWidth(), colors = fieldColors, shape = RoundedCornerShape(20.dp),
                 textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp),
                 keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
             )
             OutlinedTextField(
                 value = password, onValueChange = { password = it }, label = { Text("sudo password (only if it uses sudo)") },
-                singleLine = true, modifier = Modifier.fillMaxWidth(), colors = fieldColors,
+                singleLine = true, modifier = Modifier.fillMaxWidth(), colors = fieldColors, shape = RoundedCornerShape(20.dp),
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
             )
