@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -121,7 +122,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
           Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
             Column(Modifier.widthIn(max = 720.dp).fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
                 Row(
-                    Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer).padding(start = 4.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+                    Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(onClick = { vm.chats.closeChat() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
@@ -244,8 +245,8 @@ private fun Messages(vm: MainViewModel, voice: ChatVoice, messages: List<ChatMes
                     FileCard(vm, r.m)
                 } else if (r.m.role == "user") {
                     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-                        Surface(shape = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp), color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.widthIn(max = 320.dp)) {
-                            SelectionContainer { Text(linkify(r.m.text), modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium) }
+                        Surface(shape = RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp), color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.widthIn(max = 320.dp)) {
+                            SelectionContainer { Text(linkify(r.m.text), modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), style = MaterialTheme.typography.bodyLarge) }
                         }
                         if (r.pending) Text("queued · tap here to remove", modifier = Modifier.clickable { vm.chats.dismissPending(r.m.text) }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -253,8 +254,8 @@ private fun Messages(vm: MainViewModel, voice: ChatVoice, messages: List<ChatMes
                     val key = r.m.id + r.m.text.hashCode()
                     val isPlaying = voice.playing == key
                     Column {
-                        Surface(shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.widthIn(max = 340.dp)) {
-                            SelectionContainer { Text(linkify(r.m.text), modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium) }
+                        Surface(shape = RoundedCornerShape(22.dp, 22.dp, 22.dp, 6.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.widthIn(max = 340.dp)) {
+                            SelectionContainer { Text(linkify(r.m.text), modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), style = MaterialTheme.typography.bodyLarge) }
                         }
                         // Listen to this reply (or carry on where Pause stopped it) without asking Claude again.
                         TextButton(onClick = { if (isPlaying) voice.pause() else voice.speak(key, forSpeech(r.m.text), flush = true) }, enabled = voice.ready) {
@@ -371,21 +372,26 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            IconButton(onClick = { vm.chats.externalScreen(); pick.launch(arrayOf("*/*")) }, enabled = enabled, modifier = Modifier.height(52.dp)) {
-                Icon(Icons.Filled.AttachFile, contentDescription = "Attach a file or photo")
+        Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+            Row(Modifier.padding(start = 4.dp, end = 5.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                IconButton(onClick = { vm.chats.externalScreen(); pick.launch(arrayOf("*/*")) }, enabled = enabled, modifier = Modifier.height(48.dp)) {
+                    Icon(Icons.Filled.AttachFile, contentDescription = "Attach a file or photo")
+                }
+                OutlinedTextField(
+                    value = field, onValueChange = { field = it }, visualTransformation = GhostText(ghost, ghostColor), placeholder = { Text("Message Claude") },
+                    modifier = Modifier.weight(1f), maxLines = 6, shape = RoundedCornerShape(22.dp),
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent, disabledBorderColor = Color.Transparent,
+                    ),
+                )
+                if (working) {
+                    FilledIconButton(onClick = { vm.chats.interruptChat() }, modifier = Modifier.size(44.dp)) { Icon(Icons.Filled.Stop, contentDescription = "Stop Claude") }
+                }
+                FilledIconButton(
+                    onClick = { val t = text; vm.chats.sendChat(t, onSent = { setText("") }, onFail = { if (text.isBlank()) setText(t) }) },
+                    enabled = enabled && text.isNotBlank(), modifier = Modifier.size(44.dp),
+                ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
             }
-            OutlinedTextField(
-                value = field, onValueChange = { field = it }, visualTransformation = GhostText(ghost, ghostColor), placeholder = { Text("Message Claude") },
-                modifier = Modifier.weight(1f), maxLines = 6, shape = RoundedCornerShape(22.dp),
-            )
-            if (working) {
-                FilledIconButton(onClick = { vm.chats.interruptChat() }, modifier = Modifier.height(52.dp)) { Icon(Icons.Filled.Stop, contentDescription = "Stop Claude") }
-            }
-            FilledIconButton(
-                onClick = { val t = text; vm.chats.sendChat(t, onSent = { setText("") }, onFail = { if (text.isBlank()) setText(t) }) },
-                enabled = enabled && text.isNotBlank(), modifier = Modifier.height(52.dp),
-            ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
         }
     }
 }

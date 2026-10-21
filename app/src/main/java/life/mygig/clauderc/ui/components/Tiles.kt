@@ -50,13 +50,9 @@ fun Health.color(): Color = when (this) {
     Health.OFF, Health.NONE -> OffGrey
 }
 
-/** A Claude session's light: green idle, amber working, red when it needs an answer or has worked 5+ minutes
- *  (timed from when this screen first saw it busy). */
+/** A Claude session's light: amber when it needs an answer, green while working, grey when idle. */
 @Composable
-fun claudeHealth(busy: Boolean, waiting: Boolean): Health {
-    val longRun by produceState(false, busy) { value = false; if (busy) { delay(5 * 60_000L); value = true } }
-    return when { waiting || longRun -> Health.BAD; busy -> Health.WARN; else -> Health.OK }
-}
+fun claudeHealth(busy: Boolean, waiting: Boolean): Health = when { waiting -> Health.WARN; busy -> Health.OK; else -> Health.OFF }
 
 @Composable
 fun StatusDot(health: Health, modifier: Modifier = Modifier) {

@@ -63,6 +63,7 @@ import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.components.CalmDivider
 import life.mygig.clauderc.ui.components.CalmGroup
 import life.mygig.clauderc.ui.components.OneLine
+import life.mygig.clauderc.ui.components.PillTabs
 import life.mygig.clauderc.ui.components.SectionLabel
 import life.mygig.clauderc.ui.components.StatusDot
 import life.mygig.clauderc.ui.components.claudeHealth
@@ -79,15 +80,11 @@ fun SessionsScreen(vm: MainViewModel) {
     // Saved for process death; the controller keeps it while you visit other tabs.
     var tab by rememberSaveable { mutableIntStateOf(vm.general.tab.value) }
     Column(Modifier.fillMaxSize()) {
-        PrimaryTabRow(selectedTabIndex = tab) {
-            listOf("General chat", "Code chat").forEachIndexed { i, label ->
-                Tab(
-                    selected = tab == i,
-                    onClick = { tab = i; vm.general.selectTab(i) },
-                    text = { OneLine(label) },
-                )
-            }
-        }
+        Text("Sessions", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 20.dp, top = 12.dp))
+        PillTabs(
+            listOf("General chat", "Code chat"), tab, { tab = it; vm.general.selectTab(it) },
+            Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+        )
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (tab == 0) GeneralChatTab(vm) else CodeSessions(vm)
         }
@@ -128,13 +125,11 @@ private fun CodeSessions(vm: MainViewModel) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (sessions.size > 1) {
-                        OutlinedButton(onClick = { confirmRestartAll = true }, modifier = Modifier.weight(1f)) { OneLine("Restart all") }
-                    }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (sessions.size > 1) QuietChip("Restart all") { confirmRestartAll = true }
                     // A shell on the server: only offered when App lock guards the app.
                     if (settings?.appLock == true) {
-                        OutlinedButton(onClick = { scope.launch { if (appLock?.unlock("Run a command on the server") != false) vm.showRun(true) } }, modifier = Modifier.weight(1f)) { OneLine(if (narrow) ">_ Run" else ">_ Run a command") }
+                        QuietChip(if (narrow) ">_ Run" else ">_ Run a command") { scope.launch { if (appLock?.unlock("Run a command on the server") != false) vm.showRun(true) } }
                     }
                 }
             }
@@ -216,6 +211,14 @@ private class SessionActions(
     val stop: () -> Unit,
     val toggleDoneAlerts: (() -> Unit)?,
 )
+
+/** A small tonal pill action, like the quick actions in the design. */
+@Composable
+private fun QuietChip(label: String, onClick: () -> Unit) {
+    Surface(onClick = onClick, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+        Text(label, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp), maxLines = 1)
+    }
+}
 
 /** The session's last meaningful line, without prompt symbols: what it said or is waiting for. */
 internal fun previewLine(preview: String): String =
