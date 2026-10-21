@@ -9,7 +9,10 @@ package life.mygig.clauderc.ui.components
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.materialIcon
 import androidx.compose.material.icons.materialPath
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.PathParser
 
 val Icons.Filled.AttachFile: ImageVector
     get() {
@@ -320,3 +323,17 @@ val Icons.Filled.VisibilityOff: ImageVector
     }
 
 private var _visibilityOff: ImageVector? = null
+
+val Icons.Filled.Tune: ImageVector
+    get() {
+        _tune?.let { return it }
+        _tune = materialIcon(name = "Filled.Tune") {
+            addPath(
+                pathData = PathParser().parsePathString("M3,17v2h6v-2H3zM3,5v2h10V5H3zM13,21v-2h8v-2h-8v-2h-2v6h2zM7,9v2H3v2h4v2h2V9H7zM21,13v-2H11v2h10zM15,9h2V7h4V5h-4V3h-2v6z").toNodes(),
+                fill = SolidColor(Color.Black),
+            )
+        }
+        return _tune!!
+    }
+
+private var _tune: ImageVector? = null

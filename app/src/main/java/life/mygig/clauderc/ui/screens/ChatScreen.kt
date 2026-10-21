@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import life.mygig.clauderc.ui.components.AttachFile
+import life.mygig.clauderc.ui.components.Tune
 import android.content.Context
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.clickable
@@ -98,6 +99,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
     // The speaker switch stays as the owner left it: across chats and app restarts, until tapped again.
     val voicePrefs = remember { vm.chats.voicePrefs }
     var speak by remember { mutableStateOf(voicePrefs.getBoolean("speak", false)) }
+    var showControls by remember { mutableStateOf(false) }
     val voice = remember { ChatVoice(context, voicePrefs) { vm.say(it) } }
     DisposableEffect(voice) { onDispose { voice.shutdown() } }
     LaunchedEffect(pinNeeded) { if (pinNeeded != null) voice.pause() }   // locked: stop reading aloud
@@ -134,39 +136,15 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             if (c != null && pinNeeded == null) {
-                                // Claude's model; tap to pick another (/model).
-                                var pickModel by remember { mutableStateOf(false) }
-                                Box {
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = busy == null) { pickModel = true },
-                                    ) {
-                                        Text(
-                                            modelName(c.model) + " ▾", style = MaterialTheme.typography.labelSmall,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), maxLines = 1,
-                                        )
-                                    }
-                                    DropdownMenu(expanded = pickModel, onDismissRequest = { pickModel = false }) {
-                                        listOf("opus" to "Opus", "sonnet" to "Sonnet", "haiku" to "Haiku", "opusplan" to "Opus plans, Sonnet builds").forEach { (alias, label) ->
-                                            DropdownMenuItem(text = { Text(label) }, onClick = { pickModel = false; vm.chats.chatCommand("/model $alias") })
-                                        }
-                                    }
-                                }
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { vm.chats.openPermissions() },
-                                ) {
-                                    Text("Permissions", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), maxLines = 1)
-                                }
-                                // Claude's permission mode; tap to cycle it (Shift+Tab).
+                                // Model and mode in one quiet line; tap for everything about this chat.
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
                                     color = if (c.mode == "bypass") MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
-                                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = busy == null) { vm.chats.chatKey("BTab") },
+                                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { showControls = true },
                                 ) {
                                     Text(
-                                        when (c.mode) { "auto" -> "Auto"; "plan" -> "Plan"; "edits" -> "Accept edits"; "bypass" -> "Bypass"; else -> "Ask first" } + " ⇄",
-                                        style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), maxLines = 1,
+                                        modelName(c.model) + " · " + modeLabel(c.mode), style = MaterialTheme.typography.labelSmall,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), maxLines = 1,
                                     )
                                 }
                             }
@@ -179,13 +157,20 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                     val generalChats by vm.general.chats.collectAsStateWithLifecycle()
                     val general = session.startsWith("chat-") &&
                         (sessionList.any { it.name == session && it.general } || generalChats.any { it.session == session })
-                    if (!general && (st?.scriptApi ?: 0) >= life.mygig.clauderc.api.Updates.MIN_SCRIPT_API && pinNeeded == null) {
-                        TextButton(onClick = { showCluster = true; vm.team.loadChatWorkers(); vm.webHosts.loadChatHosts() }) { Text("👥", fontSize = 20.sp) }
+                    val showWorkers = !general && (st?.scriptApi ?: 0) >= life.mygig.clauderc.api.Updates.MIN_SCRIPT_API && pinNeeded == null
+                    chat?.takeIf { pinNeeded == null }?.let { c ->
+                        IconButton(onClick = { showControls = true }) { Icon(Icons.Filled.Tune, contentDescription = "Chat controls: model, mode, voice, permissions", tint = MaterialTheme.colorScheme.primary) }
+                        if (showControls) {
+                            ChatControlsSheet(
+                                vm, c, canChange = busy == null, speak = speak, onSpeak = { speak = it },
+                                showWorkers = showWorkers, onWorkers = { showCluster = true; vm.team.loadChatWorkers(); vm.webHosts.loadChatHosts() },
+                                onClose = { showControls = false },
+                            )
+                        }
                     }
                     if (showCluster) ChatClusterSheet(vm, onClose = { showCluster = false })
                     val permsOpen by vm.chats.permissionsOpen.collectAsStateWithLifecycle()
                     if (permsOpen) PermissionsSheet(vm, onClose = { vm.chats.clearPermissions() })
-                    TextButton(onClick = { speak = !speak }) { Text(if (speak) "🔊" else "🔈", fontSize = 20.sp) }
                     Icon(Icons.Filled.Lock, contentDescription = "PIN-protected", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 val notice by vm.chatNotice.collectAsStateWithLifecycle()
@@ -283,7 +268,7 @@ private fun Messages(vm: MainViewModel, voice: ChatVoice, messages: List<ChatMes
 }
 
 /** claude-opus-5-5 -> Opus 5.5; empty until Claude has replied. */
-private fun modelName(id: String): String {
+internal fun modelName(id: String): String {
     val parts = id.removePrefix("claude-").split("-").filter { it.isNotEmpty() && !(it.length >= 8 && it.all(Char::isDigit)) }
     val name = parts.firstOrNull { it.all(Char::isLetter) } ?: return "Model"
     val version = parts.filter { it.all(Char::isDigit) }.joinToString(".")
