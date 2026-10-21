@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui.screens
 
+import life.mygig.clauderc.ui.components.CardBox
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
