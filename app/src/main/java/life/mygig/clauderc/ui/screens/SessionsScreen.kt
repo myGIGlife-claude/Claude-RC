@@ -219,7 +219,12 @@ private class SessionActions(
 
 /** The session's last meaningful line, without prompt symbols: what it said or is waiting for. */
 internal fun previewLine(preview: String): String =
-    preview.lineSequence().map { it.trim().trimStart { c -> !c.isLetterOrDigit() } }.lastOrNull { it.isNotBlank() }.orEmpty()
+    preview.lineSequence().map { it.trim() }.filterNot { isStatusLine(it) }
+        .map { it.trimStart { c -> !c.isLetterOrDigit() } }.lastOrNull { it.isNotBlank() }.orEmpty()
+
+/** Lines that are the session's own status display, not what it said: the cost line ("full $42.21 last $0.80 …") and the token spinner. */
+private val STATUS_LINE = Regex("""(^|\s)(full|last)\s+\$\d|tokens\)\s*$""")
+private fun isStatusLine(line: String) = STATUS_LINE.containsMatchIn(line)
 
 /** One line under the tabs: how many sessions need you, are working, are idle. */
 @Composable

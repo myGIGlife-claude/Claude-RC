@@ -905,8 +905,8 @@ sessions_list_json() {
 session_state_json() {
   local screen tail4 waiting=false busy=false
   screen="$(tmux capture-pane -p -J -t "=$1:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15)"
-  # Drop Claude's input box and status bar: separators, the empty ❯ prompt, mode/shortcut hints.
-  tail4="$(grep -v '^[[:space:]]*$' <<<"$screen" | grep -vE '^[─━╭╰│ ]+$|^ *❯|⏵⏵|shift\+tab|for shortcuts|← for agents|esc to interrupt|^ *⎿? *Tip:|/clear to save|Restart to update' |
+  # Drop Claude's input box and status bar: separators, the empty ❯ prompt, mode/shortcut hints, the cost status line and the token spinner.
+  tail4="$(grep -v '^[[:space:]]*$' <<<"$screen" | grep -vE '^[─━╭╰│ ]+$|^ *❯|⏵⏵|shift\+tab|for shortcuts|← for agents|esc to interrupt|^ *⎿? *Tip:|/clear to save|Restart to update|full +\$[0-9]|last +\$[0-9]|tokens\)$' |
     sed -e 's/[[:space:]]*$//' -e 's/^[[:space:]]\{8,\}//' | tail -n 3 | cut -c1-120)"
   grep -qE "$WAIT_RE" <<<"$screen" && waiting=true
   grep -q "esc to interrupt" <<<"$screen" && busy=true
