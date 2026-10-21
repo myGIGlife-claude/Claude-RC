@@ -3,6 +3,7 @@ package life.mygig.clauderc.ui.screens
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -134,17 +136,33 @@ private fun CodeSessions(vm: MainViewModel) {
                 }
             }
             if (sessions.isEmpty()) item { Text(if (refreshing) "Loading…" else "No Claude sessions running.") }
-            // Sessions waiting on a question first.
-            items(sessions.sortedByDescending { it.waiting }, key = { it.name }) { s ->
-                SessionCard(
-                    s,
-                    chat = { vm.chats.openChat(s.name) },
-                    onOpen = { openInClaude(context) },
-                    onLog = { vm.loadTail(s.name) },
-                    onRestart = { confirmRestart = s },
-                    onStop = { confirmStop = s },
-                    onPushDone = if (pushReady) { { vm.push.setSessionPush(s.name, !s.pushDone) } } else null,
-                )
+            val needs = sessions.filter { it.waiting }
+            val working = sessions.filter { !it.waiting && it.busy }
+            val idle = sessions.filter { !it.waiting && !it.busy }
+            @Composable
+            fun rowFor(s: Session) = SessionRow(
+                s,
+                onOpen = { if (s.waiting) vm.loadTail(s.name) else vm.chats.openChat(s.name) },
+                actions = SessionActions(
+                    openInClaude = { openInClaude(context) },
+                    terminal = { vm.loadTail(s.name) },
+                    restart = { confirmRestart = s },
+                    stop = { confirmStop = s },
+                    toggleDoneAlerts = if (pushReady) { { vm.push.setSessionPush(s.name, !s.pushDone) } } else null,
+                ),
+            )
+            if (sessions.isNotEmpty()) item { SessionSummary(needs.size, working.size, idle.size) }
+            if (needs.isNotEmpty()) {
+                item { SectionLabel("Needs you") }
+                items(needs, key = { it.name }) { s -> rowFor(s) }
+            }
+            if (working.isNotEmpty()) {
+                item { SectionLabel("Working") }
+                item { SessionGroup { working.forEachIndexed { i, s -> if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)); rowFor(s) } } }
+            }
+            if (idle.isNotEmpty()) {
+                item { SectionLabel("Idle") }
+                item { SessionGroup { idle.forEachIndexed { i, s -> if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)); rowFor(s) } } }
             }
         }
     }
@@ -187,68 +205,86 @@ private fun CodeSessions(vm: MainViewModel) {
     }
 }
 
+/** What the overflow menu of a session offers. */
+private class SessionActions(
+    val openInClaude: () -> Unit,
+    val terminal: () -> Unit,
+    val restart: () -> Unit,
+    val stop: () -> Unit,
+    val toggleDoneAlerts: (() -> Unit)?,
+)
+
+/** The session's last meaningful line, without prompt symbols: what it said or is waiting for. */
+internal fun previewLine(preview: String): String =
+    preview.lineSequence().map { it.trim().trimStart { c -> !c.isLetterOrDigit() } }.lastOrNull { it.isNotBlank() }.orEmpty()
+
 @Composable
-private fun SessionCard(s: Session, chat: (() -> Unit)?, onOpen: () -> Unit, onLog: () -> Unit, onRestart: () -> Unit, onStop: () -> Unit, onPushDone: (() -> Unit)? = null) {
+private fun SectionLabel(text: String) {
+    Text(
+        text.uppercase(), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, letterSpacing = 1.1.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp, top = 8.dp),
+    )
+}
+
+/** One line under the tabs: how many sessions need you, are working, are idle. */
+@Composable
+private fun SessionSummary(needs: Int, working: Int, idle: Int) {
+    Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        listOf(Triple(needs, "needs you", claudeHealth(false, true)), Triple(working, "working", claudeHealth(true, false)), Triple(idle, "idle", claudeHealth(false, false)))
+            .filter { it.first > 0 }
+            .forEachIndexed { i, (n, label, health) ->
+                if (i > 0) Text("·", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                StatusDot(health)
+                Text("$n $label", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+    }
+}
+
+@Composable
+private fun SessionGroup(content: @Composable () -> Unit) {
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column { content() }
+    }
+}
+
+/** A session as one calm row: status dot, name, one line of what it is doing, uptime, and a menu for everything else. */
+@Composable
+private fun SessionRow(s: Session, onOpen: () -> Unit, actions: SessionActions) {
     var menu by remember { mutableStateOf(false) }
-    val narrow = isNarrow()
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = if (s.waiting) Color(0xFF2A2418) else MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = if (s.waiting) BorderStroke(1.dp, Color(0xFF5C4A24)) else null,
-    ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatusDot(claudeHealth(s.busy, s.waiting))
-                Text(s.project, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+    val line = previewLine(s.preview)
+    val body: @Composable () -> Unit = {
+        Row(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            StatusDot(claudeHealth(s.busy, s.waiting))
+            Column(Modifier.weight(1f)) {
+                Text(s.project, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    when {
-                        s.waiting -> "needs an answer"
-                        s.busy -> "working… · up ${formatUptime(s.uptimeSeconds)}"
-                        else -> "up ${formatUptime(s.uptimeSeconds)}" + if (s.attached) " · attached" else ""
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (s.waiting) WarnAmber else MaterialTheme.colorScheme.onSurfaceVariant,
+                    line.ifEmpty { if (s.waiting) "needs an answer" else if (s.busy) "working…" else "idle" },
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (s.preview.isNotBlank()) {
-                Box(Modifier.fillMaxWidth().background(Term.Field, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 10.dp)) {
-                    Text(s.preview, color = Term.Fg, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, lineHeight = 17.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                }
+            if (s.waiting) {
+                Button(
+                    onClick = onOpen, modifier = Modifier.height(38.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = WarnAmber, contentColor = Color(0xFF1A1305)),
+                ) { OneLine("Answer") }
+            } else {
+                Text(formatUptime(s.uptimeSeconds), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (s.waiting) {
-                    Button(
-                        onClick = onLog,
-                        modifier = Modifier.weight(1f).height(40.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = WarnAmber, contentColor = Color(0xFF1A1305)),
-                    ) { OneLine("Answer") }
-                } else {
-                    if (chat != null) {
-                        Button(onClick = chat, modifier = Modifier.height(40.dp)) { OneLine("Chat") }
-                    } else {
-                        Button(onClick = onOpen, modifier = Modifier.height(40.dp)) { OneLine(if (narrow) "Open" else "Open in Claude") }
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More for ${s.project}") }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(text = { Text("Terminal") }, onClick = { menu = false; actions.terminal() })
+                    DropdownMenuItem(text = { Text("Restart") }, onClick = { menu = false; actions.restart() })
+                    DropdownMenuItem(text = { Text("Open in Claude app") }, onClick = { menu = false; actions.openInClaude() })
+                    actions.toggleDoneAlerts?.let { toggle ->
+                        DropdownMenuItem(text = { Text(if (s.pushDone) "Finished alerts: on (tap to turn off)" else "Finished alerts: off (tap to turn on)") }, onClick = { menu = false; toggle() })
                     }
-                    OutlinedButton(onClick = onLog, modifier = Modifier.height(40.dp)) { OneLine("Terminal") }
-                }
-                TextButton(onClick = onRestart) { OneLine("Restart") }
-                if (!s.waiting) Spacer(Modifier.weight(1f))
-                // Bell: tell me right away when this session finishes (questions always alert).
-                if (onPushDone != null) IconButton(onClick = onPushDone) {
-                    Icon(
-                        Icons.Filled.Notifications,
-                        contentDescription = if (s.pushDone) "Finished alerts on for ${s.project}: tap to turn off" else "Finished alerts off for ${s.project}: tap to turn on",
-                        tint = if (s.pushDone) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
-                    )
-                }
-                Box {
-                    IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More for ${s.project}") }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        if (s.waiting || chat != null) DropdownMenuItem(text = { Text("Open in Claude app") }, onClick = { menu = false; onOpen() })
-                        DropdownMenuItem(text = { Text("Stop session") }, onClick = { menu = false; onStop() })
-                    }
+                    DropdownMenuItem(text = { Text("Stop session") }, onClick = { menu = false; actions.stop() })
                 }
             }
         }
     }
+    if (s.waiting) {
+        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = Color(0xFF2A2418), border = BorderStroke(1.dp, Color(0xFF5C4A24))) { body() }
+    } else body()
 }
