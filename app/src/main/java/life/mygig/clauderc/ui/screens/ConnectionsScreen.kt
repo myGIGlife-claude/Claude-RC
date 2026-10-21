@@ -23,6 +23,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import life.mygig.clauderc.ui.components.CalmGroup
+import life.mygig.clauderc.ui.components.CalmDivider
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.clickable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -81,18 +87,16 @@ fun ConnectionsScreen(vm: MainViewModel) {
     val detail = { d: Detail -> vm.connections.openDetail(d) }
 
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = { vm.refreshAll() }, modifier = Modifier.fillMaxSize()) {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
+        androidx.compose.foundation.lazy.LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             val l = latest
             val s = status
             if (s == null) {
                 full { Text(if (refreshing) "Checking the server…" else "Pull down to check the server.", style = MaterialTheme.typography.bodyLarge) }
-                return@LazyVerticalGrid
+                return@LazyColumn
             }
             val required = s.scriptApi < Updates.MIN_SCRIPT_API
             val newCommit = l?.serverCommit?.takeIf { it != s.commit }
@@ -161,14 +165,43 @@ fun ConnectionsScreen(vm: MainViewModel) {
     }
 }
 
-private fun LazyGridScope.full(content: @Composable () -> Unit) {
-    item(span = { GridItemSpan(maxLineSpan) }) { content() }
+private fun androidx.compose.foundation.lazy.LazyListScope.full(content: @Composable () -> Unit) {
+    item { content() }
 }
 
-private fun LazyGridScope.section(title: String, tiles: List<Tile>) {
+private fun androidx.compose.foundation.lazy.LazyListScope.section(title: String, tiles: List<Tile>) {
     if (tiles.isEmpty()) return
     full { SectionLabel(title) }
-    tiles.forEach { t -> item { InfoTile(t.title, t.subtitle, t.health, t.onClick) } }
+    item { CalmGroup { tiles.forEachIndexed { i, t -> if (i > 0) CalmDivider(); ConnectionRow(t) } } }
+}
+
+/** One connection as a calm row: round initial, name, one line of detail coloured by its state, chevron. */
+@Composable
+private fun ConnectionRow(t: Tile) {
+    val initials = t.title.split(' ', '/', ':', '-').filter { it.isNotEmpty() }.take(2).joinToString("") { it.first().uppercase() }.ifEmpty { "?" }
+    Row(
+        Modifier.fillMaxWidth().clickable(enabled = t.onClick != null) { t.onClick?.invoke() }.padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Surface(shape = androidx.compose.foundation.shape.CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHighest, modifier = Modifier.size(38.dp)) {
+            Box(contentAlignment = Alignment.Center) { Text(initials, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold) }
+        }
+        Column(Modifier.weight(1f)) {
+            Text(t.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            if (!t.subtitle.isNullOrBlank()) {
+                Text(
+                    t.subtitle, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    color = when (t.health) {
+                        Health.OK -> MaterialTheme.colorScheme.onSurfaceVariant
+                        Health.WARN -> WarnAmber
+                        Health.BAD -> Color(0xFFF09A9D)
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+        }
+        if (t.onClick != null) Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }
 
 /** Newer server scripts on GitHub: update from here ([commit] non-null) or copy the command. */
