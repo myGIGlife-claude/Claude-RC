@@ -38,7 +38,7 @@ fun AskCard(vm: MainViewModel, questions: List<AskQuestion>, enabled: Boolean) {
     val picks = remember(questions) { questions.map { mutableStateOf(setOf<Int>()) } }
     val others = remember(questions) { questions.map { mutableStateOf("") } }
     val ready = questions.indices.all { picks[it].value.isNotEmpty() || others[it].value.isNotBlank() }
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), shape = RoundedCornerShape(14.dp), color = Color(0xFF2A2418)) {
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), shape = RoundedCornerShape(20.dp), color = Color(0xFF2A2418)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Claude is asking", color = WarnAmber, fontWeight = FontWeight.SemiBold)
             Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {

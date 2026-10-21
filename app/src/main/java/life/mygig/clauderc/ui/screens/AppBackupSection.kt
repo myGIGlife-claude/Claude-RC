@@ -46,8 +46,8 @@ fun AppBackupSection(vm: MainViewModel) {
                 .onFailure { backupError = it.message ?: "Unable to read backup." }
         }
     }
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    CardBox {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Back up this app", style = MaterialTheme.typography.titleMedium)
             Text("Encrypted copy of your servers, app settings and phone key. Chat PIN is excluded.", style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

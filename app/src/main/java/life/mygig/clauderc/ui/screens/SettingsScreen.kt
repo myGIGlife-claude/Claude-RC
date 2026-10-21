@@ -167,13 +167,14 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
             Text("The server needs curl, jq, tmux, git and flock.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
+        if (!firstRun) Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp))
         if (!firstRun) PillTabs(listOf("Connection", "Security", "App"), tab, { tab = it })
 
         // On first run the setup card above already carries the key.
         if (t == 1) {
             SectionLabel("This phone's key")
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            CardBox {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (publicKey.isBlank()) {
                         Text("No key yet. Tap Regenerate to create one.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                     } else {

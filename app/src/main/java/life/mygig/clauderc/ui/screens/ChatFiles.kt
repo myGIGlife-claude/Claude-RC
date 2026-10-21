@@ -57,7 +57,7 @@ private fun mimeOf(name: String) = when (name.substringAfterLast('.', "").lowerc
 /** A file Claude sent to the Claude app: its caption, images as thumbnails, other files to save. */
 @Composable
 fun FileCard(vm: MainViewModel, m: ChatMessage) {
-    Surface(shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.widthIn(max = 340.dp)) {
+    Surface(shape = RoundedCornerShape(22.dp, 22.dp, 22.dp, 6.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.widthIn(max = 340.dp)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (m.text.isNotBlank()) SelectionContainer { Text(linkify(m.text), style = MaterialTheme.typography.bodyMedium) }
             m.files.forEach { FileItem(vm, it) }
