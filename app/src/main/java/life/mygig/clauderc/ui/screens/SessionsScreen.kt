@@ -60,7 +60,10 @@ import life.mygig.clauderc.ui.LocalAppLock
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import life.mygig.clauderc.ui.MainViewModel
+import life.mygig.clauderc.ui.components.CalmDivider
+import life.mygig.clauderc.ui.components.CalmGroup
 import life.mygig.clauderc.ui.components.OneLine
+import life.mygig.clauderc.ui.components.SectionLabel
 import life.mygig.clauderc.ui.components.StatusDot
 import life.mygig.clauderc.ui.components.claudeHealth
 import life.mygig.clauderc.ui.components.isNarrow
@@ -158,11 +161,11 @@ private fun CodeSessions(vm: MainViewModel) {
             }
             if (working.isNotEmpty()) {
                 item { SectionLabel("Working") }
-                item { SessionGroup { working.forEachIndexed { i, s -> if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)); rowFor(s) } } }
+                item { CalmGroup { working.forEachIndexed { i, s -> if (i > 0) CalmDivider(); rowFor(s) } } }
             }
             if (idle.isNotEmpty()) {
                 item { SectionLabel("Idle") }
-                item { SessionGroup { idle.forEachIndexed { i, s -> if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)); rowFor(s) } } }
+                item { CalmGroup { idle.forEachIndexed { i, s -> if (i > 0) CalmDivider(); rowFor(s) } } }
             }
         }
     }
@@ -218,14 +221,6 @@ private class SessionActions(
 internal fun previewLine(preview: String): String =
     preview.lineSequence().map { it.trim().trimStart { c -> !c.isLetterOrDigit() } }.lastOrNull { it.isNotBlank() }.orEmpty()
 
-@Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text.uppercase(), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, letterSpacing = 1.1.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp, top = 8.dp),
-    )
-}
-
 /** One line under the tabs: how many sessions need you, are working, are idle. */
 @Composable
 private fun SessionSummary(needs: Int, working: Int, idle: Int) {
@@ -237,13 +232,6 @@ private fun SessionSummary(needs: Int, working: Int, idle: Int) {
                 StatusDot(health)
                 Text("$n $label", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-    }
-}
-
-@Composable
-private fun SessionGroup(content: @Composable () -> Unit) {
-    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column { content() }
     }
 }
 

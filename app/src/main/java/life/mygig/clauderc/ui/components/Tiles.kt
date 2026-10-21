@@ -72,8 +72,8 @@ fun StatusDot(health: Health, modifier: Modifier = Modifier) {
 fun SectionLabel(text: String, modifier: Modifier = Modifier) {
     Text(
         text.uppercase(),
-        modifier = modifier.padding(top = 6.dp),
-        style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.sp, fontWeight = FontWeight.SemiBold),
+        modifier = modifier.padding(start = 4.dp, top = 8.dp),
+        style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.1.sp, fontWeight = FontWeight.SemiBold),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
@@ -92,16 +92,16 @@ fun InfoTile(
     Surface(
         onClick = onClick ?: {},
         enabled = onClick != null,
-        modifier = modifier.fillMaxWidth().heightIn(min = 72.dp),
-        shape = RoundedCornerShape(16.dp),
-        color = if (warn) Color(0xFF2A2418) else MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier.fillMaxWidth().heightIn(min = 76.dp),
+        shape = RoundedCornerShape(20.dp),
+        color = if (warn) Color(0xFF2A2418) else MaterialTheme.colorScheme.surfaceContainerLow,
         border = when {
             warn -> BorderStroke(1.dp, Color(0xFF5C4A24))
             selected -> BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
             else -> null
         },
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatusDot(health)
                 Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -126,9 +126,22 @@ fun InfoTile(
 /** A rounded card for groups of rows. */
 @Composable
 fun CardBox(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-        Box(Modifier.padding(14.dp)) { content() }
+    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Box(Modifier.padding(16.dp)) { content() }
     }
+}
+
+/** Rows that belong together on one soft surface; put a divider between them with [CalmDivider]. */
+@Composable
+fun CalmGroup(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        androidx.compose.foundation.layout.Column { content() }
+    }
+}
+
+@Composable
+fun CalmDivider() {
+    androidx.compose.material3.HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 }
 
 /** label → value rows inside a CardBox. */

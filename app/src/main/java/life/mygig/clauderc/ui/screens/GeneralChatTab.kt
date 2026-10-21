@@ -58,8 +58,11 @@ import life.mygig.clauderc.api.GeneralChat
 import life.mygig.clauderc.api.Updates
 import life.mygig.clauderc.api.cleanGeneralTitle
 import life.mygig.clauderc.ui.MainViewModel
+import life.mygig.clauderc.ui.components.CalmDivider
+import life.mygig.clauderc.ui.components.CalmGroup
 import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.OneLine
+import life.mygig.clauderc.ui.components.SectionLabel
 import life.mygig.clauderc.ui.components.StatusDot
 import life.mygig.clauderc.ui.components.claudeHealth
 import life.mygig.clauderc.ui.theme.Term
@@ -118,16 +121,25 @@ fun GeneralChatTab(vm: MainViewModel) {
                 )
             }
             val now = System.currentTimeMillis() / 1000
-            items(chats, key = { it.id }) { c ->
-                GeneralChatRow(
-                    c,
-                    now = now,
-                    opening = opening == c.id,
-                    onOpen = { vm.general.open(c) },
-                    onRename = { renaming = c },
-                    onStop = { vm.general.stop(c.id) },
-                    onDelete = { confirmDelete = c },
-                )
+            @Composable
+            fun rowFor(c: GeneralChat) = GeneralChatRow(
+                c,
+                now = now,
+                opening = opening == c.id,
+                onOpen = { vm.general.open(c) },
+                onRename = { renaming = c },
+                onStop = { vm.general.stop(c.id) },
+                onDelete = { confirmDelete = c },
+            )
+            val running = chats.filter { it.running }
+            val saved = chats.filterNot { it.running }
+            if (running.isNotEmpty()) {
+                item { SectionLabel("Running") }
+                item { CalmGroup { running.forEachIndexed { i, c -> if (i > 0) CalmDivider(); rowFor(c) } } }
+            }
+            if (saved.isNotEmpty()) {
+                item { SectionLabel("Saved") }
+                item { CalmGroup { saved.forEachIndexed { i, c -> if (i > 0) CalmDivider(); rowFor(c) } } }
             }
         }
     }
@@ -157,51 +169,46 @@ private fun GeneralChatRow(
     var menu by remember { mutableStateOf(false) }
     val title = generalTitle(c)
     val waiting = c.running && c.waiting
-    val shape = RoundedCornerShape(16.dp)
-    Surface(
-        modifier = Modifier.fillMaxWidth().clip(shape).clickable(enabled = !opening, onClickLabel = "Open chat", onClick = onOpen),
-        shape = shape,
-        color = if (waiting) Color(0xFF2A2418) else MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = if (waiting) BorderStroke(1.dp, Color(0xFF5C4A24)) else null,
-    ) {
-        Column(Modifier.padding(start = 14.dp, top = 6.dp, bottom = 12.dp, end = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                when {
-                    opening -> CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                    c.running -> StatusDot(claudeHealth(c.busy, c.waiting))
-                    else -> StatusDot(Health.NONE)
-                }
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Box {
-                    IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More for $title") }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; onRename() })
-                        if (c.running) DropdownMenuItem(text = { Text("Stop") }, onClick = { menu = false; onStop() })
-                        DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; onDelete() })
-                    }
-                }
+    val state = when {
+        opening -> "starting…"
+        !c.running -> "Saved"
+        c.waiting -> "needs an answer"
+        c.busy -> "working"
+        else -> "running"
+    }
+    val time = relativeTime(if (c.updatedAt > 0) c.updatedAt else c.createdAt, now)
+    val line = if (c.running) previewLine(c.preview) else ""
+    val body: @Composable () -> Unit = {
+        Row(
+            Modifier.fillMaxWidth().clickable(enabled = !opening, onClickLabel = "Open chat", onClick = onOpen).padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            when {
+                opening -> CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                c.running -> StatusDot(claudeHealth(c.busy, c.waiting))
+                else -> StatusDot(Health.NONE)
             }
-            val state = when {
-                opening -> "starting…"
-                !c.running -> "Saved"
-                c.waiting -> "needs an answer"
-                c.busy -> "working"
-                else -> "running"
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    line.ifEmpty { state }, style = MaterialTheme.typography.bodySmall,
+                    color = if (waiting) WarnAmber else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
             }
-            val time = relativeTime(if (c.updatedAt > 0) c.updatedAt else c.createdAt, now)
-            Text(
-                listOf(time, state).filter { it.isNotEmpty() }.joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-                color = if (waiting) WarnAmber else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(end = 10.dp),
-            )
-            if (c.running && c.preview.isNotBlank()) {
-                Box(Modifier.padding(top = 6.dp, end = 10.dp).fillMaxWidth().background(Term.Field, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 10.dp)) {
-                    Text(c.preview, color = Term.Fg, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, lineHeight = 17.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Text(time, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More for $title") }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; onRename() })
+                    if (c.running) DropdownMenuItem(text = { Text("Stop") }, onClick = { menu = false; onStop() })
+                    DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; onDelete() })
                 }
             }
         }
     }
+    if (waiting) {
+        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = Color(0xFF2A2418), border = BorderStroke(1.dp, Color(0xFF5C4A24))) { body() }
+    } else body()
 }
 
 @Composable
