@@ -3073,9 +3073,15 @@ do_youtube_login_poll() {
   esac
   rt="$(jq -r '.refresh_token // empty' <<<"$resp")"; at="$(jq -r '.access_token // empty' <<<"$resp")"
   [[ -n "$rt" && -n "$at" ]] || { rm -f "$YT_PENDING"; api_err not_logged_in "Google didn't return a lasting login. Start again."; }
-  chan="$(curl_auth "Authorization: Bearer $at" "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true" |
-    jq -r '.items[0].snippet.title // empty')"
-  [[ -n "$chan" ]] || { rm -f "$YT_PENDING"; api_err not_logged_in "Signed in, but that Google account has no YouTube channel."; }
+  # (no -f: on an error we want Google's reason, not silence)
+  resp="$(printf 'header = "Authorization: Bearer %s"\n' "$at" | curl -sS --max-time 15 -K - "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true" 2>/dev/null)"
+  chan="$(jq -r '.items[0].snippet.title // empty' <<<"$resp" 2>/dev/null)"
+  if [[ -z "$chan" ]]; then
+    rm -f "$YT_PENDING"
+    err="$(jq -r '.error.message // empty' <<<"$resp" 2>/dev/null | cut -c1-160)"
+    [[ -n "$err" ]] && api_err not_logged_in "Signed in, but YouTube refused the channel lookup: $err If it says the YouTube Data API isn't enabled, enable 'YouTube Data API v3' in the Google Cloud project that owns this OAuth client, then try again."
+    api_err not_logged_in "Signed in, but that Google identity has no YouTube channel. If your channel belongs to a Brand Account, start again and pick the channel's own account (not your personal one) when Google asks which account to use."
+  fi
   set_env YOUTUBE_CLIENT_ID "$id"; set_env YOUTUBE_CLIENT_SECRET "$secret"; set_env YOUTUBE_REFRESH_TOKEN "$rt"
   rm -f "$YT_PENDING"
   local tmp; tmp="$(mktemp "$SERVICES_INFO.XXXXXX")"
