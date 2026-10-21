@@ -18,9 +18,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -30,11 +27,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -74,7 +74,7 @@ private fun termText(size: Int) = TextStyle(
     shadow = Shadow(color = Term.Fg.copy(alpha = 0.35f), blurRadius = 8f),
 )
 
-/** A full-screen, green-on-black window with a back arrow and title. */
+/** A full-screen terminal with a calm title header and green-on-black content. */
 @Composable
 private fun TerminalWindow(title: String, subtitle: String, onClose: () -> Unit, actions: @Composable () -> Unit = {}, content: @Composable ColumnScope.() -> Unit) {
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
@@ -86,7 +86,7 @@ private fun TerminalWindow(title: String, subtitle: String, onClose: () -> Unit,
             ) {
                 IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Term.Head) }
                 Column(Modifier.weight(1f)) {
-                    Text(title, color = Term.Head, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                    Text(title, color = Term.Head, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.headlineSmall)
                     Text(subtitle, color = Term.Label, fontSize = 12.sp)
                 }
                 actions()
@@ -115,6 +115,7 @@ private fun TermButton(label: String, onClick: () -> Unit, enabled: Boolean = tr
 
 /** A session's screen, live, with keys to answer its prompts. */
 @Composable
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 fun TailScreen(vm: MainViewModel, tail: TailResult) {
     val busy by vm.busy.collectAsStateWithLifecycle()
     val updatedAt by vm.tailUpdatedAt.collectAsStateWithLifecycle()
@@ -147,11 +148,28 @@ fun TailScreen(vm: MainViewModel, tail: TailResult) {
             )
         }
         Column(Modifier.fillMaxWidth().background(Term.Panel).padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("ANSWER THE PROMPT", color = Term.Label, fontSize = 11.sp, letterSpacing = 1.sp)
+            Text(
+                "ANSWER THE PROMPT",
+                modifier = Modifier.padding(start = 4.dp, top = 8.dp),
+                color = Term.Label,
+                style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.1.sp, fontWeight = FontWeight.SemiBold),
+            )
             val keys = listOf("1" to "1", "2" to "2", "3" to "3", "Up" to "↑", "Down" to "↓", "y" to "y", "n" to "n", "Escape" to "Esc")
-            LazyVerticalGrid(columns = GridCells.Fixed(5), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(100.dp)) {
-                keys.forEach { (k, label) -> item { TermButton(label, { vm.sendKey(k) }, enabled = busy == null) } }
-                item(span = { GridItemSpan(2) }) { TermButton("Enter ⏎", { vm.sendKey("Enter") }, enabled = busy == null, primary = true) }
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                keys.forEach { (k, label) ->
+                    AssistChip(
+                        onClick = { vm.sendKey(k) }, enabled = busy == null,
+                        label = { Text(label, fontFamily = FontFamily.Monospace, color = Term.Head) },
+                        colors = AssistChipDefaults.assistChipColors(containerColor = Term.Key, disabledContainerColor = Term.Key.copy(alpha = 0.5f)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Term.Border),
+                    )
+                }
+                AssistChip(
+                    onClick = { vm.sendKey("Enter") }, enabled = busy == null,
+                    label = { Text("Enter ⏎", fontFamily = FontFamily.Monospace, color = Term.Head) },
+                    colors = AssistChipDefaults.assistChipColors(containerColor = Term.Key),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Term.Border),
+                )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Switch(checked = live, onCheckedChange = { live = it }, colors = SwitchDefaults.colors(checkedTrackColor = Term.Dim, checkedThumbColor = Term.Fg))
@@ -200,13 +218,13 @@ fun RunScreen(vm: MainViewModel) {
             )
             OutlinedTextField(
                 value = command, onValueChange = { command = it }, label = { Text("Command (type or paste)") },
-                minLines = 2, maxLines = 5, modifier = Modifier.fillMaxWidth(), colors = fieldColors,
+                minLines = 2, maxLines = 5, modifier = Modifier.fillMaxWidth(), colors = fieldColors, shape = RoundedCornerShape(20.dp),
                 textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp),
                 keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
             )
             OutlinedTextField(
                 value = password, onValueChange = { password = it }, label = { Text("sudo password (only if it uses sudo)") },
-                singleLine = true, modifier = Modifier.fillMaxWidth(), colors = fieldColors,
+                singleLine = true, modifier = Modifier.fillMaxWidth(), colors = fieldColors, shape = RoundedCornerShape(20.dp),
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
             )

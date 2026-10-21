@@ -70,6 +70,8 @@ import life.mygig.clauderc.ui.MigrateSignOut
 import life.mygig.clauderc.ui.MigrateStep
 import life.mygig.clauderc.ui.MigrateUi
 import life.mygig.clauderc.ui.components.CardBox
+import life.mygig.clauderc.ui.components.CalmDivider
+import life.mygig.clauderc.ui.components.CalmGroup
 import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.InfoRows
 import life.mygig.clauderc.ui.components.SectionLabel
@@ -220,6 +222,7 @@ private fun MigrateChoose(vm: MainViewModel, ui: MigrateUi, servers: List<Server
         onClick = { vm.migrateClose(); vm.addServer() },
         enabled = !ui.busy, modifier = Modifier.fillMaxWidth(),
     ) { Text("Add the new server") }
+    SectionLabel("Servers")
     MigrateServerPicker("Move from", from, servers, !ui.busy) { vm.migrateSetServers(it.id, to?.id.orEmpty()) }
     MigrateServerPicker("Move to", to, servers, !ui.busy) { vm.migrateSetServers(from?.id.orEmpty(), it.id) }
     if (same) Text("Pick two different servers.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -310,12 +313,13 @@ private fun MigrateStopSessions(vm: MainViewModel, ui: MigrateUi) {
     if (ui.sessions.isEmpty()) {
         Text(if (ui.busy) "Checking…" else "No session is running.", style = MaterialTheme.typography.bodyMedium)
     }
-    ui.sessions.forEach { s ->
-        CardBox {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    if (ui.sessions.isNotEmpty()) CalmGroup {
+        ui.sessions.forEachIndexed { index, s ->
+            if (index > 0) CalmDivider()
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     StatusDot(if (s.waiting) Health.BAD else if (s.busy) Health.WARN else Health.OK)
-                    Text(s.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                    Text(s.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                 }
                 when {
                     s.waiting -> MigrateHint("Waiting for your answer. Answer it (or stop it), then tap Wait. Stopping it now drops the question.")

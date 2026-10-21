@@ -306,7 +306,7 @@ fun linkify(text: String): AnnotatedString {
 /** Claude is asking something (permission, MCP approval): its screen and the answer keys. */
 @Composable
 private fun PromptCard(vm: MainViewModel, screen: String, enabled: Boolean) {
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), shape = RoundedCornerShape(14.dp), color = Color(0xFF2A2418)) {
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), shape = RoundedCornerShape(20.dp), color = Color(0xFF2A2418)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Claude is asking", color = WarnAmber, fontWeight = FontWeight.SemiBold)
             Box(Modifier.fillMaxWidth().background(Term.Bg, RoundedCornerShape(10.dp)).padding(10.dp)) {

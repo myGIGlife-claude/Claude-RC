@@ -2,7 +2,6 @@ package life.mygig.clauderc.ui.screens
 
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -20,7 +18,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,7 +44,6 @@ import life.mygig.clauderc.ui.components.InfoRows
 import life.mygig.clauderc.ui.components.OneLine
 import life.mygig.clauderc.ui.components.SectionLabel
 import life.mygig.clauderc.ui.components.StatusDot
-import life.mygig.clauderc.ui.components.color
 import life.mygig.clauderc.ui.openUrl
 
 /** What a detail page shows and can do. */
@@ -195,18 +191,13 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(page.title, style = MaterialTheme.typography.headlineSmall)
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            color = when (page.health) { Health.OK -> Color(0xFF16261E); Health.BAD -> Color(0xFF2A1718); Health.WARN -> Color(0xFF2A2418); else -> MaterialTheme.colorScheme.surfaceContainerHigh },
-            border = BorderStroke(1.dp, page.health.color().copy(alpha = 0.45f)),
-        ) {
-            Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(page.title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp))
+        CardBox {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StatusDot(page.health)
-                Text(page.statusLine, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Text(page.statusLine, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
             }
         }
         if (page.about != null || page.rows.isNotEmpty()) {
