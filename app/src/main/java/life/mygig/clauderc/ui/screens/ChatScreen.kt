@@ -57,6 +57,7 @@ import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.runtime.Composable
@@ -97,6 +98,11 @@ fun ChatScreen(vm: MainViewModel, session: String) {
     val busy by vm.busy.collectAsStateWithLifecycle()
     val pending by vm.chats.chatPending.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    // Picked files wait here until the composer adds them to the message. The picker lives at this level so it survives the composer being rebuilt while the picker is open.
+    val attached = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) vm.chats.attachFiles(context.contentResolver, uris) { attached += it }
+    }
     // The speaker switch stays as the owner left it: across chats and app restarts, until tapped again.
     val voicePrefs = remember { vm.chats.voicePrefs }
     var speak by remember { mutableStateOf(voicePrefs.getBoolean("speak", false)) }
@@ -187,7 +193,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                     androidx.compose.runtime.key(vm.chats.chatSession.collectAsStateWithLifecycle().value) { Messages(vm, voice, chat?.messages.orEmpty(), pending, Modifier.weight(1f)) }
                     chat?.takeIf { it.waiting }?.let { c -> c.ask?.takeIf { it.isNotEmpty() }?.let { AskCard(vm, it, busy == null) } ?: PromptCard(vm, c.screen.orEmpty(), busy == null) }
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp)) }
-                    Composer(vm, working = chat?.busy == true, enabled = busy == null && chat != null)
+                    Composer(vm, working = chat?.busy == true, enabled = busy == null && chat != null, attached = attached, onPick = { pick.launch(arrayOf("*/*")) })
                 }
             }
           }
@@ -282,25 +288,40 @@ private fun forSpeech(t: String) = t
     .replace(URL_RE, " link ")
     .replace(Regex("[*#_`>|]"), "")
 
-private val URL_RE = Regex("""https?://[^\s<>"')\]]+""")
+private val URL_RE = Regex("""https?://[^\s<>"'`*)\]’”]+""")
 
-/** The text with its web addresses tappable (opens the browser). */
+/** The text with its web addresses tappable (opens the browser), **bold** and `code` shown as such instead of with their marks. */
 @Composable
 fun linkify(text: String): AnnotatedString {
     val style = TextLinkStyles(SpanStyle(color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline))
-    return remember(text, style) {
+    val codeBg = MaterialTheme.colorScheme.surfaceContainerHighest
+    return remember(text, style, codeBg) {
         buildAnnotatedString {
-            var at = 0
-            for (m in URL_RE.findAll(text)) {
-                // Sentence punctuation right after a link isn't part of it.
-                val url = m.value.trimEnd('.', ',', ';', ':', '!', '?')
-                append(text.substring(at, m.range.first))
-                withLink(LinkAnnotation.Url(url, style)) { append(url) }
-                at = m.range.first + url.length
+            var pos = 0
+            for (m in INLINE_RE.findAll(text)) {
+                appendLinked(text.substring(pos, m.range.first), style)
+                val bold = m.groups[1]?.value
+                if (bold != null) withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { appendLinked(bold, style) }
+                else withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBg)) { appendLinked(m.groups[2]?.value.orEmpty(), style) }
+                pos = m.range.last + 1
             }
-            append(text.substring(at))
+            appendLinked(text.substring(pos), style)
         }
     }
+}
+
+private val INLINE_RE = Regex("""\*\*(.+?)\*\*|`([^`\n]+)`""")
+
+private fun AnnotatedString.Builder.appendLinked(segment: String, style: TextLinkStyles) {
+    var at = 0
+    for (m in URL_RE.findAll(segment)) {
+        // Sentence punctuation or a closing quote right after a link isn't part of it.
+        val url = m.value.trimEnd('.', ',', ';', ':', '!', '?', '\'', '"', '_')
+        append(segment.substring(at, m.range.first))
+        withLink(LinkAnnotation.Url(url, style)) { append(url) }
+        at = m.range.first + url.length
+    }
+    append(segment.substring(at))
 }
 
 /** Claude is asking something (permission, MCP approval): its screen and the answer keys. */
@@ -323,7 +344,7 @@ private fun PromptCard(vm: MainViewModel, screen: String, enabled: Boolean) {
 }
 
 @Composable
-private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
+private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean, attached: androidx.compose.runtime.snapshots.SnapshotStateList<String>, onPick: () -> Unit) {
     val context = LocalContext.current
     val session = vm.chats.chatSession.value.orEmpty()
     var field by remember(session) { vm.chats.draft(session).let { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(it, androidx.compose.ui.text.TextRange(it.length))) } }
@@ -331,30 +352,12 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
     // Programmatic changes (chips, attach, clear) put the cursor at the end; a plain String field would keep the old position.
     fun setText(s: String) { field = androidx.compose.ui.text.input.TextFieldValue(s, androidx.compose.ui.text.TextRange(s.length)) }
     LaunchedEffect(session, text) { if (session.isNotEmpty()) vm.chats.setDraft(session, text) }
-    // Attach: the file goes into the project's uploads/ folder; its path goes in the message.
-    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-            if (c.moveToFirst()) c.getString(0) else null
-        } ?: "file"
-        // Read at most 15 MB + 1 byte, so a huge file is refused without being loaded whole.
-        val bytes = runCatching {
-            context.contentResolver.openInputStream(uri)?.use { s ->
-                val out = java.io.ByteArrayOutputStream()
-                val buf = ByteArray(64 * 1024)
-                while (true) {
-                    val n = s.read(buf)
-                    if (n < 0) break
-                    if (out.size() + n > 15 * 1024 * 1024) return@use null
-                    out.write(buf, 0, n)
-                }
-                out.toByteArray()
-            }
-        }.getOrNull()
-        if (bytes == null || bytes.isEmpty() || bytes.size > 15 * 1024 * 1024) {
-            vm.say("That file couldn't be read, or it's bigger than 15 MB.")
-        } else {
-            vm.chats.uploadToChat(name, bytes) { path -> setText((text.trimEnd() + " [attached: $path]").trim()) }
+    // Files picked in the chat (see ChatScreen) arrive here and go into the message as [attached: path].
+    LaunchedEffect(attached.size) {
+        if (attached.isNotEmpty()) {
+            val paths = attached.toList()
+            attached.clear()
+            setText((field.text.trimEnd() + paths.joinToString("") { " [attached: $it]" }).trim())
         }
     }
     // Typing "/" suggests commands: the best match shows as faded text in the box, all matches as chips above it.
@@ -374,7 +377,7 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean) {
         }
         Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
             Row(Modifier.padding(start = 4.dp, end = 5.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                IconButton(onClick = { vm.chats.externalScreen(); pick.launch(arrayOf("*/*")) }, enabled = enabled, modifier = Modifier.height(48.dp)) {
+                IconButton(onClick = { vm.chats.externalScreen(); onPick() }, enabled = enabled, modifier = Modifier.height(48.dp)) {
                     Icon(Icons.Filled.AttachFile, contentDescription = "Attach a file or photo")
                 }
                 OutlinedTextField(

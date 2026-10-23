@@ -298,6 +298,48 @@ class ChatController(
         }
     }
 
+    /** Picked files (any number): read off the main thread, sent to the project's uploads/ folder one by one, each retried twice; [onPath] gets each saved path. */
+    fun attachFiles(resolver: android.content.ContentResolver, uris: List<android.net.Uri>, onPath: (String) -> Unit) {
+        val session = _chatSession.value ?: return
+        val pin = chatPin ?: return
+        tools.action("Attaching ${uris.size} file" + (if (uris.size == 1) "" else "s") + "…") {
+            for (uri in uris) {
+                val picked = withContext(Dispatchers.IO) { readPicked(resolver, uri) }
+                if (picked == null) { tools.say("A file couldn't be read, or it's bigger than 15 MB."); continue }
+                val (name, bytes) = picked
+                val b64 = withContext(Dispatchers.Default) { android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP) }
+                var saved: String? = null
+                for (attempt in 1..3) {
+                    try { saved = api.upload(session, pin, name, b64).path; break }
+                    catch (e: ApiException) { if (attempt == 3) tools.report(e) else delay(800) }
+                }
+                saved?.let(onPath)
+            }
+        }
+    }
+
+    /** The picked file's name and bytes (at most 15 MB, so a huge file is refused without being loaded whole), or null. */
+    private fun readPicked(resolver: android.content.ContentResolver, uri: android.net.Uri): Pair<String, ByteArray>? {
+        val name = resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        } ?: "file"
+        val limit = 15 * 1024 * 1024
+        val bytes = runCatching {
+            resolver.openInputStream(uri)?.use { s ->
+                val out = java.io.ByteArrayOutputStream()
+                val buf = ByteArray(64 * 1024)
+                while (true) {
+                    val n = s.read(buf)
+                    if (n < 0) break
+                    if (out.size() + n > limit) return@use null
+                    out.write(buf, 0, n)
+                }
+                out.toByteArray()
+            }
+        }.getOrNull()
+        return if (bytes == null || bytes.isEmpty() || bytes.size > limit) null else name to bytes
+    }
+
     private val _chatLog = MutableStateFlow<List<ChatLogEntry>?>(null)
     val chatLog = _chatLog.asStateFlow()
     fun loadChatLog() = tools.action("Loading the chat log…") { _chatLog.value = api.chatLog() }
