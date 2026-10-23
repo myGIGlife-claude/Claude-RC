@@ -1,4 +1,4 @@
-Last updated: 2026-10-16 12:00 UTC
+Last updated: 2026-10-21 20:00 UTC
 
 ## Goal
 cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage Claude Code sessions on your own server from a phone.
