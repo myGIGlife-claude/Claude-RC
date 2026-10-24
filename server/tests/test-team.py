@@ -36,7 +36,7 @@ claude_stub.write_text(stub_text); claude_stub.chmod(0o755)
 env = {**os.environ, "HOME": str(test_home), "CLAUDERC_SANDBOX": "off", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t", "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(claude_stub), "CLAUDERC_CODEX": str(HERE / "stubs" / "codex"), "CLAUDERC_GEMINI": str(HERE / "stubs" / "gemini"),
        "ANTHROPIC_API_KEY": "secret-should-not-leak", "CLAUDE_CODE_OAUTH_TOKEN": "main-token", "CLAUDECODE": "1", "CLAUDERC_TEST_STUB_STATE": str(tmp / "stub"), "STUB_STATE": str(tmp / "stub"),
        "SSH_AUTH_SOCK": "/tmp/fake-agent.sock", "GH_TOKEN": "fake-gh-token", "GITHUB_TOKEN": "fake-github-token",
-       "CLAUDERC_TEST_SECRET": "service-token", "CLAUDERC_WORKER_SLOTS": "3", "CLAUDERC_USAGE_TTL": "0", "CLAUDERC_START_GAP": "0",
+       "CLAUDERC_TEST_SECRET": "service-token", "CLAUDERC_WORKER_SLOTS": "3", "CLAUDERC_USAGE_TTL": "0",
        "CLAUDERC_USAGE_URL": f"http://127.0.0.1:{usage_srv.server_port}/", "CLAUDERC_SSH": str(HERE / "stubs" / "ssh"), "CLAUDERC_SCP": str(HERE / "stubs" / "scp")}
 cfg.parent.mkdir(parents=True, exist_ok=True)
 (cfg.parent / "env").write_text("export CLAUDERC_TEST_SECRET='service-token'\n")
@@ -64,9 +64,9 @@ def attach(folder, names):
     f.write_text(json.dumps(names))
 
 
-def spawn(folder):
+def spawn(folder, e=None):
     return subprocess.Popen([sys.executable, str(HERE.parent / "clauderc-team"), "mcp"], stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE, text=True, env=env, cwd=folder)
+                            stdout=subprocess.PIPE, text=True, env=e or env, cwd=folder)
 
 
 proc = spawn(tmp)
@@ -374,6 +374,20 @@ err, text = tool("merge", task_id=t1)
 assert err and "nothing changed" in text, text
 assert g("status", "--porcelain").strip() == "", "a failed merge leaves the checkout clean"
 tool("discard", task_id=t1)
+# The owner is in the middle of their own merge: merge refuses and leaves it alone (no merge --abort of the owner's work).
+err, t1 = tool("delegate", worker="research", task="WRITEFILE while the owner merges")
+tool("wait", task_id=t1, timeout_s=30)
+here = g("rev-parse", "--abbrev-ref", "HEAD").strip()
+g("checkout", "-qb", "owner-side"); (repo / "a.txt").write_text("side\n"); g("commit", "-qam", "side")
+g("checkout", "-q", here); (repo / "a.txt").write_text("mine\n"); g("commit", "-qam", "mine")
+assert subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "owner-side"], cwd=repo, capture_output=True).returncode
+merge_head = g("rev-parse", "MERGE_HEAD").strip()
+err, text = tool("merge", task_id=t1)
+assert err and "middle of a merge" in text, text
+assert g("rev-parse", "MERGE_HEAD").strip() == merge_head and "<<<<<<<" in (repo / "a.txt").read_text(), "the owner's merge is untouched"
+g("merge", "--abort"); g("branch", "-D", "owner-side")
+assert g("status", "--porcelain").strip() == "" and (repo / "a.txt").read_text() == "mine\n"
+tool("discard", task_id=t1)
 
 # A git project that can't get its own branch must not run the worker in the main checkout.
 (cfg / "research" / "trees").rename(cfg / "research" / "trees.bak")
@@ -438,6 +452,17 @@ err, text = tool("merge", task_id=tid)
 assert not err, text
 err, text = tool("reply", task_id=tid2, message="again")
 assert err and "merged or discarded" in text, text
+# Two follow-ups can't run at once on one branch: they would share the clone.
+err, tid = tool("delegate", worker="research", task="base for replies")
+tool("wait", task_id=tid, timeout_s=30)
+err, r1 = tool("reply", task_id=tid, message="first SLOW")
+assert not err, r1
+err, text = tool("reply", task_id=tid, message="second")
+assert err and "still running" in text, text
+tool("wait", task_id=r1, timeout_s=30)
+err, r2 = tool("reply", task_id=tid, message="second, after the first")
+assert not err, r2
+tool("wait", task_id=r2, timeout_s=30); tool("discard", task_id=tid)
 
 # A worker that hit its usage limit is a failed task, not a finished one.
 err, tid = tool("delegate", worker="research", task="LIMIT")
@@ -622,20 +647,16 @@ err, a2 = tool("delegate", worker="writer1", task="fresh b")
 err, text = tool("wait", task_id=a2, timeout_s=1)
 assert not err and not text.startswith("Queued"), text              # a fresh token: runs side by side
 tool("wait", task_id=a1, timeout_s=30); tool("wait", task_id=a2, timeout_s=30); tool("discard", task_id=a1); tool("discard", task_id=a2)
-# Starts of one worker's runs are spaced apart: two claude processes starting together can log the worker out.
+# The slot wrapper on its own: it runs the command with its arguments and exit code, and lets go of its slot.
 import runpy
 ns = runpy.run_path(str(HERE.parent / "clauderc-team"), run_name="not_main")
-lk = tmp / "gap"; lk.mkdir()
-def start_wrapper(tag):
-    return subprocess.Popen(["sh", "-c", ns["SLOT_SH"], "slot", str(lk / "run.lock"), "3", str(lk / f"{tag}.started"), str(lk / "none.json"), "1000", ns["TOKEN_LEFT_PY"], "3",
-                             "sh", "-c", f"date +%s.%N >{lk}/{tag}.at"])
-w1, w2 = start_wrapper("one"), start_wrapper("two")
-w1.wait(timeout=30); w2.wait(timeout=30)
-at = [float((lk / f"{x}.at").read_text()) for x in ("one", "two")]
-assert abs(at[0] - at[1]) >= 2.5, at                            # 3 s gap between the two starts
-orphan = subprocess.Popen(["sh", "-c", ns["SLOT_SH"], "slot", str(lk / "run.lock"), "3", str(lk / "orphan.started"), str(lk / "none.json"), "1000", ns["TOKEN_LEFT_PY"], "0", "sh", "-c", "sleep 3 &"])
+lk = tmp / "slots"; lk.mkdir()
+slot = lambda tag, *cmd: ["sh", "-c", ns["SLOT_SH"], "slot", str(lk / "run.lock"), "3", str(lk / f"{tag}.started"), str(lk / "none.json"), "1000", ns["TOKEN_LEFT_PY"], *cmd]
+r = subprocess.run(slot("args", "sh", "-c", 'echo "$1 $2"; exit 4', "x", "a b", "c"), capture_output=True, text=True, timeout=10)
+assert r.returncode == 4 and r.stdout == "a b c\n" and (lk / "args.started").exists(), (r.returncode, r.stdout)
+orphan = subprocess.Popen(slot("orphan", "sh", "-c", "sleep 3 &"))
 orphan.wait(timeout=5)
-free = subprocess.run(["sh", "-c", ns["SLOT_SH"], "slot", str(lk / "run.lock"), "3", str(lk / "free.started"), str(lk / "none.json"), "1000", ns["TOKEN_LEFT_PY"], "0", "true"], timeout=5)
+free = subprocess.run(slot("free", "true"), timeout=5)
 assert free.returncode == 0, "background worker descendants must not retain slot locks"
 # A logged-out Claude leaves a credentials file without a token: that is not "signed in".
 (cfg / "writer2" / "home" / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {}}))
@@ -671,7 +692,28 @@ err, tid = tool("delegate", worker="writer1", task="fresh sync 3")
 tool("wait", task_id=tid, timeout_s=30); tool("discard", task_id=tid)
 assert (wsk / "rc-demo" / "SKILL.md").read_text().endswith("v2\n") and (wsk / ".rc-version").read_text() == "2026-11-01\n", "a new VERSION refreshes it"
 import shutil; shutil.rmtree(kp)
+attach(repo, {"writer1": {"mode": "bypassPermissions"}})
+err, tid = tool("delegate", worker="writer1", task="bypass with the sandbox off")
+assert not err, tid                                              # the owner switched the sandbox off: their choice
+tool("wait", task_id=tid, timeout_s=30); tool("discard", task_id=tid)
 
+proc.stdin.close()
+proc.wait(timeout=5)
+# Sandbox 'auto' without a usable bubblewrap: other modes run unsandboxed as before, bypassPermissions is refused (fail closed).
+proc = spawn(repo, {**env, "CLAUDERC_SANDBOX": "auto", "CLAUDERC_BWRAP": "/nonexistent/bwrap"})
+_id = 0
+rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}})
+attach(repo, {"writer1": {"mode": "bypassPermissions"}, "auditor": {"mode": "acceptEdits"}})
+assert {w["name"]: w["sandbox"] for w in by_name().values()} == {"writer1": "unavailable", "auditor": "unavailable"}
+before = sorted(p.name for p in (cfg / "writer1" / "tasks").glob("*.json"))
+err, text = tool("delegate", worker="writer1", task="x")
+assert err and "bypassPermissions" in text and "bubblewrap" in text and "Nothing was started" in text, text
+assert sorted(p.name for p in (cfg / "writer1" / "tasks").glob("*.json")) == before, "no task record, no clone"
+err, tid = tool("delegate", worker="auditor", task="acceptEdits still runs")
+assert not err, tid
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err, text
+tool("discard", task_id=tid)
 proc.stdin.close()
 proc.wait(timeout=5)
 # ---- the worker sandbox (bubblewrap): what the argv grants, and (when bwrap works here) what a run can really see ----
@@ -716,4 +758,66 @@ os.environ["CLAUDERC_SANDBOX"] = "off"; assert ns2["sandbox_mode"]() == "off"; o
 os.environ["CLAUDERC_BWRAP"] = "/nonexistent/bwrap"; ns3 = runpy.run_path(str(HERE.parent / "clauderc-team"), run_name="not_main")
 assert ns3["bwrap_ok"]() is False, "no bubblewrap: not usable"
 os.environ.pop("CLAUDERC_BWRAP")
+
+# ---- seal runs git as the owner in the worker's clone: nothing the worker wrote into it may make that git run a command ----
+os.environ["XDG_CONFIG_HOME"] = str(tmp / "cfg3")
+w3 = tmp / "cfg3" / "claude-launcher" / "workers" / "w"; (w3 / "home").mkdir(parents=True); (w3 / "tasks").mkdir()
+ns4 = runpy.run_path(str(HERE.parent / "clauderc-team"), run_name="not_main")
+repo3 = tmp / "repo3"; repo3.mkdir()
+g("init", "-q", c=repo3); (repo3 / "a.txt").write_text("one\n"); g("add", ".", c=repo3); g("commit", "-qm", "init", c=repo3)
+t3 = ns4["workspace"]("w", "c0ffee00", str(repo3))
+t3.pop("cwd"); t3.update(id="c0ffee00", worker="w", task="sealed")
+wt3, br3 = Path(t3["wt"]), t3["branch"]
+pwn = tmp / "pwned"
+with open(wt3 / ".git" / "config", "a") as f:
+    f.write(f'[filter "x"]\n\tclean = touch {pwn}; cat\n\tsmudge = cat\n\trequired = true\n[diff "x"]\n\ttextconv = touch {pwn}; cat\n'
+            f'[core]\n\tfsmonitor = touch {pwn}\n\tpager = touch {pwn}\n\tsshCommand = touch {pwn}\n')
+(wt3 / ".gitattributes").write_text("* filter=x diff=x\n")
+(wt3 / ".git" / "info").mkdir(exist_ok=True); (wt3 / ".git" / "info" / "attributes").write_text("* filter=x\n")
+(wt3 / "a.txt").write_text("changed\n"); (wt3 / "new.txt").write_text("work\n")
+stat = ns4["seal"](t3)
+assert not pwn.exists(), "a filter/textconv/fsmonitor/pager in the worker's clone must never run"
+assert "new.txt" in stat and "a.txt" in stat and ".gitattributes" in stat, stat
+assert g("show", f"{br3}:new.txt", c=repo3) == "work\n" and g("show", f"{br3}:a.txt", c=repo3) == "changed\n", "the work is committed as it is"
+assert "[filter" not in (wt3 / ".git" / "config").read_text() and not (wt3 / ".git" / "info" / "attributes").exists()
+# A config symlinked to an owner file is replaced, not written through; a commondir can't point the commit at the project.
+owner_file = tmp / "owner.txt"; owner_file.write_text("owner\n")
+(wt3 / ".git" / "config").unlink(); (wt3 / ".git" / "config").symlink_to(owner_file)
+(wt3 / ".git" / "commondir").write_text(str(repo3 / ".git"))
+(wt3 / "more.txt").write_text("more\n")
+head3 = g("rev-parse", "HEAD", c=repo3)
+stat = ns4["seal"](t3)
+assert owner_file.read_text() == "owner\n" and not (wt3 / ".git" / "config").is_symlink() and not (wt3 / ".git" / "commondir").exists()
+assert "more.txt" in g("ls-tree", "-r", "--name-only", br3, c=repo3) and g("rev-parse", "HEAD", c=repo3) == head3, "committed in the clone only"
+assert g("rev-parse", br3, c=wt3) == g("rev-parse", br3, c=repo3), "the clone's own branch got the commit, then the project fetched it"
+assert not pwn.exists()
+if ns4["bwrap_ok"]():   # with the sandbox on, seal's git runs inside it too
+    t3["sandbox"] = "on"; (wt3 / "boxed.txt").write_text("boxed\n")
+    ns4["seal"](t3)
+    assert g("show", f"{br3}:boxed.txt", c=repo3) == "boxed\n", "sealed inside the sandbox"
+# A .git that isn't the clone's own folder any more (a file pointing elsewhere) is refused.
+fake = tmp / "fakewt"; fake.mkdir(); (fake / ".git").write_text(f"gitdir: {repo3 / '.git'}\n"); (fake / "x.txt").write_text("x\n")
+try:
+    ns4["seal"]({**t3, "wt": str(fake)}); raise AssertionError("seal must refuse a .git file")
+except ns4["ToolError"]:
+    pass
+assert "x.txt" not in g("ls-files", c=repo3) and g("rev-parse", "HEAD", c=repo3) == head3
+
+# ---- pruning old records keeps a clone that a newer open reply still uses ----
+trees3, tasks3, long_ago = w3 / "trees", w3 / "tasks", time.time() - 15 * 86400
+def rec(i, **k):
+    (tasks3 / f"{i}.json").write_text(json.dumps({"id": i, "worker": "w", "status": "done", **k}))
+rec("aaaa0001", branch="cluster/w/aaaa0001", finished=long_ago); (trees3 / "aaaa0001").mkdir(parents=True)
+rec("aaaa0002", branch="cluster/w/aaaa0001", finished=time.time())   # a recent reply on the same clone, not closed
+rec("cccc0001", finished=long_ago)                                    # an old task without a branch
+ns4["live_tasks"]()
+assert (trees3 / "aaaa0001").is_dir() and (tasks3 / "aaaa0001.json").exists(), "the reply's clone is kept"
+assert not (tasks3 / "cccc0001.json").exists(), "other old records are still pruned"
+rec("aaaa0002", branch="cluster/w/aaaa0001", finished=time.time(), closed="merged")
+ns4["live_tasks"]()
+assert not (trees3 / "aaaa0001").exists() and not (tasks3 / "aaaa0001.json").exists() and (tasks3 / "aaaa0002.json").exists(), "closed: pruned"
+rec("bbbb0001", branch="cluster/w/bbbb0001", finished=long_ago); (trees3 / "bbbb0001").mkdir()
+rec("bbbb0002", branch="cluster/w/bbbb0001", finished=long_ago)      # every task on the branch is old: all go
+ns4["live_tasks"]()
+assert not (trees3 / "bbbb0001").exists() and not list(tasks3.glob("bbbb*")), list(tasks3.iterdir())
 print("test-team: ok")

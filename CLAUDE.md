@@ -90,15 +90,16 @@ hostnames, IPs, emails, org names, keys. They live in
   `server/tests/test-api.sh` inherits its own `CLAUDE_CONFIG_DIR`, and the stub `claude auth login` overwrote the worker's
   real credentials (`{"claudeAiOauth":{}}`). The tests now unset `CLAUDE_CONFIG_DIR` and the stub refuses to write outside
   /tmp. (Concurrent token refresh was the first guess: `clauderc-team` still starts a run alone when its token would expire
-  mid-run, and `CLAUDERC_START_GAP` can space starts, off by default.) Never run `claude` with a worker's
+  mid-run.) Never run `claude` with a worker's
   `CLAUDE_CONFIG_DIR` by hand. The usage endpoint rate-limits (429): lookups go through one shared file cache (`usage-cache/`).
 - Plugins managed by `npx skills` (lock file `~/.agents/.skill-lock.json`) are updated by the `skills-update` action,
   not `claude plugin update`; `claude-plugin-updates` gives each installed plugin an update state for the app's lights.
 - `claude-backup` (server/): `export` = one encrypted file (tar|gzip|gpg AES256, passphrase only via file/tty, printed once) with the Claude/launcher/agents/cloud logins, ssh, scripts, chat history and a rescue copy of git repos that are unpushed/dirty/without a remote; `import [--from user@host:FILE] [--clone]` restores it (pre-restore copies kept), `list` shows the manifest (no secret values). Tests: `server/tests/test-backup.sh`.
 - Migrate (docs/migrate-design.md): `claude-backup` (`export --no-claude-login`, `plan --json`, `receive` as the SSH forced command of a restricted transfer key, `import --manifest-out`; `import` never restores `.ssh/authorized_keys` or the launcher `config` unless `--with-authorized-keys`) plus `migrate-*` actions (SCRIPT_API 35); privileged ones need `ALLOW_RUN=1`. Tests never touch the real system: stubs for sudo/adduser/userdel/reboot/ssh, temp HOME, CLAUDE_CONFIG_DIR unset.
 - Team workers (`server/clauderc-team`): each task runs in a PRIVATE CLONE (`workers/<name>/trees/<id>`, objects copied, no remote), not a git
-  worktree; `sync_branch` fetches the finished branch into the project with hooks off (`transfer.fsckObjects`). Old tasks (no `ws` field) are still
-  worktrees. Every worker run is also wrapped in a bubblewrap SANDBOX (`sandbox_argv`): read-only system, EMPTY tmpfs home, only the worker's own
+  worktree; `sync_branch` fetches the finished branch into the project with hooks off (`transfer.fsckObjects`). The worker can write its clone's
+  `.git`, so the server's git there goes through `neutralise` (minimal `.git/config`, no info/attributes or commondir) and `clone_git` (no
+  attributes, own GIT_DIR, inside the sandbox when on): a `[filter]` in the clone must never run as the owner. Every worker run is also wrapped in a bubblewrap SANDBOX (`sandbox_argv`): read-only system, EMPTY tmpfs home, only the worker's own
   login folder, the CLI tool dirs and the task workspace mounted (workspace read-only in plan mode), no other processes, network open. So a worker
   can't read the owner's credentials/SSH keys/other projects even though it runs as the same Unix user (no sudo needed). Setting `sandbox` in
   cluster.json (app: Cluster settings): auto (default; unsandboxed with `sandbox:"unavailable"` in list_workers if bwrap doesn't work), on (refuse to run
