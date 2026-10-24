@@ -306,6 +306,7 @@ touch -d '+1 minute' "$GSL/$GSID.jsonl"
 api "general-list"
 check "general-list: both, newest updated first" "$(jqa --arg a "$GID" --arg b "$GID2" '.ok and (.data.chats | map(.id)) == [$a, $b]')"
 check "general-list: title from the first message (one line, 60)" "$(jqa --arg a "$GID" '.data.chats[0].title == ("Help me plan a trip to the mountains next spring, with a budget and a packing list" | .[0:60])')"
+[[ "$(cat "$GDIR/.title")" == "$(jq -r '.data.chats[0].title' <<<"$OUT")" && ! -e "$HOME/Chat/$GID2/.title" ]]; check "general-list: the derived title is cached in .title (not \"New chat\")" $?
 check "general-list: fields" "$(jqa --arg b "$GID2" --arg h "$HOME" '.data.chats[1] | .title == "New chat" and .running and .session == ("chat-" + $b) and .dir == ($h + "/Chat/" + $b)
   and (.created_at | type) == "number" and .created_at > 1700000000 and .updated_at >= .created_at and (.preview | type) == "string" and .busy == false and .waiting == false')"
 api "general-rename $GID" $'  My\ttrip\nplan \x01  '
@@ -349,6 +350,22 @@ tmux has-session -t "=chat-$GID" 2>/dev/null; [[ $? -ne 0 ]]; check "deleted cha
 [[ ! -e "$HOME/.config/claude-launcher/push-done/chat-$GID" ]]; check "its push setting dropped" $?
 api "general-list"
 check "deleted chat gone from the list (.deleted not listed)" "$(jqa --arg b "$GID2" '.ok and (.data.chats | map(.id)) == [$b]')"
+# Many chats: only the newest 100 folders (and running chats) get the full look; older ones come from the folder alone.
+for i in $(seq 1 120); do
+  d="$HOME/Chat/$(printf '20250101-%06d-%04x' "$i" "$i")"; mkdir -p "$d"
+  touch -d "@$((1735689600 + i * 60))" "$d"
+done
+printf 'Old cached title\n' >"$HOME/Chat/20250101-000003-0003/.title"; touch -d "@$((1735689600 + 3 * 60))" "$HOME/Chat/20250101-000003-0003"
+touch -d '2001-01-01' "$HOME/Chat/$GID2"   # the running chat's folder is the oldest of all
+t0=$SECONDS; api "general-list"; took=$((SECONDS - t0))
+check "general-list: 120 old chats + the running one, all listed" "$(jqt '.ok and (.data.chats | length) == 121 and (.data.chats | map(.id) | unique | length) == 121')"
+check "general-list: every entry has the full shape" "$(jqt '.data.chats | all(has("id") and has("title") and has("dir") and has("running") and has("session") and has("created_at") and has("updated_at") and has("preview") and has("waiting") and has("busy"))')"
+check "general-list: an old chat uses its cached .title, not running" "$(jqt '[.data.chats[] | select(.id == "20250101-000003-0003")][0] | .title == "Old cached title" and .running == false and .session == "" and .created_at == 1735689603 and .updated_at == (1735689600 + 180) and .dir == ("'"$HOME"'/Chat/" + .id)')"
+check "general-list: an old chat without .title has an empty title" "$(jqt '[.data.chats[] | select(.id == "20250101-000001-0001")][0] | .title == "" and .busy == false and .waiting == false and .preview == ""')"
+check "general-list: a newer one is looked at in full" "$(jqt '[.data.chats[] | select(.id == "20250101-000120-0078")][0] | .title == "New chat" and .created_at == 1735689680')"
+check "general-list: a running chat in an old folder is still running" "$(jqa --arg b "$GID2" '[.data.chats[] | select(.id == $b)][0] | .running and .session == ("chat-" + $b)')"
+((took <= 20)); check "general-list with 121 chats took ${took}s (at most 20)" $?
+rm -rf "$HOME"/Chat/20250101-*
 api "general-delete $GID"
 check "delete again -> invalid_name" "$(jqt '.ok==false and .error.code=="invalid_name"')"
 api "general-delete $GID2"
@@ -448,24 +465,46 @@ api "set-secret ACME_ENDPOINT" "https://api.acme.example"; check "set-secret sti
 api "remove-secret ACME_ENDPOINT"
 api "set-secret TS_AUTHKEY" "tskey-auth-abc"; check "TS_AUTHKEY accepted" "$(jqt '.ok and .data.saved=="TS_AUTHKEY"')"
 api "remove-secret TS_AUTHKEY"; check "TS_AUTHKEY removed" "$(jqt '.ok')"
+for bad in PIP_TRUSTED_HOST PIP_FIND_LINKS HF_ENDPOINT; do
+  api "set-secret $bad" "http://evil.example"; check "set-secret refuses the behaviour-changing name $bad" "$(jqt '.ok==false')"
+done
+# A built-in service's variable is never a custom key: remove-secret would wipe that service's login.
+printf "export HF_TOKEN='hf_servicelogin'\n" >>"$HOME/.config/claude-launcher/env"
+for bad in HF_TOKEN VERCEL_TOKEN STRIPE_API_KEY CLOUDFLARE_ACCOUNT_ID MXROUTE_SERVER OVH_APPLICATION_KEY YOUTUBE_CLIENT_ID GOOGLE_APPLICATION_CREDENTIALS; do
+  api "set-secret $bad" "x1"; check "set-secret refuses the service variable $bad" "$(jqt '.ok==false and .error.code=="invalid_name" and (.error.message | contains("built-in service"))')"
+done
+api "set-secret-file GOOGLE_APPLICATION_CREDENTIALS" "$(printf '{}' | base64)"; check "set-secret-file refuses a service variable" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "remove-secret HF_TOKEN"; check "remove-secret refuses a service variable" "$(jqt '.ok==false')"
+grep -q "^export HF_TOKEN='hf_servicelogin'$" "$HOME/.config/claude-launcher/env"; check "...and the service login stays" $?
+sed -i '/^export HF_TOKEN=/d' "$HOME/.config/claude-launcher/env"
+# Two overlapping set-secret calls: each rewrites the env file and the name list, and neither write may be lost.
+for _ in 1 2 3; do
+  api "set-secret RACE_A_KEY" "aaa" & api "set-secret RACE_B_KEY" "bbb" & wait
+  grep -q "^export RACE_A_KEY='aaa'$" "$HOME/.config/claude-launcher/env" && grep -q "^export RACE_B_KEY='bbb'$" "$HOME/.config/claude-launcher/env" &&
+    grep -qx RACE_A_KEY "$HOME/.config/claude-launcher/custom-names" && grep -qx RACE_B_KEY "$HOME/.config/claude-launcher/custom-names"
+  check "parallel set-secret: both names saved" $?
+  api "remove-secret RACE_A_KEY" & api "remove-secret RACE_B_KEY" & wait
+  ! grep -q RACE_ "$HOME/.config/claude-launcher/env" "$HOME/.config/claude-launcher/custom-names"; check "parallel remove-secret: both gone" $?
+done
+[[ -z "$(compgen -G "$HOME/.config/claude-launcher/custom-names.*")" ]]; check "no temp name list left behind" $?
 grep -q ACME_API_KEY "$HOME/.config/claude-launcher/env" "$HOME/.claude/settings.json"; [[ $? -ne 0 ]]; check "removed from env file and settings" $?
 grep -q abc123 "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "custom key value never logged" $?
-SF="$HOME/.config/claude-launcher/secret-files/GOOGLE_APPLICATION_CREDENTIALS.json"
-api "set-secret-file GOOGLE_APPLICATION_CREDENTIALS" "$(printf '{"type":"service_account","private_key":"sf-secret-xyz"}' | base64 -w 76)"
-check "set-secret-file saves a JSON file" "$(jqt '.ok and .data.saved=="GOOGLE_APPLICATION_CREDENTIALS" and .data.file')"
+SF="$HOME/.config/claude-launcher/secret-files/ACME_SA_CREDENTIALS.json"
+api "set-secret-file ACME_SA_CREDENTIALS" "$(printf '{"type":"service_account","private_key":"sf-secret-xyz"}' | base64 -w 76)"
+check "set-secret-file saves a JSON file" "$(jqt '.ok and .data.saved=="ACME_SA_CREDENTIALS" and .data.file')"
 [[ "$(stat -c %a "$SF")" == 600 && "$(jq -r .private_key "$SF")" == sf-secret-xyz ]]; check "secret file saved, mode 600" $?
 [[ "$(stat -c %a "${SF%/*}")" == 700 ]]; check "secret-files dir is 700" $?
-jq -e --arg p "$SF" '.env.GOOGLE_APPLICATION_CREDENTIALS==$p' "$HOME/.claude/settings.json" >/dev/null; check "env var holds the file's path" $?
-api "status"; check "status lists the file key with custom keys" "$(jqt '.data.custom|index("GOOGLE_APPLICATION_CREDENTIALS")')"
+jq -e --arg p "$SF" '.env.ACME_SA_CREDENTIALS==$p' "$HOME/.claude/settings.json" >/dev/null; check "env var holds the file's path" $?
+api "status"; check "status lists the file key with custom keys" "$(jqt '.data.custom|index("ACME_SA_CREDENTIALS")')"
 api "set-secret-file ACME_KEY_FILE" "$(printf 'not json' | base64)"; check "set-secret-file refuses non-JSON" "$(jqt '.ok==false and .error.code=="invalid_name"')"
 [[ ! -e "$HOME/.config/claude-launcher/secret-files/ACME_KEY_FILE.json" ]]; check "refused file not saved" $?
 api "set-secret-file ACME_KEY_FILE" ""; check "set-secret-file refuses an empty file" "$(jqt '.ok==false')"
 for bad in "set-secret-file CLAUDE_X_FILE" "set-secret-file acme_key_file" "set-secret-file PATH" "set-secret-file"; do
   api "$bad" "$(printf '{}' | base64)"; check "set-secret-file refuses '$bad'" "$(jqt '.ok==false')"
 done
-api "remove-secret GOOGLE_APPLICATION_CREDENTIALS"; check "file key removed" "$(jqt '.ok')"
+api "remove-secret ACME_SA_CREDENTIALS"; check "file key removed" "$(jqt '.ok')"
 [[ ! -e "$SF" ]]; check "remove-secret deletes the saved file" $?
-grep -q GOOGLE_APPLICATION_CREDENTIALS "$HOME/.config/claude-launcher/env"; [[ $? -ne 0 ]]; check "file key removed from env file" $?
+grep -q ACME_SA_CREDENTIALS "$HOME/.config/claude-launcher/env"; [[ $? -ne 0 ]]; check "file key removed from env file" $?
 grep -q sf-secret-xyz "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "secret file contents never logged" $?
 rm -f "$HOME/.config/claude-launcher/env"
 
@@ -541,6 +580,8 @@ check "drive: status before setup" "$(jqt '.ok and .data == {configured:false, c
 # Sending backups to a Google account / choosing their passphrase is as strong as `run`: it needs ALLOW_RUN=1.
 api "drive-login-start"; check "drive: sign-in refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
 api "drive-passphrase" "a long passphrase here"; check "drive: setting a passphrase refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+api "drive-delete abcdefghij"; check "drive: delete refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+api "drive-logout"; check "drive: logout refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
 echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
 api "drive-login-start"
 check "drive: not configured names both variables" "$(jqt '.error.code=="not_configured" and (.error.message | contains("GOOGLE_DRIVE_CLIENT_ID") and contains("GOOGLE_DRIVE_CLIENT_SECRET")) and .error.variables==["GOOGLE_DRIVE_CLIENT_ID","GOOGLE_DRIVE_CLIENT_SECRET"]')"
@@ -643,6 +684,9 @@ rm -f "$STUB_STATE/crontab"
 api "drive-schedule off"; check "drive: off without a crontab" "$(jqt '.ok and .data.schedule=="off"')"
 [[ ! -e "$STUB_STATE/crontab" ]]; check "drive: ...doesn't create one" $?
 api "drive-schedule on"; [[ "$(grep -c clauderc-drive-backup "$STUB_STATE/crontab")" == 1 ]]; check "drive: on creates a missing crontab" $?
+api "drive-logout"; check "drive: logout refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+[[ -f "$DCFG/drive-token.json" ]]; check "drive: ...token kept" $?
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
 api "drive-logout"; check "drive: logout" "$(jqt '.ok and .data.disconnected')"
 [[ "$(cat "$DS/revoked")" == "1//stub-refresh-SECRET" && ! -e "$DCFG/drive-token.json" ]]; check "drive: token revoked and removed" $?
 ! grep -q clauderc-drive-backup "$STUB_STATE/crontab"; check "drive: logout turns the schedule off" $?
@@ -650,8 +694,16 @@ api "drive-status"; check "drive: disconnected, passphrase kept" "$(jqt '(.data.
 echo '{"refresh_token":"1//revoked-one"}' >"$DCFG/drive-token.json"
 api "drive-list"; check "drive: a revoked login asks to connect again" "$(jqt '.error.code=="not_logged_in" and (.error.message | contains("connect Google Drive again"))')"
 rm -f "$DCFG/drive-token.json"
-api "drive-passphrase" ""; check "drive: empty passphrase forgets it" "$(jqt '.ok and .data.removed')"
+api "drive-passphrase" ""; check "drive: an empty passphrase alone is refused" "$(jqt '.ok==false and .error.code=="bad_args"')"
+[[ "$(cat "$DCFG/drive-backup-pass")" == "$DPASS" ]]; check "drive: ...and the saved one stays" $?
+api "drive-passphrase" $'\nforget please'; check "drive: only the exact line forget removes it" "$(jqt '.ok==false and .error.code=="bad_args"')"
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
+api "drive-passphrase" $'\nforget'; check "drive: forgetting refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+[[ -s "$DCFG/drive-backup-pass" ]]; check "drive: ...file kept" $?
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
+api "drive-passphrase" $'\nforget'; check "drive: an empty line then forget removes it" "$(jqt '.ok and .data.removed')"
 [[ ! -e "$DCFG/drive-backup-pass" ]]; check "drive: ...file deleted" $?
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
 api "remove-secret GOOGLE_DRIVE_CLIENT_ID"; api "remove-secret GOOGLE_DRIVE_CLIENT_SECRET"
 unset CLAUDERC_DRIVE_RETRY_WAIT
 
@@ -766,6 +818,15 @@ api "chat-history demo-app2" "482913"
 check "a pending AskUserQuestion comes back as data" "$(jqt '.data.waiting and (.data.ask|length)==1 and .data.ask[0].question=="Colour?" and (.data.ask[0].options|length)==2 and .data.ask[0].options[1].label=="Blue"')"
 echo '{"type":"user","uuid":"q10","timestamp":"2026-09-29T10:02:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ask","content":"ok"}]}}' >>"$TF"
 api "chat-history demo-app2" "482913"; check "an answered question is gone" "$(jqt '.data.ask == null')"
+tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "clear"; tmux send-keys -t "=demo-app2:" Enter; sleep 0.3
+# Over 20,000 bytes is refused, never cut short and sent.
+CLOG="$HOME/.local/state/claude-launcher/chat.log"; csent() { grep -c $'\tsend$' "$CLOG" 2>/dev/null || true; }
+n0="$(csent)"
+api "chat-send demo-app2" $'482913\n'"$(head -c 20001 /dev/zero | tr '\0' a)"
+check "chat send: 20,001 bytes refused" "$(jqt '.ok==false and .error.code=="invalid_name" and (.error.message | contains("too long"))')"
+[[ "$(csent)" == "$n0" ]]; check "chat send: ...and nothing sent" $?
+api "chat-send demo-app2" $'482913\n'"$(head -c 20000 /dev/zero | tr '\0' a)"
+check "chat send: exactly 20,000 bytes accepted" "$(jqt '.ok and .data.sent')"
 tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "clear"; tmux send-keys -t "=demo-app2:" Enter; sleep 0.3
 api "chat-send no-such-proj" $'482913\nhi'; check "chat send to a stopped session fails once, with one JSON line" "$([[ "$(wc -l <<<"$OUT")" == 1 ]] && jqt '.ok==false' || echo 1)"
 api "chat-send demo-app2" $'000000\nhi'; check "chat send with a wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
@@ -1334,6 +1395,12 @@ check "host-test unknown host" "$(jqt '.ok==false and .error.code=="invalid_name
 # host-authorize: the owner's own public key (phone terminal app, PC) goes into the host account's authorized_keys, once.
 ssh-keygen -q -t ed25519 -N '' -C 'phone@term' -f "$WORK/phonekey" </dev/null
 PHONEPUB="$(cat "$WORK/phonekey.pub")"
+# It lets another key into the host account: like migrate-authorize, it needs ALLOW_RUN=1.
+api "host-authorize web" "$PHONEPUB"
+check "authorize: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+[[ ! -e "$STUB_STATE/remote/.ssh/authorized_keys" ]] || ! grep -qF "$(awk '{print $2}' "$WORK/phonekey.pub")" "$STUB_STATE/remote/.ssh/authorized_keys"
+check "authorize: ...and nothing reached the host" $?
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
 api "host-authorize web" "$PHONEPUB"
 check "authorize: key added" "$(jqt '.ok and .data.host=="web" and .data.added==true')"
 [[ "$(grep -cF "$(awk '{print $2}' "$WORK/phonekey.pub")" "$STUB_STATE/remote/.ssh/authorized_keys")" == 1 ]]; check "authorize: it is in authorized_keys once" $?
@@ -1353,6 +1420,7 @@ for bad in "host-authorize" "host-authorize Web" "host-authorize ../x" "host-aut
   api "$bad" "$PHONEPUB"; check "runner refuses '$bad'" "$(jqt '.ok == false')"
 done
 grep -qF "$(awk '{print $2}' "$WORK/phonekey.pub")" "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "authorize: the key is not in api.log" $?
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
 # host-key-export: the key this server uses for a host, to use from another SSH program. A secret leaving the server: needs ALLOW_RUN=1.
 api "host-key-export web"; check "key export: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
 echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
@@ -2040,33 +2108,50 @@ fix_signout() {
   mkdir -p "$HOME/backups" "$MST"; touch "$HOME/backups/migrate-20260101-000000.gpg" "$HOME/backups/incoming-20260101-000000.gpg"
   tmux has-session -t "=mig-a" 2>/dev/null || tmux new-session -d -s mig-a -c "$HOME" "claude --remote-control mig-a; exec bash"
   printf 'mig-a\t%s\n' "$HOME" >"$LIST"
+  jq -cn '{job:"send",phase:"done",message:"x",pct:100,bytes:5,file:"",started:1,updated:1,error:"",pid:null}' >"$MST/status.json"
 }
 fix_signout
+# It deletes logins and the backups: like the other migrate actions that change this server, it needs ALLOW_RUN=1.
 api "migrate-signout-old claude"
-check "signout claude: done [claude]" "$(jqt '.ok and .data == {done:["claude"]}')"
+check "signout: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+[[ -e "$HOME/.claude/.credentials.json" && -e "$MIG/key" && -e "$HOME/backups/migrate-20260101-000000.gpg" ]]; check "signout: ...and nothing was deleted" $?
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
+# The send never finished: the exported backups and pass files are the only copy, so they stay (the transfer key still goes).
+jq -cn '{job:"send",phase:"failed",message:"x",pct:40,bytes:5,file:"",started:1,updated:1,error:"x",pid:null}' >"$MST/status.json"
+api "migrate-signout-old claude"
+check "signout before the send finished: done, backups kept and said so" "$(jqt '.ok and .data.done == ["claude"] and .data.kept_backups == true and (.data.message | contains("kept"))')"
+[[ ! -e "$MIG" && -e "$MST/restore-pass.abc" && -e "$HOME/backups/migrate-20260101-000000.gpg" ]]; check "signout before the send finished: ~/backups/migrate-*.gpg and pass files stay" $?
+rm -f "$MST/status.json"
+api "migrate-signout-old claude"
+check "signout with no send at all: backups kept" "$(jqt '.ok and .data.kept_backups == true')"
+[[ -e "$HOME/backups/migrate-20260101-000000.gpg" ]]; check "signout with no send at all: ...the backup is still there" $?
+fix_signout
+api "migrate-signout-old claude"
+check "signout claude: done [claude]" "$(jqt '.ok and .data == {done:["claude"], kept_backups:false}')"
 [[ ! -e "$HOME/.claude/.credentials.json" && -e "$HOME/.config/claude-launcher/workers/vw/home/.credentials.json" && -e "$MS/gh_token" ]] && tmux has-session -t "=mig-a" 2>/dev/null; check "signout claude: only ~/.claude/.credentials.json is gone" $?
-# Task 6: whatever is ticked, the transfer key folder, the pass files and the exported backups go (an incoming file is not ours to delete)
+# Task 6: once the send finished, the transfer key folder, the pass files and the exported backups go (an incoming file is not ours to delete)
 [[ ! -e "$MIG" && ! -e "$MST/restore-pass.abc" && ! -e "$HOME/backups/migrate-20260101-000000.gpg" && -e "$HOME/backups/incoming-20260101-000000.gpg" ]]; check "signout claude: ...and the migrate key folder, passphrase files and ~/backups/migrate-*.gpg are deleted too (incoming-*.gpg stays)" $?
 api "migrate-signout-old claude"
-check "signout claude: nothing left to do -> done []" "$(jqt '.ok and .data == {done:[]}')"
+check "signout claude: nothing left to do -> done []" "$(jqt '.ok and .data == {done:[], kept_backups:false}')"
 api "migrate-signout-old workers"
-check "signout workers: done [workers]" "$(jqt '.ok and .data == {done:["workers"]}')"
+check "signout workers: done [workers]" "$(jqt '.ok and .data.done == ["workers"]')"
 [[ ! -e "$HOME/.config/claude-launcher/workers/vw/home/.credentials.json" && ! -e "$HOME/.config/claude-launcher/workers/vx/home/.credentials.json" && -d "$HOME/.config/claude-launcher/workers/vw/home" ]]; check "signout workers: every worker's token file is gone, the folders stay" $?
 api "migrate-signout-old github"
-check "signout github: done [github]" "$(jqt '.ok and .data == {done:["github"]}')"
+check "signout github: done [github]" "$(jqt '.ok and .data.done == ["github"]')"
 [[ "$(cat "$MS/gh-logout-argv")" == "auth logout --hostname github.com" && ! -e "$MS/gh_token" ]]; check "signout github: gh auth logout --hostname github.com (local only)" $?
 api "migrate-signout-old github"
-check "signout github: not signed in -> done []" "$(jqt '.ok and .data == {done:[]}')"
+check "signout github: not signed in -> done []" "$(jqt '.ok and .data.done == []')"
 api "migrate-signout-old autostart"
-check "signout autostart: done [autostart]" "$(jqt '.ok and .data == {done:["autostart"]}')"
+check "signout autostart: done [autostart]" "$(jqt '.ok and .data.done == ["autostart"]')"
 tmux has-session -t "=mig-a" 2>/dev/null; [[ $? -ne 0 ]]; check "signout autostart: the managed tmux session was killed" $?
 [[ ! -e "$LIST" && "$(cat "$LIST.migrated")" == "mig-a	$HOME" ]]; check "signout autostart: the saved list is set aside (.migrated copy kept), so restore does nothing" $?
 [[ ! -e "$MIG" ]]; check "signout autostart: the migrate key and pass files are gone" $?
 OUT="$(claude-autostart restore 2>&1)"; [[ "$OUT" == *"no saved sessions"* ]] && ! tmux has-session -t "=mig-a" 2>/dev/null; check "signout autostart: claude-autostart restore is now a no-op" $?
 fix_signout
 api "migrate-signout-old claude workers github autostart"
-check "signout all four at once" "$(jqt '.ok and .data == {done:["claude","workers","github","autostart"]}')"
+check "signout all four at once" "$(jqt '.ok and .data == {done:["claude","workers","github","autostart"], kept_backups:false}')"
 [[ ! -e "$MS/claude-logout-called" ]]; check "signout: claude auth logout is never called" $?
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
 [[ "$(realsnap)" == "$REAL_BEFORE" ]]; check "signout / verify / create-user touched nothing outside the test HOME" $?
 
 echo "migrate (2): reboot"

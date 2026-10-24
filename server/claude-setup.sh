@@ -120,7 +120,22 @@ EOF
 
 # The first tmux call forks the tmux server, which would inherit and hold open
 # the SSH channel (fd 3) and the api lock (fd 9). Never let it.
-tmux() { command tmux "$@" 3>&- 9>&-; }
+tmux() { command tmux "$@" 3>&- 6>&- 9>&-; }   # 6: the state lock (with_state_lock)
+
+# with_state_lock <command> [args…]: run it holding $LAUNCHER_CONFIG_DIR/.state.lock, so two overlapping requests that
+# read-modify-write the same state file (env, custom-names, services.json, attach/, cluster.json) don't lose a write.
+# fd 6: 3 is the SSH channel, 7 and 8 the drive/job/PIN locks, 9 the api lock. A nested call reuses the held lock (a
+# second flock on a new open of the same file would wait on ourselves).
+with_state_lock() {
+  if [[ -n "${STATE_LOCK_HELD:-}" ]]; then "$@"; return; fi
+  mkdir -p "$LAUNCHER_CONFIG_DIR"
+  local STATE_LOCK_HELD=1 rc=0
+  {
+    flock -w 20 6 || api_err busy "Another change is still being saved. Try again in a moment."
+    "$@" || rc=$?
+  } 6>>"$LAUNCHER_CONFIG_DIR/.state.lock"
+  return "$rc"
+}
 
 t() { local s="$1"; shift; timeout --kill-after=5 "$s" "$@"; }
 
@@ -970,24 +985,45 @@ general_title() {
   printf '%s' "${t:-New chat}"
 }
 
+# The app polls general-list every 15 s: only the newest folders (and running chats) get the full look, which forks a few
+# processes each; older ones are listed from their folder alone (cached .title, folder time, not running).
+GENERAL_LIST_FULL=100
 do_general_list() {
   [[ $# -eq 0 ]] || bad_args "general-list takes no arguments"
-  local d id f sess state created updated tmp
+  local d id f t tt sess state created updated tmp mt n=0 running=" "
   tmp="$(mktemp)"
-  for d in "$CHAT_DIR"/*/; do
+  running+="$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^chat-' | tr '\n' ' ')"
+  while IFS=' ' read -r mt d; do
     d="${d%/}"; id="${d##*/}"
     [[ "$id" =~ $GENERAL_ID_RE && ! -L "$d" ]] || continue
+    if ((n >= GENERAL_LIST_FULL)) && [[ "$running" != *" chat-$id "* ]]; then
+      t=""
+      [[ -f "$d/.title" ]] && IFS= read -r -n 400 t <"$d/.title"
+      printf '%s\t%s\t%s\t%s\n' "$id" "${t//[[:cntrl:]]/}" "$d" "$mt" >>"$tmp.old"
+      continue
+    fi
+    n=$((n + 1))
     f="$(general_transcript "$d")"
     created="$(date -u -d "${id:0:4}-${id:4:2}-${id:6:2} ${id:9:2}:${id:11:2}:${id:13:2}" +%s 2>/dev/null)" || created=0
     updated="$(stat -c %Y -- "${f:-$d}" 2>/dev/null)" || updated=0
     sess="" state='{"preview":"","waiting":false,"busy":false}'
-    if general_dir_of "chat-$id" >/dev/null; then sess="chat-$id"; state="$(session_state_json "$sess")"; fi
-    jq -cn --arg id "$id" --arg t "$(general_title "$d" "$f")" --arg d "$d" --arg s "$sess" \
+    if [[ "$running" == *" chat-$id "* ]] && general_dir_of "chat-$id" >/dev/null; then sess="chat-$id"; state="$(session_state_json "$sess")"; fi
+    t="$(general_title "$d" "$f")"
+    # The first message never changes: keep the title it gave, so the cheap listing above has it once this chat is old.
+    if [[ -n "$f" && "$t" != "New chat" && ! -e "$d/.title" ]]; then
+      tt="$(mktemp "$d/.title.XXXXXX" 2>/dev/null)" && { printf '%s\n' "$t" >"$tt" && mv -n -- "$tt" "$d/.title"; rm -f -- "$tt"; }
+    fi
+    jq -cn --arg id "$id" --arg t "$t" --arg d "$d" --arg s "$sess" \
       --argjson c "${created:-0}" --argjson u "${updated:-0}" --argjson st "$state" \
       '{id:$id, title:$t, dir:$d, running:($s != ""), session:$s, created_at:$c, updated_at:$u} + $st' >>"$tmp"
-  done
+  done < <(stat -c '%Y %n' -- "$CHAT_DIR"/*/ 2>/dev/null | sort -rn)
+  if [[ -s "$tmp.old" ]]; then
+    jq -Rc 'split("\t") | {id:.[0], title:.[1], dir:.[2], running:false, session:"",
+      created_at:(try (.[0][0:15] | strptime("%Y%m%d-%H%M%S") | mktime) catch 0), updated_at:(.[3] | tonumber? // 0),
+      preview:"", waiting:false, busy:false}' "$tmp.old" >>"$tmp"
+  fi
   jq -sc '{chats:sort_by(-.updated_at, -.created_at)}' "$tmp" >"$tmp.out"
-  rm -f "$tmp"
+  rm -f "$tmp" "$tmp.old"
   api_ok_file "$tmp.out"
 }
 
@@ -1664,6 +1700,9 @@ do_cluster_config() {
 # cluster-config-set max_parallel 1-10 | handback true|false | handback_pct 50-100
 do_cluster_config_set() {
   [[ $# -eq 2 ]] || bad_args "usage: cluster-config-set max_parallel|handback|handback_pct|sandbox <value>"
+  with_state_lock cluster_config_set_locked "$@"
+}
+cluster_config_set_locked() {
   local cur new tmp
   cur="$(cluster_config_json)"
   case "$1" in
@@ -1740,7 +1779,8 @@ attach_session() {
   ATTACH_FILE="$ATTACH_DIR/$(claude_proj_slug "$d").json"
 }
 attach_read() { { [[ -s "$ATTACH_FILE" ]] && jq -c 'if type == "object" then . else {} end' "$ATTACH_FILE" 2>/dev/null; } || echo '{}'; }
-attach_write() {  # $1 = jq filter, rest = jq args
+attach_write() { with_state_lock attach_write_locked "$@"; }
+attach_write_locked() {  # $1 = jq filter, rest = jq args
   local f="$1" tmp; shift
   mkdir -p "$ATTACH_DIR" && chmod 700 "$ATTACH_DIR"
   tmp="$(mktemp "$ATTACH_DIR/a.XXXXXX")"
@@ -2373,6 +2413,7 @@ REMOTE
 # ~/.ssh/authorized_keys over the pinned ssh login, once (nothing changes if it is already there).
 do_host_authorize() {
   [[ $# -eq 1 ]] || bad_args "usage: host-authorize <name>"
+  migrate_need_run   # it lets another key into that account, like migrate-authorize
   local key type blob comment
   key="$(read_secret_line)"
   exec 0</dev/null
@@ -2772,7 +2813,8 @@ svc_verify() {
 # the file is kept mode 600, and names we added before but no longer have are
 # removed. The .bashrc line is kept for your own terminal. Applies when a
 # session (re)starts.
-ensure_env_hook() {
+ensure_env_hook() { with_state_lock ensure_env_hook_locked; }   # locked: an overlapping set_env must not be mirrored stale
+ensure_env_hook_locked() {
   [[ -f "$SERVICES_ENV" ]] || return 0
   grep -qF "$SERVICES_ENV_HOOK" "$HOME/.bashrc" 2>/dev/null || printf '\n%s\n' "$SERVICES_ENV_HOOK" >>"$HOME/.bashrc"
   local f="$HOME/.claude/settings.json" managed="$LAUNCHER_CONFIG_DIR/settings-env-names" tmp vars line old
@@ -2831,13 +2873,29 @@ sa_token_ok() {
 
 # set_env <VAR> <value>: replace VAR's line in the env file (values are
 # regex-checked, so they never contain a quote). An empty value removes it.
-set_env() {
+set_env() { with_state_lock set_env_locked "$@"; }
+set_env_locked() {
   local tmp
-  mkdir -p "$LAUNCHER_CONFIG_DIR"
   tmp="$(mktemp "$SERVICES_ENV.XXXXXX")"
   chmod 600 "$tmp"
   { grep -v "^export $1=" "$SERVICES_ENV" 2>/dev/null; [[ -z "$2" ]] || printf "export %s='%s'\n" "$1" "$2"; } >"$tmp"
   mv "$tmp" "$SERVICES_ENV"
+}
+
+# services_info_set <jq filter> [jq args…]: rewrite services.json (who each token service is logged in as).
+services_info_set() { with_state_lock services_info_set_locked "$@"; }
+services_info_set_locked() {
+  local f="$1" tmp; shift
+  tmp="$(mktemp "$SERVICES_INFO.XXXXXX")" || return 1
+  { jq -c . "$SERVICES_INFO" 2>/dev/null || echo '{}'; } | jq -c "$@" "$f" >"$tmp" && mv -f "$tmp" "$SERVICES_INFO" || { rm -f "$tmp"; return 1; }
+}
+
+# custom_names_edit add|remove <NAME>: the list of names added with set-secret.
+custom_names_edit() { with_state_lock custom_names_edit_locked "$@"; }
+custom_names_edit_locked() {
+  local tmp
+  tmp="$(mktemp "$CUSTOM_NAMES.XXXXXX")" || return 1
+  { grep -vx -- "$2" "$CUSTOM_NAMES" 2>/dev/null; [[ "$1" != add ]] || echo "$2"; } | sort -u >"$tmp" && mv -f "$tmp" "$CUSTOM_NAMES" || { rm -f "$tmp"; return 1; }
 }
 
 # login-token <service>: stdin = one value per SVC_VARS line, or the whole
@@ -2886,9 +2944,7 @@ do_login_token() {
     fi
   fi
   ensure_env_hook
-  tmp="$(mktemp "$SERVICES_INFO.XXXXXX")"
-  { jq -c . "$SERVICES_INFO" 2>/dev/null || echo '{}'; } | jq -c --arg id "$id" --arg w "$who" '.[$id] = $w' >"$tmp"
-  mv "$tmp" "$SERVICES_INFO"
+  services_info_set '.[$id] = $w' --arg id "$id" --arg w "$who"
   api_ok "$(jq -cn --arg w "$who" '{logged_in:true, user:$w}')"
 }
 
@@ -2896,13 +2952,29 @@ do_login_token() {
 
 # Names that redirect package installs, API traffic or TLS trust for every session are refused (an attacker with the phone key could
 # otherwise point pip/npm/the AWS CLI at their own server, or swap the CA bundle).
-CUSTOM_NAME_DENY='^(PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|UV_INDEX_URL|UV_DEFAULT_INDEX|UV_EXTRA_INDEX_URL|NPM_CONFIG_REGISTRY|OPENAI_BASE_URL|OPENAI_API_BASE|AWS_ENDPOINT_URL(_[A-Z0-9_]+)?|SSL_CERT_FILE|CURL_CA_BUNDLE|REQUESTS_CA_BUNDLE|NODE_EXTRA_CA_CERTS|DOCKER_HOST|GH_HOST|GITHUB_API_URL|GIT_SSH_COMMAND|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$'
+CUSTOM_NAME_DENY='^(PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|PIP_TRUSTED_HOST|PIP_FIND_LINKS|HF_ENDPOINT|UV_INDEX_URL|UV_DEFAULT_INDEX|UV_EXTRA_INDEX_URL|NPM_CONFIG_REGISTRY|OPENAI_BASE_URL|OPENAI_API_BASE|AWS_ENDPOINT_URL(_[A-Z0-9_]+)?|SSL_CERT_FILE|CURL_CA_BUNDLE|REQUESTS_CA_BUNDLE|NODE_EXTRA_CA_CERTS|DOCKER_HOST|GH_HOST|GITHUB_API_URL|GIT_SSH_COMMAND|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$'
 custom_name_ok() { [[ "$1" =~ $CUSTOM_NAME_RE && "$1" != CLAUDE_* && "$1" != ANTHROPIC_* && ! "$1" =~ $CUSTOM_NAME_DENY ]]; }
+# 0 when <NAME> belongs to a built-in service: set-/remove-secret would overwrite or wipe that service's login.
+service_var_name() {
+  local s v
+  [[ "$1" == OVH_* || "$1" == YOUTUBE_* || "$1" == CLOUDSDK_CORE_PROJECT ]] && return 0
+  for s in $TOKEN_SERVICES; do
+    svc_def "$s" || continue
+    for v in "${SVC_VARS[@]}"; do [[ "$v" == "$1" ]] && return 0; done
+  done
+  return 1
+}
+# custom_name_check <NAME> <usage>: a name set-/remove-secret may touch, else the call ends.
+custom_name_check() {
+  custom_name_ok "$1" || bad_args "$2"
+  ! service_var_name "$1" || api_err invalid_name "$1 belongs to a built-in service: sign in to that service under Keys instead."
+}
 
 # set-secret <NAME>: stdin = the value. For APIs without a built-in service:
 # saved like the others, so every Claude session and MCP server sees it.
 do_set_secret() {
-  [[ $# -eq 1 ]] && custom_name_ok "$1" || bad_args "usage: set-secret <NAME ending in _KEY, _TOKEN, _SECRET, …>"
+  [[ $# -eq 1 ]] || bad_args "usage: set-secret <NAME ending in _KEY, _TOKEN, _SECRET, …>"
+  custom_name_check "$1" "usage: set-secret <NAME ending in _KEY, _TOKEN, _SECRET, …>"
   local v
   v="$(read_secret_line)"
   exec 0</dev/null
@@ -2910,7 +2982,7 @@ do_set_secret() {
   [[ -n "$v" && ${#v} -le 4000 && "$v" != *"'"* ]] || api_err invalid_name "The value is empty, too long, or contains a single quote."
   set_env "$1" "$v"
   unset v
-  { grep -vx "$1" "$CUSTOM_NAMES" 2>/dev/null; echo "$1"; } | sort -u >"$CUSTOM_NAMES.tmp" && mv "$CUSTOM_NAMES.tmp" "$CUSTOM_NAMES"
+  custom_names_edit add "$1"
   ensure_env_hook
   api_ok "$(jq -cn --arg n "$1" '{saved:$n}')"
 }
@@ -2918,7 +2990,8 @@ do_set_secret() {
 # set-secret-file <NAME>: stdin = a JSON file (e.g. a service-account key),
 # base64-encoded. Saved as secret-files/<NAME>.json (mode 600); NAME holds its path.
 do_set_secret_file() {
-  [[ $# -eq 1 ]] && custom_name_ok "$1" || bad_args "usage: set-secret-file <NAME ending in _KEY, _FILE, _CREDENTIALS, …>"
+  [[ $# -eq 1 ]] || bad_args "usage: set-secret-file <NAME ending in _KEY, _FILE, _CREDENTIALS, …>"
+  custom_name_check "$1" "usage: set-secret-file <NAME ending in _KEY, _FILE, _CREDENTIALS, …>"
   local n="$1" dir f
   dir="$(mktemp -d)" && chmod 700 "$dir"
   trap 'rc=$?; rm -rf "$dir"; (exit $rc); on_exit' EXIT
@@ -2930,7 +3003,7 @@ do_set_secret_file() {
   f="$SECRET_FILES_DIR/$n.json"
   install -m 600 "$dir/f" "$f.new" && mv -f "$f.new" "$f"
   set_env "$n" "$f"
-  { grep -vx "$n" "$CUSTOM_NAMES" 2>/dev/null; echo "$n"; } | sort -u >"$CUSTOM_NAMES.tmp" && mv "$CUSTOM_NAMES.tmp" "$CUSTOM_NAMES"
+  custom_names_edit add "$n"
   ensure_env_hook
   api_ok "$(jq -cn --arg n "$n" '{saved:$n, file:true}')"
 }
@@ -3078,8 +3151,7 @@ do_youtube_login_poll() {
   [[ -n "$chan" ]] || { rm -f "$YT_PENDING"; api_err not_logged_in "Signed in, but that Google account has no YouTube channel."; }
   set_env YOUTUBE_CLIENT_ID "$id"; set_env YOUTUBE_CLIENT_SECRET "$secret"; set_env YOUTUBE_REFRESH_TOKEN "$rt"
   rm -f "$YT_PENDING"
-  local tmp; tmp="$(mktemp "$SERVICES_INFO.XXXXXX")"
-  { jq -c . "$SERVICES_INFO" 2>/dev/null || echo '{}'; } | jq -c --arg w "$chan" '.youtube = $w' >"$tmp" && mv "$tmp" "$SERVICES_INFO"
+  services_info_set '.youtube = $w' --arg w "$chan"
   ensure_env_hook
   api_ok "$(jq -cn --arg c "$chan" '{logged_in:true, user:$c}')"
 }
@@ -3416,16 +3488,21 @@ do_drive_status() {
     '{configured:$c, connected:$n, schedule:$s, last_backup:$l, has_passphrase:$p}')"
 }
 
-# drive-passphrase: stdin = the passphrase (12-200 characters, one line); empty = forget the saved one.
+# drive-passphrase: stdin = the passphrase (12-200 characters, one line). An empty line, then the line "forget", removes
+# the saved one; an empty line alone (or nothing in time) changes nothing.
 do_drive_passphrase() {
   [[ $# -eq 0 ]] || bad_args "drive-passphrase reads the passphrase on stdin"
   local p tmp
   p="$(read_secret_line)"
-  exec 0</dev/null
   if [[ -z "$p" ]]; then
+    p="$(read_secret_line)"
+    exec 0</dev/null
+    [[ "$p" == forget ]] || bad_args "empty passphrase (an empty line, then the line forget, removes the saved one)"
+    migrate_need_run
     rm -f "$DRIVE_PASS"
     api_ok '{"saved":false,"removed":true}'
   fi
+  exec 0</dev/null
   migrate_need_run   # backups are encrypted with it: a stranger's passphrase would make them readable to a stranger
   if ((${#p} < 12 || ${#p} > 200)) || [[ ! "$p" =~ ^[[:print:]]+$ ]]; then
     unset p
@@ -3489,6 +3566,7 @@ drive_find() {
 
 do_drive_delete() {
   [[ $# -eq 1 ]] && drive_id_ok "$1" || bad_args "usage: drive-delete <id>"
+  migrate_need_run   # the backup is gone for good
   drive_need_token
   drive_find "$1"
   drive_delete_file "$1" || api_err internal "Google Drive didn't delete the backup."
@@ -3557,6 +3635,7 @@ do_knowledge_refresh() {
 # drive-logout: revoke at Google (best effort), forget the token, stop the schedule. The passphrase stays.
 do_drive_logout() {
   [[ $# -eq 0 ]] || bad_args "drive-logout takes no arguments"
+  migrate_need_run   # it stops the backups
   local rt
   rt="$(jq -r '.refresh_token // empty' "$DRIVE_TOKEN" 2>/dev/null)"
   if drive_safe "$rt"; then
@@ -3598,11 +3677,12 @@ do_drive_restore() {
 
 # remove-secret <NAME>: only names added with set-secret.
 do_remove_secret() {
-  [[ $# -eq 1 ]] && custom_name_ok "$1" || bad_args "usage: remove-secret <NAME>"
+  [[ $# -eq 1 ]] || bad_args "usage: remove-secret <NAME>"
+  custom_name_check "$1" "usage: remove-secret <NAME>"
   grep -qx "$1" "$CUSTOM_NAMES" 2>/dev/null || api_err invalid_name "$1 isn't a custom key."
   set_env "$1" ""
   rm -f "$SECRET_FILES_DIR/$1.json"
-  grep -vx "$1" "$CUSTOM_NAMES" >"$CUSTOM_NAMES.tmp"; mv "$CUSTOM_NAMES.tmp" "$CUSTOM_NAMES"
+  custom_names_edit remove "$1"
   ensure_env_hook
   api_ok "$(jq -cn --arg n "$1" '{removed:$n}')"
 }
@@ -4081,9 +4161,7 @@ do_disconnect() {
   [[ "$1" == gcp ]] && set_env CLOUDSDK_CORE_PROJECT ""
   [[ "$1" == googleplay ]] && { set_env SUPPLY_JSON_KEY ""; set_env ANDROID_PUBLISHER_CREDENTIALS ""; }
   [[ -n "$SVC_KEYFILE" ]] && rm -f "$LAUNCHER_CONFIG_DIR/$SVC_KEYFILE"
-  if [[ -f "$SERVICES_INFO" ]]; then
-    tmp="$(mktemp "$SERVICES_INFO.XXXXXX")" && jq -c --arg id "$1" 'del(.[$id])' "$SERVICES_INFO" >"$tmp" && mv "$tmp" "$SERVICES_INFO"
-  fi
+  if [[ -f "$SERVICES_INFO" ]]; then services_info_set 'del(.[$id])' --arg id "$1"; fi
   ensure_env_hook
   api_ok "$(jq -cn --arg id "$1" '{disconnected:$id}')"
 }
@@ -4262,10 +4340,13 @@ do_chat_send() {
   [[ $# -eq 1 ]] || bad_args "usage: chat-send <session>"
   local pin sess msg
   pin="$(read_secret_line)"
-  msg="$(head -c 20000)"
+  msg="$(head -c 20002; echo x)"   # the x keeps trailing newlines, so the size check below is exact
   exec 0</dev/null
+  msg="${msg%x}"; msg="${msg%$'\n'}"   # one closing newline isn't part of the message
   chat_session "$1"; sess="$CHAT_SESS"
   check_pin "$pin"
+  (($(printf '%s' "$msg" | wc -c) <= 20000)) || api_err invalid_name "That message is too long (20,000 characters at most)."
+  while [[ "$msg" == *$'\n' ]]; do msg="${msg%$'\n'}"; done
   [[ -n "${msg//[[:space:]]/}" ]] || bad_args "empty message"
   printf '%s' "$msg" | tmux load-buffer -b "clauderc-chat-$$" - || api_err internal "Couldn't hand the message to tmux."
   tmux paste-buffer -p -d -b "clauderc-chat-$$" -t "=$sess:" || api_err internal "Couldn't paste the message."
@@ -5232,11 +5313,12 @@ do_migrate_clone() {
 # ---- migrate-signout-old <claude|workers|github|autostart...>: local files only; nothing is revoked on Anthropic's or GitHub's side.
 do_migrate_signout_old() {
   [[ $# -ge 1 && $# -le 4 ]] || bad_args "usage: migrate-signout-old <claude|workers|github|autostart>..."
-  local item seen=" " f n done_=() names=() list="$AUTOSTART_LIST"
+  local item seen=" " f n done_=() names=() list="$AUTOSTART_LIST" kept=true
   for item in "$@"; do
     [[ "$item" =~ ^(claude|workers|github|autostart)$ && "$seen" != *" $item "* ]] || bad_args "Each of claude, workers, github, autostart at most once."
     seen+="$item "
   done
+  migrate_need_run   # it deletes logins and the migration backups
   for item in "$@"; do
     case "$item" in
       claude)   # only the local token file (`claude auth logout` would revoke the grant)
@@ -5269,13 +5351,18 @@ do_migrate_signout_old() {
         if ((n == 1 || ${#names[@]} > 0)); then done_+=(autostart); fi ;;
     esac
   done
-  # Whatever was ticked: the transfer key (the private half), the passphrase files and the exported backups go.
+  # Whatever was ticked, the transfer key (the private half) goes. The passphrase files and the exported backups go only
+  # once migrate-send finished: until then they may be the only copy of what was meant to reach the new server.
   rm -rf -- "${MIGRATE_CFG:?}" || api_err internal "Couldn't delete the transfer key folder $MIGRATE_CFG."
-  for f in "$MIGRATE_STATE"/restore-pass.* "$MIGRATE_BACKUPS"/migrate-*.gpg; do
-    [[ -e "$f" || -L "$f" ]] || continue
-    rm -f -- "$f" || api_err internal "Couldn't delete $f."
-  done
-  api_ok "$(jq -cn '{done:$ARGS.positional}' --args "${done_[@]}")"
+  if [[ "$(jq -r '(.job // "") + "/" + (.phase // "")' "$MIGRATE_STATUS" 2>/dev/null)" == send/done ]]; then
+    kept=false
+    for f in "$MIGRATE_STATE"/restore-pass.* "$MIGRATE_BACKUPS"/migrate-*.gpg; do
+      [[ -e "$f" || -L "$f" ]] || continue
+      rm -f -- "$f" || api_err internal "Couldn't delete $f."
+    done
+  fi
+  api_ok "$(jq -cn --argjson k "$kept" '{done:$ARGS.positional, kept_backups:$k}
+    + (if $k then {message:"The backups in ~/backups were kept: the send to the new server never finished."} else {} end)' --args "${done_[@]}")"
 }
 
 # ---- migrate-reboot: stdin line 1 = sudo password. The answer goes out first; the reboot follows a few seconds later from a detached job.
