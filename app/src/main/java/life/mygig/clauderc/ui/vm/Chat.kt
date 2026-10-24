@@ -131,7 +131,10 @@ class ChatController(
 
     /** Back in front while still unlocked: carry on polling. */
     fun resumeChat() {
-        externalUntil = 0L   // the grace window covers one trip out (picker, Save), not later ones
+        // The grace window covers one trip out (picker, Save), not later ones: if it ran out while we were away, lock now.
+        val expired = externalUntil != 0L && SystemClock.elapsedRealtime() >= externalUntil
+        externalUntil = 0L
+        if (expired) lockChat()
         if (chatPin != null && _chatSession.value != null && _chatPinNeeded.value == null) startChatPolling()
     }
 
@@ -281,21 +284,12 @@ class ChatController(
     /** New history; drop pending messages the conversation now shows. */
     private fun setChat(session: String, c: ChatData) {
         if (session != _chatSession.value) return   // a late reply from the chat we just left
+        if (chatPin == null) return   // locked while this reply was on its way: it must not reappear
         _chat.value = c
         // Compare loosely: Claude Code may change spacing, and the server cuts long messages at 8000 characters.
         fun norm(t: String) = t.trim().replace(Regex("\\s+"), " ").take(7000)
         val shown = c.messages.filter { it.role == "user" }.map { norm(it.text) }.toSet()
         _chatPending.value = _chatPending.value.filterNot { norm(it) in shown }
-    }
-
-    /** Send a file from the phone into the chat's project folder; [onDone] gets its path. */
-    fun uploadToChat(name: String, bytes: ByteArray, onDone: (String) -> Unit) {
-        val session = _chatSession.value ?: return
-        val pin = chatPin ?: return
-        tools.action("Sending $name…") {
-            val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-            onDone(api.upload(session, pin, name, b64).path)
-        }
     }
 
     /** Picked files (any number): read off the main thread, sent to the project's uploads/ folder one by one, each retried twice; [onPath] gets each saved path. */

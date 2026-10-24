@@ -27,14 +27,9 @@ SLOTS = max(1, int(os.environ.get("CLAUDERC_WORKER_SLOTS") or 10))   # hard cap 
 USAGE_URL = os.environ.get("CLAUDERC_USAGE_URL") or "https://api.anthropic.com/api/oauth/usage"
 # A run whose login token expires before it could finish is started ALONE (exclusive lock on <lock>.mode; the others hold
 # it shared): two runs refreshing the same token at once invalidate each other's refresh token and log the worker out.
-SLOT_SH = ('b=$1; n=$2; m=$3; cred=$4; thr=$5; py=$6; gap=$7; shift 7; while :; do i=0; while [ $i -lt $n ]; do exec 9>"$b.$i"; '
+SLOT_SH = ('b=$1; n=$2; m=$3; cred=$4; thr=$5; py=$6; shift 6; while :; do i=0; while [ $i -lt $n ]; do exec 9>"$b.$i"; '
            'flock -n 9 && { left=$(python3 -c "$py" "$cred"); k=s; [ "$left" -lt "$thr" ] && k=x; exec 8>"$b.mode"; flock -$k 8; '
-           # Starts of one worker's runs are spaced GAP seconds apart: claude touches the shared login (token, config) when it
-           # starts, and two starting together invalidated each other's refresh token, logging the worker out.
-           'exec 7>"$b.start"; flock 7; now=$(date +%s); last=$(cat "$b.last" 2>/dev/null || echo 0); w=$((last + gap - now)); '
-           '[ $w -gt 0 ] && sleep $w; date +%s >"$b.last"; exec 7>&-; '
-           ': >"$m"; ( exec 7>&- 8>&- 9>&-; exec "$@" ); exit $?; }; i=$((i+1)); done; sleep 2; done')
-START_GAP = int(os.environ.get("CLAUDERC_START_GAP") or 0)   # seconds between the starts of one worker's runs (off: the logouts were a test bug, see CLAUDE.md)
+           ': >"$m"; ( exec 8>&- 9>&-; exec "$@" ); exit $?; }; i=$((i+1)); done; sleep 2; done')
 TOKEN_LEFT_PY = ('import json,sys,time\ntry: print(int(json.load(open(sys.argv[1]))["claudeAiOauth"]["expiresAt"]/1000-time.time()))\n'
                  'except Exception: print(999999)')
 RUN_TIMEOUT = 1800        # seconds one worker run may take
@@ -259,15 +254,18 @@ def usage_text(u):
 
 def live_tasks():
     """Running tasks (any project), after finishing the ones whose process died without anyone calling wait (a chat that
-    went away): a dead run must not count against the parallel limits for ever."""
-    out = []
+    went away): a dead run must not count against the parallel limits for ever. Finished records older than 14 days are
+    pruned with their clone, unless a newer open task (a reply) still works on the same branch and clone."""
+    out, recs, old = [], [], lambda t: t.get("status") != "running" and t.get("finished", t.get("started", time.time())) < time.time() - 14 * 86400
     for p in WORKERS.glob("*/tasks/*.json"):
         try:
-            t = json.loads(p.read_text())
+            recs.append((p, json.loads(p.read_text())))
         except (OSError, ValueError):
             continue
+    in_use = {t.get("branch") for _, t in recs if t.get("branch") and not t.get("closed") and not old(t)}
+    for p, t in recs:
         if t.get("status") != "running":
-            if t.get("finished", t.get("started", time.time())) < time.time() - 14 * 86400:
+            if old(t) and not (t.get("branch") and t["branch"] in in_use):
                 p.unlink(missing_ok=True)
                 p.with_suffix(".lock").unlink(missing_ok=True)
                 shutil.rmtree(p.parent.parent / "trees" / t.get("id", ""), ignore_errors=True)
@@ -369,8 +367,50 @@ def failover(worker, c):
     return (best, f"Routed to {best} because {worker} is at {peak(u):.0f}% of its limit.") if best else None
 
 
-def git(*a, cwd):
-    return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "protocol.file.allow=user", *a], cwd=cwd, capture_output=True, text=True, timeout=120)
+def git(*a, cwd, env=None, pre=()):
+    return subprocess.run([*pre, "git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "protocol.file.allow=user", *a],
+                          cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
+
+
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+CLONE_CONFIG = "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n\tlogallrefupdates = true\n"
+
+
+def neutralise(wt):
+    """The worker could write its clone's .git (config, info/attributes) and .gitattributes: a `[filter "x"] clean = <cmd>`
+    plus `* filter=x` would make this server's git run <cmd> as the owner. Before the server runs git there, the clone's config
+    is replaced by a minimal known-good one, info/attributes and commondir (which could point at the project's .git) are
+    removed. Symlinks are removed, never followed."""
+    def drop(p):
+        if p.is_symlink() or p.is_file():
+            p.unlink()
+        elif p.exists():
+            shutil.rmtree(p)
+    g = Path(wt) / ".git"
+    if g.is_symlink() or not g.is_dir():
+        raise ToolError("The worker's copy has no .git folder of its own any more; discard the task.")
+    drop(g / "config")
+    drop(g / "commondir")
+    if (g / "info").is_symlink() or not (g / "info").is_dir():
+        drop(g / "info")
+    else:
+        drop(g / "info" / "attributes")
+    tmp = g / f"config.{uuid.uuid4().hex}.tmp"
+    tmp.write_text(CLONE_CONFIG)
+    os.replace(tmp, g / "config")
+
+
+def clone_git(t, *a):
+    """git in a worker's clone (after neutralise): its own .git only, no attributes from the clone (an empty attribute
+    tree, no attributes file) and no pager; inside the worker's sandbox when its runs are sandboxed."""
+    wt = t["wt"]
+    env = {n: os.environ[n] for n in ("PATH", "HOME", "LANG", "LC_ALL", "TZ", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM") if n in os.environ}
+    env.update(GIT_DIR=os.path.join(wt, ".git"), GIT_WORK_TREE=wt, GIT_ATTR_SOURCE=EMPTY_TREE, GIT_PAGER="cat", GIT_TERMINAL_PROMPT="0")
+    pre = ()
+    if t.get("sandbox") == "on" and sandbox_mode() != "off" and bwrap_ok():
+        w = WORKERS / t["worker"]
+        pre, env = tuple(sandbox_argv({**t, "cwd": wt}, "claude", w, env, read_only=False)), None
+    return git("-c", "core.attributesFile=/dev/null", "-c", "filter.lfs.required=false", *a, cwd=wt, env=env, pre=pre)
 
 
 def repo_dir(repo):
@@ -447,22 +487,24 @@ def bring_along(top, wt):
 
 
 def seal(t):
-    """Commit whatever the worker left in its clone; returns the diffstat against where it branched."""
-    if git("status", "--porcelain", cwd=t["wt"]).stdout.strip():
-        git("add", "-A", cwd=t["wt"])
+    """Commit whatever the worker left in its clone; returns the diffstat against where it branched. The clone is the worker's:
+    neutralise it first and run git there through clone_git only."""
+    neutralise(t["wt"])
+    if clone_git(t, "status", "--porcelain", "--ignore-submodules=dirty").stdout.strip():
+        clone_git(t, "add", "-A")
         if t.get("copied"):
-            git("reset", "-q", "--", *t["copied"], cwd=t["wt"])   # copies of ignored files stay out of the branch
-        git("-c", f"user.name=cluster-{t['worker']}", "-c", "user.email=cluster@localhost", "-c", "commit.gpgsign=false",
-            "commit", "-q", "--no-verify", "-m", f"{t['worker']}: {t['task'][:70]}", cwd=t["wt"])
+            clone_git(t, "reset", "-q", "--", *t["copied"])   # copies of ignored files stay out of the branch
+        clone_git(t, "-c", f"user.name=cluster-{t['worker']}", "-c", "user.email=cluster@localhost", "-c", "commit.gpgsign=false",
+                  "commit", "-q", "--no-verify", "-m", f"{t['worker']}: {t['task'][:70]}")
     sync_branch(t)
     return git("diff", "--no-ext-diff", "--no-textconv", "--stat", f"{t.get('fork') or t['base']}..{t['branch']}", cwd=t["top"]).stdout.strip()
 
 
 def sync_branch(t):
-    """Clone workspaces: bring the worker's branch into the project's repository (forced, so a follow-up replaces it). Hooks are
-    off, objects are checked, submodules and tags are not followed. Old worktree tasks already share the repository."""
-    if t.get("ws") != "clone":
-        return
+    """Bring the worker's branch from its clone into the project's repository (forced, so a follow-up replaces it). Hooks are
+    off, objects are checked, submodules and tags are not followed. The fetch starts upload-pack in the clone, which reads the
+    clone's config: neutralise it first."""
+    neutralise(t["wt"])
     r = git("-c", "transfer.fsckObjects=true", "fetch", "-q", "--no-tags", "--no-recurse-submodules", t["wt"],
             f"+refs/heads/{t['branch']}:refs/heads/{t['branch']}", cwd=t["top"])
     if r.returncode:
@@ -502,10 +544,7 @@ def check_idle(t):
 
 
 def close(t, how, delete_flag):
-    if t.get("ws") == "clone":
-        shutil.rmtree(t["wt"], ignore_errors=True)
-    else:
-        git("worktree", "remove", "--force", t["wt"], cwd=t["top"])
+    shutil.rmtree(t["wt"], ignore_errors=True)
     git("branch", delete_flag, t["branch"], cwd=t["top"])
     for p in WORKERS.glob("*/tasks/*.json"):   # every task (and follow-up) that shared the branch
         try:
@@ -606,7 +645,8 @@ def sync_skills(w):
 
 
 def sandbox_mode():
-    """auto (default): sandbox every worker run when bubblewrap works here, otherwise run as before; on: refuse to run without it; off."""
+    """auto (default): sandbox every worker run when bubblewrap works here, otherwise run as before (except bypassPermissions,
+    which is refused); on: refuse to run without it; off."""
     m = os.environ.get("CLAUDERC_SANDBOX") or cluster_cfg()["sandbox"]
     return m if m in ("auto", "on", "off") else "auto"
 
@@ -712,7 +752,7 @@ def launch(t):
     if use_sb:
         run = sandbox_argv(t, k, w, env, read_only=(mode == "plan")) + run
     cmd = ["sh", "-c", SLOT_SH, "slot", str(w / "run.lock"), str(SLOTS), str(d / f"{tid}.started"),
-           str(w / "home" / ".credentials.json"), str(RUN_TIMEOUT + 300), TOKEN_LEFT_PY, str(START_GAP),
+           str(w / "home" / ".credentials.json"), str(RUN_TIMEOUT + 300), TOKEN_LEFT_PY,
            "timeout", "--kill-after=10", str(RUN_TIMEOUT)] + run
     with open(d / f"{tid}.in") as fin, open(d / f"{tid}.out", "wb") as fo, open(d / f"{tid}.err", "wb") as fe:
         proc = subprocess.Popen(cmd, stdin=fin, stdout=fo, stderr=fe, cwd=t["cwd"], env=env, start_new_session=True)
@@ -840,6 +880,11 @@ def start(worker, prompt, resume=None, parent=None, repo=None, stack=None, note=
     if running_here() >= c["max_parallel"]:
         raise ToolError(f"This chat already has {c['max_parallel']} worker tasks running (the owner's limit). Collect one with wait first, or do this one yourself.")
     role, mode = settings(worker, att)
+    if mode == "bypassPermissions" and sandbox_mode() == "auto" and not bwrap_ok():
+        # auto may run other modes unsandboxed, but a worker that asks nothing must never get the owner's whole home
+        raise ToolError(f"{worker} runs with bypassPermissions, and bubblewrap isn't usable on this server, so it would run unsandboxed "
+                        "with the owner's whole home. Nothing was started. Ask the owner to make bubblewrap work (sudo apt install bubblewrap; "
+                        "on Ubuntu 24.04+ unprivileged user namespaces must be allowed) or choose another mode for this worker; or do this task yourself.")
     tid, text = uuid.uuid4().hex[:8], prompt
     if parent:
         ws, cwd = {k: parent.get(k) for k in ("top", "base", "fork", "wt", "branch", "copied", "ws")}, parent["cwd"]
@@ -1158,6 +1203,8 @@ def call_tool(name, a):
             raise ToolError("Only a finished task can be replied to.")
         if t.get("closed"):
             raise ToolError("That task's branch was already merged or discarded; delegate a new task.")
+        if t.get("branch"):
+            check_idle(t)   # two runs on one clone would mix their edits and commits
         return start(t["worker"], a.get("message"), resume=t["session_id"], parent=t)
     if name == "review":
         t = branch_task(a.get("task_id"))
@@ -1177,6 +1224,8 @@ def call_tool(name, a):
         if size > DIFF_SHOWN and a.get("force") is not True:
             raise ToolError(f"The diff is {size} characters; review shows only the first {DIFF_SHOWN}. Read the rest with review file=<path>, or "
                             f"`git diff {t['base'][:8]}..{t['branch']} -- <path>` (also check .github/ and hook files), then call merge again with force=true.")
+        if git("rev-parse", "-q", "--verify", "MERGE_HEAD", cwd=t["top"]).returncode == 0:   # the owner's own merge: never touch it
+            raise ToolError("You are in the middle of a merge in the project: finish or abort it first.")
         try:  # hooks off: the worker's changes must not run code during the merge
             r = git("-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "merge", "--no-ff", "--no-verify", "-m", f"Merge {t['branch']}", t["branch"], cwd=t["top"])
         except subprocess.TimeoutExpired:

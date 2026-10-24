@@ -110,12 +110,12 @@ fun ChatScreen(vm: MainViewModel, session: String) {
     val voice = remember { ChatVoice(context, voicePrefs) { vm.say(it) } }
     DisposableEffect(voice) { onDispose { voice.shutdown() } }
     LaunchedEffect(pinNeeded) { if (pinNeeded != null) voice.pause() }   // locked: stop reading aloud
-    LaunchedEffect(speak) { voicePrefs.edit().putBoolean("speak", speak).apply(); if (!speak) voice.pause() }
+    LaunchedEffect(speak) { voicePrefs.edit().putBoolean("speak", speak).apply(); if (!speak) voice.pause() else voice.warmUp() }
     // With the speaker on, read Claude's new replies aloud (not the ones already there when the chat opened).
     val spoken = remember { mutableSetOf<String>() }
     var primed by remember { mutableStateOf(false) }
-    LaunchedEffect(chat?.messages, voice.ready, speak) {
-        if (!voice.ready || chat == null) return@LaunchedEffect   // still loading: wait, so old replies aren't read out
+    LaunchedEffect(chat?.messages, voice.ready, speak, pinNeeded) {
+        if (!voice.ready || chat == null || pinNeeded != null) return@LaunchedEffect   // still loading: wait, so old replies aren't read out
         val replies = chat?.messages.orEmpty().filter { it.role == "assistant" }.map { (it.id + it.text.hashCode()) to it.text }
         if (!primed) { spoken += replies.map { it.first }; primed = true; return@LaunchedEffect }
         if (!speak) { spoken += replies.map { it.first }; return@LaunchedEffect }   // heard by reading; Play still works
