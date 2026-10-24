@@ -452,7 +452,7 @@ fun CustomKeysDialog(vm: MainViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Upload JSON file") }
                 Text(
-                    "Or upload a JSON file (e.g. a Google service-account key, name it GOOGLE_APPLICATION_CREDENTIALS): " +
+                    "Or upload a JSON file (e.g. a Google service-account key, name it like ACME_SA_CREDENTIALS; Firebase has its own entry in the list): " +
                         "the server keeps it private and the variable then holds the path of the saved file.",
                     style = MaterialTheme.typography.bodySmall,
                 )
