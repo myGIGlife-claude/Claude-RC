@@ -34,13 +34,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install tools
-        run: sudo apt-get update -q && sudo apt-get install -y -q jq tmux shellcheck openssh-server gnupg
+        run: sudo apt-get update -q && sudo apt-get install -y -q jq tmux shellcheck openssh-server gnupg bubblewrap
       - name: shellcheck
         run: shellcheck -S warning server/*.sh server/claude-launcher-api server/claude-backup server/tests/*.sh server/tests/stubs/*
       - name: API tests (stub gh/claude/aws)
         run: server/tests/test-api.sh
       - name: Backup / restore tests (throwaway HOME and GNUPGHOME)
         run: bash server/tests/test-backup.sh
+      - name: Plugin update tests
+        run: python3 server/tests/test-plugin-updates.py
       - name: Real sshd + forced command
         run: sudo server/tests/test-sshd.sh
 
@@ -148,11 +150,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION_NAME: ${{ needs.android.outputs.name }}
         run: |
-          gh release delete latest-main --cleanup-tag --yes || true
-          gh release create latest-main dist/*.apk --prerelease --target "$GITHUB_SHA" \
-            --title "Latest main build ($VERSION_NAME)" \
-            --notes "Built from $GITHUB_SHA. Tagged releases (v*) are the stable ones."
-          # Deleting and recreating the tag can race, and GitHub then leaves the
-          # release as an "untagged" draft that nobody can download. Make sure it's public.
-          sleep 5
-          gh release edit latest-main --draft=false --prerelease
+          if gh release view latest-main >/dev/null 2>&1; then
+            gh release upload latest-main dist/*.apk --clobber
+            new_apk="$(basename dist/*.apk)"
+            while IFS= read -r asset; do
+              [[ "$asset" == *.apk && "$asset" != "$new_apk" ]] && gh release delete-asset latest-main "$asset" --yes
+            done < <(gh release view latest-main --json assets --jq '.assets[].name')
+            gh release edit latest-main --title "Latest main build ($VERSION_NAME)" \
+              --notes "Built from $GITHUB_SHA. Tagged releases (v*) are the stable ones." \
+              --draft=false --prerelease
+            git tag -f latest-main "$GITHUB_SHA"
+            git push -f origin latest-main
+          else
+            gh release create latest-main dist/*.apk --prerelease --target "$GITHUB_SHA" \
+              --title "Latest main build ($VERSION_NAME)" \
+              --notes "Built from $GITHUB_SHA. Tagged releases (v*) are the stable ones."
+            gh release edit latest-main --draft=false --prerelease
+          fi
