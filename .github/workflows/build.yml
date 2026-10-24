@@ -159,8 +159,8 @@ jobs:
             gh release edit latest-main --title "Latest main build ($VERSION_NAME)" \
               --notes "Built from $GITHUB_SHA. Tagged releases (v*) are the stable ones." \
               --draft=false --prerelease
-            git tag -f latest-main "$GITHUB_SHA"
-            git push -f origin latest-main
+            # No checkout in this job: move the tag through the API.
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/latest-main" -f sha="$GITHUB_SHA" -F force=true
           else
             gh release create latest-main dist/*.apk --prerelease --target "$GITHUB_SHA" \
               --title "Latest main build ($VERSION_NAME)" \
