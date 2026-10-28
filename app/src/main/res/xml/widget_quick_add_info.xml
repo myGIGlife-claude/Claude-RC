@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A 4x1 toolbar; resized to about 2x2 it becomes a 2 by 2 grid (QuickAddWidget). -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_quick_add_description"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:previewLayout="@layout/widget_preview_quick_add"
+    android:minWidth="@dimen/widget_four_cells"
+    android:minHeight="@dimen/widget_one_cell"
+    android:minResizeWidth="@dimen/widget_two_cells"
+    android:minResizeHeight="@dimen/widget_one_cell"
+    android:targetCellWidth="4"
+    android:targetCellHeight="1"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

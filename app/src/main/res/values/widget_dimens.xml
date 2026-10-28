@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget sizes: n cells is about 70n - 30 dp. The corner radius follows the system's on Android 12+ (values-v31). -->
+<resources>
+    <dimen name="widget_radius">20dp</dimen>
+    <dimen name="widget_two_cells">110dp</dimen>
+    <dimen name="widget_four_cells">250dp</dimen>
+    <dimen name="widget_one_cell">40dp</dimen>
+</resources>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Static picker preview of the Quick add widget. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/widget_background" android:gravity="center" android:orientation="horizontal" android:padding="8dp">
+    <ImageView android:layout_width="0dp" android:layout_height="40dp" android:layout_weight="1" android:padding="8dp"
+        android:background="@drawable/widget_button_bg" android:src="@drawable/ic_widget_new_repo" android:scaleType="fitCenter" android:contentDescription="New repo" />
+    <ImageView android:layout_width="0dp" android:layout_height="40dp" android:layout_weight="1" android:layout_marginStart="8dp" android:padding="8dp"
+        android:background="@drawable/widget_button_bg" android:src="@drawable/ic_widget_key" android:scaleType="fitCenter" android:contentDescription="Add key" />
+    <ImageView android:layout_width="0dp" android:layout_height="40dp" android:layout_weight="1" android:layout_marginStart="8dp" android:padding="8dp"
+        android:background="@drawable/widget_button_bg" android:src="@drawable/ic_widget_chat" android:scaleType="fitCenter" android:contentDescription="New chat" />
+    <ImageView android:layout_width="0dp" android:layout_height="40dp" android:layout_weight="1" android:layout_marginStart="8dp" android:padding="8dp"
+        android:background="@drawable/widget_button_bg" android:src="@drawable/ic_widget_sessions" android:scaleType="fitCenter" android:contentDescription="Sessions" />
+</LinearLayout>

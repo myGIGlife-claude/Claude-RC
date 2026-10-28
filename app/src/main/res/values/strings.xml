@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">cLaudeRC</string>
+
+    <!-- Home-screen widgets: picker labels and descriptions. -->
+    <string name="widget_sessions_label">Sessions</string>
+    <string name="widget_sessions_description">Your Claude sessions at a glance: who needs you, who is working.</string>
+    <string name="widget_quick_add_label">Quick add</string>
+    <string name="widget_quick_add_description">New repo, add a key, new chat or your sessions in one tap.</string>
+    <string name="widget_usage_label">Usage</string>
+    <string name="widget_usage_description">How much of each Claude account\'s 5 hour and 7 day limit is used.</string>
 </resources>
