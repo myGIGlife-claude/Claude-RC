@@ -87,7 +87,7 @@ fun ConnectionsScreen(vm: MainViewModel) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val preset by vm.connections.presetTab.collectAsStateWithLifecycle()
     LaunchedEffect(preset) { vm.connections.takePresetTab(Tab.STATUS)?.let { tab = it } }
-    val login ={ kind: LoginKind -> vm.logins.showLogin(kind) }
+    val login = { kind: LoginKind -> vm.logins.showLogin(kind) }
     val detail = { d: Detail -> vm.connections.openDetail(d) }
 
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = { vm.refreshAll() }, modifier = Modifier.fillMaxSize()) {

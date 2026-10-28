@@ -86,7 +86,7 @@ fun ClaudeScreen(vm: MainViewModel) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val preset by vm.connections.presetTab.collectAsStateWithLifecycle()
     LaunchedEffect(preset) { vm.connections.takePresetTab(Tab.COMMAND)?.let { tab = it } }
-    val change ={ args: String -> vm.connections.claudeCommand(args) }
+    val change = { args: String -> vm.connections.claudeCommand(args) }
 
     LaunchedEffect(status?.scriptApi) { vm.connections.loadPlugins() }
 
