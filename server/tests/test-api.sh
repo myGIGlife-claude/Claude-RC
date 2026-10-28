@@ -128,7 +128,9 @@ check "new ok + started" "$(jqt '.ok and .data.session=="demo-app2" and .data.ur
 tmux has-session -t "=demo-app2" 2>/dev/null; check "tmux session exists" $?
 [[ -f "$STUB_STATE/rc_enabled" && -f "$HOME/.config/claude-setup/remote-control-confirmed" ]]; check "Enable Remote Control answered y" $?
 jq -e --arg d "$HOME/projects/demo-app2" '.projects[$d].hasTrustDialogAccepted' "$HOME/.claude.json" >/dev/null; check "folder pre-trusted" $?
-grep -q "^demo-app2	$HOME/projects/demo-app2$" "$LIST"; check "claude-autostart list updated" $?
+grep -q "^demo-app2	$HOME/projects/demo-app2$" "$LIST"; rc=$?
+[[ $rc -eq 0 ]] || { echo "DEBUG list:"; cat "$LIST" 2>&1; echo "DEBUG panes:"; tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}' 2>&1; echo "DEBUG tmux: $(tmux -V)"; }
+check "claude-autostart list updated" $rc
 api "new demo-app2 --owner demo-user --visibility private"
 check "new again -> repo_exists" "$(jqt '.error.code=="repo_exists"')"
 api "new my.dotted --owner example-org --visibility public --start"
