@@ -11,7 +11,7 @@ import androidx.glance.appwidget.updateAll
 /** Redraws every placed widget from the snapshot. */
 suspend fun refreshWidgets(ctx: Context) {
     SessionsWidget().updateAll(ctx)
-    QuickAddWidget().updateAll(ctx)
+    QuickActionsWidget().updateAll(ctx)
     UsageWidget().updateAll(ctx)
 }
 
@@ -22,7 +22,7 @@ class RefreshWidgetsAction : ActionCallback {
     }
 }
 
-private val RECEIVERS = listOf(SessionsWidgetReceiver::class.java, QuickAddWidgetReceiver::class.java, UsageWidgetReceiver::class.java)
+private val RECEIVERS = listOf(SessionsWidgetReceiver::class.java, QuickActionsWidgetReceiver::class.java, UsageWidgetReceiver::class.java)
 
 /** The first widget of a kind was placed: keep the background refresh going and fetch now. */
 internal fun onWidgetEnabled(ctx: Context) {

@@ -37,14 +37,6 @@ class WidgetFormatTest {
         assertEquals(BarLevel.BAD, barLevel(100))
     }
 
-    @Test fun rowsSortedAndCapped() {
-        val many = (1..20).map { WidgetSession("s$it", "p%02d".format(it)) } + WidgetSession("w", "zz", waiting = true)
-        val rows = sessionRows(many)
-        assertEquals(MAX_SESSION_ROWS, rows.size)
-        assertEquals("w", rows.first().name)
-        assertEquals(emptyList<WidgetSession>(), sessionRows(emptyList()))
-    }
-
     @Test fun staleAndFooter() {
         val t = 1_000_000_000L
         assertFalse(isStale(t, t + STALE_AFTER_MS))

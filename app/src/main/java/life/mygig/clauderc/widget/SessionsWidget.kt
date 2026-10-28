@@ -11,12 +11,11 @@ import androidx.glance.Image
 import androidx.glance.ImageProvider
 import androidx.glance.LocalContext
 import androidx.glance.LocalSize
+import androidx.glance.action.Action
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
-import androidx.glance.appwidget.lazy.LazyColumn
-import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
 import androidx.glance.layout.Alignment
@@ -32,14 +31,16 @@ import androidx.glance.layout.width
 import androidx.glance.text.Text
 import life.mygig.clauderc.R
 
-/** Sessions: who needs you, who is working; a row opens that session's chat. */
+/** Sessions: who needs you, who is working (all, active only or picked ones); a row opens that session's chat. */
 class SessionsWidget : GlanceAppWidget() {
     override val sizeMode: SizeMode = SizeMode.Exact
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val first = WidgetStore.read(context)
-        provideContent { SessionsContent(rememberSnapshot(context, first)) }
+        val first = loadWidgetState(context, id)
+        provideContent { SessionsContent(rememberWidgetState(context, id, first)) }
     }
+
+    override suspend fun onDelete(context: Context, glanceId: GlanceId) = forgetWidget(context, glanceId)
 }
 
 class SessionsWidgetReceiver : GlanceAppWidgetReceiver() {
@@ -49,45 +50,56 @@ class SessionsWidgetReceiver : GlanceAppWidgetReceiver() {
 }
 
 @Composable
-private fun SessionsContent(snap: WidgetSnapshot) {
+private fun SessionsContent(state: WidgetState) {
+    val (snap, config) = state
     val ctx = LocalContext.current
     val now = remember(snap) { System.currentTimeMillis() }
-    // Narrow widgets drop the state word; the dot's description says it instead.
-    val showWord = LocalSize.current.width >= 170.dp
-    val waiting = snap.sessions.count { it.waiting }
-    Column(modifier = GlanceModifier.widgetContainer()) {
-        Row(
-            modifier = GlanceModifier.fillMaxWidth().height(32.dp).clickable(openApp(ctx, WidgetLink.OPEN_SESSIONS)),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Sessions", style = titleStyle, maxLines = 1)
-            if (snap.configured && snap.sessions.isNotEmpty()) {
-                Text("${snap.sessions.size}", modifier = GlanceModifier.padding(start = 6.dp), style = nameStyle(WidgetColors.muted))
-            }
-            Spacer(modifier = GlanceModifier.defaultWeight())
-            if (snap.configured && waiting > 0) {
-                Box(modifier = GlanceModifier.background(ImageProvider(R.drawable.widget_badge_bg)).padding(horizontal = 8.dp, vertical = 2.dp)) {
-                    Text("$waiting waiting", style = smallStyle(WidgetColors.warn), maxLines = 1)
-                }
-            }
-        }
+    val size = LocalSize.current
+    val lay = sessionsLayout(size.width.value, size.height.value, config.rowCap())
+    val rows = config.pickSessions(snap.sessions)
+    val open = openApp(ctx, WidgetLink.OPEN_SESSIONS)
+    Column(modifier = GlanceModifier.widgetContainer(lay.padding.dp)) {
+        SessionsHeader(rows, snap.configured, open)
         when {
-            !snap.configured -> WidgetMessage(
-                "Open cLaudeRC to connect a server", null,
-                openApp(ctx, WidgetLink.OPEN_SESSIONS), GlanceModifier.defaultWeight(),
-            )
-            snap.sessions.isEmpty() -> WidgetMessage(
-                "No sessions running", "Tap to start one in cLaudeRC",
-                openApp(ctx, WidgetLink.OPEN_SESSIONS), GlanceModifier.defaultWeight(),
-            )
+            lay.rowsPerColumn == 0 -> {}   // very short: the header (count, waiting badge) is all that fits
+            !snap.configured -> WidgetMessage("Open cLaudeRC to connect a server", null, open, GlanceModifier.defaultWeight())
+            rows.isEmpty() -> WidgetMessage(emptySessionsText(config.filter), "Tap to open your sessions", open, GlanceModifier.defaultWeight())
             else -> {
                 val stale = isStale(snap.sessionsAt, now)
-                LazyColumn(modifier = GlanceModifier.defaultWeight().fillMaxWidth()) {
-                    items(sessionRows(snap.sessions)) { s -> SessionRow(ctx, s, stale, showWord) }
+                val shown = rows.take(lay.maxItems)
+                // Waiting first, so the first column holds what matters most; columns are filled top to bottom.
+                val perColumn = (shown.size + lay.columns - 1) / lay.columns
+                Row(modifier = GlanceModifier.fillMaxWidth().defaultWeight()) {
+                    shown.chunked(perColumn).forEachIndexed { i, column ->
+                        if (i > 0) Spacer(modifier = GlanceModifier.width(COLUMN_GAP.dp))
+                        Column(modifier = GlanceModifier.defaultWeight()) {
+                            column.forEach { s -> SessionRow(ctx, s, stale, lay.showWord) }
+                        }
+                    }
                 }
             }
         }
-        if (snap.configured) WidgetFooter(snap.sessionsAt, now)
+        if (lay.footer && snap.configured) WidgetFooter(snap.sessionsAt, now)
+    }
+}
+
+@Composable
+private fun SessionsHeader(rows: List<WidgetSession>, configured: Boolean, open: Action) {
+    val waiting = rows.count { it.waiting }
+    Row(
+        modifier = GlanceModifier.fillMaxWidth().height(HEADER_H.dp).clickable(open),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Sessions", style = titleStyle, maxLines = 1)
+        if (configured && rows.isNotEmpty()) {
+            Text("${rows.size}", modifier = GlanceModifier.padding(start = 6.dp), style = nameStyle(WidgetColors.muted), maxLines = 1)
+        }
+        Spacer(modifier = GlanceModifier.defaultWeight())
+        if (configured && waiting > 0) {
+            Box(modifier = GlanceModifier.background(ImageProvider(R.drawable.widget_badge_bg)).padding(horizontal = 8.dp, vertical = 2.dp)) {
+                Text("$waiting waiting", style = smallStyle(WidgetColors.warn), maxLines = 1)
+            }
+        }
     }
 }
 
@@ -95,7 +107,7 @@ private fun SessionsContent(snap: WidgetSnapshot) {
 private fun SessionRow(ctx: Context, s: WidgetSession, stale: Boolean, showWord: Boolean) {
     val dot = s.dot()
     Row(
-        modifier = GlanceModifier.fillMaxWidth().height(48.dp).clickable(openApp(ctx, WidgetLink.OPEN_SESSION, s.name)),
+        modifier = GlanceModifier.fillMaxWidth().height(ROW_H.dp).clickable(openApp(ctx, WidgetLink.OPEN_SESSION, s.name)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Image(

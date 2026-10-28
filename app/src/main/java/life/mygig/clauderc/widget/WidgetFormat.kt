@@ -6,18 +6,56 @@ import java.time.OffsetDateTime
 
 /* Pure helpers behind the widgets' text and colors (no Android types, so JVM-tested). */
 
-/** At most this many session rows; the list scrolls inside the widget. */
-const val MAX_SESSION_ROWS = 12
+/** The sessions this widget shows (by its filter), waiting first; the layout decides how many fit. */
+fun WidgetConfig.pickSessions(all: List<WidgetSession>): List<WidgetSession> = when (filter) {
+    SessionFilter.ACTIVE -> all.filter { it.waiting || it.busy }
+    SessionFilter.PICKED -> all.filter { it.name in sessions }
+    else -> all
+}.forWidget()
 
-/** Widgets show this many Claude accounts at most. */
-const val MAX_USAGE_ACCOUNTS = 3
+/** What the empty list says, by filter. */
+fun emptySessionsText(filter: String) = when (filter) {
+    SessionFilter.ACTIVE -> "Nothing needs you or is working"
+    SessionFilter.PICKED -> "None of the picked sessions is running"
+    else -> "No sessions running"
+}
 
-fun sessionRows(sessions: List<WidgetSession>): List<WidgetSession> = sessions.forWidget().take(MAX_SESSION_ROWS)
+/** Row cap from the settings, clamped to 1..12 (a hand-edited or old value can't break the layout). */
+fun WidgetConfig.rowCap(): Int = maxRows.coerceIn(1, MAX_ROW_CHOICES.last())
+
+/** The ticked accounts in snapshot order; none ticked (or none of them left) = all. */
+fun WidgetConfig.pickAccounts(all: List<WidgetUsage>): List<WidgetUsage> =
+    if (accounts.isEmpty()) all else all.filter { it.account in accounts }.ifEmpty { all }
+
+/** The account closest to a limit first (what a one-account widget shows). */
+fun List<WidgetUsage>.mostUsedFirst(): List<WidgetUsage> =
+    sortedByDescending { maxOf(it.fiveHourPct ?: -1.0, it.sevenDayPct ?: -1.0) }
+
+/** Known action ids in the chosen order, no repeats, at most MAX_ACTIONS; nothing usable = DEFAULT_ACTIONS. */
+fun sanitizeActions(ids: List<String>): List<QuickAction> {
+    val known = ids.distinct().mapNotNull { id -> QUICK_ACTIONS.firstOrNull { it.id == id } }.take(MAX_ACTIONS)
+    return known.ifEmpty { DEFAULT_ACTIONS.mapNotNull { id -> QUICK_ACTIONS.firstOrNull { it.id == id } } }
+}
 
 fun stateWord(dot: Dot) = when (dot) {
     Dot.WAITING -> "needs you"
     Dot.BUSY -> "working"
     Dot.IDLE -> "idle"
+}
+
+/** Settings screen: tick or untick [id]; ticking adds it at the end, and nothing beyond [max]. */
+fun List<String>.toggled(id: String, max: Int = Int.MAX_VALUE): List<String> = when {
+    id in this -> this - id
+    size >= max -> this
+    else -> this + id
+}
+
+/** Settings screen: move [id] up (-1) or down (+1); out of range or unknown = unchanged. */
+fun List<String>.moved(id: String, by: Int): List<String> {
+    val from = indexOf(id)
+    val to = from + by
+    if (from < 0 || to !in indices) return this
+    return toMutableList().apply { add(to, removeAt(from)) }
 }
 
 fun isStale(at: Long, now: Long) = at <= 0 || now - at > STALE_AFTER_MS

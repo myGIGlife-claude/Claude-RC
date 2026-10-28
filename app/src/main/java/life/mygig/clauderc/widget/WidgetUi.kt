@@ -9,11 +9,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.Image
 import androidx.glance.ImageProvider
 import androidx.glance.action.Action
 import androidx.glance.action.clickable
+import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.appWidgetBackground
@@ -26,6 +28,7 @@ import androidx.glance.layout.Column
 import androidx.glance.layout.Row
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
+import androidx.glance.layout.height
 import androidx.glance.layout.padding
 import androidx.glance.layout.size
 import androidx.glance.text.FontWeight
@@ -67,8 +70,8 @@ internal fun nameStyle(color: ColorProvider = WidgetColors.fg, align: TextAlign?
 internal fun smallStyle(color: ColorProvider = WidgetColors.muted, align: TextAlign? = null) =
     TextStyle(color = color, fontSize = 11.sp, textAlign = align)
 
-/** Rounded s1 surface with the system widget radius, padded 12dp (Quick add's short toolbar uses less). */
-internal fun GlanceModifier.widgetContainer(padding: Dp = 12.dp): GlanceModifier =
+/** Rounded s1 surface with the system widget radius; padding comes from the widget's layout (WidgetLayout.kt). */
+internal fun GlanceModifier.widgetContainer(padding: Dp): GlanceModifier =
     fillMaxSize().appWidgetBackground().background(ImageProvider(R.drawable.widget_background)).cornerRadius(R.dimen.widget_radius).padding(padding)
 
 /** Opens the app at [open] (a WidgetLink.OPEN_* value); MainActivity checks the extras before using them. */
@@ -80,13 +83,27 @@ internal fun openApp(ctx: Context, open: String, session: String? = null): Actio
             .apply { if (session != null) putExtra(WidgetLink.EXTRA_SESSION, session) },
     )
 
+/** What one widget draws from: the shared snapshot and its own settings. */
+internal data class WidgetState(val snap: WidgetSnapshot, val config: WidgetConfig)
+
+/** One read of both (no network); provideGlance calls it once per update. */
+internal suspend fun loadWidgetState(ctx: Context, glanceId: GlanceId): WidgetState {
+    val appWidgetId = GlanceAppWidgetManager(ctx).getAppWidgetId(glanceId)
+    return WidgetState(WidgetStore.read(ctx), WidgetConfigs.get(ctx, appWidgetId))
+}
+
 /**
- * The stored snapshot, starting from [first] and following later writes: a widget's Glance session can outlive one
- * update, and a redraw during it recomposes instead of calling provideGlance again.
+ * Starts from [first] and follows later writes of the snapshot or the settings: a widget's Glance session can
+ * outlive one update, and a redraw during it recomposes instead of calling provideGlance again.
  */
 @Composable
-internal fun rememberSnapshot(ctx: Context, first: WidgetSnapshot): WidgetSnapshot =
-    produceState(first) { ctx.widgetStore.data.collect { value = WidgetStore.read(ctx) } }.value
+internal fun rememberWidgetState(ctx: Context, glanceId: GlanceId, first: WidgetState): WidgetState =
+    produceState(first) { ctx.widgetStore.data.collect { value = loadWidgetState(ctx, glanceId) } }.value
+
+/** Settings of a removed widget are forgotten (GlanceAppWidget.onDelete runs inside the receiver's onDeleted). */
+internal suspend fun forgetWidget(ctx: Context, glanceId: GlanceId) {
+    WidgetConfigs.remove(ctx, intArrayOf(GlanceAppWidgetManager(ctx).getAppWidgetId(glanceId)))
+}
 
 /** A centered message filling the space (not configured / nothing to show); tapping it opens the app. */
 @Composable
@@ -96,18 +113,21 @@ internal fun WidgetMessage(title: String, hint: String?, onClick: Action, modifi
         verticalAlignment = Alignment.CenterVertically,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(title, style = nameStyle(align = TextAlign.Center))
+        Text(title, style = nameStyle(align = TextAlign.Center), maxLines = 2)
         if (hint != null) {
-            Text(hint, modifier = GlanceModifier.padding(top = 4.dp), style = smallStyle(align = TextAlign.Center))
+            Text(hint, modifier = GlanceModifier.padding(top = 4.dp), style = smallStyle(align = TextAlign.Center), maxLines = 2)
         }
     }
 }
 
-/** Data age (with the "phone locked or offline?" hint once stale) and a refresh button that asks the worker to fetch now. */
+/**
+ * Data age (with the "phone locked or offline?" hint once stale) and a refresh button that asks the worker to fetch
+ * now. The button is 40dp, not 48dp, to leave a 2x2 widget room for rows; the footer is FOOTER_H tall.
+ */
 @Composable
 internal fun WidgetFooter(at: Long, now: Long) {
     val stale = isStale(at, now)
-    Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier = GlanceModifier.fillMaxWidth().height(FOOTER_H.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(
             footerText(at, now),
             modifier = GlanceModifier.defaultWeight(),

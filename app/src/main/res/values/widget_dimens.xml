@@ -5,4 +5,6 @@
     <dimen name="widget_two_cells">110dp</dimen>
     <dimen name="widget_four_cells">250dp</dimen>
     <dimen name="widget_one_cell">40dp</dimen>
+    <!-- Room to grow on a foldable's inner screen or a tablet. -->
+    <dimen name="widget_max_resize">640dp</dimen>
 </resources>
