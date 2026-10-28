@@ -12,6 +12,7 @@ import life.mygig.clauderc.api.PluginsData
 import life.mygig.clauderc.api.RunResult
 import life.mygig.clauderc.api.Updates
 import life.mygig.clauderc.ui.Detail
+import life.mygig.clauderc.ui.Tab
 
 /**
  * Connections: MCP servers, plugins, tile details, MCP sign-in and the Claude command runner.
@@ -55,6 +56,15 @@ class ConnectionsController(
             try { _plugins.value = api.plugins() } catch (e: ApiException) { tools.report(e) } finally { _pluginsLoading.value = false }
         }
     }
+
+    /**
+     * A pill tab a widget tap asked for on the Connections ([Tab.STATUS]) or Claude ([Tab.COMMAND]) screen.
+     * The screen takes it once and otherwise keeps its own tab.
+     */
+    private val _presetTab = MutableStateFlow<Pair<Tab, Int>?>(null)
+    val presetTab = _presetTab.asStateFlow()
+    fun presetTab(screen: Tab, index: Int) { _presetTab.value = screen to index }
+    fun takePresetTab(screen: Tab): Int? = _presetTab.value?.takeIf { it.first == screen }?.second?.also { _presetTab.value = null }
 
     /** The tile detail page that's open, if any. */
     private val _detail = MutableStateFlow<Detail?>(null)

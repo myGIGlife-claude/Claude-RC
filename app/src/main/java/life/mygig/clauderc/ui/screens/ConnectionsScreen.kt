@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import life.mygig.clauderc.ui.components.CalmGroup
 import life.mygig.clauderc.ui.components.CalmDivider
@@ -48,6 +49,7 @@ import life.mygig.clauderc.api.Updates
 import life.mygig.clauderc.ui.Detail
 import life.mygig.clauderc.ui.LoginKind
 import life.mygig.clauderc.ui.MainViewModel
+import life.mygig.clauderc.ui.Tab
 import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.InfoTile
 import life.mygig.clauderc.ui.components.PillTabs
@@ -83,6 +85,8 @@ fun ConnectionsScreen(vm: MainViewModel) {
     val latest by vm.latest.collectAsStateWithLifecycle()
     val mcp by vm.connections.mcp.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    val preset by vm.connections.presetTab.collectAsStateWithLifecycle()
+    LaunchedEffect(preset) { vm.connections.takePresetTab(Tab.STATUS)?.let { tab = it } }
     val login = { kind: LoginKind -> vm.logins.showLogin(kind) }
     val detail = { d: Detail -> vm.connections.openDetail(d) }
 

@@ -67,14 +67,14 @@ class GeneralChatsController(
         refreshSessions()
     }
 
-    /** Starts the chat if it is stopped (same conversation), then opens it. */
-    fun open(chat: GeneralChat) {
+    /** Starts the chat [id] if it is stopped (same conversation), then opens it. */
+    fun open(id: String) {
         if (_opening.value != null) return
-        _opening.value = chat.id
+        _opening.value = id
         openJob = tools.scope.launch {
             try {
-                val r = api.generalOpen(chat.id)
-                openChat(r.session.ifBlank { chatSession(chat.id) })
+                val r = api.generalOpen(id)
+                openChat(r.session.ifBlank { chatSession(id) })
                 refresh()
                 refreshSessions()
             } catch (e: ApiException) {
