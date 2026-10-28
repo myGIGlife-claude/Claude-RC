@@ -247,6 +247,17 @@ autostart_forget() {
   awk -F'\t' -v s="$sess" '$1 != s' "$AUTOSTART_LIST" >"$tmp" && mv "$tmp" "$AUTOSTART_LIST" || rm -f "$tmp"
 }
 
+# tmux 3.6 reports a new pane's folder as the server's own until its process has started, so a save right after
+# new-session would record the wrong folder. Wait (up to ~2 s) for the real one.
+settle_pane() {
+  local sess="$1" want i
+  want="$(cd "$2" 2>/dev/null && pwd -P)" || return 0
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    [[ "$(tmux display-message -p -t "=$sess:" '#{pane_current_path}' 2>/dev/null)" == "$want" ]] && return 0
+    sleep 0.2
+  done
+}
+
 # Starts the session exactly as the menu always has, so claude-autostart picks
 # it up. Returns 0 if started, 2 if already running.
 launch_session() {
@@ -258,6 +269,7 @@ launch_session() {
   trust_folder "$dir"
   tmux new-session -d -s "$sess" -c "$dir" \
     "env -u ANTHROPIC_API_KEY claude --remote-control $(printf %q "$name"); exec bash" || return 1
+  settle_pane "$sess" "$dir"
   autostart_save
   return 0
 }
@@ -1221,6 +1233,7 @@ resume_session() {
   trust_folder "$dir"
   if tmux new-session -d -s "$sess" -c "$dir" \
     "env -u ANTHROPIC_API_KEY claude --remote-control $(printf %q "$name") --resume $sid; exec bash"; then
+    settle_pane "$sess" "$dir"
     autostart_save
     sleep 4
     pp="$(tmux display-message -p -t "=$sess:" '#{pane_pid}' 2>/dev/null)"
