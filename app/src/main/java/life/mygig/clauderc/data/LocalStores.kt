@@ -41,6 +41,8 @@ val Context.chatDraftsStore: DataStore<Preferences> by migratedStore("chat_draft
 val Context.hostDraftStore: DataStore<Preferences> by migratedStore("host_draft")
 /** The chat's speaker switch ("speak"). */
 val Context.chatVoiceStore: DataStore<Preferences> by migratedStore("chat_voice")
+/** What the home-screen widgets show (one JSON snapshot, see widget/WidgetSnapshot.kt). */
+val Context.widgetStore: DataStore<Preferences> by migratedStore("widget")
 
 /** Lives as long as the process: a write must not be dropped because the screen that made it closed. */
 private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
