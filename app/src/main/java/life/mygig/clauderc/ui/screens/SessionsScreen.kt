@@ -79,6 +79,11 @@ import life.mygig.clauderc.ui.theme.WarnAmber
 fun SessionsScreen(vm: MainViewModel) {
     // Saved for process death; the controller keeps it while you visit other tabs.
     var tab by rememberSaveable { mutableIntStateOf(vm.general.tab.value) }
+    // A restored tab goes to the controller first; after that a widget tap can switch it while this shows.
+    LaunchedEffect(Unit) {
+        vm.general.selectTab(tab)
+        vm.general.tab.collect { tab = it }
+    }
     Column(Modifier.fillMaxSize()) {
         Text("Sessions", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 20.dp, top = 12.dp))
         PillTabs(
