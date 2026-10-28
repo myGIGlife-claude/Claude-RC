@@ -126,7 +126,7 @@ fun GeneralChatTab(vm: MainViewModel) {
                 c,
                 now = now,
                 opening = opening == c.id,
-                onOpen = { vm.general.open(c) },
+                onOpen = { vm.general.open(c.id) },
                 onRename = { renaming = c },
                 onStop = { vm.general.stop(c.id) },
                 onDelete = { confirmDelete = c },

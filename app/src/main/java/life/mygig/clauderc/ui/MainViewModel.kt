@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
@@ -60,6 +62,9 @@ import life.mygig.clauderc.ui.vm.PushController
 import life.mygig.clauderc.ui.vm.ServicesController
 import life.mygig.clauderc.ui.vm.TeamController
 import life.mygig.clauderc.ui.vm.VmTools
+import life.mygig.clauderc.widget.WidgetTap
+import life.mygig.clauderc.widget.publishSessions
+import life.mygig.clauderc.widget.publishUsage
 
 enum class Tab { STATUS, NEW, PROJECTS, SESSIONS, COMMAND }
 enum class LoginKind { CLAUDE, GITHUB, AWS, GITLAB, DOCKER, YOUTUBE }
@@ -189,6 +194,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _foreground = MutableStateFlow(true)
     val foreground = _foreground.asStateFlow()
 
+    /** A home-screen widget tap waiting for the app to be unlocked. */
+    private val widgetTap = MutableStateFlow<WidgetTap?>(null)
+
     init {
         // An update's APK is only needed until it's installed (which restarts the app).
         viewModelScope.launch(Dispatchers.IO) { deleteApks() }
@@ -227,6 +235,66 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         delay(5 * 60 * 1000L)
                     }
                 }
+            }
+        }
+        viewModelScope.launch {
+            // Only once unlocked: App lock first, and a chat still asks for its PIN.
+            combine(unlocked, widgetTap) { u, t -> t.takeIf { u } }.filterNotNull().collect { t ->
+                widgetTap.value = null
+                handleWidgetTap(t)
+            }
+        }
+        // The widgets show the active server's usage, whenever the app has loaded it.
+        viewModelScope.launch {
+            team.cluster.collect { groups -> groups?.firstOrNull { it.active }?.accounts?.let { publishUsage(getApplication(), it) } }
+        }
+    }
+
+    /** MainActivity hands over a widget tap; it runs once the app is unlocked. */
+    fun openFromWidget(t: WidgetTap) { widgetTap.value = t }
+
+    private fun handleWidgetTap(t: WidgetTap) {
+        // Whatever covers the tabs goes, so the place the widget named shows.
+        _showSettings.value = false
+        if (_tail.value != null) closeTail()
+        if (chats.chatSession.value != null) chats.closeChat()
+        when (t) {
+            WidgetTap.Sessions -> selectTab(Tab.SESSIONS)
+            is WidgetTap.Session -> openSessionFromWidget(t.name)
+            WidgetTap.NewRepo -> selectTab(Tab.NEW)
+            WidgetTap.Keys -> {
+                if (connections.detail.value != null) connections.openDetail(null)
+                connections.presetTab(Tab.STATUS, 2)   // Logins, MCP, Keys
+                selectTab(Tab.STATUS)
+            }
+            WidgetTap.NewChat -> {
+                selectTab(Tab.SESSIONS)
+                general.selectTab(0)
+                if (general.supported()) general.newChat()
+            }
+            WidgetTap.Cluster -> {
+                connections.presetTab(Tab.COMMAND, 0)   // Accounts: the cLaudeCluster section
+                selectTab(Tab.COMMAND)
+            }
+        }
+    }
+
+    /** Opens the session's chat the way its row in Sessions does; if it is gone, the Sessions tab is enough. */
+    private fun openSessionFromWidget(name: String) {
+        selectTab(Tab.SESSIONS)
+        viewModelScope.launch {
+            val s = _sessions.value.firstOrNull { it.name == name } ?: run {
+                val fresh = try { api.sessions().sessions } catch (_: ApiException) { return@launch }
+                _sessions.value = fresh
+                publishSessions(getApplication(), fresh)
+                fresh.firstOrNull { it.name == name }
+            } ?: return@launch
+            if (s.general) {
+                general.selectTab(0)
+                general.open(s.chatId)   // starts it on the server first (general-open)
+            } else {
+                general.selectTab(1)
+                if (s.waiting) loadTail(s.name) else chats.openChat(s.name)
             }
         }
     }
@@ -707,7 +775,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _sessionsRefreshing.value = true
             try {
-                _sessions.value = api.sessions().sessions
+                val fresh = api.sessions().sessions
+                _sessions.value = fresh
+                publishSessions(getApplication(), fresh)
             } catch (e: ApiException) {
                 report(e) { refreshSessions() }
             } finally {
