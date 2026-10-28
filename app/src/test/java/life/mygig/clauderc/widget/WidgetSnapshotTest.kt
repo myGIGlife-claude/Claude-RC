@@ -1,10 +1,10 @@
 package life.mygig.clauderc.widget
 
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertNull
-import kotlin.test.assertTrue
+import org.junit.Test
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import life.mygig.clauderc.api.ClusterAccount
 import life.mygig.clauderc.api.Usage
 import life.mygig.clauderc.api.UsageWindow
