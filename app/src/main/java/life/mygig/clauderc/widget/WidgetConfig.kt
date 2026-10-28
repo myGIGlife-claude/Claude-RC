@@ -9,56 +9,72 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import life.mygig.clauderc.data.widgetStore
 
-/** What one placed widget shows. Chosen in WidgetConfigActivity (on adding it, and later by long-press > reconfigure). */
-@Serializable
-data class WidgetConfig(
-    val kind: String = KIND_SESSIONS,
-    /** Sessions: ALL, ACTIVE (waiting + working) or PICKED (only [sessions]). */
-    val filter: String = FILTER_ALL,
-    /** Sessions: tmux names for PICKED. */
-    val sessions: List<String> = emptyList(),
-    val maxRows: Int = 8,
-    /** Quick actions: WidgetLink.OPEN_* values, in order (max [MAX_ACTIONS]). */
-    val actions: List<String> = DEFAULT_ACTIONS,
-    /** Usage: which account names to show; empty = all Claude accounts. */
-    val accounts: List<String> = emptyList(),
-    val showWeekly: Boolean = true,
-) {
-    companion object {
-        const val KIND_SESSIONS = "sessions"
-        const val KIND_QUICK = "quick"
-        const val KIND_USAGE = "usage"
-        const val FILTER_ALL = "all"
-        const val FILTER_ACTIVE = "active"
-        const val FILTER_PICKED = "picked"
-        const val MAX_ACTIONS = 6
-        val DEFAULT_ACTIONS = listOf(WidgetLink.OPEN_NEW_REPO, WidgetLink.OPEN_KEYS, WidgetLink.OPEN_NEW_CHAT, WidgetLink.OPEN_SESSIONS)
-    }
+/*
+ * Per-widget settings, chosen in WidgetConfigActivity and stored per appWidgetId as JSON in `widgetStore`
+ * ("config_<id>"). Missing or unreadable = the defaults below, so a widget placed without configuring works.
+ */
+
+object WidgetKind {
+    const val SESSIONS = "sessions"
+    const val ACTIONS = "actions"
+    const val USAGE = "usage"
 }
 
-/** Per-widget settings, keyed by appWidgetId, in the same DataStore as the snapshot. */
+object SessionFilter {
+    const val ALL = "all"
+    const val ACTIVE = "active"   // waiting or working
+    const val PICKED = "picked"   // only WidgetConfig.sessions
+}
+
+@Serializable
+data class WidgetConfig(
+    val kind: String = "",
+    /** Sessions: a SessionFilter value. */
+    val filter: String = SessionFilter.ALL,
+    /** Sessions: tmux session names for SessionFilter.PICKED. */
+    val sessions: List<String> = emptyList(),
+    /** Sessions: at most this many rows (fewer when they don't fit). */
+    val maxRows: Int = 12,
+    /** Quick actions: QuickAction ids in display order; empty = DEFAULT_ACTIONS. */
+    val actions: List<String> = emptyList(),
+    /** Usage: account names to show; empty = all. */
+    val accounts: List<String> = emptyList(),
+    /** Usage: show the 7 day bar too. */
+    val showWeekly: Boolean = true,
+)
+
+/** A Quick actions button: where it opens the app (a WidgetLink.OPEN_* value). */
+data class QuickAction(val id: String, val label: String, val open: String)
+
+val QUICK_ACTIONS = listOf(
+    QuickAction("new_repo", "New repo", WidgetLink.OPEN_NEW_REPO),
+    QuickAction("add_key", "Add key", WidgetLink.OPEN_KEYS),
+    QuickAction("new_chat", "New chat", WidgetLink.OPEN_NEW_CHAT),
+    QuickAction("sessions", "Sessions", WidgetLink.OPEN_SESSIONS),
+    QuickAction("usage", "Usage", WidgetLink.OPEN_CLUSTER),
+)
+
+const val MAX_ACTIONS = 6
+val DEFAULT_ACTIONS = listOf("new_repo", "add_key", "new_chat", "sessions")
+val MAX_ROW_CHOICES = listOf(3, 5, 8, 12)
+
+private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+fun WidgetConfig.encode(): String = json.encodeToString(this)
+fun decodeConfig(text: String?): WidgetConfig =
+    text?.let { runCatching { json.decodeFromString<WidgetConfig>(it) }.getOrNull() } ?: WidgetConfig()
+
 object WidgetConfigs {
-    private fun key(id: Int) = stringPreferencesKey("config_$id")
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    private fun key(appWidgetId: Int) = stringPreferencesKey("config_$appWidgetId")
 
-    /** The saved settings, or [default] (what a freshly added widget of that kind shows) if none or unreadable. */
-    suspend fun get(ctx: Context, id: Int, default: WidgetConfig): WidgetConfig =
-        ctx.widgetStore.data.first()[key(id)]?.let { runCatching { json.decodeFromString<WidgetConfig>(it) }.getOrNull() } ?: default
+    suspend fun get(ctx: Context, appWidgetId: Int): WidgetConfig = decodeConfig(ctx.widgetStore.data.first()[key(appWidgetId)])
 
-    suspend fun set(ctx: Context, id: Int, c: WidgetConfig) {
-        ctx.widgetStore.edit { it[key(id)] = json.encodeToString(c) }
+    suspend fun set(ctx: Context, appWidgetId: Int, config: WidgetConfig) {
+        ctx.widgetStore.edit { it[key(appWidgetId)] = config.encode() }
         refreshWidgets(ctx)
     }
 
-    /** Called when a widget is removed, so its settings don't pile up. */
-    suspend fun remove(ctx: Context, ids: IntArray) = ctx.widgetStore.edit { p -> ids.forEach { p.remove(key(it)) } }.let { }
+    /** Forget removed widgets' settings. */
+    suspend fun remove(ctx: Context, appWidgetIds: IntArray) {
+        ctx.widgetStore.edit { p -> appWidgetIds.forEach { p.remove(key(it)) } }
+    }
 }
-
-/** Every quick action a widget can offer: its WidgetLink value, label, and a short hint for the picker. */
-val QUICK_ACTIONS: List<Triple<String, String, String>> = listOf(
-    Triple(WidgetLink.OPEN_NEW_REPO, "New repo", "Start a project"),
-    Triple(WidgetLink.OPEN_KEYS, "Add key", "Logins, MCP, API keys"),
-    Triple(WidgetLink.OPEN_NEW_CHAT, "New chat", "Talk to Claude, no repo"),
-    Triple(WidgetLink.OPEN_SESSIONS, "Sessions", "See what is running"),
-    Triple(WidgetLink.OPEN_CLUSTER, "Usage", "Accounts and limits"),
-)

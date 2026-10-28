@@ -34,6 +34,29 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Widget settings: the launcher opens it when a widget is placed (optional) or reconfigured. -->
+        <activity
+            android:name=".widget.WidgetConfigActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="@string/widget_config_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+        <!-- Home-screen widgets (widget/). They only read the stored snapshot; taps open MainActivity. -->
+        <receiver android:name=".widget.SessionsWidgetReceiver" android:exported="true" android:label="@string/widget_sessions_label">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_sessions_info" />
+        </receiver>
+        <receiver android:name=".widget.QuickActionsWidgetReceiver" android:exported="true" android:label="@string/widget_quick_actions_label">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_quick_actions_info" />
+        </receiver>
+        <receiver android:name=".widget.UsageWidgetReceiver" android:exported="true" android:label="@string/widget_usage_label">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_usage_info" />
+        </receiver>
         <service android:name=".notify.PushService" android:exported="false">
             <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter>
         </service>
