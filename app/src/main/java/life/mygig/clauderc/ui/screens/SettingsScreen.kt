@@ -47,6 +47,7 @@ import life.mygig.clauderc.ui.components.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -142,6 +143,22 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
     ) {
         if (firstRun) {
             Text("Add your server", style = MaterialTheme.typography.headlineMedium)
+            CardBox {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Connect with a password", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Enter the server's SSH login and the app sets everything up for you. Or follow the steps below to do it by hand.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    FilledTonalButton(
+                        onClick = { vm.addServerFlow.open() },
+                        enabled = publicKey.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Connect with a password") }
+                }
+            }
+            SectionLabel("Or by hand")
             Step(1, "On your Linux server, open a terminal as the user Claude should run as.")
             Step(2, "Run this one command. It installs the cLaudeRC scripts and session auto-restore (asks for sudo once) and lets this phone in.")
             SelectionContainer {
