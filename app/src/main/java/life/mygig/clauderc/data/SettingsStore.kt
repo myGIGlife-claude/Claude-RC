@@ -33,12 +33,28 @@ data class Server(
     val previousFingerprint: String = "",
     /** In cLaudeCluster: true yes, false no, null not asked yet. */
     val inCluster: Boolean? = null,
+    /** What the owner says this server is for ("Web hosting"). Kept on the phone only; see [cleanPurpose]. */
+    val purpose: String = "",
 ) {
     val isConfigured: Boolean
         get() = host.isNotBlank() && user.isNotBlank() && hostKeyBlob.isNotBlank()
 
     fun toServerConfig() = ServerConfig(host, port, user, hostKeyType, hostKeyBlob)
 }
+
+const val PURPOSE_MAX = 40
+
+/** Suggestions for [Server.purpose]; each one is already clean. */
+val PURPOSE_PRESETS = listOf("Claude sessions", "Web hosting", "Database", "Build / CI", "Backup", "Testing")
+
+/** A server's purpose as stored: control characters (newlines too) dropped, trimmed, at most [PURPOSE_MAX] characters. */
+fun cleanPurpose(text: String): String =
+    text.filterNot { it.isISOControl() }.trim().take(PURPOSE_MAX)
+        .let { if (it.lastOrNull()?.isHighSurrogate() == true) it.dropLast(1) else it }   // don't cut an emoji in half
+        .trimEnd()
+
+/** How the server list is stored; unknown keys are skipped so an older app still reads a newer list. */
+internal val settingsJson = Json { ignoreUnknownKeys = true }
 
 /** The active server's fields, plus the full list and the app-wide settings. */
 data class AppSettings(
@@ -80,7 +96,7 @@ class SettingsStore(private val context: Context) {
         val OWNERS_CACHE = stringPreferencesKey("owners_cache")
     }
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = settingsJson
 
     private fun servers(p: Preferences): List<Server> =
         p[K.SERVERS]?.let { runCatching { json.decodeFromString<List<Server>>(it) }.getOrNull() }
@@ -175,6 +191,12 @@ class SettingsStore(private val context: Context) {
         cur
     }
 
+    /** Sets what a server is for (any server, current or not); blank clears it. */
+    suspend fun setPurpose(id: String, text: String) = editServers { list, cur ->
+        list.replaceAll { if (it.id == id) it.copy(purpose = cleanPurpose(text)) else it }
+        cur
+    }
+
     suspend fun switchServer(id: String) = editServers { list, cur -> if (list.any { it.id == id }) id else cur }
 
     /** Removes a server. If it was active, the first configured one becomes active. */
@@ -192,7 +214,7 @@ class SettingsStore(private val context: Context) {
     /** Replaces backed-up app preferences; transient caches are intentionally cleared. */
     suspend fun restoreBackup(servers: List<Server>, activeId: String, appLock: Boolean, notify: Boolean, theme: ThemeMode) {
         context.dataStore.edit { p ->
-            p[K.SERVERS] = json.encodeToString(servers)
+            p[K.SERVERS] = json.encodeToString(servers.map { it.copy(purpose = cleanPurpose(it.purpose)) })
             p[K.ACTIVE] = activeId.takeIf { id -> servers.any { it.id == id } } ?: servers.firstOrNull()?.id.orEmpty()
             p[K.APP_LOCK] = appLock
             p[K.NOTIFY] = notify
