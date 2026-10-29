@@ -14,6 +14,7 @@ import life.mygig.clauderc.api.LauncherApi
 import life.mygig.clauderc.api.ServerSetup
 import life.mygig.clauderc.api.StatusData
 import life.mygig.clauderc.data.Server
+import life.mygig.clauderc.data.cleanPurpose
 import life.mygig.clauderc.ssh.HostKeyInfo
 import life.mygig.clauderc.ssh.SshCancelled
 import life.mygig.clauderc.ssh.SshFailure
@@ -33,6 +34,8 @@ data class AddServerUi(
     val host: String = "",
     val port: Int = 22,
     val user: String = "",
+    /** What the owner says the server is for (optional, cleaned); saved on the new server entry. */
+    val purpose: String = "",
     val hostKey: HostKeyInfo? = null,
     /** The server's output, as it arrives. */
     val log: String = "",
@@ -69,13 +72,13 @@ class AddServerController(
     }
 
     /** Step 1: learn the host key (nothing is saved). */
-    fun connect(host: String, port: String, user: String) {
+    fun connect(host: String, port: String, user: String, purpose: String = "") {
         val h = host.trim(); val u = user.trim()
         if (_ui.value.triesLeft <= 0) return
         ServerSetup.validate(h, port.trim(), u)?.let { m -> _ui.update { it.copy(message = m) }; return }
         val p = port.trim().toInt()
         if (h != _ui.value.host || p != _ui.value.port) confirmed = null
-        _ui.update { it.copy(step = AddServerStep.PROBING, host = h, port = p, user = u, message = null, log = "", notes = emptyList()) }
+        _ui.update { it.copy(step = AddServerStep.PROBING, host = h, port = p, user = u, purpose = cleanPurpose(purpose), message = null, log = "", notes = emptyList()) }
         job = tools.scope.launch {
             try {
                 val info = withContext(Dispatchers.IO) { SshRunner.probeHostKey(h, p, u) }
@@ -116,7 +119,7 @@ class AddServerController(
                     return@launch
                 }
                 // The phone key, not the password, must work before the server is added.
-                val candidate = Server("", s.host, s.port, s.user, key.type, key.blob, key.fingerprint)
+                val candidate = Server("", s.host, s.port, s.user, key.type, key.blob, key.fingerprint, purpose = s.purpose)
                 val status = LauncherApi(config = { candidate.toServerConfig() }, identity = { keys.identity() }).status()
                 onAdded(candidate, status)
                 _ui.update {

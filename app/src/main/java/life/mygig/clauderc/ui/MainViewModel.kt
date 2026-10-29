@@ -875,6 +875,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (same != null) {
             store.switchServer(same.id)
             store.pinHostKey(s.hostKeyType, s.hostKeyBlob, s.hostKeyFingerprint)
+            // A purpose typed on the form replaces the old one; left empty, the old one stays.
+            if (s.purpose.isNotBlank()) store.setPurpose(same.id, s.purpose)
         } else {
             store.switchServer(store.addServerEntry(s).id)
         }
@@ -884,6 +886,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _showSettings.value = false
         team.detectNewAccount()
     }
+
+    /** What a server is for: stored on the phone only, no connection needed. */
+    fun setServerPurpose(id: String, text: String) = viewModelScope.launch { store.setPurpose(id, text) }
 
     fun switchServer(id: String) = viewModelScope.launch {
         if (id == store.current().activeId) return@launch

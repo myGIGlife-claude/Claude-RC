@@ -72,6 +72,7 @@ fun AddServerScreen(vm: MainViewModel) {
     var host by rememberSaveable { mutableStateOf("") }
     var port by rememberSaveable { mutableStateOf("22") }
     var user by rememberSaveable { mutableStateOf("") }
+    var purpose by rememberSaveable { mutableStateOf("") }   // not a secret: saved on the server entry
     var password by remember { mutableStateOf("") }
     var sameSudo by remember { mutableStateOf(true) }
     var sudoPassword by remember { mutableStateOf("") }
@@ -141,6 +142,7 @@ fun AddServerScreen(vm: MainViewModel) {
                                         keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
                                     )
                                 }
+                                PurposeField(purpose, { purpose = it }, enabled = !probing)
                                 SectionLabel("Password")
                                 OutlinedTextField(
                                     value = password, onValueChange = { password = it.replace("\n", "") }, enabled = !probing,
@@ -179,7 +181,7 @@ fun AddServerScreen(vm: MainViewModel) {
                                     FilledTonalButton(onClick = { flow.cancel() }) { Text("Cancel") }
                                 } else {
                                     Button(
-                                        onClick = { flow.connect(host, port, user) },
+                                        onClick = { flow.connect(host, port, user, purpose) },
                                         enabled = host.isNotBlank() && user.isNotBlank() && password.isNotEmpty() && ui.triesLeft > 0,
                                         modifier = Modifier.fillMaxWidth(),
                                     ) { Text("Connect") }

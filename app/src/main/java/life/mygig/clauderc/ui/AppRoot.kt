@@ -257,7 +257,20 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                                             DropdownMenu(expanded = serverMenu, onDismissRequest = { serverMenu = false }) {
                                                 s.servers.filter { it.isConfigured }.forEach { srv ->
                                                     DropdownMenuItem(
-                                                        text = { Text(srv.host) },
+                                                        text = {
+                                                            Column {
+                                                                Text(srv.host)
+                                                                if (srv.purpose.isNotBlank()) {
+                                                                    Text(
+                                                                        srv.purpose,
+                                                                        style = MaterialTheme.typography.bodySmall,
+                                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                                        maxLines = 1,
+                                                                        overflow = TextOverflow.Ellipsis,
+                                                                    )
+                                                                }
+                                                            }
+                                                        },
                                                         leadingIcon = {
                                                             if (srv.id == s.activeId) Icon(Icons.Filled.Check, contentDescription = "Current")
                                                         },
@@ -405,7 +418,11 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                     confirmButton = { TextButton(onClick = { vm.team.answerClusterOffer(true) }) { Text("Add to cluster") } },
                     dismissButton = { TextButton(onClick = { vm.team.answerClusterOffer(false) }) { Text("Not now") } },
                     title = { Text("A different Claude account") },
-                    text = { Text("${o.host} is signed in as ${o.email}, not the account on your other servers. Add it to cLaudeCluster to see its usage next to the others?") },
+                    text = {
+                        val purpose = s.servers.firstOrNull { it.id == o.serverId }?.purpose.orEmpty()
+                        val name = if (purpose.isNotBlank()) "${o.host} ($purpose)" else o.host
+                        Text("$name is signed in as ${o.email}, not the account on your other servers. Add it to cLaudeCluster to see its usage next to the others?")
+                    },
                 )
             }
             pendingKey?.let { HostKeyDialog(vm, it, s.hostKeyFingerprint.ifEmpty { s.previousFingerprint }) }

@@ -94,7 +94,7 @@ private val MIGRATE_STEPS = listOf(
     MigrateStep.VERIFY to "Verify",
 )
 
-private fun migrateServerLabel(s: Server) = "${s.host} (${s.user})"
+private fun migrateServerLabel(s: Server) = "${s.host} (${s.user})" + if (s.purpose.isNotBlank()) " · ${s.purpose}" else ""
 
 /** Move everything from one server to another. The state lives in the view model, so it survives rotation. */
 @Composable
