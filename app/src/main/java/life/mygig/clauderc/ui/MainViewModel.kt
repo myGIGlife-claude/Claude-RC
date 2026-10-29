@@ -51,6 +51,7 @@ import life.mygig.clauderc.data.ThemeMode
 import life.mygig.clauderc.ssh.HostKeyInfo
 import life.mygig.clauderc.ssh.SshKeyManager
 import life.mygig.clauderc.ssh.SshRunner
+import life.mygig.clauderc.ui.vm.AddServerController
 import life.mygig.clauderc.ui.vm.ChatController
 import life.mygig.clauderc.ui.vm.ConnectionsController
 import life.mygig.clauderc.ui.vm.DriveController
@@ -150,6 +151,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val connections = ConnectionsController(api, tools, { _status.value?.scriptApi ?: 0 }, { refreshStatus() })
     /** The + dialog: CLI installs, signing keys, Apple key, custom keys, token services. */
     val services = ServicesController(api, tools, { _status.value }, { refreshStatus() }, logins)
+
+    /** Add server › Connect with a password (sets the server up over one password login). */
+    val addServerFlow = AddServerController(keys, tools) { s, st -> adoptNewServer(s, st) }
 
     private fun apiFor(s: Server) = LauncherApi(config = { s.toServerConfig() }, identity = { keys.identity() })
 
@@ -858,6 +862,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         store.addServer()
         clearServerState()
         _showSettings.value = false
+    }
+
+    /**
+     * A server set up by [addServerFlow] whose phone key already answered [status]: added (or, if the list has it,
+     * re-pinned) and made current. The blank entry the setup screen was showing is dropped.
+     */
+    private suspend fun adoptNewServer(s: Server, status: StatusData) {
+        val cur = store.current()
+        val blank = cur.servers.firstOrNull { it.id == cur.activeId && !it.isConfigured }?.id
+        val same = cur.servers.firstOrNull { it.host == s.host && it.port == s.port && it.user == s.user }
+        if (same != null) {
+            store.switchServer(same.id)
+            store.pinHostKey(s.hostKeyType, s.hostKeyBlob, s.hostKeyFingerprint)
+        } else {
+            store.switchServer(store.addServerEntry(s).id)
+        }
+        if (blank != null && blank != same?.id) store.removeServer(blank)
+        clearServerState()
+        _status.value = status
+        _showSettings.value = false
+        team.detectNewAccount()
     }
 
     fun switchServer(id: String) = viewModelScope.launch {
