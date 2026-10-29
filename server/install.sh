@@ -12,6 +12,9 @@
 
 set -euo pipefail
 
+# The app's "Connect with a password" setup has no terminal: it hands sudo an askpass helper instead.
+sudo() { if [[ -n "${SUDO_ASKPASS:-}" ]]; then command sudo -A "$@"; else command sudo "$@"; fi; }
+
 # The developer knowledge pack: skills (rc-*) every Claude session and worker loads, so they code against current standards.
 # Every file is checked against the manifest's sha256; a failure leaves the installed pack as it was and never breaks the update.
 install_knowledge() {  # <base url> <tmp dir>

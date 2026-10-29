@@ -1010,6 +1010,60 @@ bash "$SERVER/knowledge/make-manifest.sh" --check >/dev/null 2>&1; check "knowle
 KS="$(HOME="$IH" "$IH/claude-setup.sh" --api status </dev/null 2>/dev/null | jq -c '.data.knowledge')"
 [[ "$(jq -r .skills <<<"$KS")" -ge 12 && "$(jq -r .version <<<"$KS")" == "$(head -n 1 "$SERVER/knowledge/VERSION")" ]]; check "status reports the installed pack (version and skill count)" $?
 
+echo "install.sh with SUDO_ASKPASS (the app's password setup)"
+AH="$WORK/askhome" AS="$WORK/askstate"; mkdir -p "$AH/.local/bin" "$AS"
+# A sudo that only records its arguments and never runs anything (the real autostart install writes /etc/systemd).
+cat >"$AH/.local/bin/sudo" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >>"$ASK_STATE/sudo-argv"
+cat >/dev/null 2>&1 || true
+if [[ "${1:-}" == -A ]]; then [[ "$("$SUDO_ASKPASS")" == "$(cat "$ASK_STATE/pw")" ]] || exit 1; echo askpass-ok >>"$ASK_STATE/sudo-auth"; exit 0; fi
+echo "sudo: a terminal is required to read the password"; exit 1
+EOF
+printf '#!/bin/sh\nexit 0\n' >"$AH/.local/bin/bun"   # so install.sh doesn't go and fetch Bun
+chmod +x "$AH/.local/bin/sudo" "$AH/.local/bin/bun"
+printf '%s\n' "S3cret-askpass-PW" >"$AS/pw"; chmod 600 "$AS/pw"
+printf '#!/bin/sh\ncat %q\n' "$AS/pw" >"$AS/askpass"; chmod 700 "$AS/askpass"
+OUT="$(HOME="$AH" ASK_STATE="$AS" SUDO_ASKPASS="$AS/askpass" PATH="$AH/.local/bin:/usr/local/bin:/usr/bin:/bin" CLAUDERC_BASE="file://$SERVER" \
+  bash -s -- "$(cat "$WORK/phone.pub")" <"$SERVER/install.sh" 2>&1)"
+[[ -s "$AS/sudo-argv" ]] && ! grep -qv '^-A ' "$AS/sudo-argv"; check "askpass: claude-autostart's every sudo call is sudo -A" $?
+grep -q "^-A systemctl enable --now claude-sessions.service" "$AS/sudo-argv" && [[ -s "$AS/sudo-auth" ]]; check "askpass: the boot service is enabled through the helper" $?
+[[ "$OUT" != *"wasn't set up"* ]]; check "askpass: autostart set up without a terminal" $?
+! grep -rq "S3cret-askpass-PW" "$AS/sudo-argv" "$AH/.config" "$AH/.local/state" 2>/dev/null && [[ "$OUT" != *S3cret-askpass-PW* ]]; check "askpass: the password is in no argv, log or output" $?
+rm -f "$AS/sudo-argv" "$AS/sudo-auth" "$AH/.local/bin/claude-autostart"
+OUT="$(HOME="$AH" ASK_STATE="$AS" PATH="$AH/.local/bin:/usr/local/bin:/usr/bin:/bin" CLAUDERC_BASE="file://$SERVER" \
+  bash -s <"$SERVER/install.sh" 2>&1)"
+[[ -s "$AS/sudo-argv" ]] && ! grep -q '^-A' "$AS/sudo-argv"; check "no askpass: plain sudo, as before" $?
+[[ "$OUT" == *"claude-autostart wasn't set up"* ]]; check "no askpass: a failed sudo still only skips autostart" $?
+
+echo "the app's password setup script (app/.../api/ServerSetup.kt), run as the app runs it: bash -s"
+PS="$WORK/pwsetup"; mkdir -p "$PS/home/.local/bin"
+cp "$AH/.local/bin/sudo" "$PS/home/.local/bin/sudo"   # the recording sudo from above: runs nothing
+printf '#!/bin/sh\nexit 0\n' >"$PS/home/.local/bin/claude"; cp "$PS/home/.local/bin/claude" "$PS/home/.local/bin/bun"
+chmod +x "$PS/home/.local/bin/"*
+python3 -I -c 'import sys; s = open(sys.argv[1]).read(); print(s.split("$$\"\"\"", 1)[1].split("\"\"\"", 1)[0], end="")' \
+  "$(dirname "$SERVER")/app/src/main/java/life/mygig/clauderc/api/ServerSetup.kt" >"$PS/body.sh"
+bash -n "$PS/body.sh"; check "setup script: valid bash" $?
+# The app's header is SUDO_PW=… and INSTALL=…; here INSTALL runs the local install.sh instead of the download.
+pwsetup() {  # pwsetup <sudo password>
+  rm -f "$AS/sudo-argv" "$AS/sudo-auth" "$PS/home/.local/bin/claude-autostart"
+  OUT="$({ printf 'SUDO_PW=%q\nINSTALL=%q\n' "$1" "CLAUDERC_BASE=$(printf %q "file://$SERVER") bash -s -- $(printf %q "$(cat "$WORK/phone.pub")") <$(printf %q "$SERVER/install.sh")"
+    cat "$PS/body.sh"; } | HOME="$PS/home" ASK_STATE="$AS" PATH=/usr/local/bin:/usr/bin:/bin bash -s 2>&1)"
+  RC=$?
+}
+pwsetup "S3cret-askpass-PW"
+[[ $RC == 0 && "$OUT" == *"@@clauderc sudo=ok"* && "$OUT" == *"@@clauderc install=ok"* && "$OUT" == *"@@clauderc claude=present"* ]]; check "setup script: sudo checked, scripts installed" $?
+grep -q "^restrict,command=\"$PS/home/bin/claude-launcher-api\" ssh-ed25519 " "$PS/home/.ssh/authorized_keys"; check "setup script: the phone key is authorized" $?
+grep -q "^-A true$" "$AS/sudo-argv" && grep -q "^-A systemctl enable --now claude-sessions" "$AS/sudo-argv"; check "setup script: install.sh's autostart gets sudo -A" $?
+[[ -z "$(find "$PS/home" -maxdepth 1 -name '.clauderc-setup.*')" ]]; check "setup script: the password file and helper are removed" $?
+! grep -rq "S3cret-askpass-PW" "$AS/sudo-argv" "$PS/home" 2>/dev/null && [[ "$OUT" != *S3cret-askpass-PW* ]]; check "setup script: the password is in no argv, file or output" $?
+echo "DEBUG: $(grep -rl "S3cret-askpass-PW" "$AS/sudo-argv" "$PS/home" 2>&1 | head -5) OUT=$([[ "$OUT" == *S3cret-askpass-PW* ]] && echo yes)"
+pwsetup "wrong-PW"
+[[ $RC == 0 && "$OUT" == *"@@clauderc sudo=denied"* && "$OUT" == *"@@clauderc install=ok"* && ! -s "$AS/sudo-auth" ]]; check "setup script: a wrong sudo password still installs, without sudo" $?
+[[ "$(grep -c '^-A' "$AS/sudo-argv")" == 1 ]]; check "setup script: a wrong sudo password is tried once" $?
+pwsetup ""
+[[ $RC == 0 && "$OUT" == *"@@clauderc sudo=no"* && "$OUT" == *"@@clauderc install=ok"* ]] && ! grep -q '^-A' "$AS/sudo-argv"; check "setup script: no sudo password, no askpass" $?
+
 # ---- the monthly knowledge refresh: schedule actions and the refresh script (stub claude/gh, a local bare repo as "origin") ----
 for bad in "knowledge-status x" "knowledge-refresh x" "knowledge-schedule" "knowledge-schedule maybe" "knowledge-schedule on off" "knowledge-schedule ON"; do
   api "$bad"; check "knowledge forbidden: '$bad'" "$(jqt '.ok==false and .error.code=="forbidden"')"

@@ -5,6 +5,7 @@ import com.jcraft.jsch.HostKey
 import com.jcraft.jsch.HostKeyRepository
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.JSchException
+import com.jcraft.jsch.UIKeyboardInteractive
 import com.jcraft.jsch.UserInfo
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -34,6 +35,21 @@ fun fingerprintOf(blob: ByteArray): String =
 /** Why a call failed before the server could answer with JSON. */
 class SshFailure(val kind: Kind, message: String, cause: Throwable? = null) : IOException(message, cause) {
     enum class Kind { HOST_KEY_CHANGED, AUTH_FAILED, NETWORK, TIMEOUT, NOT_CONFIGURED }
+}
+
+/** The user stopped a password setup run. */
+class SshCancelled : IOException("Cancelled")
+
+/** How a failed password login reads; the key-based [SshRunner.exec] keeps its own wording. */
+fun passwordConnectFailure(msg: String, hostKeyMismatch: Boolean, host: String, port: Int, cause: Throwable? = null): SshFailure = when {
+    hostKeyMismatch -> SshFailure(SshFailure.Kind.HOST_KEY_CHANGED, "The server's host key is not the one you confirmed. Refusing to connect.", cause)
+    msg.contains("Auth fail", true) || msg.contains("auth cancel", true) || msg.contains("USERAUTH fail", true) ||
+        msg.contains("Too many authentication failures", true) ->
+        SshFailure(SshFailure.Kind.AUTH_FAILED, "Wrong user name or password.", cause)
+    msg.contains("Algorithm negotiation fail", true) && msg.contains("server_host_key", true) ->
+        SshFailure(SshFailure.Kind.HOST_KEY_CHANGED, "The server no longer offers the host key type you confirmed.", cause)
+    msg.contains("timeout", true) || msg.contains("timed out", true) -> SshFailure(SshFailure.Kind.TIMEOUT, "Timed out connecting to $host", cause)
+    else -> SshFailure(SshFailure.Kind.NETWORK, "Could not connect to $host:$port ($msg)", cause)
 }
 
 /**
@@ -188,6 +204,135 @@ object SshRunner {
             return buf.toString(Charsets.UTF_8.name())
         } finally {
             session.disconnect()
+        }
+    }
+
+    /** What a password-login command printed and its exit status (-1 when the server didn't say). */
+    data class PasswordExecResult(val output: String, val exitStatus: Int)
+
+    /**
+     * One command over a PASSWORD login, only for "Connect with a password" (setting up a server that doesn't
+     * know this phone's key yet). The host key must be the one the user confirmed ([pinned]); the password is
+     * offered once per call (to "password" or "keyboard-interactive", whichever the server asks for), never
+     * stored and never logged. [onOutput] gets the output as it arrives; [isCancelled] is polled to stop early.
+     */
+    fun execWithPassword(
+        host: String,
+        port: Int,
+        user: String,
+        password: String,
+        pinned: HostKeyInfo,
+        command: String,
+        stdin: String? = null,
+        timeoutMs: Long = DEFAULT_CALL_TIMEOUT_MS,
+        onOutput: (String) -> Unit = {},
+        isCancelled: () -> Boolean = { false },
+    ): PasswordExecResult {
+        if (host.isBlank() || user.isBlank() || password.isEmpty()) {
+            throw SshFailure(SshFailure.Kind.NOT_CONFIGURED, "Enter the address, user name and password")
+        }
+        val jsch = JSch()
+        val repo = PinnedRepository(host, port, pinned.type, pinned.blob)
+        jsch.hostKeyRepository = repo
+        val session = jsch.getSession(user, host, port)
+        session.setConfig("StrictHostKeyChecking", "yes")
+        session.setConfig("PreferredAuthentications", "password,keyboard-interactive")
+        session.setConfig("server_host_key", if (pinned.type == "ssh-rsa") "rsa-sha2-512,rsa-sha2-256" else pinned.type)
+        session.userInfo = OncePassword(password)
+        session.timeout = CONNECT_TIMEOUT_MS
+        try {
+            try {
+                session.connect(CONNECT_TIMEOUT_MS)
+            } catch (e: JSchException) {
+                throw passwordConnectFailure(e.message.orEmpty(), repo.mismatch, host, port, e)
+            }
+            val channel = session.openChannel("exec") as ChannelExec
+            channel.setCommand(command)
+            channel.setPty(false)
+            val out = channel.inputStream
+            val err = channel.extInputStream
+            val input = channel.outputStream
+            channel.connect(CONNECT_TIMEOUT_MS)
+            try {
+                if (stdin != null) input.write((stdin + "\n").toByteArray())
+                input.flush()
+            } finally {
+                input.close()
+            }
+            // stderr (progress, notes) is shown too: read it on its own thread so neither stream blocks the other.
+            val lock = Any()
+            val text = StringBuilder()
+            fun emit(s: String) = synchronized(lock) {
+                text.append(s)
+                if (text.length > MAX_PASSWORD_OUTPUT) text.delete(0, text.length - MAX_PASSWORD_OUTPUT)
+                onOutput(s)
+            }
+            val errThread = Thread { runCatching { drain(err, ::emit) } }.apply { isDaemon = true; start() }
+            val timedOut = AtomicBoolean(false)
+            val stopped = AtomicBoolean(false)
+            val deadline = System.currentTimeMillis() + timeoutMs
+            val watchdog = Timer(true)
+            watchdog.schedule(object : TimerTask() {
+                override fun run() {
+                    when {
+                        isCancelled() -> { stopped.set(true); channel.disconnect() }
+                        System.currentTimeMillis() > deadline -> { timedOut.set(true); channel.disconnect() }
+                    }
+                }
+            }, 250, 250)
+            try {
+                drain(out, ::emit)
+            } catch (e: IOException) {
+                if (!timedOut.get() && !stopped.get()) throw e
+            } finally {
+                watchdog.cancel()
+            }
+            errThread.join(2_000)
+            if (stopped.get()) throw SshCancelled()
+            if (timedOut.get()) throw SshFailure(SshFailure.Kind.TIMEOUT, "The server took too long to finish the setup")
+            // The exit status arrives with the channel's close, just after the last output.
+            val waitUntil = System.currentTimeMillis() + 2_000
+            while (!channel.isClosed && System.currentTimeMillis() < waitUntil) Thread.sleep(50)
+            val status = channel.exitStatus
+            channel.disconnect()
+            return PasswordExecResult(synchronized(lock) { text.toString() }, status)
+        } finally {
+            session.disconnect()
+        }
+    }
+
+    private const val MAX_PASSWORD_OUTPUT = 256 * 1024
+
+    private fun drain(stream: java.io.InputStream, emit: (String) -> Unit) {
+        // A Reader keeps a UTF-8 character that is split across two reads in one piece.
+        val reader = stream.reader(Charsets.UTF_8)
+        val chunk = CharArray(8192)
+        while (true) {
+            val n = reader.read(chunk)
+            if (n < 0) break
+            if (n > 0) emit(String(chunk, 0, n))
+        }
+    }
+
+    /** Answers the password prompt once (password or keyboard-interactive): a wrong password is one try, no loop. */
+    private class OncePassword(private val password: String) : UserInfo, UIKeyboardInteractive {
+        private var answered = false
+        override fun getPassphrase(): String? = null
+        override fun getPassword(): String? = if (answered) null else password.also { answered = true }
+        override fun promptPassword(message: String?) = !answered
+        override fun promptPassphrase(message: String?) = false
+        override fun promptYesNo(message: String?) = false
+        override fun showMessage(message: String?) {}
+        override fun promptKeyboardInteractive(
+            destination: String?,
+            name: String?,
+            instruction: String?,
+            prompt: Array<String>?,
+            echo: BooleanArray?,
+        ): Array<String>? = when {
+            prompt == null || prompt.isEmpty() -> emptyArray()   // an info-only round: nothing to answer
+            answered || prompt.size != 1 || echo?.getOrNull(0) == true -> null   // null = cancel
+            else -> { answered = true; arrayOf(password) }
         }
     }
 

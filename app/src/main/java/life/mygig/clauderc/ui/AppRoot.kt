@@ -103,6 +103,7 @@ import life.mygig.clauderc.ui.screens.TailScreen
 import life.mygig.clauderc.ui.screens.CustomKeysDialog
 import life.mygig.clauderc.ui.screens.AppleDialog
 import life.mygig.clauderc.ui.screens.KeystoresDialog
+import life.mygig.clauderc.ui.screens.AddServerScreen
 import life.mygig.clauderc.ui.screens.HostKeyDialog
 import life.mygig.clauderc.ui.screens.LoginDialog
 import life.mygig.clauderc.ui.screens.MigrateScreen
@@ -408,6 +409,8 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                 )
             }
             pendingKey?.let { HostKeyDialog(vm, it, s.hostKeyFingerprint.ifEmpty { s.previousFingerprint }) }
+            // Here, not in Settings: the setup screen goes away once the new server is added, the result stays.
+            AddServerScreen(vm)
         }
     }
 }
