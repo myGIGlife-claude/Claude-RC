@@ -76,7 +76,7 @@ fun ChatControlsSheet(
                 SheetRow("Permissions", "What Claude may do without asking", onClick = { onClose(); vm.chats.openPermissions() }) { Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 if (showWorkers) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                    SheetRow("Team workers", "Accounts this chat can hand work to", onClick = { onClose(); onWorkers() }) { Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    SheetRow("Workers & servers", "Accounts and servers this chat can use", onClick = { onClose(); onWorkers() }) { Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
             }
         }

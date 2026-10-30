@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import life.mygig.clauderc.ui.components.AttachFile
+import life.mygig.clauderc.ui.components.Hub
 import life.mygig.clauderc.ui.components.Tune
 import android.content.Context
 import androidx.compose.ui.platform.LocalContext
@@ -166,6 +167,9 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                         (sessionList.any { it.name == session && it.general } || generalChats.any { it.session == session })
                     val showWorkers = !general && (st?.scriptApi ?: 0) >= life.mygig.clauderc.api.Updates.MIN_SCRIPT_API && pinNeeded == null
                     chat?.takeIf { pinNeeded == null }?.let { c ->
+                        if (showWorkers) IconButton(onClick = { showCluster = true; vm.team.loadChatWorkers(); vm.webHosts.loadChatHosts() }) {
+                            Icon(Icons.Filled.Hub, contentDescription = "Workers and servers for this chat", tint = MaterialTheme.colorScheme.primary)
+                        }
                         IconButton(onClick = { showControls = true }) { Icon(Icons.Filled.Tune, contentDescription = "Chat controls: model, mode, voice, permissions", tint = MaterialTheme.colorScheme.primary) }
                         if (showControls) {
                             ChatControlsSheet(
