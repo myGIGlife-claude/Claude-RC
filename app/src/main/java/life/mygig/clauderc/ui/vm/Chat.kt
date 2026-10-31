@@ -9,6 +9,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import life.mygig.clauderc.api.ApiException
 import life.mygig.clauderc.api.AskQuestion
@@ -23,6 +25,10 @@ import life.mygig.clauderc.data.cached
 import life.mygig.clauderc.data.chatDraftsStore
 import life.mygig.clauderc.data.chatVoiceStore
 import life.mygig.clauderc.ui.friendly
+import life.mygig.clauderc.ui.screens.ChatImage
+
+/** Server answers that mean the PIN is wrong or the chat locked: retrying won't help. */
+private val PIN_CODES = setOf("wrong_pin", "chat_locked", "pin_not_set")
 
 /**
  * In-app chat. The PIN is kept only in memory while the chat is unlocked, and forgotten the
@@ -69,6 +75,7 @@ class ChatController(
     private var chatPoller: Job? = null
 
     fun openChat(session: String) {
+        if (_chatSession.value != session) cancelAttachments()   // another chat: its uploads don't belong here
         _chatSession.value = session
         _chatPending.value = queuedBySession[session].orEmpty()
         _chat.value = null
@@ -101,6 +108,7 @@ class ChatController(
     fun closeChat() {
         fileCache.evictAll()
         chatPoller?.cancel()
+        cancelAttachments()
         _chatSession.value?.let { queuedBySession[it] = _chatPending.value }
         _chatPending.value = emptyList()
         _chatSession.value = null
@@ -173,7 +181,7 @@ class ChatController(
                     setChat(session, api.chatHistory(session, pin))
                     _chatError.value = null
                 } catch (e: ApiException) {
-                    if (e.code in setOf("wrong_pin", "chat_locked", "pin_not_set")) { forgetChatPin(); _chatError.value = friendly(e).first; break }
+                    if (e.code in PIN_CODES) { forgetChatPin(); _chatError.value = friendly(e).first; break }
                     _chatError.value = friendly(e).first
                 }
                 delay(if (_chat.value?.busy == true) 2_000 else 4_000)
@@ -258,21 +266,34 @@ class ChatController(
         }
     }
 
-    /** Clears the box and shows the message as pending at once; the SSH round trip takes seconds. A failure puts the text back. */
+    /**
+     * Clears the box and shows the message as pending at once; the SSH round trip takes seconds. A failure puts the text back.
+     * Ready attachments go along as ` [attached: path]` after the text (in pick order) and leave the strip; a failure puts them back.
+     * Not while an attachment is still uploading (the Send button is off then too).
+     */
     fun sendChat(text: String, onSent: () -> Unit, onFail: () -> Unit = {}) {
         val session = _chatSession.value ?: return
         val pin = chatPin ?: return
-        val t = text.trim()
+        val items = _attachments.value
+        if (AttachQueue.active(items) > 0) { tools.say("Wait until the attachments have uploaded."); return }
+        val sent = items.filter { it.state == AttachState.Ready && it.path != null }
+        val sentIds = sent.mapTo(HashSet()) { it.id }
+        val message = composeMessage(text, sent.mapNotNull { it.path })
+        val t = message.trim()
+        if (t.isEmpty()) return
         if (t == "/permissions") { onSent(); openPermissions(); return }   // our own screen instead of the terminal menu
         val tracked = !t.startsWith("/")   // a slash command never shows up as a message, so it would stay "queued" for good
         onSent()
+        if (sent.isNotEmpty()) updateAttachments { AttachQueue.removeAll(it, sentIds) }
         if (tracked) _chatPending.value = _chatPending.value + t
         tools.action("Sending…", onError = { e ->
             if (tracked) _chatPending.value = _chatPending.value.toMutableList().also { it.remove(t) }
+            // Back in the strip, ahead of anything picked since (unless the chat changed meanwhile).
+            if (sent.isNotEmpty() && _chatSession.value == session) updateAttachments { sent + it.filterNot { a -> a.id in sentIds } }
             onFail()
             tools.report(e)
         }) {
-            api.chatSend(session, pin, text)
+            api.chatSend(session, pin, message)
             delay(800)
             setChat(session, api.chatHistory(session, pin))
         }
@@ -292,46 +313,102 @@ class ChatController(
         _chatPending.value = _chatPending.value.filterNot { norm(it) in shown }
     }
 
-    /** Picked files (any number): read off the main thread, sent to the project's uploads/ folder one by one, each retried twice; [onPath] gets each saved path. */
-    fun attachFiles(resolver: android.content.ContentResolver, uris: List<android.net.Uri>, onPath: (String) -> Unit) {
+    // ---- Attachments ------------------------------------------------------------------
+    // Picked files upload at once, UPLOAD_PARALLEL at a time, and wait in a strip above the text box
+    // until the message is sent. They live in memory only and are NOT kept across process death
+    // (the picker's read grants end with the activity anyway); only the typed text draft is saved.
+
+    private val _attachments = MutableStateFlow<List<Attachment>>(emptyList())
+    /** The open chat's picked files, in pick order, with their upload state. */
+    val attachments = _attachments.asStateFlow()
+    private val uploadSlots = Semaphore(UPLOAD_PARALLEL)
+    private val uploadJobs = mutableMapOf<Long, Job>()
+    private var nextAttachId = 1L
+    private var lastUploadReport = 0L
+    /** Kept so a retry can read the file again (a ContentResolver, not the activity). Dropped when the chat closes. */
+    private var uploadResolver: android.content.ContentResolver? = null
+
+    private fun updateAttachments(f: (List<Attachment>) -> List<Attachment>) { _attachments.value = f(_attachments.value) }
+
+    /** Picked files (any number): each goes into the strip and starts uploading to the project's uploads/ folder right away. */
+    fun attachFiles(resolver: android.content.ContentResolver, uris: List<android.net.Uri>) {
         val session = _chatSession.value ?: return
-        val pin = chatPin ?: return
-        tools.action("Attaching ${uris.size} file" + (if (uris.size == 1) "" else "s") + "…") {
-            for (uri in uris) {
-                val picked = withContext(Dispatchers.IO) { readPicked(resolver, uri) }
-                if (picked == null) { tools.say("A file couldn't be read, or it's bigger than 15 MB."); continue }
-                val (name, bytes) = picked
-                val b64 = withContext(Dispatchers.Default) { android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP) }
-                var saved: String? = null
-                for (attempt in 1..3) {
-                    try { saved = api.upload(session, pin, name, b64).path; break }
-                    catch (e: ApiException) { if (attempt == 3) tools.report(e) else delay(800) }
-                }
-                saved?.let(onPath)
+        if (uris.isEmpty()) return
+        if (chatPin == null) { tools.say("Unlock the chat to attach files."); return }
+        uploadResolver = resolver
+        tools.scope.launch {
+            val metas = withContext(Dispatchers.IO) { uris.map { it to ChatImage.meta(resolver, it) } }
+            if (_chatSession.value != session) return@launch   // the chat closed while we looked them up
+            val taken = _attachments.value.map { it.base }.toMutableList()
+            val added = metas.map { (uri, m) ->
+                val (name, mime, size) = m
+                val base = uniqueBase(splitName(name).first, taken).also { taken += it }
+                Attachment(nextAttachId++, uri.toString(), name, base, mime, size, image = mime?.startsWith("image/") == true)
             }
+            updateAttachments { AttachQueue.add(it, added) }
+            added.forEach { startUpload(it.id) }
         }
     }
 
-    /** The picked file's name and bytes (at most 15 MB, so a huge file is refused without being loaded whole), or null. */
-    private fun readPicked(resolver: android.content.ContentResolver, uri: android.net.Uri): Pair<String, ByteArray>? {
-        val name = resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-            if (c.moveToFirst()) c.getString(0) else null
-        } ?: "file"
-        val limit = 15 * 1024 * 1024
-        val bytes = runCatching {
-            resolver.openInputStream(uri)?.use { s ->
-                val out = java.io.ByteArrayOutputStream()
-                val buf = ByteArray(64 * 1024)
-                while (true) {
-                    val n = s.read(buf)
-                    if (n < 0) break
-                    if (out.size() + n > limit) return@use null
-                    out.write(buf, 0, n)
+    /** The × on an item: drops it and cancels its upload if that is still running. */
+    fun removeAttachment(id: Long) {
+        uploadJobs.remove(id)?.cancel()
+        updateAttachments { AttachQueue.remove(it, id) }
+    }
+
+    /** Tap on a failed item. */
+    fun retryAttachment(id: Long) {
+        if (_attachments.value.none { it.id == id && it.state == AttachState.Failed }) return
+        updateAttachments { AttachQueue.retry(it, id) }
+        startUpload(id)
+    }
+
+    private fun cancelAttachments() {
+        uploadJobs.values.forEach { it.cancel() }
+        uploadJobs.clear()
+        _attachments.value = emptyList()
+        uploadResolver = null
+    }
+
+    private fun startUpload(id: Long) {
+        val session = _chatSession.value ?: return
+        val resolver = uploadResolver ?: return
+        uploadJobs.remove(id)?.cancel()
+        val job = tools.scope.launch {
+            uploadSlots.withPermit {
+                val item = _attachments.value.firstOrNull { it.id == id } ?: return@withPermit
+                updateAttachments { AttachQueue.start(it, id) }
+                // Read, scale and encode off the main thread; the semaphore keeps at most UPLOAD_PARALLEL files in memory.
+                val ok = when (val p = withContext(Dispatchers.IO) { ChatImage.prepare(resolver, android.net.Uri.parse(item.uri), item) }) {
+                    is ChatImage.Prepared.Bad -> { updateAttachments { AttachQueue.fail(it, id, p.reason) }; return@withPermit }
+                    is ChatImage.Prepared.Ok -> p
                 }
-                out.toByteArray()
+                val name = uploadName(item.base, ok.ext)
+                val b64 = withContext(Dispatchers.Default) { android.util.Base64.encodeToString(ok.bytes, android.util.Base64.NO_WRAP) }
+                var failure: ApiException? = null
+                for (attempt in 1..3) {
+                    val pin = chatPin
+                    if (pin == null) { failure = ApiException("chat_locked", "The chat is locked: unlock it, then tap to retry."); break }
+                    try {
+                        val path = api.upload(session, pin, name, b64).path
+                        updateAttachments { AttachQueue.finish(it, id, path) }
+                        return@withPermit
+                    } catch (e: ApiException) {
+                        failure = e
+                        if (e.code in PIN_CODES) break
+                        if (attempt < 3) delay(800)
+                    }
+                }
+                val e = failure ?: return@withPermit
+                updateAttachments { AttachQueue.fail(it, id, friendly(e).first) }
+                if (e.code == "wrong_pin" || e.code == "pin_not_set") { forgetChatPin(); return@withPermit }
+                // One message for a batch that fails together (say the connection dropped), not one per photo.
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastUploadReport > 5_000) { lastUploadReport = now; tools.report(e) }
             }
-        }.getOrNull()
-        return if (bytes == null || bytes.isEmpty() || bytes.size > limit) null else name to bytes
+        }
+        uploadJobs[id] = job
+        job.invokeOnCompletion { tools.scope.launch { if (uploadJobs[id] === job) uploadJobs.remove(id) } }
     }
 
     private val _chatLog = MutableStateFlow<List<ChatLogEntry>?>(null)

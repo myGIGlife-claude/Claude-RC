@@ -5,7 +5,9 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import life.mygig.clauderc.ui.components.AttachFile
+import androidx.activity.result.PickVisualMediaRequest
+import life.mygig.clauderc.ui.vm.AttachQueue
+import life.mygig.clauderc.ui.vm.PHOTO_PICK_MAX
 import life.mygig.clauderc.ui.components.Hub
 import life.mygig.clauderc.ui.components.Tune
 import android.content.Context
@@ -100,10 +102,20 @@ fun ChatScreen(vm: MainViewModel, session: String) {
     val busy by vm.busy.collectAsStateWithLifecycle()
     val pending by vm.chats.chatPending.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    // Picked files wait here until the composer adds them to the message. The picker lives at this level so it survives the composer being rebuilt while the picker is open.
-    val attached = remember { androidx.compose.runtime.mutableStateListOf<String>() }
-    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNotEmpty()) vm.chats.attachFiles(context.contentResolver, uris) { attached += it }
+    // The pickers live at this level so they survive the composer being rebuilt while a picker is open.
+    // Picked files start uploading at once and wait in vm.chats.attachments (the strip above the text box).
+    // The application's resolver: the controller keeps it for retries, and it must not hold the activity.
+    val resolver = context.applicationContext.contentResolver
+    val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) vm.chats.attachFiles(resolver, uris)
+    }
+    val pickPhotos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(PHOTO_PICK_MAX)) { uris ->
+        if (uris.isNotEmpty()) vm.chats.attachFiles(resolver, uris)
+    }
+    // The photo picker (or its document-picker fallback on old phones); if it refuses to start, the document picker for images.
+    fun launchPhotos() {
+        try { pickPhotos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+        catch (_: Exception) { pickFiles.launch(arrayOf("image/*")) }
     }
     // The speaker switch stays as the owner left it: across chats and app restarts, until tapped again.
     val voicePrefs = remember { vm.chats.voicePrefs }
@@ -198,7 +210,10 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                     androidx.compose.runtime.key(vm.chats.chatSession.collectAsStateWithLifecycle().value) { Messages(vm, voice, chat?.messages.orEmpty(), pending, Modifier.weight(1f)) }
                     chat?.takeIf { it.waiting }?.let { c -> c.ask?.takeIf { it.isNotEmpty() }?.let { AskCard(vm, it, busy == null) } ?: PromptCard(vm, c.screen.orEmpty(), busy == null) }
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp)) }
-                    Composer(vm, working = chat?.busy == true, enabled = busy == null && chat != null, attached = attached, onPick = { pick.launch(arrayOf("*/*")) })
+                    Composer(
+                        vm, working = chat?.busy == true, enabled = busy == null && chat != null,
+                        onPhotos = { launchPhotos() }, onFiles = { pickFiles.launch(arrayOf("*/*")) },
+                    )
                 }
             }
           }
@@ -364,22 +379,15 @@ private fun PromptCard(vm: MainViewModel, screen: String, enabled: Boolean) {
 }
 
 @Composable
-private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean, attached: androidx.compose.runtime.snapshots.SnapshotStateList<String>, onPick: () -> Unit) {
-    val context = LocalContext.current
+private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean, onPhotos: () -> Unit, onFiles: () -> Unit) {
     val session = vm.chats.chatSession.value.orEmpty()
     var field by remember(session) { vm.chats.draft(session).let { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(it, androidx.compose.ui.text.TextRange(it.length))) } }
     val text = field.text
     // Programmatic changes (chips, attach, clear) put the cursor at the end; a plain String field would keep the old position.
     fun setText(s: String) { field = androidx.compose.ui.text.input.TextFieldValue(s, androidx.compose.ui.text.TextRange(s.length)) }
     LaunchedEffect(session, text) { if (session.isNotEmpty()) vm.chats.setDraft(session, text) }
-    // Files picked in the chat (see ChatScreen) arrive here and go into the message as [attached: path].
-    LaunchedEffect(attached.size) {
-        if (attached.isNotEmpty()) {
-            val paths = attached.toList()
-            attached.clear()
-            setText((field.text.trimEnd() + paths.joinToString("") { " [attached: $it]" }).trim())
-        }
-    }
+    // Files picked in the chat (see ChatScreen) upload in the background and show in the strip; Send adds them as [attached: path].
+    val attachments by vm.chats.attachments.collectAsStateWithLifecycle()
     // Typing "/" suggests commands: the best match shows as faded text in the box, all matches as chips above it.
     val extra by vm.chats.chatCommands.collectAsStateWithLifecycle()
     val matches = if (text.startsWith("/") && !text.contains(' ')) {
@@ -395,11 +403,11 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean, atta
                 }
             }
         }
+        AttachmentStrip(attachments, onRemove = { vm.chats.removeAttachment(it) }, onRetry = { vm.chats.retryAttachment(it) })
         Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
             Row(Modifier.padding(start = 4.dp, end = 5.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                IconButton(onClick = { vm.chats.externalScreen(); onPick() }, enabled = enabled, modifier = Modifier.height(48.dp)) {
-                    Icon(Icons.Filled.AttachFile, contentDescription = "Attach a file or photo")
-                }
+                // externalScreen first: leaving for a picker mustn't count as leaving the app (app lock / chat PIN grace).
+                AttachButton(enabled, onPhotos = { vm.chats.externalScreen(); onPhotos() }, onFiles = { vm.chats.externalScreen(); onFiles() })
                 OutlinedTextField(
                     value = field, onValueChange = { field = it }, visualTransformation = GhostText(ghost, ghostColor), placeholder = { Text("Message Claude") },
                     modifier = Modifier.weight(1f), maxLines = 6, shape = RoundedCornerShape(22.dp),
@@ -412,8 +420,9 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean, atta
                 }
                 FilledIconButton(
                     onClick = { val t = text; vm.chats.sendChat(t, onSent = { setText("") }, onFail = { if (text.isBlank()) setText(t) }) },
-                    enabled = enabled && text.isNotBlank(), modifier = Modifier.size(44.dp),
-                ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send") }
+                    // Text or a ready attachment, and nothing still uploading (the strip says "Uploading 2 of 5…").
+                    enabled = enabled && AttachQueue.canSend(text, attachments), modifier = Modifier.size(44.dp),
+                ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = if (AttachQueue.active(attachments) > 0) "Send (waiting for uploads)" else "Send") }
             }
         }
     }
