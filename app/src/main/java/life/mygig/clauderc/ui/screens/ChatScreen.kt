@@ -34,7 +34,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -82,7 +81,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import life.mygig.clauderc.api.ChatMessage
 import life.mygig.clauderc.api.PinStatus
+import life.mygig.clauderc.ui.LayoutKind
 import life.mygig.clauderc.ui.MainViewModel
+import life.mygig.clauderc.ui.currentLayoutKind
 import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.StatusDot
 import life.mygig.clauderc.ui.components.claudeHealth
@@ -231,6 +232,10 @@ private fun Messages(vm: MainViewModel, voice: ChatVoice, messages: List<ChatMes
         if (list.isEmpty()) return@LaunchedEffect
         if (landed) state.animateScrollToItem(list.size - 1) else { state.scrollToItem(list.size - 1); landed = true }
     }
+    // Bubbles may grow on a wide window (foldable inner screen, tablet) so code boxes get room; the chat column stops at 720dp.
+    val wide = currentLayoutKind() != LayoutKind.COMPACT
+    val userMax = if (wide) 560.dp else 320.dp
+    val replyMax = if (wide) 560.dp else 340.dp
     LazyColumn(modifier.fillMaxWidth(), state = state, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (list.isEmpty()) item { Text("No messages yet in this conversation.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         items(list, key = { r -> when (r) { is Row0.Msg -> "m-" + r.m.id + r.m.text.hashCode(); is Row0.Steps -> "s-" + r.key } }) { r ->
@@ -255,21 +260,31 @@ private fun Messages(vm: MainViewModel, voice: ChatVoice, messages: List<ChatMes
                     FileCard(vm, r.m)
                 } else if (r.m.role == "user") {
                     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-                        Surface(shape = RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp), color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.widthIn(max = 320.dp)) {
-                            SelectionContainer { Text(linkify(r.m.text), modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), style = MaterialTheme.typography.bodyLarge) }
+                        // "[attached: path]" tokens show as file-name chips; the message itself (sent, copied) is unchanged.
+                        val (att, blocks) = remember(r.m.text) { splitAttachments(r.m.text).let { it to parseBlocks(it.text) } }
+                        Surface(shape = RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp), color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.widthIn(max = userMax)) {
+                            Column {
+                                if (blocks.isNotEmpty()) MessageBlocks(blocks)
+                                if (att.names.isNotEmpty()) AttachmentChips(att.names, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp, top = if (blocks.isEmpty()) 10.dp else 0.dp))
+                            }
                         }
                         if (r.pending) Text("queued · tap here to remove", modifier = Modifier.clickable { vm.chats.dismissPending(r.m.text) }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
                     val key = r.m.id + r.m.text.hashCode()
                     val isPlaying = voice.playing == key
+                    // Parsed once per text (a streaming reply's text changes, and so does its item key).
+                    val blocks = remember(r.m.text) { parseBlocks(r.m.text) }
                     Column {
-                        Surface(shape = RoundedCornerShape(22.dp, 22.dp, 22.dp, 6.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.widthIn(max = 340.dp)) {
-                            SelectionContainer { Text(linkify(r.m.text), modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), style = MaterialTheme.typography.bodyLarge) }
+                        Surface(shape = RoundedCornerShape(22.dp, 22.dp, 22.dp, 6.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.widthIn(max = replyMax)) {
+                            MessageBlocks(blocks)
                         }
-                        // Listen to this reply (or carry on where Pause stopped it) without asking Claude again.
-                        TextButton(onClick = { if (isPlaying) voice.pause() else voice.speak(key, forSpeech(r.m.text), flush = true) }, enabled = voice.ready) {
-                            Text(if (isPlaying) "⏸ Pause" else "▶ Play", fontSize = 13.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Listen to this reply (or carry on where Pause stopped it) without asking Claude again.
+                            TextButton(onClick = { if (isPlaying) voice.pause() else voice.speak(key, forSpeech(r.m.text), flush = true) }, enabled = voice.ready) {
+                                Text(if (isPlaying) "⏸ Pause" else "▶ Play", fontSize = 13.sp)
+                            }
+                            CopyButton(r.m.text, what = "reply", tonal = false)
                         }
                     }
                 }
@@ -287,8 +302,9 @@ internal fun modelName(id: String): String {
 }
 
 /** Reply text made listenable: no code blocks, links or markdown marks. */
-private fun forSpeech(t: String) = t
+internal fun forSpeech(t: String) = t
     .replace(Regex("```[\\s\\S]*?```"), " (code) ")
+    .replace(COMMAND_RUN_RE, " (code) ")   // "$ command" lines show as a code box: not read out either
     .replace(URL_RE, " link ")
     .replace(Regex("[*#_`>|]"), "")
 
