@@ -70,6 +70,10 @@ private val FENCE_OPEN = Regex("""^([ \t]*)(`{3,}|~{3,})(.*)$""")
 private val HEADING = Regex("""^(#{1,3}) +(\S.*)$""")
 private val LIST_ITEM = Regex("""^[ \t]*([-*+•]|\d{1,3}[.)])[ \t]+\S.*$""")
 private val PROMPT = Regex("""^[ \t]*\$ """)
+// "! command": what the user types into a Claude session to run a command there. Copy keeps the "! " (that is what gets pasted).
+private val BANG = Regex("""^[ \t]*! \S""")
+private val BANG_TICK = Regex("""^[ \t]*(?:[-*+•][ \t]+)?`(! [^`\n]+)`[ \t]*$""")
+private fun bangText(line: String): String? = BANG_TICK.matchEntire(line)?.groupValues?.get(1) ?: if (BANG.containsMatchIn(line)) line.trim() else null
 private val SHELLS = setOf("shell", "sh", "bash", "zsh", "console", "terminal", "shell-session", "fish", "powershell", "ps", "cmd", "bat")
 
 internal fun parseSegments(input: String): List<Segment> {
@@ -101,6 +105,15 @@ internal fun parseSegments(input: String): List<Segment> {
             flushText(i)
             out += Segment(Block.Code(fenceLang(open.groupValues[3]), trimCode(body)), raw(i, end))
             i = end
+            continue
+        }
+        // A run of "! command" lines (or a line that is just `! command` in backticks).
+        if (bangText(line) != null) {
+            var j = i
+            while (j < n && bangText(lines[j]) != null) j++
+            flushText(i)
+            out += Segment(Block.Code("shell", trimCode((i until j).map { bangText(lines[it])!! })), raw(i, j))
+            i = j
             continue
         }
         // A run of "$ command" lines.
@@ -215,8 +228,8 @@ fun splitAttachments(text: String): Attachments {
     return Attachments(ATTACHED.replace(text, "").trim(), names)
 }
 
-/** Consecutive "$ command" lines (after fences are gone), spoken as "(code)". */
-internal val COMMAND_RUN_RE = Regex("""(?m)^[ \t]*\$ .*(?:\n[ \t]*\$ .*)*""")
+/** Consecutive "$ command" or "! command" lines (after fences are gone), spoken as "(code)". */
+internal val COMMAND_RUN_RE = Regex("""(?m)^[ \t]*(?:\$|!) .*(?:\n[ \t]*(?:\$|!) .*)*""")
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Rendering

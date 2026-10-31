@@ -127,7 +127,7 @@ class ChatMarkdownTest {
     private val pool = listOf(
         "text line", "**bold** and `code`", "- item", "  - sub item", "1. step", "    indented", "      deeper", "", "", "",
         "```", "```kotlin", "````", "~~~", "   ```bash", "$ ls -la", "  $ pwd", "# Head", "## Two", "#### four", "see https://x.y/z",
-        "[attached: /a/b.png]", "\tTabbed", "say ```x``` inline",
+        "[attached: /a/b.png]", "\tTabbed", "say ```x``` inline", "! echo hi", "  ! pwd",
     )
 
     private val fenceLine = Regex("^[ \\t]*(`{3,}|~{3,})[^`]*$")
@@ -153,5 +153,22 @@ class ChatMarkdownTest {
             // What is shown, in order, equals the input minus fence markers.
             assertEquals("visible for: $input", canon(input), canon(visible(segs.map { s -> s.block })))
         }
+    }
+
+    @Test fun bangCommandsKeepTheBangForCopy() {
+        val b = parseBlocks("Run this in the chat:\n! gcloud auth login --no-launch-browser\nthen tell me.")
+        assertEquals(3, b.size)
+        assertEquals(Block.Code("shell", "! gcloud auth login --no-launch-browser"), b[1])
+    }
+
+    @Test fun bangRunAndBacktickedBang() {
+        assertEquals(listOf(Block.Code("shell", "! a\n! b")), parseBlocks("! a\n! b"))
+        assertEquals(listOf(Block.Code("shell", "! claude mcp list")), parseBlocks("- `! claude mcp list`"))
+        // not commands: no space after the bang, or a bang mid-sentence
+        assertEquals(listOf(Block.Text("!important is a CSS word\nWow! it works")), parseBlocks("!important is a CSS word\nWow! it works"))
+    }
+
+    @Test fun bangLinesAreSpokenAsCode() {
+        assertEquals("Run:\n (code) \nok", forSpeech("Run:\n! echo hi\n! pwd\nok"))
     }
 }
