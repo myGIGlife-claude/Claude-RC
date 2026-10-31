@@ -337,3 +337,32 @@ val Icons.Filled.Tune: ImageVector
     }
 
 private var _tune: ImageVector? = null
+
+/** Material's "Image" icon (named Photo here so it doesn't clash with the Image composable). */
+val Icons.Filled.Photo: ImageVector
+    get() {
+        _image?.let { return it }
+        _image = materialIcon(name = "Filled.Image") {
+            addPath(
+                pathData = PathParser().parsePathString("M21,19V5c0,-1.1 -0.9,-2 -2,-2H5c-1.1,0 -2,0.9 -2,2v14c0,1.1 0.9,2 2,2h14c1.1,0 2,-0.9 2,-2zM8.5,13.5l2.5,3.01L14.5,12l4.5,6H5l3.5,-4.5z").toNodes(),
+                fill = SolidColor(Color.Black),
+            )
+        }
+        return _image!!
+    }
+
+private var _image: ImageVector? = null
+
+val Icons.Filled.InsertDriveFile: ImageVector
+    get() {
+        _insertDriveFile?.let { return it }
+        _insertDriveFile = materialIcon(name = "Filled.InsertDriveFile") {
+            addPath(
+                pathData = PathParser().parsePathString("M6,2c-1.1,0 -1.99,0.9 -1.99,2L4,20c0,1.1 0.89,2 1.99,2L18,22c1.1,0 2,-0.9 2,-2L20,8l-6,-6L6,2zM13,9L13,3.5L18.5,9L13,9z").toNodes(),
+                fill = SolidColor(Color.Black),
+            )
+        }
+        return _insertDriveFile!!
+    }
+
+private var _insertDriveFile: ImageVector? = null
