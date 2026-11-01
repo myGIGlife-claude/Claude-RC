@@ -74,6 +74,13 @@ class ChatController(
     val voicePrefs = app.chatVoiceStore.cached()
     private var chatPoller: Job? = null
 
+    /**
+     * session -> id of the last message when /clear was typed. Claude Code only starts the new conversation file on the next
+     * prompt, so until then the history still holds the old chat: hide everything up to that message (the marker is dropped
+     * as soon as the history no longer contains it, i.e. the new conversation has begun).
+     */
+    private val clearedAfter = HashMap<String, String>()
+
     fun openChat(session: String) {
         if (_chatSession.value != session) cancelAttachments()   // another chat: its uploads don't belong here
         _chatSession.value = session
@@ -283,11 +290,17 @@ class ChatController(
         if (t.isEmpty()) return
         if (t == "/permissions") { onSent(); openPermissions(); return }   // our own screen instead of the terminal menu
         val tracked = !t.startsWith("/")   // a slash command never shows up as a message, so it would stay "queued" for good
+        val clearing = t == "/clear" || t == "/reset" || t == "/new"
+        if (clearing) {
+            _chat.value?.messages?.lastOrNull { it.id.isNotEmpty() }?.id?.let { clearedAfter[session] = it }
+            _chat.value = _chat.value?.copy(messages = emptyList())
+        }
         onSent()
         if (sent.isNotEmpty()) updateAttachments { AttachQueue.removeAll(it, sentIds) }
         if (tracked) _chatPending.value = _chatPending.value + t
         tools.action("Sending…", onError = { e ->
             if (tracked) _chatPending.value = _chatPending.value.toMutableList().also { it.remove(t) }
+            if (clearing) clearedAfter.remove(session)   // the clear didn't go out: show the chat again on the next refresh
             // Back in the strip, ahead of anything picked since (unless the chat changed meanwhile).
             if (sent.isNotEmpty() && _chatSession.value == session) updateAttachments { sent + it.filterNot { a -> a.id in sentIds } }
             onFail()
@@ -306,7 +319,7 @@ class ChatController(
     private fun setChat(session: String, c: ChatData) {
         if (session != _chatSession.value) return   // a late reply from the chat we just left
         if (chatPin == null) return   // locked while this reply was on its way: it must not reappear
-        _chat.value = c
+        _chat.value = c.withoutCleared(clearedAfter, session)
         // Compare loosely: Claude Code may change spacing, and the server cuts long messages at 8000 characters.
         fun norm(t: String) = t.trim().replace(Regex("\\s+"), " ").take(7000)
         val shown = c.messages.filter { it.role == "user" }.map { norm(it.text) }.toSet()
@@ -437,4 +450,12 @@ class ChatController(
         chatPin = null
         pinVault.clear()
     }
+}
+
+/** [c] without the messages up to the /clear marker for [session] (the marker is forgotten once the history no longer has it). */
+internal fun ChatData.withoutCleared(marks: MutableMap<String, String>, session: String): ChatData {
+    val id = marks[session] ?: return this
+    val i = messages.indexOfLast { it.id == id }
+    if (i < 0) { marks.remove(session); return this }
+    return copy(messages = messages.drop(i + 1))
 }
