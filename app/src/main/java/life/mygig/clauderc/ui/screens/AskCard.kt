@@ -1,6 +1,7 @@
 package life.mygig.clauderc.ui.screens
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +18,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
@@ -25,6 +27,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import life.mygig.clauderc.api.AskQuestion
@@ -52,8 +56,12 @@ fun AskCard(vm: MainViewModel, questions: List<AskQuestion>, enabled: Boolean) {
                                 picks[qi].value = if (q.multiSelect) (if (on) picks[qi].value - oi else picks[qi].value + oi) else setOf(oi)
                                 if (!q.multiSelect) others[qi].value = ""
                             }
-                            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(enabled = enabled, onClick = toggle), verticalAlignment = Alignment.CenterVertically) {
-                                if (q.multiSelect) Checkbox(on, onCheckedChange = { toggle() }, enabled = enabled) else RadioButton(on, onClick = toggle, enabled = enabled)
+                            // The row is the one control; the mark only shows the state. Without a callback a mark drops its 48dp, so it is kept here.
+                            val tap = if (q.multiSelect) Modifier.toggleable(value = on, enabled = enabled, role = Role.Checkbox) { toggle() }
+                                else Modifier.selectable(selected = on, enabled = enabled, role = Role.RadioButton, onClick = toggle)
+                            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).then(tap), verticalAlignment = Alignment.CenterVertically) {
+                                val mark = Modifier.minimumInteractiveComponentSize().clearAndSetSemantics {}
+                                if (q.multiSelect) Checkbox(on, onCheckedChange = null, modifier = mark, enabled = enabled) else RadioButton(on, onClick = null, modifier = mark, enabled = enabled)
                                 Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
                                     Text(o.label)
                                     if (o.description.isNotBlank()) Text(o.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

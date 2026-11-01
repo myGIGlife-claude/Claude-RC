@@ -5,6 +5,7 @@ import android.app.Activity
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -243,7 +244,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                                         Box {
                                             // Tap the server name to switch or add servers.
                                             Row(
-                                                Modifier.clickable { serverMenu = true },
+                                                Modifier.clickable(onClickLabel = "Switch server from $sub", role = Role.Button) { serverMenu = true },
                                                 verticalAlignment = Alignment.CenterVertically,
                                             ) {
                                                 Text(
@@ -252,7 +253,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis,
                                                 )
-                                                Icon(Icons.Filled.ArrowDropDown, contentDescription = "Switch server")
+                                                Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
                                             }
                                             DropdownMenu(expanded = serverMenu, onDismissRequest = { serverMenu = false }) {
                                                 s.servers.filter { it.isConfigured }.forEach { srv ->

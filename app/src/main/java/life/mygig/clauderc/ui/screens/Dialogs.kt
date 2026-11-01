@@ -184,7 +184,7 @@ fun AddServiceDialog(vm: MainViewModel) {
                                     Text(name, style = MaterialTheme.typography.bodyLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium, maxLines = 1)
                                     Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
                                 }
-                                Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                life.mygig.clauderc.ui.components.RowChevron()
                             }
                         }
                     }

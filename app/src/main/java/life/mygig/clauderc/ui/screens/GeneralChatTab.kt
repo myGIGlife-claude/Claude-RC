@@ -45,6 +45,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -64,6 +67,8 @@ import life.mygig.clauderc.ui.components.OneLine
 import life.mygig.clauderc.ui.components.SectionLabel
 import life.mygig.clauderc.ui.components.StatusDot
 import life.mygig.clauderc.ui.components.claudeHealth
+import life.mygig.clauderc.ui.components.stateLine
+import life.mygig.clauderc.ui.components.stateSpoken
 import life.mygig.clauderc.ui.theme.Term
 import life.mygig.clauderc.ui.theme.statusColors
 import life.mygig.clauderc.ui.vm.generalTitle
@@ -179,7 +184,7 @@ private fun GeneralChatRow(
     val line = if (c.running) previewLine(c.preview) else ""
     val body: @Composable () -> Unit = {
         Row(
-            Modifier.fillMaxWidth().clickable(enabled = !opening, onClickLabel = "Open chat", onClick = onOpen).padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+            Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}.clickable(enabled = !opening, onClickLabel = "Open chat", role = Role.Button, onClick = onOpen).padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             when {
@@ -190,8 +195,10 @@ private fun GeneralChatRow(
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    line.ifEmpty { state }, style = MaterialTheme.typography.bodySmall,
-                    color = if (waiting) MaterialTheme.statusColors.warnText elseMaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    stateLine(state, line),
+                    modifier = Modifier.semantics { contentDescription = stateSpoken(state, line) },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (waiting) MaterialTheme.statusColors.warnText else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
             Text(time, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

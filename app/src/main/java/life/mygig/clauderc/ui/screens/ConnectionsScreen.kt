@@ -30,6 +30,8 @@ import life.mygig.clauderc.ui.components.CalmDivider
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.Role
+import life.mygig.clauderc.ui.components.RowChevron
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -183,7 +185,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.section(title: String
 private fun ConnectionRow(t: Tile) {
     val initials = t.title.split(' ', '/', ':', '-').filter { it.isNotEmpty() }.take(2).joinToString("") { it.first().uppercase() }.ifEmpty { "?" }
     Row(
-        Modifier.fillMaxWidth().clickable(enabled = t.onClick != null) { t.onClick?.invoke() }.padding(horizontal = 16.dp, vertical = 12.dp),
+        Modifier.fillMaxWidth().clickable(onClickLabel = "Open ${t.title}", role = Role.Button, onClick = t.onClick).padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Surface(shape = androidx.compose.foundation.shape.CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHighest, modifier = Modifier.size(38.dp)) {
@@ -203,7 +205,7 @@ private fun ConnectionRow(t: Tile) {
                 )
             }
         }
-        if (t.onClick != null) Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        RowChevron()
     }
 }
 

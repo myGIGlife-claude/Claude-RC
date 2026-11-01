@@ -13,6 +13,8 @@ import life.mygig.clauderc.ui.components.Tune
 import android.content.Context
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.clickable
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
@@ -161,7 +163,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
                                     color = if (c.mode == "bypass") MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
-                                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { showControls = true },
+                                    modifier = Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(8.dp)).clickable(onClickLabel = "Open chat controls", role = Role.Button) { showControls = true },
                                 ) {
                                     Text(
                                         modelName(c.model) + " · " + modeLabel(c.mode), style = MaterialTheme.typography.labelSmall,
@@ -199,7 +201,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                 }
                 val notice by vm.chatNotice.collectAsStateWithLifecycle()
                 notice?.let { n ->
-                    Surface(color = MaterialTheme.colorScheme.inverseSurface, modifier = Modifier.fillMaxWidth().clickable { vm.clearChatNotice() }) {
+                    Surface(color = MaterialTheme.colorScheme.inverseSurface, modifier = Modifier.fillMaxWidth().minimumInteractiveComponentSize().clickable(onClickLabel = "Dismiss", role = Role.Button) { vm.clearChatNotice() }) {
                         Text(n, color = MaterialTheme.colorScheme.inverseOnSurface, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
                     }
                 }
@@ -259,7 +261,9 @@ private fun Messages(vm: MainViewModel, voice: ChatVoice, messages: List<ChatMes
                     val expanded = r.key in open
                     val names = r.items.map { it.text.substringBefore(":").substringAfterLast("__") }.distinct().take(4).joinToString(", ")
                     Column(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { open = if (expanded) open - r.key else open + r.key }.padding(horizontal = 6.dp, vertical = 2.dp),
+                        Modifier.fillMaxWidth().minimumInteractiveComponentSize().clip(RoundedCornerShape(10.dp))
+                            .clickable(onClickLabel = if (expanded) "Hide steps" else "Show steps", role = Role.Button) { open = if (expanded) open - r.key else open + r.key }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
                         Text(
@@ -283,7 +287,7 @@ private fun Messages(vm: MainViewModel, voice: ChatVoice, messages: List<ChatMes
                                 if (att.names.isNotEmpty()) AttachmentChips(att.names, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp, top = if (blocks.isEmpty()) 10.dp else 0.dp))
                             }
                         }
-                        if (r.pending) Text("queued · tap here to remove", modifier = Modifier.clickable { vm.chats.dismissPending(r.m.text) }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (r.pending) Text("queued · tap here to remove", modifier = Modifier.minimumInteractiveComponentSize().clickable(onClickLabel = "Remove queued message", role = Role.Button) { vm.chats.dismissPending(r.m.text) }.padding(vertical = 4.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
                     val key = r.m.id + r.m.text.hashCode()

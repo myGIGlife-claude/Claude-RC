@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -23,6 +26,9 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -54,13 +60,39 @@ fun Health.color(): Color = when (this) {
 @Composable
 fun claudeHealth(busy: Boolean, waiting: Boolean): Health = when { waiting -> Health.WARN; busy -> Health.OK; else -> Health.OFF }
 
+/** A Claude session's state in words: what [claudeHealth] says by colour. */
+internal fun sessionState(busy: Boolean, waiting: Boolean): String = when { waiting -> "needs an answer"; busy -> "working"; else -> "idle" }
+
+/** The line under a session's name: its state first, so colour is never the only clue, then its preview. */
+internal fun stateLine(state: String, preview: String): String = if (preview.isEmpty()) state else "$state · $preview"
+
+/** [stateLine] for a screen reader: a comma pauses, a middle dot may be read out. */
+internal fun stateSpoken(state: String, preview: String): String = if (preview.isEmpty()) state else "$state, $preview"
+
+/** What a dot means, for a dot with no state word next to it. */
+fun Health.description(): String = when (this) {
+    Health.OK -> "OK"
+    Health.WARN -> "Needs attention"
+    Health.BAD -> "Problem"
+    Health.OFF -> "Off"
+    Health.NONE -> "Not set up"
+}
+
+/** Without [contentDescription] the dot is decorative: pass one only when no text beside it says the state. */
 @Composable
-fun StatusDot(health: Health, modifier: Modifier = Modifier) {
+fun StatusDot(health: Health, modifier: Modifier = Modifier, contentDescription: String? = null) {
+    val named = if (contentDescription != null) modifier.semantics { this.contentDescription = contentDescription } else modifier.clearAndSetSemantics {}
     if (health == Health.NONE) {
-        Box(modifier.size(10.dp).border(1.dp, health.color(), CircleShape))
+        Box(named.size(10.dp).border(1.dp, health.color(), CircleShape))
     } else {
-        Box(modifier.size(10.dp).background(health.color(), CircleShape))
+        Box(named.size(10.dp).background(health.color(), CircleShape))
     }
+}
+
+/** The arrow at the end of a row that opens something. Mirrors right-to-left; decorative, the row says what a tap does. */
+@Composable
+fun RowChevron() {
+    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
 }
 
 /** Small upper-case heading above a group of tiles. */
@@ -100,7 +132,7 @@ fun InfoTile(
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatusDot(health)
+                StatusDot(health, contentDescription = health.description())
                 Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (!subtitle.isNullOrBlank()) {
