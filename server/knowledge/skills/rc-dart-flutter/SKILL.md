@@ -1,6 +1,6 @@
 ---
 name: rc-dart-flutter
-description: How to write current Dart 3.13 / Flutter 3.47 code: language features (records, patterns, sealed, primary constructors, dot shorthands), widget build performance, Impeller, Material/Cupertino packages, go_router, Riverpod/Bloc, data and storage, platform channels/Pigeon/FFI, testing, release. Use when editing *.dart, pubspec.yaml, analysis_options.yaml, build.yaml, l10n.yaml, *.arb, or Flutter android/ios/web runners.
+description: "How to write current Dart 3.13 / Flutter 3.47 code: language features (records, patterns, sealed, primary constructors, dot shorthands), widget build performance, Impeller, Material/Cupertino packages, go_router, Riverpod/Bloc, data and storage, platform channels/Pigeon/FFI, testing, release. Use when editing *.dart, pubspec.yaml, analysis_options.yaml, build.yaml, l10n.yaml, *.arb, or Flutter android/ios/web runners."
 ---
 # Dart and Flutter  (as of 2026-10)
 

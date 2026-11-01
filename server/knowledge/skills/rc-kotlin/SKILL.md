@@ -1,6 +1,6 @@
 ---
 name: rc-kotlin
-description: Kotlin language and non-Android Kotlin as of 2026-10: K2 and 2.x features, coroutines/Flow, kotlinx.serialization, Multiplatform (expect/actual, Compose MP), Ktor/Spring/Exposed servers, Gradle Kotlin DSL, convention plugins, libs.versions.toml, Java interop, Kotest/MockK/Turbine, detekt/ktlint. Use for *.kt, *.kts, build-logic, commonMain, Flow or suspend code. Android specifics are in rc-android.
+description: "Kotlin language and non-Android Kotlin as of 2026-10: K2 and 2.x features, coroutines/Flow, kotlinx.serialization, Multiplatform (expect/actual, Compose MP), Ktor/Spring/Exposed servers, Gradle Kotlin DSL, convention plugins, libs.versions.toml, Java interop, Kotest/MockK/Turbine, detekt/ktlint. Use for *.kt, *.kts, build-logic, commonMain, Flow or suspend code. Android specifics are in rc-android."
 ---
 # Kotlin: language, coroutines, KMP and server (as of 2026-10)
 

@@ -1,6 +1,6 @@
 ---
 name: rc-security-engineering
-description: Security engineering process and non-web surfaces: secure SDLC, threat modeling (STRIDE, LINDDUN, 30-minute method), ASVS 5/MASVS/SAMM, mobile app security, secrets/KMS, crypto and post-quantum, vuln triage (CVSS, EPSS, KEV, SBOM/VEX), SAST/DAST/SCA, cloud/container IAM, security.txt, incident response, GDPR/CCPA/HIPAA/PCI/COPPA basics, LLM/agent security. Use for design reviews, threat models, audits, compliance questions.
+description: "Security engineering process and non-web surfaces: secure SDLC, threat modeling (STRIDE, LINDDUN, 30-minute method), ASVS 5/MASVS/SAMM, mobile app security, secrets/KMS, crypto and post-quantum, vuln triage (CVSS, EPSS, KEV, SBOM/VEX), SAST/DAST/SCA, cloud/container IAM, security.txt, incident response, GDPR/CCPA/HIPAA/PCI/COPPA basics, LLM/agent security. Use for design reviews, threat models, audits, compliance questions."
 ---
 # Security engineering, privacy and compliance  (as of 2026-10)
 
