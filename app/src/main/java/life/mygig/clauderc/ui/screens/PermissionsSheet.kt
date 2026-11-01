@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -99,7 +100,7 @@ fun PermissionsSheet(vm: MainViewModel, onClose: () -> Unit) {
                     } else CalmGroup {
                         rules.forEachIndexed { i, r ->
                             if (i > 0) CalmDivider()
-                            Column(Modifier.fillMaxWidth().clickable { picked = key to r }.padding(horizontal = 16.dp, vertical = 12.dp).semantics { contentDescription = "$title rule $r. Tap to change." }) {
+                            Column(Modifier.fillMaxWidth().clickable(onClickLabel = "Change rule", role = Role.Button) { picked = key to r }.padding(horizontal = 16.dp, vertical = 12.dp).semantics { contentDescription = "$title rule $r. Tap to change." }) {
                                 Text(r, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
                                 Text(describePermissionRule(r), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }

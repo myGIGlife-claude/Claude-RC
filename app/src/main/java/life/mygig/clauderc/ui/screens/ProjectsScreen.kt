@@ -17,6 +17,8 @@ import life.mygig.clauderc.ui.components.StatusDot
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.semantics.Role
+import life.mygig.clauderc.ui.components.RowChevron
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -142,7 +144,11 @@ fun ProjectsScreen(vm: MainViewModel) {
 @Composable
 private fun RepoRow(repo: Repo, index: Int, count: Int, onClick: () -> Unit, onLongClick: () -> Unit) {
     val shape = groupedShape(index, count)
-    Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth().clip(shape).combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+    Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth().clip(shape).combinedClickable(
+        role = Role.Button, onClickLabel = "Open ${repo.name}",
+        onLongClickLabel = if (repo.running) "Open terminal" else "Open ${repo.name}",
+        onClick = onClick, onLongClick = onLongClick,
+    )) {
         Column {
             if (index > 0) CalmDivider()
             Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -160,7 +166,7 @@ private fun RepoRow(repo: Repo, index: Int, count: Int, onClick: () -> Unit, onL
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                RowChevron()
             }
         }
     }

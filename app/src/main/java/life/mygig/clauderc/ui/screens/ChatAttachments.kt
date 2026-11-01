@@ -42,6 +42,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -130,7 +131,7 @@ private fun AttachmentItem(a: Attachment, index: Int, total: Int, onRemove: (Lon
         Box(
             Modifier.align(Alignment.BottomStart).size(THUMB).clip(shape)
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                .then(if (failed) Modifier.clickable(onClickLabel = "Retry the upload") { onRetry(a.id) } else Modifier)
+                .then(if (failed) Modifier.clickable(onClickLabel = "Retry the upload", role = Role.Button) { onRetry(a.id) } else Modifier)
                 .semantics { contentDescription = desc },
             contentAlignment = Alignment.Center,
         ) {
