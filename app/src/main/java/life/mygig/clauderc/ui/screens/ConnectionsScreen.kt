@@ -38,7 +38,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.text.font.FontWeight
@@ -54,7 +53,7 @@ import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.InfoTile
 import life.mygig.clauderc.ui.components.PillTabs
 import life.mygig.clauderc.ui.components.SectionLabel
-import life.mygig.clauderc.ui.theme.WarnAmber
+import life.mygig.clauderc.ui.theme.statusColors
 
 private data class Tile(val title: String, val subtitle: String?, val health: Health, val onClick: () -> Unit)
 
@@ -197,8 +196,8 @@ private fun ConnectionRow(t: Tile) {
                     t.subtitle, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     color = when (t.health) {
                         Health.OK -> MaterialTheme.colorScheme.onSurfaceVariant
-                        Health.WARN -> WarnAmber
-                        Health.BAD -> Color(0xFFF09A9D)
+                        Health.WARN -> MaterialTheme.statusColors.warnText
+                        Health.BAD -> MaterialTheme.statusColors.errorText
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
@@ -217,13 +216,14 @@ private fun ServerUpdateCard(vm: MainViewModel, required: Boolean, commit: Strin
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
-        color = if (required) Color(0xFF2A1718) else Color(0xFF2A2418),
-        border = BorderStroke(1.dp, if (required) Color(0xFF6A2A2D) else Color(0xFF5C4A24)),
+        color = if (required) MaterialTheme.statusColors.errorContainer else MaterialTheme.statusColors.warnContainer,
+        contentColor = if (required) MaterialTheme.statusColors.onErrorContainer else MaterialTheme.statusColors.onWarnContainer,
+        border = BorderStroke(1.dp, if (required) MaterialTheme.statusColors.errorBorder else MaterialTheme.statusColors.warnBorder),
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 if (required) "Server scripts need an update" else "Server scripts update available",
-                color = if (required) Color(0xFFF09A9D) else WarnAmber,
+                color = if (required) MaterialTheme.statusColors.errorText else MaterialTheme.statusColors.warnText,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(

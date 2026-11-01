@@ -45,7 +45,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -66,7 +65,7 @@ import life.mygig.clauderc.ui.components.SectionLabel
 import life.mygig.clauderc.ui.components.StatusDot
 import life.mygig.clauderc.ui.components.claudeHealth
 import life.mygig.clauderc.ui.theme.Term
-import life.mygig.clauderc.ui.theme.WarnAmber
+import life.mygig.clauderc.ui.theme.statusColors
 import life.mygig.clauderc.ui.vm.generalTitle
 import life.mygig.clauderc.ui.vm.relativeTime
 
@@ -192,7 +191,7 @@ private fun GeneralChatRow(
                 Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     line.ifEmpty { state }, style = MaterialTheme.typography.bodySmall,
-                    color = if (waiting) WarnAmber else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    color = if (waiting) MaterialTheme.statusColors.warnText elseMaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
             Text(time, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -207,7 +206,7 @@ private fun GeneralChatRow(
         }
     }
     if (waiting) {
-        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = Color(0xFF2A2418), border = BorderStroke(1.dp, Color(0xFF5C4A24))) { body() }
+        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = MaterialTheme.statusColors.warnContainer, contentColor = MaterialTheme.statusColors.onWarnContainer, border = BorderStroke(1.dp, MaterialTheme.statusColors.warnBorder)) { body() }
     } else body()
 }
 

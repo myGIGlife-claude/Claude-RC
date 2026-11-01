@@ -28,7 +28,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -45,6 +44,7 @@ import life.mygig.clauderc.ui.components.OneLine
 import life.mygig.clauderc.ui.components.SectionLabel
 import life.mygig.clauderc.ui.components.StatusDot
 import life.mygig.clauderc.ui.openUrl
+import life.mygig.clauderc.ui.theme.statusColors
 
 /** What a detail page shows and can do. */
 private class Page(
@@ -227,7 +227,7 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
         page.link?.let { (label, url) -> OutlinedButton(onClick = { openUrl(context, url) }, modifier = Modifier.fillMaxWidth()) { Text(label) } }
         page.remove?.let { (label, _) ->
             TextButton(onClick = { confirm = true }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) {
-                Text(label, color = Color(0xFFF09A9D))
+                Text(label, color = MaterialTheme.statusColors.errorText)
             }
         }
         Text("Changes reach running chats after Sessions › Restart.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

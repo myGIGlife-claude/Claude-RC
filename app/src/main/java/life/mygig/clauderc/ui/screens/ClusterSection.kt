@@ -70,8 +70,7 @@ import kotlin.math.roundToInt
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.components.CardBox
 import life.mygig.clauderc.ui.openUrl
-import life.mygig.clauderc.ui.theme.BadRed
-import life.mygig.clauderc.ui.theme.WarnAmber
+import life.mygig.clauderc.ui.theme.statusColors
 import life.mygig.clauderc.ui.vm.HostsController
 
 private val MODES = listOf("acceptEdits", "plan", "bypassPermissions")
@@ -648,7 +647,7 @@ private fun HostSetupDialog(vm: MainViewModel, name: String, sshPort: Int) {
                     }
                     if (r.docker) Text(
                         "Docker is installed: its published ports bypass the firewall. Publish container ports on 127.0.0.1 (behind Caddy).",
-                        style = MaterialTheme.typography.bodySmall, color = WarnAmber,
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.statusColors.warnText,
                     )
                 }
                 error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
@@ -724,7 +723,8 @@ private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean
 @Composable
 private fun UsageBar(label: String, w: UsageWindow) {
     val used = (w.pct ?: return).coerceIn(0.0, 100.0)
-    val color = when { used >= 90 -> BadRed; used >= 75 -> WarnAmber; else -> MaterialTheme.colorScheme.primary }
+    val color = when { used >= 90 -> MaterialTheme.statusColors.badDot; used >= 75 -> MaterialTheme.statusColors.warnDot; else -> MaterialTheme.colorScheme.primary }
+    val percentColor = when { used >= 90 -> MaterialTheme.statusColors.badText; used >= 75 -> MaterialTheme.statusColors.warnText; else -> MaterialTheme.colorScheme.onSurfaceVariant }
     // The bar fills as usage is spent, so a full bar means nothing is left.
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -734,7 +734,7 @@ private fun UsageBar(label: String, w: UsageWindow) {
                 modifier = Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(3.dp)),
                 color = color, trackColor = MaterialTheme.colorScheme.surfaceContainerHighest, gapSize = 0.dp, drawStopIndicator = {},
             )
-            Text("${used.roundToInt()}%", style = MaterialTheme.typography.bodySmall, color = if (used >= 75) color else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(40.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
+            Text("${used.roundToInt()}%", style = MaterialTheme.typography.bodySmall, color = percentColor, modifier = Modifier.width(40.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
         }
         resetsIn(w.resetsAt)?.let { Text("resets in $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 66.dp)) }
     }
