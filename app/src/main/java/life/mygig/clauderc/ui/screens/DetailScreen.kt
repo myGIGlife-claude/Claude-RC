@@ -100,11 +100,11 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
         }
         is Detail.Login -> when (d.kind) {
             LoginKind.CLAUDE -> Page("Claude", if (s.claude.loggedIn) Health.OK else Health.BAD,
-                if (s.claude.loggedIn) "Logged in with your claude.ai subscription" else "Not logged in",
+                if (s.claude.loggedIn) "Signed in with your claude.ai subscription" else "Not signed in",
                 about = "Claude Code on the server. Sessions run with Remote Control, never an API key.",
-                edit = "Log in again" to login(LoginKind.CLAUDE))
+                edit = "Sign in again" to login(LoginKind.CLAUDE))
             LoginKind.GITHUB -> Page("GitHub", if (s.github.loggedIn) Health.OK else Health.BAD,
-                if (s.github.loggedIn) "Logged in as ${s.github.user}" else "Not logged in",
+                if (s.github.loggedIn) "Signed in as ${s.github.user}" else "Not signed in",
                 about = "Used to create, clone and push repositories (gh CLI).",
                 rows = listOf("Missing scopes" to s.github.missingScopes.ifEmpty { listOf("none") }.joinToString(", ")),
                 edit = "Replace token" to login(LoginKind.GITHUB))
@@ -112,18 +112,18 @@ fun DetailScreen(vm: MainViewModel, d: Detail) {
                 if (s.aws.loggedIn) "Connected" else "Not connected",
                 about = "The AWS CLI on the server.",
                 rows = listOfNotNull("Profile" to s.aws.profile, s.aws.identity?.arn?.let { "Identity" to it }, s.aws.identity?.account?.let { "Account" to it }),
-                edit = "Log in again" to login(LoginKind.AWS))
-            LoginKind.GITLAB -> Page("GitLab", Health.OK, "Logged in as ${sv["gitlab"]?.detail ?: "?"}",
+                edit = "Sign in again" to login(LoginKind.AWS))
+            LoginKind.GITLAB -> Page("GitLab", Health.OK, "Signed in as ${sv["gitlab"]?.detail ?: "?"}",
                 about = "The glab CLI on the server.", edit = "Replace token" to login(LoginKind.GITLAB))
-            LoginKind.DOCKER -> Page("Docker / GHCR", Health.OK, "Logged in to ${sv["docker"]?.detail ?: "?"}",
-                about = "docker login on the server: push and pull images.", edit = "Log in to a registry" to login(LoginKind.DOCKER))
+            LoginKind.DOCKER -> Page("Docker / GHCR", Health.OK, "Signed in to ${sv["docker"]?.detail ?: "?"}",
+                about = "docker login on the server: push and pull images.", edit = "Sign in to a registry" to login(LoginKind.DOCKER))
             LoginKind.YOUTUBE -> Page("YouTube", Health.OK, "Connected to ${sv["youtube"]?.detail ?: "your channel"}",
                 about = "Claude uploads with: youtube-upload video.mp4 --title \"…\" --privacy unlisted",
                 vars = Catalog.envVars["youtube"].orEmpty(),
                 note = "Videos from unaudited Google projects stay private until audited. 100 uploads a day.",
                 edit = "Sign in again" to login(LoginKind.YOUTUBE),
                 remove = "Disconnect YouTube" to { vm.connections.disconnect("youtube", "YouTube") },
-                removeConfirm = "The YouTube login is deleted from the server.")
+                removeConfirm = "The YouTube sign-in is deleted from the server.")
         }
         is Detail.Mcp -> {
             val m = mcp?.servers?.firstOrNull { it.name == d.server.name } ?: d.server

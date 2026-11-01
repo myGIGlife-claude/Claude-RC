@@ -65,25 +65,25 @@ class LoginsController(
         }, block = block)
     }
 
-    fun claudeLoginStart() = loginAction(LoginKind.CLAUDE, "Starting Claude login…") {
+    fun claudeLoginStart() = loginAction(LoginKind.CLAUDE, "Starting Claude sign-in…") {
         val u = api.loginClaudeStart()
         if (_login.value == LoginKind.CLAUDE) _loginUrl.value = u
     }
 
     fun claudeLoginCode(code: String) = loginAction(LoginKind.CLAUDE, "Checking code…") {
         api.loginClaudeCode(code)
-        loginDone(LoginKind.CLAUDE, "Claude is logged in")
+        loginDone(LoginKind.CLAUDE, "Claude is signed in")
     }
 
     fun githubLogin(token: String) = loginAction(LoginKind.GITHUB, "Saving GitHub token…") {
         val r = api.loginGithub(token)
-        loginDone(LoginKind.GITHUB, "GitHub logged in as ${r.user}")
+        loginDone(LoginKind.GITHUB, "GitHub signed in as ${r.user}")
         onGithub()
     }
 
     fun awsKeysLogin(id: String, secret: String, region: String) = loginAction(LoginKind.AWS, "Saving AWS keys…") {
         val r = api.loginAwsKeys(id, secret, region)
-        loginDone(LoginKind.AWS, "AWS logged in" + (r.account?.let { " (account $it)" } ?: ""))
+        loginDone(LoginKind.AWS, "AWS signed in" + (r.account?.let { " (account $it)" } ?: ""))
     }
 
     fun awsSsoStart() = loginAction(LoginKind.AWS, "Starting AWS SSO…") {
@@ -100,25 +100,25 @@ class LoginsController(
                 val s = runCatching { api.status() }.getOrNull() ?: return@repeat
                 setStatus(s)
                 if (s.aws.loggedIn) {
-                    loginDone(LoginKind.AWS, "AWS SSO login complete")
+                    loginDone(LoginKind.AWS, "AWS SSO sign-in complete")
                     return@launch
                 }
             }
             if (_login.value == LoginKind.AWS) {
                 _loginUrl.value = null
-                _loginError.value = "The SSO code expired before it was approved. Start the SSO login again."
+                _loginError.value = "The SSO code expired before it was approved. Start the SSO sign-in again."
             }
         }
     }
 
     fun gitlabLogin(token: String, host: String) = loginAction(LoginKind.GITLAB, "Saving GitLab token…") {
         val r = api.loginGitlab(token, host)
-        loginDone(LoginKind.GITLAB, "GitLab logged in as ${r.user}")
+        loginDone(LoginKind.GITLAB, "GitLab signed in as ${r.user}")
     }
 
-    fun dockerLogin(registry: String, user: String, token: String) = loginAction(LoginKind.DOCKER, "Logging in to the registry…") {
+    fun dockerLogin(registry: String, user: String, token: String) = loginAction(LoginKind.DOCKER, "Signing in to the registry…") {
         api.loginDocker(registry, user, token)
-        loginDone(LoginKind.DOCKER, "Logged in to ${registry.ifBlank { "docker.io" }}")
+        loginDone(LoginKind.DOCKER, "Signed in to ${registry.ifBlank { "docker.io" }}")
     }
 
     /** YouTube: start Google's device sign-in, then poll until you approve it on google.com/device. */

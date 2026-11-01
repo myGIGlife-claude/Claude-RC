@@ -51,6 +51,7 @@ import life.mygig.clauderc.ui.Detail
 import life.mygig.clauderc.ui.LoginKind
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.Tab
+import life.mygig.clauderc.ui.plural
 import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.InfoTile
 import life.mygig.clauderc.ui.components.PillTabs
@@ -109,15 +110,15 @@ fun ConnectionsScreen(vm: MainViewModel) {
                 full { ServerUpdateCard(vm, required, newCommit) }
             }
 
-            full { PillTabs(listOf("Logins", "MCP", "Keys"), tab, { tab = it }) }
+            full { PillTabs(listOf("Sign-ins", "MCP", "Keys"), tab, { tab = it }) }
 
             if (tab == 0) section("Core", listOf(
-                Tile("Claude", if (s.claude.loggedIn) "claude.ai subscription" else "Not logged in: tap to log in",
+                Tile("Claude", if (s.claude.loggedIn) "claude.ai subscription" else "Not signed in: tap to sign in",
                     if (s.claude.loggedIn) Health.OK else Health.BAD) {
                     if (s.claude.loggedIn) detail(Detail.Login(LoginKind.CLAUDE)) else login(LoginKind.CLAUDE)
                 },
                 Tile("GitHub", when {
-                    !s.github.loggedIn -> "Not logged in: tap to log in"
+                    !s.github.loggedIn -> "Not signed in: tap to sign in"
                     s.github.missingScopes.isNotEmpty() -> "missing ${s.github.missingScopes.joinToString(", ")}"
                     else -> s.github.user
                 }, when {
@@ -149,7 +150,7 @@ fun ConnectionsScreen(vm: MainViewModel) {
                 if (s.apple) add(Tile("Apple developer", "App Store Connect key", Health.OK) { detail(Detail.Apple) })
                 s.keystores.forEach { n -> add(Tile("Signing: $n", "Android upload key", Health.OK) { detail(Detail.Keystore(n)) }) }
                 if (s.custom.isNotEmpty()) {
-                    add(Tile("Custom keys", "${s.custom.size} key" + if (s.custom.size == 1) "" else "s", Health.OK) { vm.services.showCustomKeys(true) })
+                    add(Tile("Custom keys", plural(s.custom.size, "key", "keys"), Health.OK) { vm.services.showCustomKeys(true) })
                 }
             }
             if (tab == 2) section("Keys", keys)

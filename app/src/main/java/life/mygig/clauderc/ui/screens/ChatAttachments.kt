@@ -55,6 +55,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import life.mygig.clauderc.ui.components.AttachFile
 import life.mygig.clauderc.ui.components.Photo
+import life.mygig.clauderc.ui.components.tabular
 import life.mygig.clauderc.ui.components.InsertDriveFile
 import life.mygig.clauderc.ui.vm.AttachQueue
 import life.mygig.clauderc.ui.vm.AttachState
@@ -105,7 +106,7 @@ internal fun AttachmentStrip(items: List<Attachment>, onRemove: (Long) -> Unit, 
             ?: items.count { it.state == AttachState.Failed }.takeIf { it > 0 }?.let { "$it couldn't upload: tap to retry" }
         hint?.let {
             Text(
-                it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                it, style = MaterialTheme.typography.labelMedium.tabular(), color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp).semantics { liveRegion = LiveRegionMode.Polite },
             )
         }
@@ -191,7 +192,7 @@ private fun FileTile(a: Attachment) {
     Column(Modifier.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(Icons.Filled.InsertDriveFile, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
         Text(
-            a.displayName, fontSize = 9.sp, lineHeight = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+            a.displayName, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }

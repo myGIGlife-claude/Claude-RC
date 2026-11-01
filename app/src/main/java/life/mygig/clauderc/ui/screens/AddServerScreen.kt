@@ -117,8 +117,8 @@ fun AddServerScreen(vm: MainViewModel) {
                             AddServerStep.FORM, AddServerStep.PROBING, AddServerStep.CONFIRM_KEY -> {
                                 val probing = step == AddServerStep.PROBING
                                 Text(
-                                    "Enter the server's SSH login. The app installs what it needs, then lets this phone's key in; " +
-                                        "after that the key is the only login the app uses.",
+                                    "Enter the server's SSH user and password. The app installs what it needs, then lets this phone's key in; " +
+                                        "after that the key is the only sign-in the app uses.",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )

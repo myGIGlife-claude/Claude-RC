@@ -60,6 +60,7 @@ import life.mygig.clauderc.api.InstalledPlugin
 import life.mygig.clauderc.api.PluginsData
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.Tab
+import life.mygig.clauderc.ui.plural
 import life.mygig.clauderc.ui.components.CardBox
 import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.InfoTile
@@ -143,7 +144,7 @@ fun ClaudeScreen(vm: MainViewModel) {
                                     val n = p.available.count { it.marketplace == m.name }
                                     Row {
                                         Text(m.name, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text("$n plugin" + if (n == 1) "" else "s", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                        Text(plural(n, "plugin", "plugins"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                     }
                                 }
                                 Row {

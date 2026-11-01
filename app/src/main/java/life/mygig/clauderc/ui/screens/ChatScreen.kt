@@ -87,6 +87,7 @@ import life.mygig.clauderc.api.ChatMessage
 import life.mygig.clauderc.api.PinStatus
 import life.mygig.clauderc.ui.LayoutKind
 import life.mygig.clauderc.ui.MainViewModel
+import life.mygig.clauderc.ui.plural
 import life.mygig.clauderc.ui.currentLayoutKind
 import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.StatusDot
@@ -267,8 +268,8 @@ private fun Messages(vm: MainViewModel, voice: ChatVoice, messages: List<ChatMes
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
                         Text(
-                            (if (expanded) "▾ " else "› ") + "${r.items.size} step" + (if (r.items.size == 1) "" else "s") + ": $names",
-                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                            (if (expanded) "▾ " else "› ") + plural(r.items.size, "step", "steps") + ": $names",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
                         )
                         if (expanded) r.items.forEach { t ->
                             Text(t.text, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, modifier = Modifier.padding(start = 12.dp))
@@ -301,7 +302,7 @@ private fun Messages(vm: MainViewModel, voice: ChatVoice, messages: List<ChatMes
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             // Listen to this reply (or carry on where Pause stopped it) without asking Claude again.
                             TextButton(onClick = { if (isPlaying) voice.pause() else voice.speak(key, forSpeech(r.m.text), flush = true) }, enabled = voice.ready) {
-                                Text(if (isPlaying) "⏸ Pause" else "▶ Play", fontSize = 13.sp)
+                                Text(if (isPlaying) "⏸ Pause" else "▶ Play", style = MaterialTheme.typography.labelLarge)
                             }
                             CopyButton(r.m.text, what = "reply", tonal = false)
                         }

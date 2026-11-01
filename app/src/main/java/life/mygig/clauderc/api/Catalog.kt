@@ -63,7 +63,7 @@ object Catalog {
             "fly", "Fly.io", "Deploy with flyctl",
             listOf(FieldDef("Token (starts with FlyV1)", minLength = 20)),
             "https://fly.io/dashboard", "Open the Fly.io dashboard",
-            "Create it where you're logged in to Fly:\n" +
+            "Create it where you're signed in to Fly:\n" +
                 "• fly tokens create org  (can create and manage apps)\n" +
                 "• fly tokens create deploy -a <app>  (one app only)\n" +
                 "or in the dashboard: your organization (or app) › Tokens.\n" +

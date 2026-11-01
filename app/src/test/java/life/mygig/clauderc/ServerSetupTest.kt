@@ -113,7 +113,7 @@ class ServerSetupTest {
         assertFalse(n.any { "not signed in" in it })   // not installed says it already
         assertTrue(n.last().startsWith("Tip:"))
         val ok = ServerSetup.notes(ServerSetup.Report(sudo = "ok", installed = true, claude = "present", autostart = true), claudeSignedIn = false)
-        assertTrue(ok.any { it == "Claude is not signed in yet: open Connections > Logins." })
+        assertTrue(ok.any { it == "Claude is not signed in yet: open Connections > Sign-ins." })
         assertEquals(2, ok.size)
     }
 

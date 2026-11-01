@@ -63,7 +63,7 @@ fun ChatControlsSheet(
                         selected = alias == current, enabled = canChange,
                         onClick = { vm.chats.chatCommand("/model $alias") },
                         shape = SegmentedButtonDefaults.itemShape(i, models.size),
-                        label = { Text(label, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        label = { Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     )
                 }
             }
