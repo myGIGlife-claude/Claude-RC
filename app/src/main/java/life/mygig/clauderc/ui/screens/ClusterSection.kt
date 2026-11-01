@@ -69,6 +69,7 @@ import java.time.Instant
 import kotlin.math.roundToInt
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.components.CardBox
+import life.mygig.clauderc.ui.components.tabular
 import life.mygig.clauderc.ui.openUrl
 import life.mygig.clauderc.ui.theme.statusColors
 import life.mygig.clauderc.ui.vm.HostsController
@@ -240,7 +241,7 @@ fun ClusterSection(vm: MainViewModel) {
             title = { Text("$who: recent tasks") },
             text = {
                 Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (list.isEmpty()) Text("Nothing delegated yet.")
+                    if (list.isEmpty()) Text("Nothing delegated yet. Ask the main chat to hand work to a worker.")
                     list.forEach { r ->
                         CardBox {
                             Column(Modifier.fillMaxWidth()) {
@@ -290,7 +291,7 @@ private fun ClusterSettingsCard(vm: MainViewModel, c: ClusterConfig, idle: Boole
             }
             Text("Sandbox for workers", style = MaterialTheme.typography.labelLarge)
             Text(
-                "Each worker run sees only its own project copy and its own login: none of your credentials, SSH keys or other projects. " +
+                "Each worker run sees only its own project copy and its own sign-in: none of your credentials, SSH keys or other projects. " +
                     "Auto uses it when this server supports it; Required refuses to run workers without it.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -336,7 +337,7 @@ private fun HostsCard(vm: MainViewModel, idle: Boolean, onRemove: (String) -> Un
             )
             val hs = hosts
             if (hs == null) Text("Loading…", style = MaterialTheme.typography.bodySmall)
-            else if (hs.isEmpty()) Text("No servers yet.", style = MaterialTheme.typography.bodySmall)
+            else if (hs.isEmpty()) Text("No servers yet. Tap + Add host to add one.", style = MaterialTheme.typography.bodySmall)
             hs?.forEach { h ->
                 Column {
                     Text(h.name, style = MaterialTheme.typography.labelLarge)
@@ -734,9 +735,9 @@ private fun UsageBar(label: String, w: UsageWindow) {
                 modifier = Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(3.dp)),
                 color = color, trackColor = MaterialTheme.colorScheme.surfaceContainerHighest, gapSize = 0.dp, drawStopIndicator = {},
             )
-            Text("${used.roundToInt()}%", style = MaterialTheme.typography.bodySmall, color = percentColor, modifier = Modifier.width(40.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
+            Text("${used.roundToInt()}%", style = MaterialTheme.typography.bodySmall.tabular(), color = percentColor, modifier = Modifier.width(40.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
         }
-        resetsIn(w.resetsAt)?.let { Text("resets in $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 66.dp)) }
+        resetsIn(w.resetsAt)?.let { Text("resets in $it", style = MaterialTheme.typography.labelSmall.tabular(), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 66.dp)) }
     }
 }
 

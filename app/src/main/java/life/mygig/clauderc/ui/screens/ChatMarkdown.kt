@@ -312,9 +312,9 @@ fun CopyButton(text: String, what: String, tonal: Boolean, modifier: Modifier = 
     }
     val label = if (copied) "Copied" else "Copy"
     if (tonal) {
-        FilledTonalButton(onClick = onClick, modifier = modifier.then(a11y), contentPadding = PaddingValues(horizontal = 16.dp)) { Text(label, fontSize = 13.sp) }
+        FilledTonalButton(onClick = onClick, modifier = modifier.then(a11y), contentPadding = PaddingValues(horizontal = 16.dp)) { Text(label, style = MaterialTheme.typography.labelLarge) }
     } else {
-        TextButton(onClick = onClick, modifier = modifier.then(a11y)) { Text(label, fontSize = 13.sp) }
+        TextButton(onClick = onClick, modifier = modifier.then(a11y)) { Text(label, style = MaterialTheme.typography.labelLarge) }
     }
 }
 

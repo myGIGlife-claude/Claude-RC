@@ -74,6 +74,7 @@ import life.mygig.clauderc.ui.components.isNarrow
 import life.mygig.clauderc.ui.components.sessionState
 import life.mygig.clauderc.ui.components.stateLine
 import life.mygig.clauderc.ui.components.stateSpoken
+import life.mygig.clauderc.ui.components.tabular
 import life.mygig.clauderc.ui.formatUptime
 import life.mygig.clauderc.ui.openInClaude
 import life.mygig.clauderc.ui.theme.Term
@@ -145,7 +146,21 @@ private fun CodeSessions(vm: MainViewModel) {
                     }
                 }
             }
-            if (sessions.isEmpty()) item { Text(if (refreshing) "Loading…" else "No Claude sessions running.") }
+            if (sessions.isEmpty()) item {
+                if (refreshing) {
+                    Text("Loading…")
+                } else {
+                    Column(
+                        Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text("No sessions running", style = MaterialTheme.typography.titleMedium)
+                        Text("Start one from a project.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Button(onClick = { vm.selectTab(life.mygig.clauderc.ui.Tab.PROJECTS) }) { OneLine("Open projects") }
+                    }
+                }
+            }
             val needs = sessions.filter { it.waiting }
             val working = sessions.filter { !it.waiting && it.busy }
             val idle = sessions.filter { !it.waiting && !it.busy }
@@ -278,7 +293,7 @@ private fun SessionRow(s: Session, onOpen: () -> Unit, actions: SessionActions) 
                     colors = ButtonDefaults.buttonColors(containerColor = WarnAmber, contentColor = Color(0xFF1A1305)),
                 ) { OneLine("Answer") }
             } else {
-                Text(formatUptime(s.uptimeSeconds), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(formatUptime(s.uptimeSeconds), style = MaterialTheme.typography.bodySmall.tabular(), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More for ${s.project}") }

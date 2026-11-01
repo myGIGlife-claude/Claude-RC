@@ -148,7 +148,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Connect with a password", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "Enter the server's SSH login and the app sets everything up for you. Or follow the steps below to do it by hand.",
+                        "Enter the server's SSH user and password and the app sets everything up for you. Or follow the steps below to do it by hand.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

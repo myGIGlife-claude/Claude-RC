@@ -174,8 +174,8 @@ main </dev/null; exit $?
         if (r.installed && !r.autostart && r.sudoWorked) add("Boot-restore (claude-autostart) isn't on yet: run 'claude-autostart install' on the server.")
         when {
             r.claude == "failed" -> add("Claude Code not installed: sign in/installation can be done later.")
-            claudeSignedIn == false -> add("Claude is not signed in yet: open Connections > Logins.")
+            claudeSignedIn == false -> add("Claude is not signed in yet: open Connections > Sign-ins.")
         }
-        add("Tip: the app now logs in with this phone's key only. You can turn off password login for SSH on the server if nothing else needs it.")
+        add("Tip: the app now signs in with this phone's key only. You can turn off password sign-in for SSH on the server if nothing else needs it.")
     }
 }

@@ -117,7 +117,7 @@ fun MigrateScreen(vm: MainViewModel) {
                 ) {
                     IconButton(onClick = { vm.migrateClose() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close") }
                     Column(Modifier.weight(1f)) {
-                        Text("Migrate", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                        Text("Migrate", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text(
                             "Step $index of ${MIGRATE_STEPS.size}: $title",
                             style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -215,7 +215,7 @@ private fun MigrateChoose(vm: MainViewModel, ui: MigrateUi, servers: List<Server
     val from = ui.from
     val to = ui.to
     val same = from != null && to != null && from.id == to.id
-    Text("Move everything from one server to another: sessions, projects, settings and logins.", style = MaterialTheme.typography.bodyMedium)
+    Text("Move everything from one server to another: sessions, projects, settings and sign-ins.", style = MaterialTheme.typography.bodyMedium)
     if (servers.size < 2) MigrateHint("The new server isn't in the app yet: add it first (host, user, trust its key), then come back here.")
     OutlinedButton(
         onClick = { vm.migrateClose(); vm.addServer() },
@@ -410,7 +410,7 @@ private fun MigrateCreateUser(vm: MainViewModel, ui: MigrateUi) {
         "Claude will run as ${ui.userName} on $host, and that user doesn't exist there yet. Creating it installs Claude Code and takes a few minutes.",
         style = MaterialTheme.typography.bodyMedium,
     )
-    MigrateCheckRow("Also make a key to log in from a computer (ssh)", ui.makeLoginKey, !ui.busy) { vm.migrateSetLoginKey(it) }
+    MigrateCheckRow("Also make a key to sign in from a computer (ssh)", ui.makeLoginKey, !ui.busy) { vm.migrateSetLoginKey(it) }
     MigrateHint(
         "The app already reaches ${ui.userName} with the phone's own key. This extra key is for your PC: you get the file to save right after the user is made.",
     )
@@ -429,7 +429,7 @@ private fun MigrateLoginKey(vm: MainViewModel, pem: String, forWho: String) {
         }
     }
     MigrateWarning {
-        Text("Your login key for $forWho", style = MaterialTheme.typography.titleMedium)
+        Text("Your sign-in key for $forWho", style = MaterialTheme.typography.titleMedium)
         Text(
             "Save this key file now: it is shown only here and the app doesn't keep it. On your computer: chmod 600 the file, then ssh -i <file> $forWho",
             style = MaterialTheme.typography.bodySmall,
@@ -505,7 +505,7 @@ private fun MigrateSignInStep(vm: MainViewModel, ui: MigrateUi) {
     var confirmSkip by remember { mutableStateOf(false) }
     val prompt = ui.signInPrompt
     Text(
-        "Claude logins aren't copied (two servers using one login would sign each other out). Sign in again on ${ui.to?.host.orEmpty()}.",
+        "Claude sign-ins aren't copied (two servers using one sign-in would sign each other out). Sign in again on ${ui.to?.host.orEmpty()}.",
         style = MaterialTheme.typography.bodyMedium,
     )
     if (ui.signInTargets.isEmpty()) Text("Nothing to sign in.", style = MaterialTheme.typography.bodyMedium)
@@ -548,7 +548,7 @@ private fun MigrateSignInCard(vm: MainViewModel, prompt: MigrateSignInPrompt, bu
     CardBox {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Sign in ${if (prompt.main) "Claude" else prompt.name}", style = MaterialTheme.typography.titleSmall)
-            Text("1. Open the link and approve the login.", style = MaterialTheme.typography.bodyMedium)
+            Text("1. Open the link and approve the sign-in.", style = MaterialTheme.typography.bodyMedium)
             Button(onClick = { openUrl(context, prompt.login.url) }, modifier = Modifier.fillMaxWidth()) { Text("Open link") }
             Text("2. Paste the code it shows you.", style = MaterialTheme.typography.bodyMedium)
             OutlinedTextField(
@@ -595,12 +595,12 @@ private fun MigrateSignOutStep(vm: MainViewModel, ui: MigrateUi) {
         Column {
             MigrateCheckRow("Sign out of Claude on the old server", c.claude, !ui.busy) { vm.migrateSetSignOut(c.copy(claude = it)) }
             MigrateCheckRow("Sign out of the worker accounts", c.workers, !ui.busy) { vm.migrateSetSignOut(c.copy(workers = it)) }
-            MigrateCheckRow("Remove the GitHub login there", c.github, !ui.busy) { vm.migrateSetSignOut(c.copy(github = it)) }
+            MigrateCheckRow("Remove the GitHub sign-in there", c.github, !ui.busy) { vm.migrateSetSignOut(c.copy(github = it)) }
             MigrateCheckRow("Stop its sessions from restarting", c.autostart, !ui.busy) { vm.migrateSetSignOut(c.copy(autostart = it)) }
         }
     }
     Text(
-        "This only removes the logins from the OLD server; nothing is deleted from the new one.",
+        "This only removes the sign-ins from the OLD server; nothing is deleted from the new one.",
         color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
     )
     Button(
@@ -617,7 +617,7 @@ private fun MigrateSignOutStep(vm: MainViewModel, ui: MigrateUi) {
 private fun MigrateReboot(vm: MainViewModel, ui: MigrateUi) {
     val host = ui.to?.host.orEmpty()
     Text(
-        "A reboot of $host is optional: it proves everything comes back by itself (sessions restart, logins stay). The app waits up to 5 minutes for it.",
+        "A reboot of $host is optional: it proves everything comes back by itself (sessions restart, sign-ins stay). The app waits up to 5 minutes for it.",
         style = MaterialTheme.typography.bodyMedium,
     )
     MigrateSudo(
