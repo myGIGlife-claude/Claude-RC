@@ -1,6 +1,6 @@
 ---
 name: rc-cloud-platforms
-description: Choosing and using cloud platforms - AWS, Azure, Google Cloud, Cloudflare (Workers, R2, D1, KV, Durable Objects, Tunnel), OVHcloud, IBM Cloud, plus Hetzner, DigitalOcean, Fly.io, Vercel, Netlify, Railway, Render, Supabase, Firebase. Use for picking a host, service mapping, IAM/OIDC from CI, serverless limits, egress/NAT cost traps, budgets, EU data residency, lock-in and DR. Triggers: wrangler.toml, serverless.yml, vercel.json, fly.toml, *.tf.
+description: "Choosing and using cloud platforms - AWS, Azure, Google Cloud, Cloudflare (Workers, R2, D1, KV, Durable Objects, Tunnel), OVHcloud, IBM Cloud, plus Hetzner, DigitalOcean, Fly.io, Vercel, Netlify, Railway, Render, Supabase, Firebase. Use for picking a host, service mapping, IAM/OIDC from CI, serverless limits, egress/NAT cost traps, budgets, EU data residency, lock-in and DR. Triggers: wrangler.toml, serverless.yml, vercel.json, fly.toml, *.tf."
 ---
 # Cloud platforms: choose, secure, pay less (as of 2026-10)
 

@@ -16,6 +16,8 @@ for d in skills/rc-*/; do
   [[ "$(sed -n '2,6p' "$f" | grep -c "^name: $name$")" == 1 ]] || fail "$name: 'name:' must equal the folder name"
   desc="$(sed -n '2,8p' "$f" | grep '^description:' | head -n 1)"; desc="${desc#description: }"
   [[ -n "$desc" ]] || fail "$name: description is missing"
+  # YAML: a plain description containing ": " breaks the frontmatter (Claude Code's /doctor flags it): it must be double-quoted.
+  [[ "$desc" != *": "* || "$desc" == \"*\" ]] || fail "$name: the description contains ': ' so it must be wrapped in double quotes (escape inner quotes)"
   # (the 12 first skills predate the 450 limit and are shortened in the next refresh: they may still be up to 700)
   max=450; case "$name" in rc-web-frontend|rc-javascript-typescript|rc-node-backend|rc-web-backend|rc-php|rc-python|rc-go|rc-java|rc-android|rc-ios|rc-ui-ux-design|rc-web-security-perf) max=700 ;; esac
   ((${#desc} >= 60 && ${#desc} <= max)) || fail "$name: description should be 60-$max characters (it is loaded into every session): ${#desc}"
