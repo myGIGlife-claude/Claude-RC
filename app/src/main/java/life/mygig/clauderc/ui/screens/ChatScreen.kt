@@ -13,6 +13,8 @@ import life.mygig.clauderc.ui.components.Tune
 import android.content.Context
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.clickable
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
@@ -85,12 +87,13 @@ import life.mygig.clauderc.api.ChatMessage
 import life.mygig.clauderc.api.PinStatus
 import life.mygig.clauderc.ui.LayoutKind
 import life.mygig.clauderc.ui.MainViewModel
+import life.mygig.clauderc.ui.plural
 import life.mygig.clauderc.ui.currentLayoutKind
 import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.StatusDot
 import life.mygig.clauderc.ui.components.claudeHealth
 import life.mygig.clauderc.ui.theme.Term
-import life.mygig.clauderc.ui.theme.WarnAmber
+import life.mygig.clauderc.ui.theme.statusColors
 
 /** Chat with a Claude session inside the app. Behind App lock and the chat PIN. */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
@@ -161,7 +164,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
                                     color = if (c.mode == "bypass") MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
-                                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { showControls = true },
+                                    modifier = Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(8.dp)).clickable(onClickLabel = "Open chat controls", role = Role.Button) { showControls = true },
                                 ) {
                                     Text(
                                         modelName(c.model) + " · " + modeLabel(c.mode), style = MaterialTheme.typography.labelSmall,
@@ -199,7 +202,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                 }
                 val notice by vm.chatNotice.collectAsStateWithLifecycle()
                 notice?.let { n ->
-                    Surface(color = MaterialTheme.colorScheme.inverseSurface, modifier = Modifier.fillMaxWidth().clickable { vm.clearChatNotice() }) {
+                    Surface(color = MaterialTheme.colorScheme.inverseSurface, modifier = Modifier.fillMaxWidth().minimumInteractiveComponentSize().clickable(onClickLabel = "Dismiss", role = Role.Button) { vm.clearChatNotice() }) {
                         Text(n, color = MaterialTheme.colorScheme.inverseOnSurface, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
                     }
                 }
@@ -259,12 +262,14 @@ private fun Messages(vm: MainViewModel, voice: ChatVoice, messages: List<ChatMes
                     val expanded = r.key in open
                     val names = r.items.map { it.text.substringBefore(":").substringAfterLast("__") }.distinct().take(4).joinToString(", ")
                     Column(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { open = if (expanded) open - r.key else open + r.key }.padding(horizontal = 6.dp, vertical = 2.dp),
+                        Modifier.fillMaxWidth().minimumInteractiveComponentSize().clip(RoundedCornerShape(10.dp))
+                            .clickable(onClickLabel = if (expanded) "Hide steps" else "Show steps", role = Role.Button) { open = if (expanded) open - r.key else open + r.key }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
                         Text(
-                            (if (expanded) "▾ " else "› ") + "${r.items.size} step" + (if (r.items.size == 1) "" else "s") + ": $names",
-                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                            (if (expanded) "▾ " else "› ") + plural(r.items.size, "step", "steps") + ": $names",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
                         )
                         if (expanded) r.items.forEach { t ->
                             Text(t.text, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, modifier = Modifier.padding(start = 12.dp))
@@ -283,7 +288,7 @@ private fun Messages(vm: MainViewModel, voice: ChatVoice, messages: List<ChatMes
                                 if (att.names.isNotEmpty()) AttachmentChips(att.names, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp, top = if (blocks.isEmpty()) 10.dp else 0.dp))
                             }
                         }
-                        if (r.pending) Text("queued · tap here to remove", modifier = Modifier.clickable { vm.chats.dismissPending(r.m.text) }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (r.pending) Text("queued · tap here to remove", modifier = Modifier.minimumInteractiveComponentSize().clickable(onClickLabel = "Remove queued message", role = Role.Button) { vm.chats.dismissPending(r.m.text) }.padding(vertical = 4.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
                     val key = r.m.id + r.m.text.hashCode()
@@ -297,7 +302,7 @@ private fun Messages(vm: MainViewModel, voice: ChatVoice, messages: List<ChatMes
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             // Listen to this reply (or carry on where Pause stopped it) without asking Claude again.
                             TextButton(onClick = { if (isPlaying) voice.pause() else voice.speak(key, forSpeech(r.m.text), flush = true) }, enabled = voice.ready) {
-                                Text(if (isPlaying) "⏸ Pause" else "▶ Play", fontSize = 13.sp)
+                                Text(if (isPlaying) "⏸ Pause" else "▶ Play", style = MaterialTheme.typography.labelLarge)
                             }
                             CopyButton(r.m.text, what = "reply", tonal = false)
                         }
@@ -362,9 +367,9 @@ private fun AnnotatedString.Builder.appendLinked(segment: String, style: TextLin
 /** Claude is asking something (permission, MCP approval): its screen and the answer keys. */
 @Composable
 private fun PromptCard(vm: MainViewModel, screen: String, enabled: Boolean) {
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), shape = RoundedCornerShape(20.dp), color = Color(0xFF2A2418)) {
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), shape = RoundedCornerShape(20.dp), color = MaterialTheme.statusColors.warnContainer, contentColor = MaterialTheme.statusColors.onWarnContainer) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Claude is asking", color = WarnAmber, fontWeight = FontWeight.SemiBold)
+            Text("Claude is asking", color = MaterialTheme.statusColors.warnText,fontWeight = FontWeight.SemiBold)
             Box(Modifier.fillMaxWidth().background(Term.Bg, RoundedCornerShape(10.dp)).padding(10.dp)) {
                 Text(screen.lines().takeLast(10).joinToString("\n"), color = Term.Fg, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
             }

@@ -77,8 +77,7 @@ import life.mygig.clauderc.ui.components.InfoRows
 import life.mygig.clauderc.ui.components.SectionLabel
 import life.mygig.clauderc.ui.components.StatusDot
 import life.mygig.clauderc.ui.openUrl
-import life.mygig.clauderc.ui.theme.BadRed
-import life.mygig.clauderc.ui.theme.OkGreen
+import life.mygig.clauderc.ui.theme.statusColors
 
 /** The wizard's visible steps (DONE shares the last one). */
 private val MIGRATE_STEPS = listOf(
@@ -118,7 +117,7 @@ fun MigrateScreen(vm: MainViewModel) {
                 ) {
                     IconButton(onClick = { vm.migrateClose() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close") }
                     Column(Modifier.weight(1f)) {
-                        Text("Migrate", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                        Text("Migrate", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text(
                             "Step $index of ${MIGRATE_STEPS.size}: $title",
                             style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -216,7 +215,7 @@ private fun MigrateChoose(vm: MainViewModel, ui: MigrateUi, servers: List<Server
     val from = ui.from
     val to = ui.to
     val same = from != null && to != null && from.id == to.id
-    Text("Move everything from one server to another: sessions, projects, settings and logins.", style = MaterialTheme.typography.bodyMedium)
+    Text("Move everything from one server to another: sessions, projects, settings and sign-ins.", style = MaterialTheme.typography.bodyMedium)
     if (servers.size < 2) MigrateHint("The new server isn't in the app yet: add it first (host, user, trust its key), then come back here.")
     OutlinedButton(
         onClick = { vm.migrateClose(); vm.addServer() },
@@ -411,7 +410,7 @@ private fun MigrateCreateUser(vm: MainViewModel, ui: MigrateUi) {
         "Claude will run as ${ui.userName} on $host, and that user doesn't exist there yet. Creating it installs Claude Code and takes a few minutes.",
         style = MaterialTheme.typography.bodyMedium,
     )
-    MigrateCheckRow("Also make a key to log in from a computer (ssh)", ui.makeLoginKey, !ui.busy) { vm.migrateSetLoginKey(it) }
+    MigrateCheckRow("Also make a key to sign in from a computer (ssh)", ui.makeLoginKey, !ui.busy) { vm.migrateSetLoginKey(it) }
     MigrateHint(
         "The app already reaches ${ui.userName} with the phone's own key. This extra key is for your PC: you get the file to save right after the user is made.",
     )
@@ -430,7 +429,7 @@ private fun MigrateLoginKey(vm: MainViewModel, pem: String, forWho: String) {
         }
     }
     MigrateWarning {
-        Text("Your login key for $forWho", style = MaterialTheme.typography.titleMedium)
+        Text("Your sign-in key for $forWho", style = MaterialTheme.typography.titleMedium)
         Text(
             "Save this key file now: it is shown only here and the app doesn't keep it. On your computer: chmod 600 the file, then ssh -i <file> $forWho",
             style = MaterialTheme.typography.bodySmall,
@@ -506,14 +505,14 @@ private fun MigrateSignInStep(vm: MainViewModel, ui: MigrateUi) {
     var confirmSkip by remember { mutableStateOf(false) }
     val prompt = ui.signInPrompt
     Text(
-        "Claude logins aren't copied (two servers using one login would sign each other out). Sign in again on ${ui.to?.host.orEmpty()}.",
+        "Claude sign-ins aren't copied (two servers using one sign-in would sign each other out). Sign in again on ${ui.to?.host.orEmpty()}.",
         style = MaterialTheme.typography.bodyMedium,
     )
     if (ui.signInTargets.isEmpty()) Text("Nothing to sign in.", style = MaterialTheme.typography.bodyMedium)
     ui.signInTargets.forEach { t ->
         CardBox {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(if (t.done) "✓" else "•", color = if (t.done) OkGreen else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                Text(if (t.done) "✓" else "•", color = if (t.done) MaterialTheme.statusColors.okText else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
                 Text(if (t.main) "Claude (main account)" else t.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 OutlinedButton(onClick = { vm.migrateSignInStart(t.name, t.main) }, enabled = !ui.busy && prompt == null) {
                     Text(if (t.done) "Sign in again" else "Sign in")
@@ -549,7 +548,7 @@ private fun MigrateSignInCard(vm: MainViewModel, prompt: MigrateSignInPrompt, bu
     CardBox {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Sign in ${if (prompt.main) "Claude" else prompt.name}", style = MaterialTheme.typography.titleSmall)
-            Text("1. Open the link and approve the login.", style = MaterialTheme.typography.bodyMedium)
+            Text("1. Open the link and approve the sign-in.", style = MaterialTheme.typography.bodyMedium)
             Button(onClick = { openUrl(context, prompt.login.url) }, modifier = Modifier.fillMaxWidth()) { Text("Open link") }
             Text("2. Paste the code it shows you.", style = MaterialTheme.typography.bodyMedium)
             OutlinedTextField(
@@ -596,12 +595,12 @@ private fun MigrateSignOutStep(vm: MainViewModel, ui: MigrateUi) {
         Column {
             MigrateCheckRow("Sign out of Claude on the old server", c.claude, !ui.busy) { vm.migrateSetSignOut(c.copy(claude = it)) }
             MigrateCheckRow("Sign out of the worker accounts", c.workers, !ui.busy) { vm.migrateSetSignOut(c.copy(workers = it)) }
-            MigrateCheckRow("Remove the GitHub login there", c.github, !ui.busy) { vm.migrateSetSignOut(c.copy(github = it)) }
+            MigrateCheckRow("Remove the GitHub sign-in there", c.github, !ui.busy) { vm.migrateSetSignOut(c.copy(github = it)) }
             MigrateCheckRow("Stop its sessions from restarting", c.autostart, !ui.busy) { vm.migrateSetSignOut(c.copy(autostart = it)) }
         }
     }
     Text(
-        "This only removes the logins from the OLD server; nothing is deleted from the new one.",
+        "This only removes the sign-ins from the OLD server; nothing is deleted from the new one.",
         color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
     )
     Button(
@@ -618,7 +617,7 @@ private fun MigrateSignOutStep(vm: MainViewModel, ui: MigrateUi) {
 private fun MigrateReboot(vm: MainViewModel, ui: MigrateUi) {
     val host = ui.to?.host.orEmpty()
     Text(
-        "A reboot of $host is optional: it proves everything comes back by itself (sessions restart, logins stay). The app waits up to 5 minutes for it.",
+        "A reboot of $host is optional: it proves everything comes back by itself (sessions restart, sign-ins stay). The app waits up to 5 minutes for it.",
         style = MaterialTheme.typography.bodyMedium,
     )
     MigrateSudo(
@@ -679,8 +678,8 @@ private fun MigrateVerify(vm: MainViewModel, ui: MigrateUi) {
     } else {
         val bad = v.items.count { !it.ok }
         if (v.ok) {
-            MigrateNotice(OkGreen.copy(alpha = 0.18f), MaterialTheme.colorScheme.onSurface) {
-                Text("Everything is moved: 100%", style = MaterialTheme.typography.headlineSmall, color = OkGreen, fontWeight = FontWeight.Bold)
+            MigrateNotice(MaterialTheme.statusColors.okDot.copy(alpha = 0.18f), MaterialTheme.colorScheme.onSurface) {
+                Text("Everything is moved: 100%", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.statusColors.okText, fontWeight = FontWeight.Bold)
                 Text("${ui.to?.host.orEmpty()} has your sessions, projects and settings.", style = MaterialTheme.typography.bodyMedium)
             }
         } else {
@@ -693,7 +692,7 @@ private fun MigrateVerify(vm: MainViewModel, ui: MigrateUi) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 v.items.forEach { item ->
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(if (item.ok) "✓" else "✗", color = if (item.ok) OkGreen else BadRed, fontWeight = FontWeight.Bold)
+                        Text(if (item.ok) "✓" else "✗", color = if (item.ok) MaterialTheme.statusColors.okText else MaterialTheme.statusColors.badText,fontWeight = FontWeight.Bold)
                         Column(Modifier.weight(1f)) {
                             Text(item.id.replace('_', ' '), style = MaterialTheme.typography.bodyMedium)
                             if (item.detail.isNotBlank()) {

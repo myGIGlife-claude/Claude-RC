@@ -268,7 +268,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             WidgetTap.NewRepo -> selectTab(Tab.NEW)
             WidgetTap.Keys -> {
                 if (connections.detail.value != null) connections.openDetail(null)
-                connections.presetTab(Tab.STATUS, 2)   // Logins, MCP, Keys
+                connections.presetTab(Tab.STATUS, 2)   // Sign-ins, MCP, Keys
                 selectTab(Tab.STATUS)
             }
             WidgetTap.NewChat -> {
@@ -388,7 +388,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         if (!waitingShown) {
-            say("Restarted $done session" + (if (done == 1) "" else "s") +
+            say("Restarted " + plural(done, "session", "sessions") +
                 if (busy.isEmpty()) "" else ". Still working, skipped: ${busy.joinToString(", ")}")
         }
         refreshSessions()

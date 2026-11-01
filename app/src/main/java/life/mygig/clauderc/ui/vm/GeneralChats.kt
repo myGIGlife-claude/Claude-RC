@@ -8,6 +8,7 @@ import life.mygig.clauderc.api.ApiException
 import life.mygig.clauderc.api.GeneralChat
 import life.mygig.clauderc.api.LauncherApi
 import life.mygig.clauderc.api.Updates
+import life.mygig.clauderc.ui.plural
 
 /**
  * General chats: Claude conversations not tied to a repo, saved on the server (running or stopped).
@@ -132,7 +133,7 @@ fun relativeTime(then: Long, now: Long): String {
     if (then <= 0) return ""
     fun secs(t: Long) = if (t > 100_000_000_000L) t / 1000 else t
     val d = secs(now) - secs(then)
-    fun ago(n: Long, unit: String) = "$n $unit" + (if (n == 1L) "" else "s") + " ago"
+    fun ago(n: Long, unit: String) = plural(n, unit, unit + "s") + " ago"
     return when {
         d < 60 -> "just now"
         d < 3_600 -> ago(d / 60, "minute")

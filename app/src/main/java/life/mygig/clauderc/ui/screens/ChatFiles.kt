@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -101,7 +102,7 @@ private fun FileItem(vm: MainViewModel, path: String) {
                 r == null -> Text("Loading $name…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 r.isSuccess -> Image(
                     r.getOrThrow().asImageBitmap(), contentDescription = name, contentScale = ContentScale.FillWidth,
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { big = true },
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClickLabel = "View image", role = Role.Button) { big = true },
                 )
                 else -> Text("Couldn't load $name: ${r.exceptionOrNull()?.message}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }

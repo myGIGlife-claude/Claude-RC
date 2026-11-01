@@ -391,7 +391,7 @@ class LauncherApi(
         val key = phonePublicKey.trim()
         if (key.isEmpty() || key.any { it == '\n' || it == '\r' }) throw ApiException(Codes.INVALID_NAME, "Bad phone key")
         val login = loginPublicKey?.trim().orEmpty()
-        if (login.any { it == '\n' || it == '\r' }) throw ApiException(Codes.INVALID_NAME, "Bad login key")
+        if (login.any { it == '\n' || it == '\r' }) throw ApiException(Codes.INVALID_NAME, "Bad sign-in key")
         val stdin = sudoPassword + "\n" + key + if (login.isNotEmpty()) "\n" + login else ""
         return call("migrate-create-user $name", stdin = stdin, timeoutMs = 1_200_000)
     }

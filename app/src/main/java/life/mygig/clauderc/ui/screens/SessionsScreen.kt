@@ -49,6 +49,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -68,10 +71,15 @@ import life.mygig.clauderc.ui.components.SectionLabel
 import life.mygig.clauderc.ui.components.StatusDot
 import life.mygig.clauderc.ui.components.claudeHealth
 import life.mygig.clauderc.ui.components.isNarrow
+import life.mygig.clauderc.ui.components.sessionState
+import life.mygig.clauderc.ui.components.stateLine
+import life.mygig.clauderc.ui.components.stateSpoken
+import life.mygig.clauderc.ui.components.tabular
 import life.mygig.clauderc.ui.formatUptime
 import life.mygig.clauderc.ui.openInClaude
 import life.mygig.clauderc.ui.theme.Term
 import life.mygig.clauderc.ui.theme.WarnAmber
+import life.mygig.clauderc.ui.theme.statusColors
 
 /** Two tabs: General chat (conversations not tied to a repo) and Code chat (the project sessions). */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -138,7 +146,21 @@ private fun CodeSessions(vm: MainViewModel) {
                     }
                 }
             }
-            if (sessions.isEmpty()) item { Text(if (refreshing) "Loading…" else "No Claude sessions running.") }
+            if (sessions.isEmpty()) item {
+                if (refreshing) {
+                    Text("Loading…")
+                } else {
+                    Column(
+                        Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text("No sessions running", style = MaterialTheme.typography.titleMedium)
+                        Text("Start one from a project.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Button(onClick = { vm.selectTab(life.mygig.clauderc.ui.Tab.PROJECTS) }) { OneLine("Open projects") }
+                    }
+                }
+            }
             val needs = sessions.filter { it.waiting }
             val working = sessions.filter { !it.waiting && it.busy }
             val idle = sessions.filter { !it.waiting && !it.busy }
@@ -253,14 +275,16 @@ private fun SessionSummary(needs: Int, working: Int, idle: Int) {
 private fun SessionRow(s: Session, onOpen: () -> Unit, actions: SessionActions) {
     var menu by remember { mutableStateOf(false) }
     val line = previewLine(s.preview)
+    val state = sessionState(s.busy, s.waiting)
     val body: @Composable () -> Unit = {
-        Row(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}.clickable(onClickLabel = "Open ${s.project}", role = Role.Button, onClick = onOpen).padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             StatusDot(claudeHealth(s.busy, s.waiting))
             Column(Modifier.weight(1f)) {
                 Text(s.project, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    line.ifEmpty { if (s.waiting) "needs an answer" else if (s.busy) "working…" else "idle" },
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    stateLine(state, line),
+                    modifier = Modifier.semantics { contentDescription = stateSpoken(state, line) },
+                    style =MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
             if (s.waiting) {
@@ -269,7 +293,7 @@ private fun SessionRow(s: Session, onOpen: () -> Unit, actions: SessionActions) 
                     colors = ButtonDefaults.buttonColors(containerColor = WarnAmber, contentColor = Color(0xFF1A1305)),
                 ) { OneLine("Answer") }
             } else {
-                Text(formatUptime(s.uptimeSeconds), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(formatUptime(s.uptimeSeconds), style = MaterialTheme.typography.bodySmall.tabular(), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More for ${s.project}") }
@@ -286,6 +310,6 @@ private fun SessionRow(s: Session, onOpen: () -> Unit, actions: SessionActions) 
         }
     }
     if (s.waiting) {
-        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = Color(0xFF2A2418), border = BorderStroke(1.dp, Color(0xFF5C4A24))) { body() }
+        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = MaterialTheme.statusColors.warnContainer, contentColor = MaterialTheme.statusColors.onWarnContainer, border = BorderStroke(1.dp, MaterialTheme.statusColors.warnBorder)) { body() }
     } else body()
 }

@@ -51,7 +51,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,6 +60,7 @@ import life.mygig.clauderc.api.InstalledPlugin
 import life.mygig.clauderc.api.PluginsData
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.Tab
+import life.mygig.clauderc.ui.plural
 import life.mygig.clauderc.ui.components.CardBox
 import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.InfoTile
@@ -69,6 +69,7 @@ import life.mygig.clauderc.ui.components.PillTabs
 import life.mygig.clauderc.ui.components.SectionLabel
 import life.mygig.clauderc.ui.components.isNarrow
 import life.mygig.clauderc.ui.theme.Term
+import life.mygig.clauderc.ui.theme.statusColors
 
 /** Claude tab: Claude Code itself, plugins and marketplaces, other claude commands. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -143,7 +144,7 @@ fun ClaudeScreen(vm: MainViewModel) {
                                     val n = p.available.count { it.marketplace == m.name }
                                     Row {
                                         Text(m.name, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text("$n plugin" + if (n == 1) "" else "s", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                        Text(plural(n, "plugin", "plugins"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                     }
                                 }
                                 Row {
@@ -269,7 +270,7 @@ private fun PluginSheet(vm: MainViewModel, pl: InstalledPlugin, p: PluginsData?,
                 }
             }
             if (viaSkills) Text("Managed with npx skills add ${pl.source}; Update runs that for you.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            TextButton(onClick = { confirm = true }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) { Text("Uninstall ${pl.name}", color = Color(0xFFF09A9D)) }
+            TextButton(onClick = { confirm = true }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) { Text("Uninstall ${pl.name}", color = MaterialTheme.statusColors.errorText) }
         }
     }
     if (confirm) {
@@ -318,7 +319,7 @@ private fun InstallPluginSheet(vm: MainViewModel, p: PluginsData, onClose: () ->
                                 Text(a.description.ifBlank { a.marketplace }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                             if (a.installed) {
-                                Text("Installed", color = Color(0xFF7FD4A8), style = MaterialTheme.typography.bodySmall)
+                                Text("Installed", color = MaterialTheme.statusColors.installedText,style = MaterialTheme.typography.bodySmall)
                             } else {
                                 Button(onClick = { onClose(); vm.connections.claudeCommand("plugin install ${a.id}") }, enabled = busy == null) { Text("Install") }
                             }

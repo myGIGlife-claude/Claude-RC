@@ -80,12 +80,12 @@ fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
         title = {
             Text(
                 when (kind) {
-                    LoginKind.CLAUDE -> "Log in to Claude"
-                    LoginKind.GITHUB -> "Log in to GitHub"
-                    LoginKind.AWS -> "Log in to AWS"
-                    LoginKind.GITLAB -> "Log in to GitLab"
+                    LoginKind.CLAUDE -> "Sign in to Claude"
+                    LoginKind.GITHUB -> "Sign in to GitHub"
+                    LoginKind.AWS -> "Sign in to AWS"
+                    LoginKind.GITLAB -> "Sign in to GitLab"
                     LoginKind.YOUTUBE -> "Connect YouTube"
-                    LoginKind.DOCKER -> "Log in to a container registry"
+                    LoginKind.DOCKER -> "Sign in to a container registry"
                 },
             )
         },
@@ -184,7 +184,7 @@ fun AddServiceDialog(vm: MainViewModel) {
                                     Text(name, style = MaterialTheme.typography.bodyLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium, maxLines = 1)
                                     Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
                                 }
-                                Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                life.mygig.clauderc.ui.components.RowChevron()
                             }
                         }
                     }
@@ -550,7 +550,7 @@ fun SetupDialog(vm: MainViewModel, kind: LoginKind) {
                     Text(
                         "GitLab needs its command-line tool, glab, on the server. Install downloads the latest " +
                             "official release from gitlab.com into ~/.local/bin, checks it against the release's " +
-                            "checksums, and needs no sudo. Then you can log in.",
+                            "checksums, and needs no sudo. Then you can sign in.",
                     )
                     Button(onClick = { vm.services.installGlab() }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) {
                         Text("Install glab")
@@ -590,10 +590,10 @@ private fun ClaudeLogin(vm: MainViewModel, busy: Boolean) {
     if (u == null) {
         Text("Starts `claude auth login` on the server using your claude.ai subscription (never an API key).")
         Button(onClick = { vm.logins.claudeLoginStart() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-            Text("Start login")
+            Text("Start sign-in")
         }
     } else {
-        Text("1. Open the link and approve the login.")
+        Text("1. Open the link and approve the sign-in.")
         Button(onClick = { openUrl(context, u.url) }, modifier = Modifier.fillMaxWidth()) { Text("Open link") }
         Text("2. Paste the code it shows you.")
         OutlinedTextField(
@@ -687,7 +687,7 @@ private fun permissionsText(kind: LoginKind): String = when (kind) {
             "1. Enable \"YouTube Data API v3\" (APIs & Services › Library).\n" +
             "2. Google Auth Platform › Branding: app name and your email. Audience: External, then Publish app " +
             "so it's \"In production\". Unverified is fine for your own channel (you'll see a warning; continue). " +
-            "In \"Testing\" Google expires the login after 7 days.\n" +
+            "In \"Testing\" Google expires the sign-in after 7 days.\n" +
             "3. Google Auth Platform › Clients › Create client › type \"TVs and Limited Input devices\" › Create. " +
             "Copy the client ID and secret here.\n" +
             "4. Start sign-in: open google.com/device, enter the code, pick the Google account that owns the channel, " +
@@ -853,7 +853,7 @@ private fun AwsLogin(vm: MainViewModel, busy: Boolean) {
                 Text("SSO isn't configured on the server yet. Use access keys, or run `aws configure sso` there once.")
             }
             Button(onClick = { vm.logins.awsSsoStart() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                Text("Start SSO login")
+                Text("Start SSO sign-in")
             }
         } else {
             Text("Open the link, confirm the code matches, and approve.")
@@ -863,7 +863,7 @@ private fun AwsLogin(vm: MainViewModel, busy: Boolean) {
                 }
             }
             Button(onClick = { openUrl(context, u.url) }, modifier = Modifier.fillMaxWidth()) { Text("Open link") }
-            Text("Waiting for approval… this closes by itself when AWS is logged in.", style = MaterialTheme.typography.bodySmall)
+            Text("Waiting for approval… this closes by itself when AWS is signed in.", style = MaterialTheme.typography.bodySmall)
         }
     }
 }
