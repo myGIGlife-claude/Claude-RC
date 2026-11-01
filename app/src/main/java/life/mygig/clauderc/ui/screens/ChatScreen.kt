@@ -90,7 +90,7 @@ import life.mygig.clauderc.ui.components.Health
 import life.mygig.clauderc.ui.components.StatusDot
 import life.mygig.clauderc.ui.components.claudeHealth
 import life.mygig.clauderc.ui.theme.Term
-import life.mygig.clauderc.ui.theme.WarnAmber
+import life.mygig.clauderc.ui.theme.statusColors
 
 /** Chat with a Claude session inside the app. Behind App lock and the chat PIN. */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
@@ -362,9 +362,9 @@ private fun AnnotatedString.Builder.appendLinked(segment: String, style: TextLin
 /** Claude is asking something (permission, MCP approval): its screen and the answer keys. */
 @Composable
 private fun PromptCard(vm: MainViewModel, screen: String, enabled: Boolean) {
-    Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), shape = RoundedCornerShape(20.dp), color = Color(0xFF2A2418)) {
+    Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), shape = RoundedCornerShape(20.dp), color = MaterialTheme.statusColors.warnContainer, contentColor = MaterialTheme.statusColors.onWarnContainer) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Claude is asking", color = WarnAmber, fontWeight = FontWeight.SemiBold)
+            Text("Claude is asking", color = MaterialTheme.statusColors.warnText,fontWeight = FontWeight.SemiBold)
             Box(Modifier.fillMaxWidth().background(Term.Bg, RoundedCornerShape(10.dp)).padding(10.dp)) {
                 Text(screen.lines().takeLast(10).joinToString("\n"), color = Term.Fg, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
             }

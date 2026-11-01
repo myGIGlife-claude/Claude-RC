@@ -17,6 +17,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
@@ -26,10 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import life.mygig.clauderc.ui.theme.BadRed
-import life.mygig.clauderc.ui.theme.OffGrey
-import life.mygig.clauderc.ui.theme.OkGreen
-import life.mygig.clauderc.ui.theme.WarnAmber
+import life.mygig.clauderc.ui.theme.statusColors
 import kotlinx.coroutines.delay
 
 /** True on narrow screens such as a foldable's cover display: use short labels there. */
@@ -43,11 +41,13 @@ fun OneLine(text: String) = Text(text, maxLines = 1, softWrap = false, overflow 
 /** A tile's health: the coloured dot. */
 enum class Health { OK, WARN, BAD, OFF, NONE }
 
+@Composable
+@ReadOnlyComposable
 fun Health.color(): Color = when (this) {
-    Health.OK -> OkGreen
-    Health.WARN -> WarnAmber
-    Health.BAD -> BadRed
-    Health.OFF, Health.NONE -> OffGrey
+    Health.OK -> MaterialTheme.statusColors.okDot
+    Health.WARN -> MaterialTheme.statusColors.warnDot
+    Health.BAD -> MaterialTheme.statusColors.badDot
+    Health.OFF, Health.NONE -> MaterialTheme.statusColors.offDot
 }
 
 /** A Claude session's light: amber when it needs an answer, green while working, grey when idle. */
@@ -57,7 +57,7 @@ fun claudeHealth(busy: Boolean, waiting: Boolean): Health = when { waiting -> He
 @Composable
 fun StatusDot(health: Health, modifier: Modifier = Modifier) {
     if (health == Health.NONE) {
-        Box(modifier.size(10.dp).border(1.dp, OffGrey, CircleShape))
+        Box(modifier.size(10.dp).border(1.dp, health.color(), CircleShape))
     } else {
         Box(modifier.size(10.dp).background(health.color(), CircleShape))
     }
@@ -90,9 +90,10 @@ fun InfoTile(
         enabled = onClick != null,
         modifier = modifier.fillMaxWidth().heightIn(min = 76.dp),
         shape = RoundedCornerShape(20.dp),
-        color = if (warn) Color(0xFF2A2418) else MaterialTheme.colorScheme.surfaceContainerLow,
+        color = if (warn) MaterialTheme.statusColors.warnContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = if (warn) MaterialTheme.statusColors.onWarnContainer else MaterialTheme.colorScheme.onSurface,
         border = when {
-            warn -> BorderStroke(1.dp, Color(0xFF5C4A24))
+            warn -> BorderStroke(1.dp, MaterialTheme.statusColors.warnBorder)
             selected -> BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
             else -> null
         },
@@ -107,8 +108,8 @@ fun InfoTile(
                     subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = when (health) {
-                        Health.WARN -> WarnAmber
-                        Health.BAD -> Color(0xFFF09A9D)
+                        Health.WARN -> MaterialTheme.statusColors.warnText
+                        Health.BAD -> MaterialTheme.statusColors.errorText
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
                     maxLines = 2,

@@ -72,6 +72,7 @@ import life.mygig.clauderc.ui.formatUptime
 import life.mygig.clauderc.ui.openInClaude
 import life.mygig.clauderc.ui.theme.Term
 import life.mygig.clauderc.ui.theme.WarnAmber
+import life.mygig.clauderc.ui.theme.statusColors
 
 /** Two tabs: General chat (conversations not tied to a repo) and Code chat (the project sessions). */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -286,6 +287,6 @@ private fun SessionRow(s: Session, onOpen: () -> Unit, actions: SessionActions) 
         }
     }
     if (s.waiting) {
-        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = Color(0xFF2A2418), border = BorderStroke(1.dp, Color(0xFF5C4A24))) { body() }
+        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = MaterialTheme.statusColors.warnContainer, contentColor = MaterialTheme.statusColors.onWarnContainer, border = BorderStroke(1.dp, MaterialTheme.statusColors.warnBorder)) { body() }
     } else body()
 }

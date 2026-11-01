@@ -77,8 +77,7 @@ import life.mygig.clauderc.ui.components.InfoRows
 import life.mygig.clauderc.ui.components.SectionLabel
 import life.mygig.clauderc.ui.components.StatusDot
 import life.mygig.clauderc.ui.openUrl
-import life.mygig.clauderc.ui.theme.BadRed
-import life.mygig.clauderc.ui.theme.OkGreen
+import life.mygig.clauderc.ui.theme.statusColors
 
 /** The wizard's visible steps (DONE shares the last one). */
 private val MIGRATE_STEPS = listOf(
@@ -513,7 +512,7 @@ private fun MigrateSignInStep(vm: MainViewModel, ui: MigrateUi) {
     ui.signInTargets.forEach { t ->
         CardBox {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(if (t.done) "✓" else "•", color = if (t.done) OkGreen else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                Text(if (t.done) "✓" else "•", color = if (t.done) MaterialTheme.statusColors.okText else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
                 Text(if (t.main) "Claude (main account)" else t.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 OutlinedButton(onClick = { vm.migrateSignInStart(t.name, t.main) }, enabled = !ui.busy && prompt == null) {
                     Text(if (t.done) "Sign in again" else "Sign in")
@@ -679,8 +678,8 @@ private fun MigrateVerify(vm: MainViewModel, ui: MigrateUi) {
     } else {
         val bad = v.items.count { !it.ok }
         if (v.ok) {
-            MigrateNotice(OkGreen.copy(alpha = 0.18f), MaterialTheme.colorScheme.onSurface) {
-                Text("Everything is moved: 100%", style = MaterialTheme.typography.headlineSmall, color = OkGreen, fontWeight = FontWeight.Bold)
+            MigrateNotice(MaterialTheme.statusColors.okDot.copy(alpha = 0.18f), MaterialTheme.colorScheme.onSurface) {
+                Text("Everything is moved: 100%", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.statusColors.okText, fontWeight = FontWeight.Bold)
                 Text("${ui.to?.host.orEmpty()} has your sessions, projects and settings.", style = MaterialTheme.typography.bodyMedium)
             }
         } else {
@@ -693,7 +692,7 @@ private fun MigrateVerify(vm: MainViewModel, ui: MigrateUi) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 v.items.forEach { item ->
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(if (item.ok) "✓" else "✗", color = if (item.ok) OkGreen else BadRed, fontWeight = FontWeight.Bold)
+                        Text(if (item.ok) "✓" else "✗", color = if (item.ok) MaterialTheme.statusColors.okText else MaterialTheme.statusColors.badText,fontWeight = FontWeight.Bold)
                         Column(Modifier.weight(1f)) {
                             Text(item.id.replace('_', ' '), style = MaterialTheme.typography.bodyMedium)
                             if (item.detail.isNotBlank()) {
