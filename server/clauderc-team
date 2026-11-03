@@ -17,12 +17,19 @@ DIFF_SHOWN = 20000        # characters of a diff that review returns
 MODES = ("acceptEdits", "plan", "bypassPermissions")
 git_lock = threading.Lock()   # one clone is created at a time
 CLAUDE = os.environ.get("CLAUDERC_CLAUDE", "claude")
-# Other CLIs a worker can be (meta.json "kind"): ChatGPT's Codex and Gemini, each signed in under its own home folder.
-CLIS = {"codex": os.environ.get("CLAUDERC_CODEX", "codex"), "gemini": os.environ.get("CLAUDERC_GEMINI", "gemini")}
+# Other CLIs a worker can be (meta.json "kind"): ChatGPT's Codex, Gemini and xAI's Grok, each signed in under its own home folder.
+CLIS = {"codex": os.environ.get("CLAUDERC_CODEX", "codex"), "gemini": os.environ.get("CLAUDERC_GEMINI", "gemini"), "grok": os.environ.get("CLAUDERC_GROK", "grok")}
 CODEX_SANDBOX = {"acceptEdits": "workspace-write", "plan": "read-only", "bypassPermissions": "danger-full-access"}
 BWRAP = os.environ.get("CLAUDERC_BWRAP") or shutil.which("bwrap")
 TOOL_DIRS = (".local/bin", ".local/lib", ".local/share/claude", ".nvm", ".npm-global", ".bun", ".cargo/bin", ".volta")   # ro: the CLIs and their runtimes, no secrets
 GEMINI_APPROVAL = {"acceptEdits": "auto_edit", "plan": "plan", "bypassPermissions": "yolo"}
+# Grok has no read-only or limited-approval headless mode (ask mode would wait for ever), so it only ever runs inside our sandbox.
+GROK_SANDBOX_ERROR = "Grok workers run only inside the sandbox: turn Sandbox on/auto in Cluster settings and make sure bubblewrap works."
+GROK_PROMPT_MAX = 100_000   # bytes: the prompt becomes one -p argument and Linux caps one argument at 128 KB (the headers added to a task fit in the gap)
+# Runs inside the sandbox: the key goes from the worker's key file into grok's environment. bubblewrap's --setenv would put it
+# in argv, where `ps` shows it to the host. # unverified: whether `-p` could read stdin itself; the docs only show an argument.
+GROK_SH = 'XAI_API_KEY=$(cat -- "$1") || exit 1; export XAI_API_KEY; shift; exec "$@" -p "$(cat)"'
+GROK_TEXT_KEYS = ("result", "response", "text", "output", "message", "content")   # unverified: the docs only name .sessionId in the final JSON object
 SLOTS = max(1, int(os.environ.get("CLAUDERC_WORKER_SLOTS") or 10))   # hard cap of runs of one worker at once (they share its login like several chats share one); the owner's per-chat limit is lower
 USAGE_URL = os.environ.get("CLAUDERC_USAGE_URL") or "https://api.anthropic.com/api/oauth/usage"
 # A run whose login token expires before it could finish is started ALONE (exclusive lock on <lock>.mode; the others hold
@@ -142,7 +149,7 @@ def settings(name, att=None):
 
 
 def kind(name):
-    """claude (default), codex or gemini."""
+    """claude (default), codex, gemini or grok."""
     try:
         k = json.loads((WORKERS / name / "meta.json").read_text()).get("kind")
     except (OSError, ValueError, AttributeError):
@@ -157,6 +164,8 @@ def signed_in(name):
         try:
             if k == "gemini":   # an API key: Google ended personal-account sign-in for the Gemini CLI
                 return bool((h / "gemini-api-key").read_text().strip())
+            if k == "grok":
+                return bool((h / "xai-api-key").read_text().strip())
             c = json.loads((h / "auth.json").read_text())
         except (OSError, ValueError):
             return False
@@ -316,11 +325,11 @@ def list_workers():
 
 
 def usable(att):
-    """{name: role} of the attached workers that exist and are signed in."""
+    """{name: role} of the attached workers that exist, are signed in and could run here (Grok needs the sandbox)."""
     out = {}
     for name in att:
         try:
-            if isinstance(name, str) and NAME_RE.match(name) and signed_in(name):
+            if isinstance(name, str) and NAME_RE.match(name) and signed_in(name) and not (kind(name) == "grok" and not can_sandbox()):
                 out[name] = settings(name, att)[0]
         except (OSError, ValueError):
             continue
@@ -347,6 +356,8 @@ def pick_by_role(role, c):
         raise ToolError(f"No attached worker has the role {role!r}. Attached roles: {roles or 'none (the owner adds workers with the Cluster button in the chat)'}.")
     ready = [n for n in mine if n in ok]
     if not ready:
+        if not can_sandbox() and any(kind(n) == "grok" for n in mine):
+            raise ToolError(GROK_SANDBOX_ERROR)
         raise ToolError(f"The workers with role {role!r} ({', '.join(mine)}) aren't signed in. Sign them in from the Claude tab in the cLaudeRC app.")
     best, us = best_worker(ready, c)
     if not best:
@@ -654,6 +665,10 @@ def sandbox_mode():
 _bwrap_ok = None
 
 
+def can_sandbox():
+    return sandbox_mode() != "off" and bwrap_ok()
+
+
 def bwrap_ok():
     global _bwrap_ok
     if _bwrap_ok is None:
@@ -690,7 +705,13 @@ def sandbox_argv(t, k, w, env, read_only):
     for sub in TOOL_DIRS:
         ro(os.path.join(home, sub))
     prog = CLIS.get(k) if k in CLIS else CLAUDE
-    for p in [d for d in env.get("PATH", "").split(":") if d.startswith(home + "/")] + [os.path.dirname(os.path.realpath(shutil.which(prog) or prog))]:
+    real = os.path.realpath(shutil.which(prog) or prog)
+    path_dirs, tool = [d for d in env.get("PATH", "").split(":") if d.startswith(home + "/")], os.path.dirname(real)
+    if k == "grok":   # the installer's real binary lives under the owner's ~/.grok, next to its login and sessions: only the binary's own folder comes in
+        own = os.path.join(home, ".grok")
+        path_dirs = [d for d in path_dirs if d != own and not d.startswith(own + "/")]
+        tool = real if tool == own else tool
+    for p in path_dirs + [tool]:
         if p.startswith(home + "/"):
             ro(p)
     wh = str(w / "home")
@@ -704,7 +725,16 @@ def sandbox_argv(t, k, w, env, read_only):
     a += ["--clearenv"]
     for n, v in env.items():
         a += ["--setenv", n, v]
+    if k == "grok":   # no env var relocates ~/.grok (unverified), so its home is the worker's own folder: `-r` finds the session on a follow-up
+        a += ["--setenv", "HOME", wh]
     return a + ["--chdir", t["cwd"], "--"]
+
+
+def grok_run(key_file, model=None, resume=None):
+    """The command inside the sandbox (never the key itself). --always-approve in every mode, plan included: asking would hang
+    headless, and the sandbox is the boundary (plan = the workspace is mounted read-only)."""
+    return ["sh", "-c", GROK_SH, "grok-run", str(key_file), CLIS["grok"], "--output-format", "json", "--always-approve", "--no-auto-update"] \
+        + (["-m", model] if model else []) + (["-r", resume] if resume else [])
 
 
 def launch(t):
@@ -740,13 +770,20 @@ def launch(t):
     elif k == "gemini":
         # no session ids to resume by, so a follow-up starts fresh (the prompt carries what it needs)
         run = [CLIS[k], "-p", "", "-o", "json", "--skip-trust", "--approval-mode", GEMINI_APPROVAL[mode]] + (["-m", model] if model else [])
+    elif k == "grok":
+        if not use_sb:
+            raise ToolError(GROK_SANDBOX_ERROR)
+        run = grok_run(w / "home" / "xai-api-key", model, t.get("resume"))
+        if t["prompt"].startswith("-"):   # unverified: a value starting with - may be read as a flag; a leading newline keeps it a value
+            (d / f"{tid}.in").write_text("\n" + t["prompt"])
     else:
         run = [CLAUDE, "-p", "--output-format", "json", "--permission-mode", mode] + pick + (["--allowed-tools", ",".join(tools)] if tools else []) + (["--resume", t["resume"]] if t.get("resume") else [])
     # The worker must run as its own account: drop the main session's credentials, Claude Code markers and the service tokens.
     env = {n: os.environ[n] for n in ("PATH", "HOME", "LANG", "LC_ALL", "TERM", "USER", "LOGNAME", "SHELL", "TMPDIR", "TZ") if n in os.environ}
     if "CLAUDERC_TEST_STUB_STATE" in os.environ:
         env["STUB_STATE"] = os.environ["CLAUDERC_TEST_STUB_STATE"]
-    env[{"codex": "CODEX_HOME", "gemini": "GEMINI_CLI_HOME"}.get(k, "CLAUDE_CONFIG_DIR")] = str(w / "home")
+    if k != "grok":   # grok gets its folder through HOME (sandbox_argv)
+        env[{"codex": "CODEX_HOME", "gemini": "GEMINI_CLI_HOME"}.get(k, "CLAUDE_CONFIG_DIR")] = str(w / "home")
     if k == "gemini":
         env["GEMINI_API_KEY"] = (w / "home" / "gemini-api-key").read_text().strip()
     if use_sb:
@@ -779,6 +816,8 @@ def parse_output(k, out_s, last=""):
         if last.strip():
             return {"result": last.strip(), "session_id": sid if isinstance(sid, str) and SESSION_RE.fullmatch(sid) else None}
         return {"result": err, "is_error": True, "session_id": sid if isinstance(sid, str) and SESSION_RE.fullmatch(sid) else None} if err else {}
+    if k == "grok":
+        return parse_grok(out_s)
     try:
         out = json.loads(out_s)
     except ValueError:
@@ -794,6 +833,28 @@ def parse_output(k, out_s, last=""):
     if sid is not None and (not isinstance(sid, str) or not SESSION_RE.fullmatch(sid)):
         out.pop("session_id", None)
     return out
+
+
+def parse_grok(out_s):
+    """`grok --output-format json`: one JSON object at the end. Only .sessionId is documented; the rest is defensive."""
+    text = out_s.strip()
+    if not text:
+        return {}
+    try:
+        out = json.loads(text)
+    except ValueError:
+        return {"result": text}   # unverified: plain-text output is taken as the answer
+    if not isinstance(out, dict):
+        return {"result": text}   # unverified: as above
+    first = next((out[n].strip() for n in GROK_TEXT_KEYS if isinstance(out.get(n), str) and out[n].strip()), None)
+    e = out.get("error")   # unverified: the error shape (`error` as text or {message}, or `is_error`)
+    if e or out.get("is_error"):
+        m = e.get("message") if isinstance(e, dict) else e
+        return {"result": m.strip() if isinstance(m, str) and m.strip() else first or "Grok reported an error.", "is_error": True}
+    if first is None:
+        return {}
+    sid = out.get("sessionId")
+    return {"result": first, "session_id": sid if isinstance(sid, str) and SESSION_RE.fullmatch(sid) else None}
 
 
 def finalize(tid):
@@ -867,12 +928,16 @@ def start(worker, prompt, resume=None, parent=None, repo=None, stack=None, note=
         raise ToolError(f"Worker {worker} isn't signed in. Sign it in from the Claude tab in the cLaudeRC app.")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ToolError("The task is empty.")
+    if kind(worker) == "grok" and len(prompt.encode(errors="replace")) > GROK_PROMPT_MAX:
+        raise ToolError(f"This task is too long for a Grok worker ({GROK_PROMPT_MAX:,} bytes at most: the prompt goes on its command line). Shorten it, or put the details in a file in the project and point to it.")
     if resume is not None and (not isinstance(resume, str) or not SESSION_RE.fullmatch(resume)):
         resume = None
     c = cluster_cfg()
     if sandbox_mode() == "on" and not bwrap_ok():
         raise ToolError("The owner requires workers to run sandboxed, but bubblewrap isn't usable on this server (install it: sudo apt install bubblewrap; "
                         "on Ubuntu 24.04+ unprivileged user namespaces must be allowed). Do this task yourself, or ask the owner to set the sandbox to auto.")
+    if kind(worker) == "grok" and not can_sandbox():
+        raise ToolError(GROK_SANDBOX_ERROR)
     u = usage(worker)
     if near_limit(worker, c, u):
         raise ToolError(f"{worker} has used {peak(u):.0f}% of its usage limit ({usage_text(u)}; the owner's hand-back point is {c['handback_pct']}%). "

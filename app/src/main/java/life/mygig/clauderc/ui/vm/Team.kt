@@ -18,6 +18,9 @@ import life.mygig.clauderc.api.WorkerRun
 import life.mygig.clauderc.data.Server
 import life.mygig.clauderc.data.SettingsStore
 
+/** Worker kinds that sign in with a pasted API key instead of a browser sign-in. */
+fun usesApiKey(kind: String): Boolean = kind == "gemini" || kind == "grok"
+
 /**
  * Team (extra Claude accounts): the cluster view across servers, its settings, the "join the
  * cluster?" prompt, workers and their sign-in, and the open chat's workers ([chatSession]).
@@ -124,8 +127,9 @@ class TeamController(
 
     private val _workerLogin = MutableStateFlow<Pair<String, LoginUrl>?>(null)
     val workerLogin = _workerLogin.asStateFlow()
-    /** The Gemini worker whose API key is being asked for. */
-    private val _workerKey = MutableStateFlow<String?>(null)
+    /** A worker whose API key is being asked for; the dialog's text depends on its kind. */
+    data class WorkerKeyAsk(val name: String, val kind: String)
+    private val _workerKey = MutableStateFlow<WorkerKeyAsk?>(null)
     val workerKey = _workerKey.asStateFlow()
     fun closeWorkerKey() { _workerKey.value = null }
     fun saveWorkerKey(name: String, key: String) = tools.action("Saving the key for $name…") {
@@ -139,7 +143,7 @@ class TeamController(
     fun addWorker(name: String, role: String, kind: String = "claude") = tools.action("Adding $name…") {
         api.workerAdd(name, role, kind)
         _cluster.value = clusterGroups()
-        if (kind == "gemini") _workerKey.value = name else _workerLogin.value = name to api.workerLoginStart(name)   // straight on to signing in
+        if (usesApiKey(kind)) _workerKey.value = WorkerKeyAsk(name, kind) else _workerLogin.value = name to api.workerLoginStart(name)   // straight on to signing in
     }
     fun setWorker(name: String, field: String, value: String) = tools.action("Saving…") {
         api.workerSet(name, field, value)
@@ -150,7 +154,7 @@ class TeamController(
         _cluster.value = clusterGroups()
     }
     fun workerLoginStart(name: String, kind: String = "claude") = tools.action("Starting sign-in for $name…") {
-        if (kind == "gemini") { _workerKey.value = name; return@action }
+        if (usesApiKey(kind)) { _workerKey.value = WorkerKeyAsk(name, kind); return@action }
         _workerLogin.value = name to api.workerLoginStart(name)
     }
     fun workerLoginCode(name: String, code: String) = tools.action("Checking code…") {
@@ -169,6 +173,7 @@ class TeamController(
         _clusterConfig.value = null
         _clusterOffer.value = null
         _workerLogin.value = null
+        _workerKey.value = null   // a key typed after switching servers must not go to the new server's worker
         _workerRuns.value = null
     }
 }

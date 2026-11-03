@@ -9,6 +9,14 @@ for a; do
     exit 0
   fi
 done
+# xAI's installer: a script that links the stub kept in $STUB_STATE/grok-real, the way the real one links ~/.grok/downloads/... into GROK_BIN_DIR.
+for a; do
+  if [[ "$a" == https://x.ai/cli/install.sh ]]; then
+    [[ -f "${STUB_STATE:-/tmp}/grok-install-fail" ]] && exit 22
+    printf 'echo "anthropic=${ANTHROPIC_API_KEY:-unset} bin=$GROK_BIN_DIR" >>"%s/grok-install-log"\nmkdir -p "$HOME/.grok/downloads/v1"\ncp "%s/grok-real" "$HOME/.grok/downloads/v1/grok"\nln -sf "$HOME/.grok/downloads/v1/grok" "$GROK_BIN_DIR/grok"\n' "${STUB_STATE:-/tmp}" "${STUB_STATE:-/tmp}"
+    exit 0
+  fi
+done
 # codex sign-in: the pasted-back callback is fetched from the local listener on 127.0.0.1:1455
 for a; do
   [[ "$a" == http://127.0.0.1:1455/* ]] && { echo "$a" >"${STUB_STATE:-/tmp}/callback"; exit 0; }
