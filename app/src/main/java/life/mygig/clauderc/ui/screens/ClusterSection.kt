@@ -67,6 +67,7 @@ import androidx.compose.foundation.layout.padding
 import java.time.Duration
 import java.time.Instant
 import kotlin.math.roundToInt
+import life.mygig.clauderc.ui.LoginKind
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.components.CardBox
 import life.mygig.clauderc.ui.components.tabular
@@ -705,6 +706,10 @@ private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+            // The main account is signed in through the same Claude sign-in as Connections › Sign-ins: without this a signed-out main account had no way back in from here.
+            if (!worker && a.kind == "claude") {
+                OutlinedButton(onClick = { vm.logins.showLogin(LoginKind.CLAUDE) }, enabled = idle) { Text(if (a.signedIn) "Re-sign in" else "Sign in") }
             }
             if (worker && canManage) {
                 Text("Mode: ${a.mode} (${modeHint(a.mode)})", style = MaterialTheme.typography.bodySmall)
