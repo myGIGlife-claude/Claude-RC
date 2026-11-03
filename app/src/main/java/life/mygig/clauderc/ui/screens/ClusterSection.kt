@@ -18,6 +18,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -74,16 +75,20 @@ import life.mygig.clauderc.ui.components.tabular
 import life.mygig.clauderc.ui.openUrl
 import life.mygig.clauderc.ui.theme.statusColors
 import life.mygig.clauderc.ui.vm.HostsController
+import life.mygig.clauderc.ui.vm.usesApiKey
 
 private val MODES = listOf("acceptEdits", "plan", "bypassPermissions")
-private fun modeHint(m: String) = when (m) {
-    "acceptEdits" -> "edits files; runs only commands the project lists in .cluster-allowed-tools"
-    "plan" -> "read-only: research and plans"
-    "bypassPermissions" -> "runs anything without asking"
+private fun modeHint(m: String, kind: String = "claude"): String = when {
+    // Grok approves every tool in every mode; only the sandbox limits it.
+    kind == "grok" -> if (m == "plan") "read-only project folder, inside the sandbox" else "runs anything, inside the sandbox"
+    m == "acceptEdits" -> "edits files; runs only commands the project lists in .cluster-allowed-tools"
+    m == "plan" -> "read-only: research and plans"
+    m == "bypassPermissions" -> "runs anything without asking"
     else -> m
 }
 
 /** cLaudeCluster: every Claude account you're connected to, with what's left of its usage, plus the workers the main Claude hands work to. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ClusterSection(vm: MainViewModel) {
     val groups by vm.team.cluster.collectAsStateWithLifecycle()
@@ -161,15 +166,19 @@ fun ClusterSection(vm: MainViewModel) {
                 TextButton(
                     onClick = { vm.team.addWorker(name, role, kind); name = ""; role = ""; kind = "claude"; add = false },
                     enabled = WORKER_NAME_RE.matches(name) && busy == null,
-                ) { Text("Add and sign in") }
+                ) { Text(if (usesApiKey(kind)) "Add and enter key" else "Add and sign in") }
             },
             dismissButton = { TextButton(onClick = { add = false }) { Text("Cancel") } },
             title = { Text("Add an account") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("It becomes a worker on this server. Next you sign in to the account in your browser.", style = MaterialTheme.typography.bodySmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for ((k, label) in listOf("claude" to "Claude", "codex" to "ChatGPT", "gemini" to "Gemini"))
+                    Text(
+                        if (usesApiKey(kind)) "It becomes a worker on this server. Next you paste its API key."
+                        else "It becomes a worker on this server. Next you sign in to the account in your browser.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {   // four chips don't fit one line in a phone's dialog
+                        for ((k, label) in listOf("claude" to "Claude", "codex" to "ChatGPT", "gemini" to "Gemini", "grok" to "Grok"))
                             FilterChip(selected = kind == k, onClick = { kind = k }, label = { Text(label) })
                     }
                     OutlinedTextField(
@@ -184,16 +193,23 @@ fun ClusterSection(vm: MainViewModel) {
         )
     }
 
-    keyFor?.let { who ->
+    keyFor?.let { ask ->
+        val who = ask.name
+        val grok = ask.kind == "grok"
         AlertDialog(
             onDismissRequest = { vm.team.closeWorkerKey(); apiKey = "" },
-            confirmButton = { TextButton(onClick = { vm.team.saveWorkerKey(who, apiKey); apiKey = "" }, enabled = apiKey.length >= 20 && busy == null) { Text("Save key") } },
+            confirmButton = { TextButton(onClick = { vm.team.saveWorkerKey(who, apiKey); apiKey = "" }, enabled = apiKey.length >= (if (grok) 16 else 20) && busy == null) { Text("Save key") } },
             dismissButton = { TextButton(onClick = { vm.team.closeWorkerKey(); apiKey = "" }) { Text("Cancel") } },
-            title = { Text("Gemini key for $who") },
+            title = { Text(if (grok) "Grok key for $who" else "Gemini key for $who") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Google no longer lets the Gemini command-line tool sign in with a personal account. Paste an API key from aistudio.google.com/apikey instead.")
-                    OutlinedButton(onClick = { openUrl(context, "https://aistudio.google.com/apikey") }, modifier = Modifier.fillMaxWidth()) { Text("Open Google AI Studio") }
+                    if (grok) {
+                        Text("Create an API key at console.x.ai and paste it here. It is stored only on the server, for this account. If Grok refuses to run, check that your xAI plan allows the Grok Build CLI.")
+                        OutlinedButton(onClick = { openUrl(context, "https://console.x.ai") }, modifier = Modifier.fillMaxWidth()) { Text("Open xAI console") }
+                    } else {
+                        Text("Google no longer lets the Gemini command-line tool sign in with a personal account. Paste an API key from aistudio.google.com/apikey instead.")
+                        OutlinedButton(onClick = { openUrl(context, "https://aistudio.google.com/apikey") }, modifier = Modifier.fillMaxWidth()) { Text("Open Google AI Studio") }
+                    }
                     OutlinedTextField(
                         value = apiKey, onValueChange = { apiKey = it.trim() }, label = { Text("API key") }, singleLine = true,
                         visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
@@ -683,7 +699,7 @@ private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean
     CardBox {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                (if (worker) a.name else "Main account") + (if (a.kind == "codex") " · ChatGPT" else if (a.kind == "gemini") " · Gemini" else "") + (a.plan?.let { " · $it" } ?: "") + if (a.signedIn) "" else " · not signed in",
+                (if (worker) a.name else "Main account") + (if (a.kind == "codex") " · ChatGPT" else if (a.kind == "gemini") " · Gemini" else if (a.kind == "grok") " · Grok" else "") + (a.plan?.let { " · $it" } ?: "") + if (a.signedIn) "" else " · not signed in",
                 style = MaterialTheme.typography.titleSmall,
             )
             a.email?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -712,9 +728,9 @@ private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean
                 OutlinedButton(onClick = { vm.logins.showLogin(LoginKind.CLAUDE) }, enabled = idle) { Text(if (a.signedIn) "Re-sign in" else "Sign in") }
             }
             if (worker && canManage) {
-                Text("Mode: ${a.mode} (${modeHint(a.mode)})", style = MaterialTheme.typography.bodySmall)
+                Text("Mode: ${a.mode} (${modeHint(a.mode, a.kind)})", style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    OutlinedButton(onClick = { vm.team.workerLoginStart(a.name, a.kind) }, enabled = idle) { Text(if (a.kind == "gemini") (if (a.signedIn) "Change key" else "Add key") else if (a.signedIn) "Re-sign in" else "Sign in") }
+                    OutlinedButton(onClick = { vm.team.workerLoginStart(a.name, a.kind) }, enabled = idle) { Text(if (usesApiKey(a.kind)) (if (a.signedIn) "Change key" else "Add key") else if (a.signedIn) "Re-sign in" else "Sign in") }
                     OutlinedButton(onClick = { vm.team.setWorker(a.name, "mode", MODES[(MODES.indexOf(a.mode) + 1) % MODES.size]) }, enabled = idle) { Text("Mode") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {

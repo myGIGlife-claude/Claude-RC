@@ -1190,7 +1190,48 @@ check "gemini API key saved" "$(jqt '.ok and .data.saved == "gem"')"
 api "worker-list"
 check "gemini worker signed in with the key" "$(jqt '.data.workers[] | select(.name=="gem") | .signed_in')"
 grep -q "AIzaSyDemo" "$HOME/.local/state/claude-launcher/api.log" 2>/dev/null; [[ $? -ne 0 ]]; check "key is not in the api log" $?
-api "worker-remove gpt"; api "worker-remove gem"
+echo "grok workers"
+api "worker-add gro grok" "Grok opinion"
+check "add grok worker" "$(jqt '.ok and .data.added == "gro"')"
+GROK_KEY_FILE="$HOME/.config/claude-launcher/workers/gro/home/xai-api-key"
+api "worker-list"
+check "grok listed, not signed in" "$(jqt '.data.workers[] | select(.name=="gro") | .kind=="grok" and .signed_in==false')"
+api "cluster"
+check "cluster lists grok without usage" "$(jqt '.data.accounts[] | select(.name=="gro") | .kind=="grok" and .usage==null')"
+api "worker-login-start gro"
+check "grok has no browser sign-in" "$(jqt '.ok == false and (.error.message // .message // "" | contains("API key"))')"
+api "worker-login-code gro" "x"
+check "grok has no sign-in code" "$(jqt '.ok == false')"
+api "worker-set-key gro" "short"
+check "short xAI key refused" "$(jqt '.ok == false')"
+api "worker-set-key gro" 'xai-DemoDemo;DemoDemo'
+check "xAI key with odd characters refused" "$(jqt '.ok == false')"
+[[ ! -e "$GROK_KEY_FILE" ]]; check "refused keys are not saved" $?
+# First key save with the CLI missing: the official installer runs, in a clean environment.
+mv "$HOME/.local/bin/grok" "$STUB_STATE/grok-real"
+touch "$STUB_STATE/grok-install-fail"
+api "worker-set-key gro" "xai-GrokDemoDemoDemoDemo1234567890"
+check "install failure is reported" "$(jqt '.ok == false and (tostring | contains("Grok CLI"))')"
+[[ ! -e "$GROK_KEY_FILE" ]]; check "no key saved when the CLI can't be installed" $?
+rm "$STUB_STATE/grok-install-fail"
+OLD_ANTHROPIC="${ANTHROPIC_API_KEY:-}"; export ANTHROPIC_API_KEY=main-key-should-not-reach-the-installer
+api "worker-set-key gro" "xai-GrokDemoDemoDemoDemo1234567890"
+if [[ -n "$OLD_ANTHROPIC" ]]; then export ANTHROPIC_API_KEY="$OLD_ANTHROPIC"; else unset ANTHROPIC_API_KEY; fi
+check "grok key saved after the installer ran" "$(jqt '.ok and .data.saved == "gro"')"
+[[ -L "$HOME/.local/bin/grok" && -x "$HOME/.grok/downloads/v1/grok" ]]; check "installer linked grok into ~/.local/bin" $?
+grep -qx "anthropic=unset bin=$HOME/.local/bin" "$STUB_STATE/grok-install-log"; check "installer got a clean environment and GROK_BIN_DIR" $?
+[[ "$(stat -c %a "$GROK_KEY_FILE")" == 600 && "$(cat "$GROK_KEY_FILE")" == xai-GrokDemoDemoDemoDemo1234567890 ]]; check "grok key file is mode 600" $?
+[[ ! -e "$GROK_KEY_FILE.new" ]]; check "no temporary key file left" $?
+api "worker-list"
+check "grok worker signed in with the key" "$(jqt '.data.workers[] | select(.name=="gro") | .signed_in')"
+! grep -rq "xai-GrokDemo" "$HOME/.local/state/claude-launcher/" "$STUB_STATE" 2>/dev/null; check "grok key is not in the api log or any stub's argv" $?
+# Installed but broken: refused, the old key stays.
+touch "$STUB_STATE/grok-version-fail"
+api "worker-set-key gro" "xai-AnotherDemoDemoDemoDemo12345"
+check "a grok that won't run is reported" "$(jqt '.ok == false')"
+[[ "$(cat "$GROK_KEY_FILE")" == xai-GrokDemoDemoDemoDemo1234567890 ]]; check "old grok key kept" $?
+rm "$STUB_STATE/grok-version-fail"
+api "worker-remove gro"; api "worker-remove gpt"; api "worker-remove gem"
 api "worker-list"
 check "no workers yet" "$(jqt '.ok and (.data.workers | length == 0)')"
 api "worker-add research" "Reads docs & \"quotes\", finds sources"
