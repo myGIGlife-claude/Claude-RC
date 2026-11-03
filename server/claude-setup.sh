@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id)
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id), 50 = grok worker kind
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=49
+SCRIPT_API=50
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 CLAUDERC_API="${CLAUDERC_API:-https://api.github.com}"
@@ -166,14 +166,15 @@ session_dir() {
 # A credentials file that has a token (a logged-out Claude leaves `{"claudeAiOauth":{}}` behind, which must not count as signed in).
 creds_ok() { jq -e '(.claudeAiOauth.accessToken // empty) | strings | length > 0' "$1" >/dev/null 2>&1; }
 
-# Workers can be other CLIs: kind is claude (default), codex (ChatGPT) or gemini. Each is signed in under its own home folder.
-WORKER_KINDS=" claude codex gemini "
+# Workers can be other CLIs: kind is claude (default), codex (ChatGPT), gemini or grok. Each is signed in under its own home folder.
+WORKER_KINDS=" claude codex gemini grok "
 worker_kind() { jq -r '.kind // "claude"' "$1/meta.json" 2>/dev/null || echo claude; }
 # worker_signed <worker dir>: its login file has something in it.
 worker_signed() {
   case "$(worker_kind "$1")" in
     codex) jq -e 'length > 0' "$1/home/auth.json" >/dev/null 2>&1 ;;
     gemini) [[ -s "$1/home/gemini-api-key" ]] ;;   # Google ended personal-account sign-in for the Gemini CLI: it uses an API key
+    grok) [[ -s "$1/home/xai-api-key" ]] ;;
     *) creds_ok "$1/home/.credentials.json" ;;
   esac
 }
@@ -1740,7 +1741,7 @@ do_worker_add() {
   role="$(read_secret_line)"
   exec 0</dev/null
   worker_check "$name"
-  [[ "$WORKER_KINDS" == *" $kind "* && $# -le 2 ]] || api_err invalid_name "Kind must be claude, codex or gemini."
+  [[ "$WORKER_KINDS" == *" $kind "* && $# -le 2 ]] || api_err invalid_name "Kind must be claude, codex, gemini or grok."
   [[ ! -f "$WORKERS_DIR/$name/meta.json" ]] || api_err invalid_name "A worker named '$name' already exists."
   mkdir -p "$WORKERS_DIR/$name/home" "$WORKERS_DIR/$name/tasks"
   chmod 700 "$WORKERS_DIR" "$WORKERS_DIR/$name" "$WORKERS_DIR/$name/home" "$WORKERS_DIR/$name/tasks"
@@ -2521,6 +2522,7 @@ do_worker_login_start() {
   case "$(worker_kind "$WORKERS_DIR/$1")" in
     codex) do_login_codex_start ;;
     gemini) api_err invalid_name "Gemini workers sign in with an API key (worker-set-key)." ;;
+    grok) api_err invalid_name "Grok workers sign in with an API key (worker-set-key)." ;;
     *) do_login_claude_start ;;
   esac
 }
@@ -2529,12 +2531,23 @@ do_worker_login_code() {
   case "$(worker_kind "$WORKERS_DIR/$1")" in
     codex) do_login_codex_code ;;
     gemini) api_err invalid_name "Gemini workers sign in with an API key (worker-set-key)." ;;
+    grok) api_err invalid_name "Grok workers sign in with an API key (worker-set-key)." ;;
     *) do_login_claude_code ;;
   esac
 }
 
-# The Codex and Gemini CLIs install on first use (npm into ~/.local, on the sessions' PATH).
-ensure_cli() {  # <binary> <npm package>
+# The Codex and Gemini CLIs install on first use (npm into ~/.local, on the sessions' PATH); Grok through xAI's official installer.
+ensure_cli() {  # <binary> <npm package> (grok: no package)
+  if [[ "$1" == grok ]]; then
+    if ! command -v grok >/dev/null 2>&1; then
+      timeout 300 env -u ANTHROPIC_API_KEY -u GROK_DEPLOYMENT_KEY GROK_BIN_DIR="$HOME/.local/bin" \
+        bash -c 'curl -fsSL https://x.ai/cli/install.sh | bash' >/dev/null 2>&1 || true
+      hash -r
+    fi
+    command -v grok >/dev/null 2>&1 && timeout 30 grok --version >/dev/null 2>&1 ||
+      api_err internal "Couldn't install the Grok CLI on the server. Check that the server can reach x.ai, then save the key again."
+    return 0
+  fi
   command -v "$1" >/dev/null 2>&1 && return 0
   command -v npm >/dev/null 2>&1 || api_err internal "Installing $1 needs npm, which isn't on the server."
   timeout 300 npm install -g --prefix "$HOME/.local" "$2" >/dev/null 2>&1 || true
@@ -2596,14 +2609,22 @@ do_login_device_wait() {  # <codex|gemini>
   api_err not_logged_in_claude "Login did not complete. Start the sign-in again." "$(jq -cn --arg t "$(tail -n 15 <<<"$text")" '{pane:$t}')"
 }
 
-# Gemini: the key (from Google AI Studio) comes on stdin and is kept in the worker's home, mode 600; clauderc-team hands it to the CLI.
+# Gemini and Grok: the key (from Google AI Studio / console.x.ai) comes on stdin and is kept in the worker's home, mode 600; clauderc-team hands it to the CLI.
 do_worker_set_key() {
-  local name="${1:-}" key dir
+  local name="${1:-}" key dir kind
   key="$(read_secret_line)"
   exec 0</dev/null
   worker_exists "$name"
-  [[ "$(worker_kind "$WORKERS_DIR/$name")" == gemini ]] || api_err invalid_name "Only Gemini workers use an API key."
+  kind="$(worker_kind "$WORKERS_DIR/$name")"
+  [[ "$kind" == gemini || "$kind" == grok ]] || api_err invalid_name "Only Gemini and Grok workers use an API key."
   key="${key//[[:space:]]/}"
+  if [[ "$kind" == grok ]]; then
+    [[ "$key" =~ ^[A-Za-z0-9_.-]{16,200}$ ]] || api_err invalid_name "That doesn't look like an xAI API key."
+    ensure_cli grok
+    dir="$WORKERS_DIR/$name/home"
+    (umask 077; printf '%s\n' "$key" >"$dir/xai-api-key.new" && mv -f "$dir/xai-api-key.new" "$dir/xai-api-key") || api_err internal "Couldn't save the key."
+    api_ok "$(jq -cn --arg n "$name" '{saved:$n}')"
+  fi
   [[ "$key" =~ ^[A-Za-z0-9._-]{20,200}$ ]] || api_err invalid_name "That doesn't look like a Gemini API key."
   ensure_cli gemini @google/gemini-cli
   dir="$WORKERS_DIR/$name/home"

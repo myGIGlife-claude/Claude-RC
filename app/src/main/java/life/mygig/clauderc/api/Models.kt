@@ -388,7 +388,7 @@ data class Tokens(@SerialName("five_hour") val fiveHour: TokenWindow = TokenWind
 @Serializable
 data class ClusterAccount(
     val name: String,
-    /** claude, codex (ChatGPT) or gemini. */
+    /** claude, codex (ChatGPT), gemini or grok. */
     val kind: String = "claude",
     val email: String? = null,
     val plan: String? = null,

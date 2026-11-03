@@ -222,7 +222,7 @@ class LauncherApi(
     suspend fun workers(): WorkersData = call("worker-list")
     suspend fun workerAdd(name: String, role: String, kind: String = "claude"): JsonObject {
         requireWorker(name)
-        require(kind in listOf("claude", "codex", "gemini"))
+        require(kind in listOf("claude", "codex", "gemini", "grok"))
         return call("worker-add $name $kind", stdin = role.trim().replace('\n', ' '))
     }
     suspend fun workerSet(name: String, field: String, value: String): JsonObject {
@@ -230,7 +230,7 @@ class LauncherApi(
         if (field != "role" && field != "mode") throw ApiException(Codes.INVALID_NAME, "Bad field")
         return call("worker-set $name $field", stdin = value.trim().replace('\n', ' '))
     }
-    /** Gemini workers sign in with an API key from Google AI Studio (the key travels on stdin only). */
+    /** Gemini and Grok workers sign in with an API key (the key travels on stdin only). The first Grok key also installs the CLI, hence the long timeout. */
     suspend fun workerSetKey(name: String, key: String): JsonObject { requireWorker(name); return call("worker-set-key $name", stdin = key.trim(), timeoutMs = 300_000) }
     suspend fun workerRemove(name: String): JsonObject { requireWorker(name); return call("worker-remove $name") }
     suspend fun workerLoginStart(name: String): LoginUrl { requireWorker(name); return call("worker-login-start $name", timeoutMs = 60_000) }

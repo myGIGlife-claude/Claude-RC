@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import life.mygig.clauderc.api.WORKER_NAME_RE
 import life.mygig.clauderc.api.WorkerRunsData
 import life.mygig.clauderc.api.WorkersData
+import life.mygig.clauderc.ui.vm.usesApiKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -29,6 +30,11 @@ class TeamModelsTest {
         )
         assertEquals("hi", d.runs[0].reply)
         assertNull(d.runs[0].error)
+    }
+
+    @Test fun apiKeyKinds() {
+        for (k in listOf("gemini", "grok")) assertTrue(k, usesApiKey(k))
+        for (k in listOf("claude", "codex", "", "other")) assertFalse(k, usesApiKey(k))
     }
 
     @Test fun workerNameRule() {

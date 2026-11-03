@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Test stub for xAI's Grok Build CLI (`grok -p "<prompt>" --output-format json`): one JSON object on stdout.
+# Records its argv and whether the key was in its environment (never the key) in $STUB_STATE. grok-fail there = fail the run.
+state="${STUB_STATE:-/tmp}"
+if [[ "${1:-}" == --version ]]; then
+  [[ -f "$state/grok-version-fail" ]] && exit 1
+  echo "grok stub 0.0.0"; exit 0
+fi
+printf '%s\n' "$*" >"$state/grok-args" 2>/dev/null
+prompt="" resume="" args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case "${args[i]}" in
+    -p) prompt="${args[i + 1]:-}" ;;
+    -r) resume="${args[i + 1]:-}" ;;
+  esac
+done
+key="unset"; [[ -n "${XAI_API_KEY:-}" ]] && key="set(${#XAI_API_KEY})"
+printf 'key=%s home=%s cwd=%s\n' "$key" "${HOME:-}" "$PWD" >"$state/grok-env" 2>/dev/null
+if [[ -f "$state/grok-fail" || "$prompt" == *FAIL* ]]; then echo '{"error":{"message":"stub grok failure"}}'; exit 1; fi
+jq -cn --arg r "stub grok says hi key=$key home=${HOME:-} resume=$resume prompt=$prompt" \
+  '{sessionId:"3f2c9a10-7b1e-4d2a-9c55-0a1b2c3d4e5f",result:$r}'

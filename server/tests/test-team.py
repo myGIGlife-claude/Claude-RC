@@ -33,7 +33,7 @@ claude_stub = tmp / "claude-stub"
 stub_text = (HERE / "stubs" / "claude").read_text()
 stub_text = stub_text.replace("svc=${CLAUDERC_TEST_SECRET:-unset} args=", "svc=${CLAUDERC_TEST_SECRET:-unset} ssh=${SSH_AUTH_SOCK:-unset} gh=${GH_TOKEN:-unset} ghub=${GITHUB_TOKEN:-unset} settings=${SETTINGS_ONLY_SECRET:-unset} args=")
 claude_stub.write_text(stub_text); claude_stub.chmod(0o755)
-env = {**os.environ, "HOME": str(test_home), "CLAUDERC_SANDBOX": "off", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t", "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(claude_stub), "CLAUDERC_CODEX": str(HERE / "stubs" / "codex"), "CLAUDERC_GEMINI": str(HERE / "stubs" / "gemini"),
+env = {**os.environ, "HOME": str(test_home), "CLAUDERC_SANDBOX": "off", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t", "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(claude_stub), "CLAUDERC_CODEX": str(HERE / "stubs" / "codex"), "CLAUDERC_GEMINI": str(HERE / "stubs" / "gemini"), "CLAUDERC_GROK": str(HERE / "stubs" / "grok"),
        "ANTHROPIC_API_KEY": "secret-should-not-leak", "CLAUDE_CODE_OAUTH_TOKEN": "main-token", "CLAUDECODE": "1", "CLAUDERC_TEST_STUB_STATE": str(tmp / "stub"), "STUB_STATE": str(tmp / "stub"),
        "SSH_AUTH_SOCK": "/tmp/fake-agent.sock", "GH_TOKEN": "fake-gh-token", "GITHUB_TOKEN": "fake-github-token",
        "CLAUDERC_TEST_SECRET": "service-token", "CLAUDERC_WORKER_SLOTS": "3", "CLAUDERC_USAGE_TTL": "0",
@@ -183,6 +183,25 @@ assert err and "stub gemini failure" in text, text
 err, tid = tool("delegate", role="second opinion", task="by role")
 assert not err, tid
 tool("wait", task_id=tid, timeout_s=30)
+# Grok: API key in its own file; it runs only inside the sandbox, and this suite has the sandbox off, so it is refused.
+for name, signed in (("gro", True), ("gro2", False)):
+    (cfg / name / "home").mkdir(parents=True); (cfg / name / "tasks").mkdir()
+    (cfg / name / "meta.json").write_text(json.dumps({"role": "grok only", "mode": "acceptEdits", "kind": "grok"}))
+    if signed:
+        (cfg / name / "home" / "xai-api-key").write_text("xai-TESTKEY\n")
+attach(tmp, {**json.loads((cfg.parent / "attach" / (re.sub(r"[^A-Za-z0-9]", "-", str(tmp.resolve())) + ".json")).read_text()), "gro": {}, "gro2": {}})
+ws = {w["name"]: w for w in json.loads(tool("list_workers")[1])}
+assert ws["gro"]["kind"] == "grok" and ws["gro"]["signed_in"] and ws["gro2"]["signed_in"] is False and "five_hour_pct" not in ws["gro"], ws
+err, text = tool("delegate", worker="gro2", task="x")
+assert err and "sign" in text.lower(), text
+err, text = tool("delegate", worker="gro", task="x")
+assert err and "Grok workers run only inside the sandbox" in text and "bubblewrap" in text, text
+assert not list((cfg / "gro" / "tasks").glob("*.json")), "refused: no task record, no clone"
+assert not (tmp / "stub" / "grok-args").exists(), "the stub never ran"
+err, text = tool("delegate", role="grok only", task="x")
+assert err and "Grok workers run only inside the sandbox" in text, text     # by role too, not "isn't signed in"
+err, text = tool("delegate", worker="gro", task="x" * 100_001)
+assert err and "too long" in text and "100,000" in text, text
 proc.stdin.close()
 proc.wait(timeout=5)
 
@@ -748,6 +767,85 @@ if ns["bwrap_ok"]():
     assert inside(f"echo x > {sbx_home}/dropped", argv).returncode == 0 and not (sbx_home / "dropped").exists(), "writes to the home folder vanish"
 else:
     print("test-team: bubblewrap unusable here, the sandbox run checks were skipped")
+
+# ---- Grok: the command, what its sandbox mounts, and how its output is read ----
+GROK_UUID = "3f2c9a10-7b1e-4d2a-9c55-0a1b2c3d4e5f"
+parse = lambda s: ns["parse_output"]("grok", s)
+for key in ("result", "response", "text", "output", "message", "content"):
+    assert parse(json.dumps({key: " hi ", "sessionId": GROK_UUID})) == {"result": "hi", "session_id": GROK_UUID}, key
+assert parse(json.dumps({"result": "", "response": "  ", "text": ["x"], "output": "second"}))["result"] == "second", "first non-empty string"
+assert parse(json.dumps({"result": "a", "response": "b"}))["result"] == "a", "in the documented order"
+assert parse(json.dumps({"result": "a"})) == {"result": "a", "session_id": None}
+assert parse(json.dumps({"result": "a", "sessionId": "../../etc/passwd"}))["session_id"] is None, "a bad session id is dropped"
+assert parse(json.dumps({"result": "a", "sessionId": 7}))["session_id"] is None
+assert parse(json.dumps({"error": {"message": "no credit"}})) == {"result": "no credit", "is_error": True}
+assert parse(json.dumps({"error": "no credit"})) == {"result": "no credit", "is_error": True}
+assert parse(json.dumps({"is_error": True, "result": "refused"})) == {"result": "refused", "is_error": True}
+assert parse(json.dumps({"is_error": True})) == {"result": "Grok reported an error.", "is_error": True}
+assert parse("plain words\n") == {"result": "plain words"} and parse('["a"]') == {"result": '["a"]'}
+assert parse("") == {} and parse(" \n") == {} and parse('{"sessionId":"' + GROK_UUID + '"}') == {}
+assert ns["parse_output"]("gemini", '{"response":"g"}') == {"result": "g", "session_id": "fresh"}, "other kinds read as before"
+
+grok_w = tmp / "sbxworkers" / "g1"; (grok_w / "home").mkdir(parents=True); (grok_w / "tasks").mkdir()
+grok_key = grok_w / "home" / "xai-api-key"; grok_key.write_text("xai-SECRETKEY\n")
+# The installer's layout: the real binary under ~/.grok/downloads, a link in ~/.local/bin, and the owner's own Grok login beside it.
+grok_dl = sbx_home / ".grok" / "downloads" / "v1"; grok_dl.mkdir(parents=True)
+(grok_dl / "grok").write_text((HERE / "stubs" / "grok").read_text()); (grok_dl / "grok").chmod(0o755)
+(sbx_home / ".local" / "bin" / "grok").symlink_to(grok_dl / "grok")
+(sbx_home / ".grok" / "auth.json").write_text("owner-grok-login\n"); (sbx_home / ".grok" / "sessions").mkdir(); (sbx_home / ".grok" / "bin").mkdir()
+ns["CLIS"]["grok"] = str(sbx_home / ".local" / "bin" / "grok")
+grok_state = sbx_ws / "grok-state"; grok_state.mkdir()
+grok_env = {"PATH": f"{sbx_home}/.local/bin:{sbx_home}/.grok/bin:/usr/bin:/bin", "HOME": str(sbx_home), "LANG": "C.UTF-8", "STUB_STATE": str(grok_state)}
+g_argv = ns["sandbox_argv"](sbx_t, "grok", grok_w, grok_env, read_only=False)
+g_argv[0] = g_argv[0] or "bwrap"
+g_run = ns["grok_run"](grok_key, "grok-model", GROK_UUID)
+assert g_run[:3] == ["sh", "-c", ns["GROK_SH"]] and g_run[5:] == [ns["CLIS"]["grok"], "--output-format", "json", "--always-approve", "--no-auto-update", "-m", "grok-model", "-r", GROK_UUID], g_run
+assert ns["grok_run"](grok_key)[-1] == "--no-auto-update", "no model, no resume: no flags"
+j = " ".join(g_argv + g_run)
+assert "xai-SECRETKEY" not in j and "XAI_API_KEY " not in j, "the key is never in argv"
+assert f"--ro-bind {grok_dl} {grok_dl}" in j, "the binary's own folder is mounted read-only"
+assert f"--ro-bind {sbx_home / '.grok'} " not in j and f"--ro-bind {sbx_home / '.grok' / 'bin'} " not in j and "auth.json" not in j, "nothing else of the owner's ~/.grok"
+assert f"--setenv HOME {grok_w / 'home'}" in j and "--clearenv" in g_argv, "its own home, nothing inherited"
+# A binary directly in ~/.grok must not bring the folder in with it.
+(sbx_home / ".grok" / "grok").write_text("#!/bin/sh\n"); (sbx_home / ".grok" / "grok").chmod(0o755); ns["CLIS"]["grok"] = str(sbx_home / ".grok" / "grok")
+j2 = " ".join(ns["sandbox_argv"](sbx_t, "grok", grok_w, grok_env, read_only=False))
+assert f"--ro-bind {sbx_home / '.grok' / 'grok'} " in j2 and f"--ro-bind {sbx_home / '.grok'} " not in j2, j2
+ns["CLIS"]["grok"] = str(sbx_home / ".local" / "bin" / "grok"); g_run = ns["grok_run"](grok_key, None, GROK_UUID)
+assert "--ro-bind" in " ".join(ns["sandbox_argv"](sbx_t, "grok", grok_w, grok_env, read_only=True)) and f"--ro-bind {sbx_ws} {sbx_ws}" in " ".join(ns["sandbox_argv"](sbx_t, "grok", grok_w, grok_env, read_only=True)), "plan mode: read-only workspace"
+if ns["bwrap_ok"]():
+    r = subprocess.run(g_argv + g_run, input="hello grok", capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    o = ns["parse_output"]("grok", r.stdout)
+    assert o["session_id"] == GROK_UUID and "prompt=hello grok" in o["result"] and f"resume={GROK_UUID}" in o["result"], o
+    assert f"key=set({len('xai-SECRETKEY')})" in o["result"] and f"home={grok_w / 'home'}" in o["result"], o
+    assert "-p hello grok" in (grok_state / "grok-args").read_text() and "SECRETKEY" not in (grok_state / "grok-args").read_text()
+    r = subprocess.run(g_argv + ["sh", "-c", f"cat {sbx_home}/.grok/auth.json; ls {sbx_home}/.grok; ls {sbx_home}/.grok/downloads"], capture_output=True, text=True, timeout=30)
+    assert "owner-grok-login" not in r.stdout + r.stderr and "auth.json" not in r.stdout and r.stdout.split() == ["downloads", "v1"], r.stdout + r.stderr
+    r = subprocess.run(g_argv + ["sh", "-c", "echo x > ~/.grok-probe"], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0 and (grok_w / "home" / ".grok-probe").exists(), "what grok keeps in its home survives the run (sessions for -r)"
+    # The whole way, through the MCP server: delegate, the reply resumes with -r, and plan mode can't write.
+    (test_home / ".local" / "bin").mkdir(parents=True, exist_ok=True)
+    (test_home / ".local" / "bin" / "grok").write_text((HERE / "stubs" / "grok").read_text()); (test_home / ".local" / "bin" / "grok").chmod(0o755)
+    g_proj = tmp / "grokproj"; g_proj.mkdir()
+    (cfg / "gro" / "meta.json").write_text(json.dumps({"role": "grok only", "mode": "bypassPermissions", "kind": "grok", "model": "grok-x"}))
+    attach(g_proj, {"gro": {}})
+    proc = spawn(g_proj, {**env, "CLAUDERC_SANDBOX": "on", "CLAUDERC_GROK": str(test_home / ".local" / "bin" / "grok"), "PATH": f"{test_home}/.local/bin:{env['PATH']}"})
+    _id = 0
+    rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}})
+    err, tid = tool("delegate", worker="gro", task="- starts with a dash")
+    assert not err, tid
+    err, text = tool("wait", task_id=tid, timeout_s=30)
+    assert not err and "stub grok says hi" in text and "key=set(11)" in text and "- starts with a dash" in text, text
+    assert "xai-TESTKEY" not in text
+    err, tid2 = tool("reply", task_id=tid, message="and more")
+    assert not err, tid2
+    err, text = tool("wait", task_id=tid2, timeout_s=30)
+    assert not err and f"resume={GROK_UUID}" in text and "and more" in text, text
+    proc.stdin.close()
+    proc.wait(timeout=5)
+    print("test-team: grok ran inside the sandbox")
+else:
+    print("test-team: bubblewrap unusable here, the grok sandbox run checks were skipped")
 # modes: the cluster setting, the env override, and 'on' refuses to run without bubblewrap
 os.environ.pop("CLAUDERC_SANDBOX", None); os.environ["XDG_CONFIG_HOME"] = str(tmp / "cfg2"); (tmp / "cfg2" / "claude-launcher").mkdir(parents=True)
 ns2 = runpy.run_path(str(HERE.parent / "clauderc-team"), run_name="not_main")
