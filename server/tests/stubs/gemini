@@ -1,6 +1,51 @@
 #!/usr/bin/env bash
-# Test stub for the Gemini CLI (`gemini -p "" -o json`): prompt on stdin, one JSON object on stdout.
-echo "$*" >"${STUB_STATE:-/tmp}/gemini-args"
+# Test stub for the Gemini CLI. Headless (`gemini -p "" -o json`): prompt on stdin, one JSON object on stdout.
+# Interactive (no -p): the real CLI's Google sign-in text; it asks for the code from the browser.
+# In $STUB_STATE: gemini-args, gemini-env (never the key itself), gemini-login-code = the code it accepts, gemini-login-giveup = exit after a wrong code.
+state="${STUB_STATE:-/tmp}"
+home="${GEMINI_CLI_HOME:-none}"
+key="unset"; [[ -n "${GEMINI_API_KEY:-}" ]] && key="set"
+auth="$(jq -r '.security.auth.selectedType // "none"' "$home/.gemini/settings.json" 2>/dev/null || echo none)"
+if [[ " $* " != *" -p "* ]]; then
+  [[ "$home" == /tmp/* || "$home" == "${TMPDIR:-/nonexistent}"/* ]] || { echo "stub gemini: refusing to write a login under $home" >&2; exit 1; }
+  printf 'home=%s HOME=%s nobrowser=%s key=%s auth=%s cwd=%s args=%s\n' "$home" "${HOME:-}" "${NO_BROWSER:-}" "$key" "$auth" "$PWD" "$*" >"$state/gemini-login-env"
+  good="$(cat "$state/gemini-login-code" 2>/dev/null || echo 4/GOOD-gemini-code)"
+  printf 'Please visit the following URL to authorize the application:\n\n'
+  printf 'https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=https%%3A%%2F%%2Fcodeassist.google.com%%2Fauthcode&access_type=offline&scope=stub&state=invalid-looking-state\n\n'
+  while :; do
+    printf 'Enter the authorization code: '
+    IFS= read -r code || exit 1
+    if [[ "$code" == "$good" ]]; then
+      mkdir -p "$home/.gemini" && echo '{"access_token":"stub","refresh_token":"stub"}' >"$home/.gemini/oauth_creds.json"
+      echo '{"active":"stub@example.invalid"}' >"$home/.gemini/google_accounts.json"
+      printf '> Type your message\n'
+      exec sleep 600
+    fi
+    echo "Failed to authenticate with authorization code: invalid_grant"
+    [[ -f "$state/gemini-login-giveup" ]] && exit 1
+  done
+fi
+echo "$*" >"$state/gemini-args"
+printf 'home=%s key=%s auth=%s\n' "$home" "$key" "$auth" >"$state/gemini-env"
 prompt="$(cat)"
 if [[ "$prompt" == *FAIL* ]]; then echo '{"error":{"message":"stub gemini failure"}}'; exit 1; fi
-jq -cn --arg r "gemini home=${GEMINI_CLI_HOME:-none} key=${GEMINI_API_KEY:-unset} cwd=$PWD args=$* prompt=$prompt" '{response:$r,stats:{}}'
+# Errors the real CLI retries for minutes: it keeps running here too, so only something outside can end it quickly.
+if [[ "$prompt" == *STUB_QUOTA* ]]; then
+  echo "TerminalQuotaError: You have exhausted your daily quota on this model." >&2
+  echo $$ >"$state/gemini-pid"
+  exec sleep 300
+fi
+if [[ "$prompt" == *STUB_OVERLOAD* ]]; then
+  for n in 1 2 3; do echo "Attempt $n failed with status 503. Retrying with backoff... The model is experiencing high demand." >&2; done
+  echo $$ >"$state/gemini-pid"
+  exec sleep 300
+fi
+if [[ "$prompt" == *STUB_TWO_503* ]]; then   # two are normal retries: the run goes on and answers
+  for n in 1 2; do echo "Attempt $n failed with status 503. Retrying with backoff..." >&2; done
+  sleep 3
+fi
+if [[ "$prompt" == *STUB_EXPIRED* ]]; then
+  echo "Manual authorization is required but the current session is non-interactive. Please run the Gemini CLI in an interactive terminal to log in." >&2
+  exit 41
+fi
+jq -cn --arg r "gemini home=$home key=${GEMINI_API_KEY:-unset} auth=$auth cwd=$PWD args=$* prompt=$prompt" '{response:$r,stats:{}}'
