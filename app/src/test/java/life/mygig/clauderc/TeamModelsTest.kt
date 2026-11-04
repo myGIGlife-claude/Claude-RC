@@ -1,9 +1,13 @@
 package life.mygig.clauderc
 
 import kotlinx.serialization.json.Json
+import life.mygig.clauderc.api.Codes
+import life.mygig.clauderc.api.LoginUrl
 import life.mygig.clauderc.api.WORKER_NAME_RE
 import life.mygig.clauderc.api.WorkerRunsData
 import life.mygig.clauderc.api.WorkersData
+import life.mygig.clauderc.ui.vm.choosesSignIn
+import life.mygig.clauderc.ui.vm.grokSignInStillWaiting
 import life.mygig.clauderc.ui.vm.usesApiKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -33,8 +37,31 @@ class TeamModelsTest {
     }
 
     @Test fun apiKeyKinds() {
-        for (k in listOf("gemini", "grok")) assertTrue(k, usesApiKey(k))
-        for (k in listOf("claude", "codex", "", "other")) assertFalse(k, usesApiKey(k))
+        assertTrue(usesApiKey("gemini"))
+        for (k in listOf("grok", "claude", "codex", "", "other")) assertFalse(k, usesApiKey(k))
+    }
+
+    @Test fun onlyGrokChoosesHowToSignIn() {
+        assertTrue(choosesSignIn("grok"))
+        for (k in listOf("gemini", "claude", "codex", "", "other")) assertFalse(k, choosesSignIn(k))
+    }
+
+    @Test fun parsesGrokSignInStart() {
+        val d = json.decodeFromString<LoginUrl>("""{"url":"https://accounts.x.ai/oauth2/device?user_code=QJPW-MG9J","code":"QJPW-MG9J","session":"worker-login-g"}""")
+        assertEquals("QJPW-MG9J", d.code)
+        assertFalse(d.pasteUrl)
+    }
+
+    @Test fun otherSignInStartsHaveNoCode() {
+        assertNull(json.decodeFromString<LoginUrl>("""{"url":"https://claude.ai/x","session":"worker-login-c"}""").code)
+        val codex = json.decodeFromString<LoginUrl>("""{"url":"https://auth.openai.com/x","paste_url":true,"session":"worker-login-g"}""")
+        assertNull(codex.code)
+        assertTrue(codex.pasteUrl)
+    }
+
+    @Test fun grokSignInKeepsWaitingOnlyWhenItCan() {
+        for (c in listOf(Codes.LOGIN_PENDING, Codes.NETWORK, Codes.TIMEOUT)) assertTrue(c, grokSignInStillWaiting(c))
+        for (c in listOf("login_failed", Codes.INTERNAL, Codes.AUTH_FAILED, Codes.FORBIDDEN)) assertFalse(c, grokSignInStillWaiting(c))
     }
 
     @Test fun workerNameRule() {

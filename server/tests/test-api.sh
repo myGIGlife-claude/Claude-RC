@@ -1153,7 +1153,7 @@ grep -q '^FAIL: ' "$WORK/evout/ts-tsconfig.without.1.result" && [[ "$(cat "$WORK
 echo "team workers"
 for bad in "worker-add" "worker-add ../x" "worker-add -x" "worker-add .x" "worker-add a b" "worker-set a" \
   "worker-set a color" "worker-remove" "worker-remove a/b" "worker-list extra" "worker-runs" "worker-login-start" \
-  "worker-login-code a b" "worker-add a other" "worker-add a codex x"; do
+  "worker-login-code a b" "worker-login-cancel" "worker-login-cancel a/b" "worker-add a other" "worker-add a codex x"; do
   api "$bad"
   check "runner rejects: $bad" "$(jqt '.ok == false')"
 done
@@ -1198,10 +1198,8 @@ api "worker-list"
 check "grok listed, not signed in" "$(jqt '.data.workers[] | select(.name=="gro") | .kind=="grok" and .signed_in==false')"
 api "cluster"
 check "cluster lists grok without usage" "$(jqt '.data.accounts[] | select(.name=="gro") | .kind=="grok" and .usage==null')"
-api "worker-login-start gro"
-check "grok has no browser sign-in" "$(jqt '.ok == false and (.error.message // .message // "" | contains("API key"))')"
-api "worker-login-code gro" "x"
-check "grok has no sign-in code" "$(jqt '.ok == false')"
+api "worker-login-code gro"
+check "grok: nothing to wait for without a started sign-in" "$(jqt '.ok == false and .error.code == "login_failed"')"
 api "worker-set-key gro" "short"
 check "short xAI key refused" "$(jqt '.ok == false')"
 api "worker-set-key gro" 'xai-DemoDemo;DemoDemo'
@@ -1217,6 +1215,8 @@ touch "$STUB_STATE/grok-install-fail"
 api "worker-set-key gro" "xai-GrokDemoDemoDemoDemo1234567890"
 check "install failure is reported" "$(jqt '.ok == false and (tostring | contains("Grok CLI"))')"
 [[ ! -e "$GROK_KEY_FILE" ]]; check "no key saved when the CLI can't be installed" $?
+api "worker-login-start gro"
+check "account sign-in reports a failed install too" "$(jqt '.ok == false and (tostring | contains("Grok CLI"))')"
 rm "$STUB_STATE/grok-install-fail"
 OLD_ANTHROPIC="${ANTHROPIC_API_KEY:-}"; export ANTHROPIC_API_KEY=main-key-should-not-reach-the-installer
 api "worker-set-key gro" "xai-GrokDemoDemoDemoDemo1234567890"
@@ -1236,6 +1236,65 @@ check "a grok that won't run is reported" "$(jqt '.ok == false')"
 [[ "$(cat "$GROK_KEY_FILE")" == xai-GrokDemoDemoDemoDemo1234567890 ]]; check "old grok key kept" $?
 rm "$STUB_STATE/grok-version-fail"
 PATH="$OLD_PATH"
+echo "grok account sign-in"
+export CLAUDERC_GROK_LOGIN_WAIT=1   # a "still waiting" answer in 1 s, not 120
+api "worker-add acc grok" "Grok account"
+ACC_AUTH="$HOME/.config/claude-launcher/workers/acc/home/.grok/auth.json"
+echo "ZZ9Y-8X7W" >"$STUB_STATE/grok-login-code"
+api "worker-login-start acc"
+check "start gives the link, the code and the session" "$(jqt '.ok and .data.url == "https://accounts.x.ai/oauth2/device?user_code=ZZ9Y-8X7W" and .data.code == "ZZ9Y-8X7W" and .data.session == "worker-login-acc"')"
+api "worker-login-code acc"
+check "not approved yet = the retryable answer" "$(jqt '.ok == false and .error.code == "login_pending"')"
+tmux has-session -t "=worker-login-acc" 2>/dev/null; check "waiting leaves the sign-in running" $?
+api "worker-list"
+check "not signed in before approval" "$(jqt '.data.workers[] | select(.name=="acc") | .signed_in == false')"
+touch "$STUB_STATE/grok-login-approve"
+sleep 0.5
+api "worker-login-code acc"
+check "signed in after approval" "$(jqt '.ok and .data.logged_in')"
+[[ "$(stat -c %a "$ACC_AUTH")" == 600 ]]; check "the login is in the worker's home, mode 600" $?
+[[ ! -e "$HOME/.grok/auth.json" ]]; check "the owner's own Grok login is not touched" $?
+api "worker-login-code acc"
+check "a retry after a lost connection gets the same answer" "$(jqt '.ok and .data.logged_in')"
+api "worker-login-cancel acc"
+tmux has-session -t "=worker-login-acc" 2>/dev/null; [[ $? -ne 0 ]]; check "login session ended after the answer was read" $?
+[[ -s "$ACC_AUTH" ]]; check "ending the session keeps the login" $?
+[[ ! -e "$HOME/.config/claude-launcher/workers/acc/home/xai-api-key" ]]; check "no key involved" $?
+api "worker-list"
+check "signed in with only the account login" "$(jqt '.data.workers[] | select(.name=="acc") | .signed_in')"
+rm "$STUB_STATE/grok-login-approve" "$STUB_STATE/grok-login-code"
+# A key or an older login must not count as this sign-in being finished.
+api "worker-login-start gro"
+api "worker-login-code gro"
+check "a worker with a key still waits for the approval" "$(jqt '.ok == false and .error.code == "login_pending"')"
+api "worker-login-cancel gro"
+check "cancel answers" "$(jqt '.ok and .data.cancelled')"
+tmux has-session -t "=worker-login-gro" 2>/dev/null; [[ $? -ne 0 ]]; check "cancel ends the login session" $?
+api "worker-login-code gro"
+check "waiting after a cancel is a real failure" "$(jqt '.ok == false and .error.code == "login_failed"')"
+api "worker-list"
+check "cancelling keeps the key" "$(jqt '.data.workers[] | select(.name=="gro") | .signed_in')"
+api "worker-login-start acc"
+api "worker-login-code acc"
+check "re-sign-in waits although a login exists" "$(jqt '.ok == false and .error.code == "login_pending"')"
+touch "$STUB_STATE/grok-login-deny"; sleep 0.5
+api "worker-login-code acc"
+check "a refused sign-in is a real failure with the pane" "$(jqt '.ok == false and .error.code == "login_failed" and (.error.pane | contains("denied"))')"
+api "worker-login-code acc"
+check "a refused sign-in stays refused on a retry" "$(jqt '.ok == false and .error.code == "login_failed"')"
+[[ -s "$ACC_AUTH" ]]; check "a refused re-sign-in keeps the old login" $?
+rm "$STUB_STATE/grok-login-deny"
+api "worker-add acc2 grok" "No login file"
+api "worker-login-start acc2"
+touch "$STUB_STATE/grok-login-nofile"; sleep 0.5
+api "worker-login-code acc2"
+check "exit 0 without a login file is not success" "$(jqt '.ok == false and .error.code == "login_failed" and (.error.message | contains(".grok/auth.json"))')"
+rm "$STUB_STATE/grok-login-nofile"
+api "worker-remove acc2"
+api "worker-login-start acc"
+api "worker-remove acc"
+tmux has-session -t "=worker-login-acc" 2>/dev/null; [[ $? -ne 0 ]]; check "removing a worker ends its sign-in" $?
+unset CLAUDERC_GROK_LOGIN_WAIT
 api "worker-remove gro"; api "worker-remove gpt"; api "worker-remove gem"
 api "worker-list"
 check "no workers yet" "$(jqt '.ok and (.data.workers | length == 0)')"

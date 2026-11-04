@@ -192,6 +192,11 @@ for name, signed in (("gro", True), ("gro2", False)):
 attach(tmp, {**json.loads((cfg.parent / "attach" / (re.sub(r"[^A-Za-z0-9]", "-", str(tmp.resolve())) + ".json")).read_text()), "gro": {}, "gro2": {}})
 ws = {w["name"]: w for w in json.loads(tool("list_workers")[1])}
 assert ws["gro"]["kind"] == "grok" and ws["gro"]["signed_in"] and ws["gro2"]["signed_in"] is False and "five_hour_pct" not in ws["gro"], ws
+(cfg / "gro2" / "home" / ".grok").mkdir(); (cfg / "gro2" / "home" / ".grok" / "auth.json").write_text("")
+assert not {w["name"]: w for w in json.loads(tool("list_workers")[1])}["gro2"]["signed_in"], "an empty login file is not a login"
+(cfg / "gro2" / "home" / ".grok" / "auth.json").write_text('{"stub":"account"}\n')
+assert {w["name"]: w for w in json.loads(tool("list_workers")[1])}["gro2"]["signed_in"], "a Grok account login without a key counts"
+(cfg / "gro2" / "home" / ".grok" / "auth.json").unlink()
 err, text = tool("delegate", worker="gro2", task="x")
 assert err and "sign" in text.lower(), text
 err, text = tool("delegate", worker="gro", task="x")
@@ -788,6 +793,21 @@ assert ns["parse_output"]("gemini", '{"response":"g"}') == {"result": "g", "sess
 
 grok_w = tmp / "sbxworkers" / "g1"; (grok_w / "home").mkdir(parents=True); (grok_w / "tasks").mkdir()
 grok_key = grok_w / "home" / "xai-api-key"; grok_key.write_text("xai-SECRETKEY\n")
+# Which login a run uses (runs GROK_SH directly, so this holds where bubblewrap is unusable too).
+gl_home = tmp / "groklogin"; gl_state = tmp / "groklogin-state"; gl_home.mkdir(); gl_state.mkdir()
+def grok_login_run():
+    r = subprocess.run(["sh", "-c", ns["GROK_SH"], "grok-run", str(gl_home / "xai-api-key"), str(HERE / "stubs" / "grok"), "--output-format", "json"], input="hello", capture_output=True, text=True, timeout=30,
+                       env={"PATH": os.environ["PATH"], "HOME": str(gl_home), "STUB_STATE": str(gl_state)})
+    return r, (gl_state / "grok-env").read_text() if r.returncode == 0 else ""
+(gl_home / "xai-api-key").write_text("xai-ONLYKEY\n")
+r, e = grok_login_run(); assert r.returncode == 0 and "key=set(11)" in e, (r, e)
+(gl_home / ".grok").mkdir(); (gl_home / ".grok" / "auth.json").write_text('{"stub":"account"}\n')
+r, e = grok_login_run(); assert r.returncode == 0 and "key=unset" in e, ("both: the account wins, the key stays out", r, e)
+(gl_home / "xai-api-key").unlink()
+r, e = grok_login_run(); assert r.returncode == 0 and "key=unset" in e and "prompt=hello" in r.stdout, ("account only", r, e)
+(gl_home / ".grok" / "auth.json").write_text("")
+r, e = grok_login_run(); assert r.returncode != 0, ("neither: refused, as before", r, e)
+
 # The installer's layout: the real binary under ~/.grok/downloads, a link in ~/.local/bin, and the owner's own Grok login beside it.
 grok_dl = sbx_home / ".grok" / "downloads" / "v1"; grok_dl.mkdir(parents=True)
 (grok_dl / "grok").write_text((HERE / "stubs" / "grok").read_text()); (grok_dl / "grok").chmod(0o755)
@@ -804,7 +824,7 @@ assert ns["grok_run"](grok_key)[-1] == "--no-auto-update", "no model, no resume:
 j = " ".join(g_argv + g_run)
 assert "xai-SECRETKEY" not in j and "XAI_API_KEY " not in j, "the key is never in argv"
 assert f"--ro-bind {grok_dl} {grok_dl}" in j, "the binary's own folder is mounted read-only"
-assert f"--ro-bind {sbx_home / '.grok'} " not in j and f"--ro-bind {sbx_home / '.grok' / 'bin'} " not in j and "auth.json" not in j, "nothing else of the owner's ~/.grok"
+assert f"--ro-bind {sbx_home / '.grok'} " not in j and f"--ro-bind {sbx_home / '.grok' / 'bin'} " not in j and "auth.json" not in " ".join(g_argv), "nothing else of the owner's ~/.grok"
 assert f"--setenv HOME {grok_w / 'home'}" in j and "--clearenv" in g_argv, "its own home, nothing inherited"
 # A binary directly in ~/.grok must not bring the folder in with it.
 (sbx_home / ".grok" / "grok").write_text("#!/bin/sh\n"); (sbx_home / ".grok" / "grok").chmod(0o755); ns["CLIS"]["grok"] = str(sbx_home / ".grok" / "grok")
