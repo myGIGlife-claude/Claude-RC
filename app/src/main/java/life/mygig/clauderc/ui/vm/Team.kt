@@ -20,11 +20,23 @@ import life.mygig.clauderc.api.WorkerRun
 import life.mygig.clauderc.data.Server
 import life.mygig.clauderc.data.SettingsStore
 
-/** Worker kinds that can only sign in with a pasted API key. */
-fun usesApiKey(kind: String): Boolean = kind == "gemini"
+/** Worker kinds that choose between their account (Grok: device code, Gemini: Google and a pasted code) and a pasted API key. */
+fun choosesSignIn(kind: String): Boolean = kind == "grok" || kind == "gemini"
 
-/** Worker kinds that choose between their account (device code) and a pasted API key. */
-fun choosesSignIn(kind: String): Boolean = kind == "grok"
+/** The chooser's and the add dialog's name for a kind's account. */
+fun accountName(kind: String): String = if (kind == "gemini") "your Google account" else "your Grok account"
+
+/** What the account card shows: which login the worker's runs use, when the server says. */
+fun authLabel(kind: String, auth: String): String = when {
+    auth == "key" && choosesSignIn(kind) -> "API key"
+    auth == "account" && kind == "gemini" -> "Google account"
+    auth == "account" && kind == "grok" -> "Grok account"
+    else -> ""
+}
+
+/** Same rule as the server's: anything else can't be the code from Google's page. */
+private val GOOGLE_CODE_RE = Regex("^[A-Za-z0-9/_.~=+#-]{8,512}$")
+fun googleCodeLooksRight(code: String): Boolean = GOOGLE_CODE_RE.matches(code)
 
 /** The server is still waiting for the browser, or the phone lost the connection meanwhile (it often does while the browser is in front): ask again. */
 fun grokSignInStillWaiting(code: String): Boolean = code == Codes.LOGIN_PENDING || code == Codes.NETWORK || code == Codes.TIMEOUT
@@ -141,18 +153,37 @@ class TeamController(
     data class WorkerKeyAsk(val name: String, val kind: String)
     private val _workerKey = MutableStateFlow<WorkerKeyAsk?>(null)
     val workerKey = _workerKey.asStateFlow()
-    /** A Grok worker choosing how to sign in: its account or an API key. */
-    private val _workerSignInChoice = MutableStateFlow<String?>(null)
+    /** A Grok or Gemini worker choosing how to sign in: its account or an API key. */
+    data class WorkerSignInChoice(val name: String, val kind: String)
+    private val _workerSignInChoice = MutableStateFlow<WorkerSignInChoice?>(null)
     val workerSignInChoice = _workerSignInChoice.asStateFlow()
     fun closeWorkerSignInChoice() { _workerSignInChoice.value = null }
-    fun useGrokKey(name: String) {
+    fun useApiKey(choice: WorkerSignInChoice) {
         _workerSignInChoice.value = null
-        _workerKey.value = WorkerKeyAsk(name, "grok")
+        _workerKey.value = WorkerKeyAsk(choice.name, choice.kind)
+    }
+    fun startAccountSignIn(choice: WorkerSignInChoice) {
+        if (choice.kind == "gemini") startGoogleSignIn(choice.name) else startGrokAccountSignIn(choice.name)
+    }
+    /** Why the last pasted code was refused, shown in the dialog: the sign-in is still open, so the user can fix it and try again. */
+    private val _workerLoginError = MutableStateFlow("")
+    val workerLoginError = _workerLoginError.asStateFlow()
+    private fun startGoogleSignIn(name: String) = tools.action("Starting Google sign-in for $name…") {
+        _workerSignInChoice.value = null
+        _workerLoginError.value = ""
+        _workerLogin.value = name to api.workerAccountLoginStart(name)
+    }
+    fun submitGoogleCode(name: String, code: String) = tools.action("Checking code…", onError = { e -> _workerLoginError.value = e.message }) {
+        _workerLoginError.value = ""
+        api.workerLoginCode(name, code)
+        _workerLogin.value = null
+        tools.say("$name is signed in with Google.")
+        _cluster.value = clusterGroups()
     }
     private var grokSignInWait: Job? = null
-    fun startGrokAccountSignIn(name: String) = tools.action("Starting Grok sign-in for $name…") {
+    private fun startGrokAccountSignIn(name: String) = tools.action("Starting Grok sign-in for $name…") {
         _workerSignInChoice.value = null
-        _workerLogin.value = name to api.workerGrokLoginStart(name)
+        _workerLogin.value = name to api.workerAccountLoginStart(name)
         waitForGrokSignIn(name)
     }
     /** Not a spinner action: the screen stays usable, and the dialog closes itself when the browser step is done. */
@@ -200,8 +231,7 @@ class TeamController(
     }
     private suspend fun beginSignIn(name: String, kind: String) {
         when {
-            choosesSignIn(kind) -> _workerSignInChoice.value = name
-            usesApiKey(kind) -> _workerKey.value = WorkerKeyAsk(name, kind)
+            choosesSignIn(kind) -> _workerSignInChoice.value = WorkerSignInChoice(name, kind)
             else -> _workerLogin.value = name to api.workerLoginStart(name)
         }
     }
@@ -223,8 +253,9 @@ class TeamController(
     fun closeWorkerLogin() {
         val open = _workerLogin.value
         _workerLogin.value = null
-        if (open?.second?.code == null) return
-        // A device code waiting on the server: end it, so nothing can still be approved after Cancel.
+        _workerLoginError.value = ""
+        if (open == null || (open.second.code == null && !open.second.pasteCode)) return
+        // A device code or Gemini's CLI waiting on the server: end it, so nothing can still be approved after Cancel.
         grokSignInWait?.cancel()
         tools.scope.launch { try { api.workerLoginCancel(open.first) } catch (_: ApiException) { } }
     }
@@ -238,6 +269,7 @@ class TeamController(
         _clusterOffer.value = null
         grokSignInWait?.cancel()   // its calls would now reach the new server
         _workerLogin.value = null
+        _workerLoginError.value = ""
         _workerSignInChoice.value = null
         _workerKey.value = null   // a key typed after switching servers must not go to the new server's worker
         _workerRuns.value = null

@@ -1174,8 +1174,6 @@ api "worker-login-code gpt" "http://localhost:1455/auth/callback?code=good&state
 check "codex login finishes after the pasted address" "$(jqt '.ok and .data.logged_in')"
 api "worker-list"
 check "codex worker signed in" "$(jqt '.data.workers[] | select(.name=="gpt") | .signed_in')"
-api "worker-login-start gem"
-check "gemini has no browser sign-in" "$(jqt '.ok == false')"
 api "worker-set-key gpt" "AIzaSyDemoDemoDemoDemoDemo1234567890"
 check "key refused for a non-Gemini worker" "$(jqt '.ok == false')"
 api "worker-set-key gem" "AQ.Ab8RNDemoDemoDemoDemoDemo-1234567890_x"
@@ -1186,9 +1184,81 @@ mkdir -p "$HOME/.config/claude-launcher/workers/gem/home/.gemini"; echo '{"x":1}
 api "worker-set-key gem" "AIzaSyDemoDemoDemoDemoDemo1234567890"
 check "gemini API key saved" "$(jqt '.ok and .data.saved == "gem"')"
 [[ "$(stat -c %a "$HOME/.config/claude-launcher/workers/gem/home/gemini-api-key")" == 600 ]]; check "key file is mode 600" $?
-[[ ! -e "$HOME/.config/claude-launcher/workers/gem/home/.gemini/oauth_creds.json" ]]; check "old Google login removed" $?
+[[ -s "$HOME/.config/claude-launcher/workers/gem/home/.gemini/oauth_creds.json" ]]; check "saving a key keeps the Google login" $?
 api "worker-list"
-check "gemini worker signed in with the key" "$(jqt '.data.workers[] | select(.name=="gem") | .signed_in')"
+check "gemini worker signed in, the account wins" "$(jqt '.data.workers[] | select(.name=="gem") | .signed_in and .auth == "account"')"
+rm "$HOME/.config/claude-launcher/workers/gem/home/.gemini/oauth_creds.json"
+api "worker-set-key gem" "AIzaSyDemoDemoDemoDemoDemo1234567890"
+check "gemini key saved again" "$(jqt '.ok')"
+[[ "$(jq -r .security.auth.selectedType "$HOME/.config/claude-launcher/workers/gem/home/.gemini/settings.json")" == gemini-api-key ]]; check "with only a key, the settings pick the key" $?
+api "worker-list"
+check "gemini worker signed in with the key" "$(jqt '.data.workers[] | select(.name=="gem") | .signed_in and .auth == "key"')"
+check "other kinds have no auth field" "$(jqt '.data.workers[] | select(.name=="gpt") | has("auth") | not')"
+api "cluster"
+check "cluster says which login a gemini worker uses" "$(jqt '.data.accounts[] | select(.name=="gem") | .auth == "key"')"
+# A link planted in the worker's folder (it can write there) must not aim the settings at another file.
+GEM_HOME="$HOME/.config/claude-launcher/workers/gem/home"
+echo owner >"$STUB_STATE/owner-file"; rm -f "$GEM_HOME/.gemini/settings.json"; ln -s "$STUB_STATE/owner-file" "$GEM_HOME/.gemini/settings.json"
+api "worker-set-key gem" "AIzaSyDemoDemoDemoDemoDemo1234567890"
+[[ "$(cat "$STUB_STATE/owner-file")" == owner && ! -L "$GEM_HOME/.gemini/settings.json" ]]; check "a planted settings link is replaced, not followed" $?
+echo "gemini account sign-in"
+api "worker-add gac gemini" "Gemini account"
+GAC="$HOME/.config/claude-launcher/workers/gac/home"
+api "worker-login-code gac" "4/some-code-1234"
+check "no started sign-in: a clear failure" "$(jqt '.ok == false and .error.code == "login_failed"')"
+export GEMINI_API_KEY=owner-key-should-not-reach-the-login
+api "worker-login-start gac"
+unset GEMINI_API_KEY
+check "start gives Google's link and asks for the code" "$(jqt '.ok and (.data.url | startswith("https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=https%3A%2F%2Fcodeassist.google.com")) and .data.paste_code and .data.session == "worker-login-gac"')"
+grep -qx "home=$GAC/.gemini-signin HOME=$GAC/.gemini-signin nobrowser=true key=unset auth=oauth-personal cwd=$GAC/.gemini-signin args=--skip-trust" "$STUB_STATE/gemini-login-env"; check "the CLI runs interactively, in its own folder, no browser, no key" $?
+api "worker-list"
+check "not signed in before the code" "$(jqt '.data.workers[] | select(.name=="gac") | .signed_in == false and (has("auth") | not)')"
+api "worker-login-code gac" "x"
+check "a code that can't be right is refused at once" "$(jqt '.ok == false and .error.code == "invalid_name"')"
+api "worker-login-code gac" 'bad code;$(id)'
+check "odd characters in a code are refused" "$(jqt '.ok == false and .error.code == "invalid_name"')"
+api "worker-login-code gac" "4/WRONG-gemini-code"
+check "a wrong code is a retryable failure" "$(jqt '.ok == false and .error.code == "login_failed" and (.error.message | contains("code didn"))')"
+check "the code is not repeated back" "$(jqt 'tostring | contains("WRONG") | not')"
+tmux has-session -t "=worker-login-gac" 2>/dev/null; check "a wrong code leaves the sign-in running" $?
+api "worker-login-code gac" "4/WRONG-again-code"
+check "a second wrong code is noticed too" "$(jqt '.ok == false and .error.code == "login_failed"')"
+api "worker-login-code gac" "4/GOOD-gemini-code"
+check "the right code signs in" "$(jqt '.ok and .data.logged_in')"
+[[ "$(stat -c %a "$GAC/.gemini/oauth_creds.json")" == 600 ]]; check "the login is in the worker's home, mode 600" $?
+[[ -s "$GAC/.gemini/google_accounts.json" && ! -e "$GAC/.gemini-signin" ]]; check "the sign-in folder is gone" $?
+[[ "$(jq -r .security.auth.selectedType "$GAC/.gemini/settings.json")" == oauth-personal ]]; check "the settings pick the account" $?
+tmux has-session -t "=worker-login-gac" 2>/dev/null; [[ $? -ne 0 ]]; check "the sign-in session ended" $?
+[[ ! -e "$HOME/.gemini/oauth_creds.json" ]]; check "the owner's own Gemini login is not touched" $?
+api "worker-list"
+check "signed in with only the Google login" "$(jqt '.data.workers[] | select(.name=="gac") | .signed_in and .auth == "account"')"
+api "cluster"
+check "cluster says account" "$(jqt '.data.accounts[] | select(.name=="gac") | .auth == "account" and .signed_in')"
+api "worker-set-key gac" "AIzaSyDemoDemoDemoDemoDemo1234567890"
+check "a key can be added to it" "$(jqt '.ok')"
+[[ -s "$GAC/.gemini/oauth_creds.json" && "$(jq -r .security.auth.selectedType "$GAC/.gemini/settings.json")" == oauth-personal ]]; check "the new key leaves the account login and its setting alone" $?
+# Signing in again: a login already in use shows no link in the real CLI, so it mustn't be in the sign-in's folder, and it stays until a new one arrives.
+OLD_CREDS="$(cat "$GAC/.gemini/oauth_creds.json")"
+api "worker-login-start gac"
+check "re-sign-in still gets a link" "$(jqt '.ok and .data.paste_code')"
+[[ ! -e "$GAC/.gemini-signin/.gemini/oauth_creds.json" && "$(cat "$GAC/.gemini/oauth_creds.json")" == "$OLD_CREDS" ]]; check "the old login stays while signing in again" $?
+api "worker-login-cancel gac"
+check "cancel answers" "$(jqt '.ok and .data.cancelled')"
+tmux has-session -t "=worker-login-gac" 2>/dev/null; [[ $? -ne 0 ]]; check "cancel ends the session" $?
+[[ ! -e "$GAC/.gemini-signin" && -s "$GAC/.gemini/oauth_creds.json" ]]; check "cancel cleans up and keeps the login" $?
+api "worker-login-code gac" "4/GOOD-gemini-code"
+check "a code after a cancel is a real failure" "$(jqt '.ok == false and .error.code == "login_failed"')"
+# The CLI gives up after a wrong code: the session goes, only a new start helps.
+touch "$STUB_STATE/gemini-login-giveup"
+api "worker-add gac2 gemini" "Gives up"
+api "worker-login-start gac2"
+api "worker-login-code gac2" "4/WRONG-gemini-code"
+check "the CLI gave up: same plain answer" "$(jqt '.ok == false and .error.code == "login_failed"')"
+tmux has-session -t "=worker-login-gac2" 2>/dev/null; [[ $? -ne 0 ]]; check "its session is ended" $?
+api "worker-list"
+check "still not signed in" "$(jqt '.data.workers[] | select(.name=="gac2") | .signed_in == false')"
+rm "$STUB_STATE/gemini-login-giveup"
+api "worker-remove gac"; api "worker-remove gac2"   # the later tests count workers
 grep -q "AIzaSyDemo" "$HOME/.local/state/claude-launcher/api.log" 2>/dev/null; [[ $? -ne 0 ]]; check "key is not in the api log" $?
 echo "grok workers"
 api "worker-add gro grok" "Grok opinion"

@@ -173,13 +173,69 @@ err, text = tool("wait", task_id=tid, timeout_s=30)
 assert err and "stub codex failure" in text, text
 err, tid = tool("delegate", worker="gem", task="ask gemini")
 err, text = tool("wait", task_id=tid, timeout_s=30)
-assert not err and "key=AIzaKEY" in text and "ask gemini" in text and "--approval-mode auto_edit" in text, text
+assert not err and "key=AIzaKEY" in text and "auth=gemini-api-key" in text and "ask gemini" in text and "--approval-mode auto_edit" in text, text
+assert "AIzaKEY" not in (tmp / "stub" / "gemini-args").read_text(), "never in argv"
 err, tid = tool("reply", task_id=tid, message="and more")
 err, text = tool("wait", task_id=tid, timeout_s=30)
 assert not err and "and more" in text, text                                  # reply = a new run (gemini has no session ids)
 err, tid = tool("delegate", worker="gem", task="please FAIL")
 err, text = tool("wait", task_id=tid, timeout_s=30)
 assert err and "stub gemini failure" in text, text
+# A Google account login wins over the key, and the settings say so before the run. Other settings stay.
+gem_home = cfg / "gem" / "home"
+(gem_home / ".gemini").mkdir(exist_ok=True)
+(gem_home / ".gemini" / "settings.json").write_text('{"model":{"name":"m"},"security":{"auth":{"selectedType":"gemini-api-key","x":1}}}')
+(gem_home / ".gemini" / "oauth_creds.json").write_text('{"refresh_token":"stub"}')
+err, tid = tool("delegate", worker="gem", task="with the account")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "key=unset" in text and "auth=oauth-personal" in text, text
+assert (tmp / "stub" / "gemini-env").read_text().strip().endswith("key=unset auth=oauth-personal")
+assert json.loads((gem_home / ".gemini" / "settings.json").read_text()) == {"model": {"name": "m"}, "security": {"auth": {"selectedType": "oauth-personal", "x": 1}}}
+err, tid = tool("delegate", worker="gem", task="STUB_EXPIRED please")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert err and "Google sign-in expired" in text and "Claude tab" in text and "non-interactive" not in text, text
+# Only the Google login, no key: signed in, and it runs.
+(cfg / "gem3" / "home" / ".gemini").mkdir(parents=True); (cfg / "gem3" / "tasks").mkdir()
+(cfg / "gem3" / "meta.json").write_text(json.dumps({"role": "account only", "mode": "acceptEdits", "kind": "gemini"}))
+(cfg / "gem3" / "home" / ".gemini" / "oauth_creds.json").write_text('{"refresh_token":"stub"}')
+attach(tmp, {**json.loads((cfg.parent / "attach" / (re.sub(r"[^A-Za-z0-9]", "-", str(tmp.resolve())) + ".json")).read_text()), "gem3": {}})
+assert {w["name"]: w for w in json.loads(tool("list_workers")[1])}["gem3"]["signed_in"], "a Google login without a key counts"
+err, tid = tool("delegate", worker="gem3", task="account only")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "key=unset" in text and "auth=oauth-personal" in text, text
+(cfg / "gem3" / "home" / ".gemini" / "oauth_creds.json").write_text("")
+assert not {w["name"]: w for w in json.loads(tool("list_workers")[1])}["gem3"]["signed_in"], "an empty login file is not a login"
+# The planted-link case: the worker can write its home, this code runs as the owner.
+owner_cfg = tmp / "owner-gemini"; owner_cfg.mkdir(); (owner_cfg / "settings.json").write_text("owner\n")
+(gem_home / ".gemini" / "oauth_creds.json").unlink()
+(gem_home / ".gemini" / "settings.json").unlink(); (gem_home / ".gemini" / "settings.json").symlink_to(owner_cfg / "settings.json")
+err, tid = tool("delegate", worker="gem", task="after a planted file link")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "auth=gemini-api-key" in text and (owner_cfg / "settings.json").read_text() == "owner\n" and not (gem_home / ".gemini" / "settings.json").is_symlink(), text
+(gem_home / ".gemini").rename(gem_home / ".gemini-keep"); (gem_home / ".gemini").symlink_to(owner_cfg)
+err, tid = tool("delegate", worker="gem", task="after a planted folder link")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "auth=gemini-api-key" in text and (owner_cfg / "settings.json").read_text() == "owner\n" and not (gem_home / ".gemini").is_symlink(), text
+# Errors the CLI would retry for minutes end the run at once, with a plain message; the stub would sleep 5 minutes.
+for task, want in (("STUB_QUOTA now", "daily quota is used up"), ("STUB_OVERLOAD now", "overloaded right now")):
+    began = time.time()
+    err, tid = tool("delegate", worker="gem", task=task)
+    while True:
+        err, text = tool("wait", task_id=tid, timeout_s=30)
+        if not text.startswith(("Still running", "Queued")):
+            break
+    assert err and want in text and time.time() - began < 30, (task, text, time.time() - began)
+    # The CLI itself is gone, not only the wrapper: `timeout` keeps it in a process group of its own.
+    stat_file = Path("/proc", (tmp / "stub" / "gemini-pid").read_text().strip(), "stat")
+    assert not stat_file.exists() or stat_file.read_text().rsplit(")", 1)[1].split()[0] == "Z", "the CLI outlived the run"
+assert not list((cfg / "gem" / "tasks").glob("*.fatal")), "the marker is cleaned up"
+err, tid = tool("delegate", worker="gem", task="STUB_TWO_503 then an answer")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "STUB_TWO_503" in text, text
+# An answer that merely talks about these errors is an answer.
+err, tid = tool("delegate", worker="gem", task="explain TerminalQuotaError")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "explain TerminalQuotaError" in text, text
 err, tid = tool("delegate", role="second opinion", task="by role")
 assert not err, tid
 tool("wait", task_id=tid, timeout_s=30)
@@ -674,6 +730,25 @@ tool("wait", task_id=a1, timeout_s=30); tool("wait", task_id=a2, timeout_s=30); 
 # The slot wrapper on its own: it runs the command with its arguments and exit code, and lets go of its slot.
 import runpy
 ns = runpy.run_path(str(HERE.parent / "clauderc-team"), run_name="not_main")
+# Gemini: what stops a run, and what it says.
+stop, gerr = ns["gemini_stop_reason"], ns["gemini_error"]
+QUOTA, OVER, LOGIN = ns["GEMINI_QUOTA_MSG"], ns["GEMINI_503_MSG"], ns["GEMINI_LOGIN_MSG"]
+for line in ("TerminalQuotaError: x", "You have exhausted your daily quota on this model.", "Quota exceeded for metric: generativelanguage.googleapis.com/x"):
+    assert stop(line) == QUOTA, line
+assert stop("") is None and stop("Attempt 1 failed with status 429") is None and stop("all fine") is None
+two = "Attempt 1 failed with status 503\nAttempt 2 failed with status 503\n"
+assert stop(two) is None and stop(two + "Attempt 3 failed with status 503\n") == OVER
+assert stop(two + "Attempt 3 failed with status 503\nTerminalQuotaError") == QUOTA, "the one that won't pass by itself comes first"
+assert gerr("Manual authorization is required but the current session is non-interactive") == LOGIN and gerr("TerminalQuotaError") == QUOTA and gerr("something else") is None
+assert "Google account sign-in" in QUOTA and "another worker" in OVER and "Claude tab" in LOGIN
+vis = ns["gemini_visible_output"]
+assert vis('{"response":"about TerminalQuotaError"}') == "" and vis('{"error":{"message":"TerminalQuotaError"}}') != "" and vis("TerminalQuotaError raw") != ""
+# The key wrapper: from the file into the environment, with nothing in argv.
+gk = tmp / "gemkey"; gk.mkdir(); (gk / "k").write_text("AIzaFILEKEY\n")
+r = subprocess.run(["sh", "-c", ns["GEMINI_KEY_SH"], "gemini-run", str(gk / "k"), "sh", "-c", 'printf "%s|%s" "$GEMINI_API_KEY" "$(cat)"'], input="prompt", capture_output=True, text=True, timeout=30)
+assert r.stdout == "AIzaFILEKEY|prompt", r
+r = subprocess.run(["sh", "-c", ns["GEMINI_KEY_SH"], "gemini-run", str(gk / "missing"), "sh", "-c", "echo ran"], capture_output=True, text=True, timeout=30)
+assert r.returncode != 0 and "ran" not in r.stdout, r
 lk = tmp / "slots"; lk.mkdir()
 slot = lambda tag, *cmd: ["sh", "-c", ns["SLOT_SH"], "slot", str(lk / "run.lock"), "3", str(lk / f"{tag}.started"), str(lk / "none.json"), "1000", ns["TOKEN_LEFT_PY"], *cmd]
 r = subprocess.run(slot("args", "sh", "-c", 'echo "$1 $2"; exit 4', "x", "a b", "c"), capture_output=True, text=True, timeout=10)
