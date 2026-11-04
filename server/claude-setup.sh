@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id), 50 = grok worker kind
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id), 50 = grok worker kind, 51 = grok account sign-in (device code; worker-login-cancel)
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=50
+SCRIPT_API=51
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 CLAUDERC_API="${CLAUDERC_API:-https://api.github.com}"
@@ -168,13 +168,14 @@ creds_ok() { jq -e '(.claudeAiOauth.accessToken // empty) | strings | length > 0
 
 # Workers can be other CLIs: kind is claude (default), codex (ChatGPT), gemini or grok. Each is signed in under its own home folder.
 WORKER_KINDS=" claude codex gemini grok "
+GROK_AUTH_FILE=".grok/auth.json"   # unverified: the name comes from xAI's installer notes; `grok login` keeps its login under $HOME/.grok
 worker_kind() { jq -r '.kind // "claude"' "$1/meta.json" 2>/dev/null || echo claude; }
 # worker_signed <worker dir>: its login file has something in it.
 worker_signed() {
   case "$(worker_kind "$1")" in
     codex) jq -e 'length > 0' "$1/home/auth.json" >/dev/null 2>&1 ;;
     gemini) [[ -s "$1/home/gemini-api-key" ]] ;;   # Google ended personal-account sign-in for the Gemini CLI: it uses an API key
-    grok) [[ -s "$1/home/xai-api-key" ]] ;;
+    grok) [[ -s "$1/home/xai-api-key" || -s "$1/home/$GROK_AUTH_FILE" ]] ;;   # an API key or a Grok account login
     *) creds_ok "$1/home/.credentials.json" ;;
   esac
 }
@@ -1514,6 +1515,8 @@ start_login_session() {
   local envs=(-e "LOGIN_BIN=$bin")
   # Team: sign a worker account in to its own config dir.
   [[ -n "${LOGIN_CONFIG_DIR:-}" ]] && envs+=(-e "CLAUDE_CONFIG_DIR=$LOGIN_CONFIG_DIR" -e "CODEX_HOME=$LOGIN_CONFIG_DIR" -e "GEMINI_CLI_HOME=$LOGIN_CONFIG_DIR" -e NO_BROWSER=true)
+  # Grok has no variable for its folder: it keeps its login under $HOME/.grok.
+  [[ -n "${LOGIN_HOME:-}" ]] && envs+=(-e "HOME=$LOGIN_HOME")
   tmux new-session -d -s "$name" -x 1000 -y 60 "${envs[@]}" \
     bash -c 'env -u ANTHROPIC_API_KEY "$LOGIN_BIN" "$@"; echo "[exit $?]"; sleep 900' login "$@" >/dev/null 2>&1
 }
@@ -2522,7 +2525,7 @@ do_worker_login_start() {
   case "$(worker_kind "$WORKERS_DIR/$1")" in
     codex) do_login_codex_start ;;
     gemini) api_err invalid_name "Gemini workers sign in with an API key (worker-set-key)." ;;
-    grok) api_err invalid_name "Grok workers sign in with an API key (worker-set-key)." ;;
+    grok) do_login_grok_start ;;
     *) do_login_claude_start ;;
   esac
 }
@@ -2531,9 +2534,14 @@ do_worker_login_code() {
   case "$(worker_kind "$WORKERS_DIR/$1")" in
     codex) do_login_codex_code ;;
     gemini) api_err invalid_name "Gemini workers sign in with an API key (worker-set-key)." ;;
-    grok) api_err invalid_name "Grok workers sign in with an API key (worker-set-key)." ;;
+    grok) do_login_grok_wait ;;
     *) do_login_claude_code ;;
   esac
+}
+do_worker_login_cancel() {
+  worker_login_target "${1:-}"
+  end_login "$CLAUDE_LOGIN_SESSION"
+  api_ok '{"cancelled":true}'
 }
 
 # The Codex and Gemini CLIs install on first use (npm into ~/.local, on the sessions' PATH); Grok through xAI's official installer.
@@ -2545,7 +2553,7 @@ ensure_cli() {  # <binary> <npm package> (grok: no package)
       hash -r
     fi
     command -v grok >/dev/null 2>&1 && timeout 30 grok --version >/dev/null 2>&1 ||
-      api_err internal "Couldn't install the Grok CLI on the server. Check that the server can reach x.ai, then save the key again."
+      api_err internal "Couldn't install the Grok CLI on the server. Check that the server can reach x.ai, then try again."
     return 0
   fi
   command -v "$1" >/dev/null 2>&1 && return 0
@@ -2607,6 +2615,54 @@ do_login_device_wait() {  # <codex|gemini>
   done
   text="$(pane_text "$CLAUDE_LOGIN_SESSION")"
   api_err not_logged_in_claude "Login did not complete. Start the sign-in again." "$(jq -cn --arg t "$(tail -n 15 <<<"$text")" '{pane:$t}')"
+}
+
+# Grok account (the user's subscription): `grok login --device-code` prints a link and a code, then waits until the page is approved and exits.
+do_login_grok_start() {
+  need tmux; ensure_cli grok
+  LOGIN_HOME="$LOGIN_CONFIG_DIR"
+  start_login_session "$CLAUDE_LOGIN_SESSION" "$(command -v grok)" login --device-code || api_err internal "Could not start the login session."
+  login_wait_url "$CLAUDE_LOGIN_SESSION" 30
+  local i code=""
+  if [[ -n "$LOGIN_URL" ]]; then
+    for ((i = 0; i < 20; i++)); do   # the code is printed a moment after the link
+      code="$(pane_text "$CLAUDE_LOGIN_SESSION" | sed -n '/Confirm this code/,$p' | grep -oE '\b[A-Z0-9]{4}-[A-Z0-9]{4}\b' | head -n 1 || true)"
+      [[ -n "$code" ]] && break
+      sleep 0.5
+    done
+    LOGIN_PANE="$(pane_text "$CLAUDE_LOGIN_SESSION" | tail -n 15 || true)"
+  fi
+  if [[ -z "$LOGIN_URL" || -z "$code" ]]; then
+    end_login "$CLAUDE_LOGIN_SESSION"
+    api_err internal "Grok didn't show a sign-in link and code." "$(jq -cn --arg t "$LOGIN_PANE" '{pane:$t}')"
+  fi
+  api_ok "$(jq -cn --arg u "$LOGIN_URL" --arg c "$code" --arg s "$CLAUDE_LOGIN_SESSION" '{url:$u, code:$c, session:$s}')"
+}
+
+# Success = `grok login` itself exited 0. worker_signed can't be the test: a worker that has an API key or an older login would count
+# as finished before the user approved anything. login_pending = not approved yet, ask again (the session stays up).
+# The answer can be asked for again: the phone often loses its connection while the browser is in front, and an orphaned wait must not
+# end the session under the app's retry. So the session stays after the exit; the app ends it (worker-login-cancel) or it goes by itself in 15 min.
+do_login_grok_wait() {
+  local i text secs=120
+  [[ "${CLAUDERC_GROK_LOGIN_WAIT:-}" =~ ^[0-9]+$ ]] && secs="$CLAUDERC_GROK_LOGIN_WAIT"   # the tests' short wait
+  exec 0</dev/null
+  for ((i = 0; i < secs; i++)); do
+    tmux has-session -t "=$CLAUDE_LOGIN_SESSION" 2>/dev/null || api_err login_failed "This sign-in has ended. Start the sign-in again."
+    text="$(pane_text "$CLAUDE_LOGIN_SESSION")"
+    if grep -q '\[exit 0\]' <<<"$text"; then
+      if [[ -s "$LOGIN_CONFIG_DIR/$GROK_AUTH_FILE" ]]; then
+        chmod 600 -- "$LOGIN_CONFIG_DIR/$GROK_AUTH_FILE"
+        api_ok '{"logged_in":true}'
+      fi
+      api_err login_failed "Grok finished signing in, but its login file isn't where this server looks for it ($GROK_AUTH_FILE)." "$(jq -cn --arg t "$(tail -n 15 <<<"$text")" '{pane:$t}')"
+    fi
+    if grep -q '\[exit ' <<<"$text"; then
+      api_err login_failed "Grok didn't finish signing in (the code may have expired). Start the sign-in again." "$(jq -cn --arg t "$(tail -n 15 <<<"$text")" '{pane:$t}')"
+    fi
+    sleep 1
+  done
+  api_err login_pending "Still waiting for you to approve the sign-in in your browser."
 }
 
 # Gemini and Grok: the key (from Google AI Studio / console.x.ai) comes on stdin and is kept in the worker's home, mode 600; clauderc-team hands it to the CLI.
@@ -5528,6 +5584,7 @@ api_main() {
     host-attach)         do_host_attach "$@" ;;
     worker-login-start)  do_worker_login_start "$@" ;;
     worker-login-code)   do_worker_login_code "$@" ;;
+    worker-login-cancel) do_worker_login_cancel "$@" ;;
     mcp)                 do_mcp "$@" ;;
     mcp-refresh)         do_mcp_refresh "$@" ;;
     mcp-auth-start)      [[ $# -eq 0 ]] || bad_args "mcp-auth-start reads the name on stdin"; do_mcp_auth_start ;;

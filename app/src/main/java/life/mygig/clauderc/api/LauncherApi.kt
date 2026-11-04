@@ -39,6 +39,8 @@ object Codes {
     const val INTERNAL = "internal"
     const val FORBIDDEN = "forbidden"
     const val SESSION_BUSY = "session_busy"
+    /** A Grok sign-in the browser hasn't approved yet: ask again, it is still running. */
+    const val LOGIN_PENDING = "login_pending"
 
     // Local, never sent by the server.
     const val HOST_KEY_CHANGED = "host_key_changed"
@@ -230,7 +232,7 @@ class LauncherApi(
         if (field != "role" && field != "mode") throw ApiException(Codes.INVALID_NAME, "Bad field")
         return call("worker-set $name $field", stdin = value.trim().replace('\n', ' '))
     }
-    /** Gemini and Grok workers sign in with an API key (the key travels on stdin only). The first Grok key also installs the CLI, hence the long timeout. */
+    /** Gemini workers, and Grok workers that choose it, sign in with an API key (the key travels on stdin only). The first Grok key also installs the CLI, hence the long timeout. */
     suspend fun workerSetKey(name: String, key: String): JsonObject { requireWorker(name); return call("worker-set-key $name", stdin = key.trim(), timeoutMs = 300_000) }
     suspend fun workerRemove(name: String): JsonObject { requireWorker(name); return call("worker-remove $name") }
     suspend fun workerLoginStart(name: String): LoginUrl { requireWorker(name); return call("worker-login-start $name", timeoutMs = 60_000) }
@@ -238,6 +240,11 @@ class LauncherApi(
         requireWorker(name)
         return call("worker-login-code $name", stdin = code.trim(), timeoutMs = 120_000)
     }
+    /** Grok account sign-in: gives the link and [LoginUrl.code]. The first use also installs the CLI, hence the long timeout. */
+    suspend fun workerGrokLoginStart(name: String): LoginUrl { requireWorker(name); return call("worker-login-start $name", timeoutMs = 360_000) }
+    /** Waits up to 120 s on the server for the browser's approval; throws [Codes.LOGIN_PENDING] when it hasn't come yet. */
+    suspend fun workerGrokLoginWait(name: String): LoginDone { requireWorker(name); return call("worker-login-code $name", timeoutMs = 150_000) }
+    suspend fun workerLoginCancel(name: String): JsonObject { requireWorker(name); return call("worker-login-cancel $name") }
     suspend fun workerRuns(name: String): WorkerRunsData { requireWorker(name); return call("worker-runs $name") }
     // Which workers one chat's project hands work to.
     suspend fun clusterSession(session: String): ChatWorkersData { requireName(session); return call("cluster-session $session") }

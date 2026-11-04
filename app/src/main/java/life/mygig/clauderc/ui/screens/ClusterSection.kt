@@ -53,11 +53,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.dp
 import life.mygig.clauderc.api.WORKER_NAME_RE
 import life.mygig.clauderc.api.ClusterAccount
 import life.mygig.clauderc.api.ClusterConfig
+import life.mygig.clauderc.api.LoginUrl
 import life.mygig.clauderc.api.TokenWindow
 import life.mygig.clauderc.api.UsageWindow
 import life.mygig.clauderc.api.Updates
@@ -75,6 +77,7 @@ import life.mygig.clauderc.ui.components.tabular
 import life.mygig.clauderc.ui.openUrl
 import life.mygig.clauderc.ui.theme.statusColors
 import life.mygig.clauderc.ui.vm.HostsController
+import life.mygig.clauderc.ui.vm.choosesSignIn
 import life.mygig.clauderc.ui.vm.usesApiKey
 
 private val MODES = listOf("acceptEdits", "plan", "bypassPermissions")
@@ -95,6 +98,7 @@ fun ClusterSection(vm: MainViewModel) {
     val status by vm.status.collectAsStateWithLifecycle()
     val login by vm.team.workerLogin.collectAsStateWithLifecycle()
     val keyFor by vm.team.workerKey.collectAsStateWithLifecycle()
+    val signInChoice by vm.team.workerSignInChoice.collectAsStateWithLifecycle()
     var apiKey by remember { mutableStateOf("") }
     val runs by vm.team.workerRuns.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
@@ -174,6 +178,7 @@ fun ClusterSection(vm: MainViewModel) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
                         if (usesApiKey(kind)) "It becomes a worker on this server. Next you paste its API key."
+                        else if (choosesSignIn(kind)) "It becomes a worker on this server. Next you sign in with your Grok account or paste an API key."
                         else "It becomes a worker on this server. Next you sign in to the account in your browser.",
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -204,7 +209,8 @@ fun ClusterSection(vm: MainViewModel) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (grok) {
-                        Text("Create an API key at console.x.ai (API Keys; it starts with xai-) and paste it here. It is stored only on the server, for this account. If Grok refuses to run, check that your xAI plan allows the Grok Build CLI.")
+                        Text("API keys use xAI credits. Prefer signing in with your Grok account if your plan includes the Grok CLI.")
+                        Text("Create an API key at console.x.ai (API Keys; it starts with xai-) and paste it here. It is stored only on the server, for this account. If this account is also signed in with Grok, that sign-in is used instead of the key.")
                         OutlinedButton(onClick = { openUrl(context, "https://console.x.ai") }, modifier = Modifier.fillMaxWidth()) { Text("Open xAI console") }
                     } else {
                         Text("Google no longer lets the Gemini command-line tool sign in with a personal account. Paste an API key from aistudio.google.com/apikey instead.")
@@ -220,7 +226,23 @@ fun ClusterSection(vm: MainViewModel) {
         )
     }
 
-    login?.let { (who, url) ->
+    signInChoice?.let { who ->
+        AlertDialog(
+            onDismissRequest = vm.team::closeWorkerSignInChoice,
+            confirmButton = { TextButton(onClick = vm.team::closeWorkerSignInChoice) { Text("Cancel") } },
+            title = { Text("Sign in $who") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = { vm.team.startGrokAccountSignIn(who) }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) { Text("Sign in with your Grok account") }
+                    OutlinedButton(onClick = { vm.team.useGrokKey(who) }, modifier = Modifier.fillMaxWidth()) { Text("Use an API key instead") }
+                }
+            },
+        )
+    }
+
+    val deviceLogin = login?.takeIf { it.second.code != null }
+    if (deviceLogin != null) GrokSignInDialog(vm, deviceLogin.first, deviceLogin.second)
+    else login?.let { (who, url) ->
         AlertDialog(
             onDismissRequest = { vm.team.closeWorkerLogin(); code = "" },
             confirmButton = {
@@ -281,6 +303,28 @@ fun ClusterSection(vm: MainViewModel) {
             text = { Text("Signs the account out on the server and forgets its past tasks.") },
         )
     }
+}
+
+/** Grok's device code: nothing to type here. The view model waits for the browser's approval and closes this; a stray tap outside must not end the sign-in. */
+@Composable
+private fun GrokSignInDialog(vm: MainViewModel, who: String, login: LoginUrl) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = vm.team::closeWorkerLogin,
+        properties = DialogProperties(dismissOnClickOutside = false),
+        confirmButton = { TextButton(onClick = vm.team::closeWorkerLogin) { Text("Cancel") } },
+        title = { Text("Sign in $who") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                TextButton(onClick = { openUrl(context, login.url) }, modifier = Modifier.fillMaxWidth()) { Text(login.url) }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(login.code.orEmpty(), style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f))
+                    CopyButton(login.code.orEmpty(), what = "code", tonal = true)
+                }
+                Text("Open the page, check that the code matches, and approve. This window closes when Grok is signed in.")
+            }
+        },
+    )
 }
 
 @Composable

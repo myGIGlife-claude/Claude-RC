@@ -3,6 +3,8 @@ package life.mygig.clauderc.ui.vm
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -18,8 +20,16 @@ import life.mygig.clauderc.api.WorkerRun
 import life.mygig.clauderc.data.Server
 import life.mygig.clauderc.data.SettingsStore
 
-/** Worker kinds that sign in with a pasted API key instead of a browser sign-in. */
-fun usesApiKey(kind: String): Boolean = kind == "gemini" || kind == "grok"
+/** Worker kinds that can only sign in with a pasted API key. */
+fun usesApiKey(kind: String): Boolean = kind == "gemini"
+
+/** Worker kinds that choose between their account (device code) and a pasted API key. */
+fun choosesSignIn(kind: String): Boolean = kind == "grok"
+
+/** The server is still waiting for the browser, or the phone lost the connection meanwhile (it often does while the browser is in front): ask again. */
+fun grokSignInStillWaiting(code: String): Boolean = code == Codes.LOGIN_PENDING || code == Codes.NETWORK || code == Codes.TIMEOUT
+
+private const val GROK_SIGN_IN_MAX_MS = 15 * 60 * 1000L
 
 /**
  * Team (extra Claude accounts): the cluster view across servers, its settings, the "join the
@@ -131,6 +141,49 @@ class TeamController(
     data class WorkerKeyAsk(val name: String, val kind: String)
     private val _workerKey = MutableStateFlow<WorkerKeyAsk?>(null)
     val workerKey = _workerKey.asStateFlow()
+    /** A Grok worker choosing how to sign in: its account or an API key. */
+    private val _workerSignInChoice = MutableStateFlow<String?>(null)
+    val workerSignInChoice = _workerSignInChoice.asStateFlow()
+    fun closeWorkerSignInChoice() { _workerSignInChoice.value = null }
+    fun useGrokKey(name: String) {
+        _workerSignInChoice.value = null
+        _workerKey.value = WorkerKeyAsk(name, "grok")
+    }
+    private var grokSignInWait: Job? = null
+    fun startGrokAccountSignIn(name: String) = tools.action("Starting Grok sign-in for $name…") {
+        _workerSignInChoice.value = null
+        _workerLogin.value = name to api.workerGrokLoginStart(name)
+        waitForGrokSignIn(name)
+    }
+    /** Not a spinner action: the screen stays usable, and the dialog closes itself when the browser step is done. */
+    private fun waitForGrokSignIn(name: String) {
+        grokSignInWait?.cancel()
+        grokSignInWait = tools.scope.launch {
+            val until = System.currentTimeMillis() + GROK_SIGN_IN_MAX_MS
+            while (System.currentTimeMillis() < until) {
+                try {
+                    api.workerGrokLoginWait(name)
+                    finishGrokSignIn(name, "$name is signed in to Grok.")
+                    return@launch
+                } catch (e: ApiException) {
+                    if (!grokSignInStillWaiting(e.code)) {
+                        finishGrokSignIn(name, e.message)   // not report(): its "Sign in" fix would open the main Claude sign-in
+                        return@launch
+                    }
+                    if (e.code != Codes.LOGIN_PENDING) delay(3_000)
+                }
+            }
+            closeWorkerLogin()
+            tools.say("The Grok sign-in for $name timed out. Start it again.")
+        }
+    }
+    /** The server keeps the finished session so a retry gets the same answer; now that it was read, end it. */
+    private suspend fun finishGrokSignIn(name: String, message: String) {
+        _workerLogin.value = null
+        tools.say(message)
+        try { api.workerLoginCancel(name) } catch (_: ApiException) { }
+        _cluster.value = clusterGroups()
+    }
     fun closeWorkerKey() { _workerKey.value = null }
     fun saveWorkerKey(name: String, key: String) = tools.action("Saving the key for $name…") {
         api.workerSetKey(name, key)
@@ -143,7 +196,14 @@ class TeamController(
     fun addWorker(name: String, role: String, kind: String = "claude") = tools.action("Adding $name…") {
         api.workerAdd(name, role, kind)
         _cluster.value = clusterGroups()
-        if (usesApiKey(kind)) _workerKey.value = WorkerKeyAsk(name, kind) else _workerLogin.value = name to api.workerLoginStart(name)   // straight on to signing in
+        beginSignIn(name, kind)   // straight on to signing in
+    }
+    private suspend fun beginSignIn(name: String, kind: String) {
+        when {
+            choosesSignIn(kind) -> _workerSignInChoice.value = name
+            usesApiKey(kind) -> _workerKey.value = WorkerKeyAsk(name, kind)
+            else -> _workerLogin.value = name to api.workerLoginStart(name)
+        }
     }
     fun setWorker(name: String, field: String, value: String) = tools.action("Saving…") {
         api.workerSet(name, field, value)
@@ -153,17 +213,21 @@ class TeamController(
         api.workerRemove(name)
         _cluster.value = clusterGroups()
     }
-    fun workerLoginStart(name: String, kind: String = "claude") = tools.action("Starting sign-in for $name…") {
-        if (usesApiKey(kind)) { _workerKey.value = WorkerKeyAsk(name, kind); return@action }
-        _workerLogin.value = name to api.workerLoginStart(name)
-    }
+    fun workerLoginStart(name: String, kind: String = "claude") = tools.action("Starting sign-in for $name…") { beginSignIn(name, kind) }
     fun workerLoginCode(name: String, code: String) = tools.action("Checking code…") {
         api.workerLoginCode(name, code)
         _workerLogin.value = null
         _cluster.value = clusterGroups()
     }
-    // ponytail: the server's login helper session just times out; add a cancel action if stale ones annoy.
-    fun closeWorkerLogin() { _workerLogin.value = null }
+    // ponytail: for the other kinds the server's login helper session just times out; worker-login-cancel would end it too.
+    fun closeWorkerLogin() {
+        val open = _workerLogin.value
+        _workerLogin.value = null
+        if (open?.second?.code == null) return
+        // A device code waiting on the server: end it, so nothing can still be approved after Cancel.
+        grokSignInWait?.cancel()
+        tools.scope.launch { try { api.workerLoginCancel(open.first) } catch (_: ApiException) { } }
+    }
     fun showWorkerRuns(name: String) = tools.action("Loading runs…") { _workerRuns.value = name to api.workerRuns(name).runs }
     fun closeWorkerRuns() { _workerRuns.value = null }
 
@@ -172,7 +236,9 @@ class TeamController(
         _cluster.value = null
         _clusterConfig.value = null
         _clusterOffer.value = null
+        grokSignInWait?.cancel()   // its calls would now reach the new server
         _workerLogin.value = null
+        _workerSignInChoice.value = null
         _workerKey.value = null   // a key typed after switching servers must not go to the new server's worker
         _workerRuns.value = null
     }
