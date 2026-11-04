@@ -26,9 +26,12 @@ GEMINI_APPROVAL = {"acceptEdits": "auto_edit", "plan": "plan", "bypassPermission
 # Grok has no read-only or limited-approval headless mode (ask mode would wait for ever), so it only ever runs inside our sandbox.
 GROK_SANDBOX_ERROR = "Grok workers run only inside the sandbox: turn Sandbox on/auto in Cluster settings and make sure bubblewrap works."
 GROK_PROMPT_MAX = 100_000   # bytes: the prompt becomes one -p argument and Linux caps one argument at 128 KB (the headers added to a task fit in the gap)
-# Runs inside the sandbox: the key goes from the worker's key file into grok's environment. bubblewrap's --setenv would put it
-# in argv, where `ps` shows it to the host. # unverified: whether `-p` could read stdin itself; the docs only show an argument.
-GROK_SH = 'XAI_API_KEY=$(cat -- "$1") || exit 1; export XAI_API_KEY; shift; exec "$@" -p "$(cat)"'
+GROK_AUTH_FILE = ".grok/auth.json"   # unverified: the name comes from xAI's installer notes; `grok login` keeps its login under $HOME/.grok
+# Runs inside the sandbox, where HOME is the worker's home. A Grok account login wins (it uses the user's plan, a key uses xAI credits).
+# Otherwise the key goes from the worker's key file into grok's environment: bubblewrap's --setenv would put it in argv, where `ps`
+# shows it to the host. # unverified: whether `-p` could read stdin itself; the docs only show an argument.
+# unverified: whether the account login works headless in the sandbox (network is open, the home is writable for token refreshes).
+GROK_SH = f'if [ ! -s "$HOME/{GROK_AUTH_FILE}" ]; then XAI_API_KEY=$(cat -- "$1") || exit 1; export XAI_API_KEY; fi; shift; exec "$@" -p "$(cat)"'
 GROK_TEXT_KEYS = ("result", "response", "text", "output", "message", "content")   # unverified: the docs only name .sessionId in the final JSON object
 SLOTS = max(1, int(os.environ.get("CLAUDERC_WORKER_SLOTS") or 10))   # hard cap of runs of one worker at once (they share its login like several chats share one); the owner's per-chat limit is lower
 USAGE_URL = os.environ.get("CLAUDERC_USAGE_URL") or "https://api.anthropic.com/api/oauth/usage"
@@ -157,6 +160,16 @@ def kind(name):
     return k if k in CLIS else "claude"
 
 
+def grok_signed_in(home):
+    """An API key or a Grok account login in the worker's home."""
+    def has_text(p):
+        try:
+            return bool(p.read_text().strip())
+        except (OSError, ValueError):
+            return False
+    return has_text(home / "xai-api-key") or has_text(home / GROK_AUTH_FILE)
+
+
 def signed_in(name):
     """The worker's login has a token (a logged-out Claude leaves a credentials file without one)."""
     k, h = kind(name), WORKERS / name / "home"
@@ -165,7 +178,7 @@ def signed_in(name):
             if k == "gemini":   # an API key: Google ended personal-account sign-in for the Gemini CLI
                 return bool((h / "gemini-api-key").read_text().strip())
             if k == "grok":
-                return bool((h / "xai-api-key").read_text().strip())
+                return grok_signed_in(h)
             c = json.loads((h / "auth.json").read_text())
         except (OSError, ValueError):
             return False
