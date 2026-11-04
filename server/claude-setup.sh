@@ -2619,7 +2619,7 @@ do_worker_set_key() {
   [[ "$kind" == gemini || "$kind" == grok ]] || api_err invalid_name "Only Gemini and Grok workers use an API key."
   key="${key//[[:space:]]/}"
   if [[ "$kind" == grok ]]; then
-    [[ "$key" =~ ^[A-Za-z0-9_.-]{16,200}$ ]] || api_err invalid_name "That doesn't look like an xAI API key."
+    [[ "$key" =~ ^xai-[A-Za-z0-9_.-]{16,200}$ ]] || api_err invalid_name "That isn't an xAI API key: they start with xai-. Create one at console.x.ai (API Keys)."
     ensure_cli grok
     dir="$WORKERS_DIR/$name/home"
     (umask 077; printf '%s\n' "$key" >"$dir/xai-api-key.new" && mv -f "$dir/xai-api-key.new" "$dir/xai-api-key") || api_err internal "Couldn't save the key."
