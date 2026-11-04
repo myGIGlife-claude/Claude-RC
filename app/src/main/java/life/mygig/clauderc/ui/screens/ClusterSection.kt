@@ -204,7 +204,7 @@ fun ClusterSection(vm: MainViewModel) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (grok) {
-                        Text("Create an API key at console.x.ai and paste it here. It is stored only on the server, for this account. If Grok refuses to run, check that your xAI plan allows the Grok Build CLI.")
+                        Text("Create an API key at console.x.ai (API Keys; it starts with xai-) and paste it here. It is stored only on the server, for this account. If Grok refuses to run, check that your xAI plan allows the Grok Build CLI.")
                         OutlinedButton(onClick = { openUrl(context, "https://console.x.ai") }, modifier = Modifier.fillMaxWidth()) { Text("Open xAI console") }
                     } else {
                         Text("Google no longer lets the Gemini command-line tool sign in with a personal account. Paste an API key from aistudio.google.com/apikey instead.")

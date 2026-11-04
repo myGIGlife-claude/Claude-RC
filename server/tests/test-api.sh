@@ -1206,8 +1206,12 @@ api "worker-set-key gro" "short"
 check "short xAI key refused" "$(jqt '.ok == false')"
 api "worker-set-key gro" 'xai-DemoDemo;DemoDemo'
 check "xAI key with odd characters refused" "$(jqt '.ok == false')"
+api "worker-set-key gro" 'abcd_1234567890abcd1234567890abcd'
+check "a key that does not start with xai- is refused" "$(jqt '.ok == false and (.error.message | contains("xai-"))')"
 [[ ! -e "$GROK_KEY_FILE" ]]; check "refused keys are not saved" $?
 # First key save with the CLI missing: the official installer runs, in a clean environment.
+# A real grok on the machine running the tests (the app installs one on first use) must not hide the "missing CLI" cases.
+OLD_PATH="$PATH"; PATH="$(tr ':' '\n' <<<"$PATH" | while read -r d; do [[ -x "$d/grok" && "$d" != "$HOME/.local/bin" ]] || echo "$d"; done | paste -sd: -)"
 mv "$HOME/.local/bin/grok" "$STUB_STATE/grok-real"
 touch "$STUB_STATE/grok-install-fail"
 api "worker-set-key gro" "xai-GrokDemoDemoDemoDemo1234567890"
@@ -1231,6 +1235,7 @@ api "worker-set-key gro" "xai-AnotherDemoDemoDemoDemo12345"
 check "a grok that won't run is reported" "$(jqt '.ok == false')"
 [[ "$(cat "$GROK_KEY_FILE")" == xai-GrokDemoDemoDemoDemo1234567890 ]]; check "old grok key kept" $?
 rm "$STUB_STATE/grok-version-fail"
+PATH="$OLD_PATH"
 api "worker-remove gro"; api "worker-remove gpt"; api "worker-remove gem"
 api "worker-list"
 check "no workers yet" "$(jqt '.ok and (.data.workers | length == 0)')"
