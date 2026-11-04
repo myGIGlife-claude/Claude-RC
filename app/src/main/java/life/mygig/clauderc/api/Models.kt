@@ -196,7 +196,7 @@ data class StopResult(val session: String, val stopped: Boolean)
 data class TailResult(val session: String, val lines: Int = 0, val text: String = "")
 
 @Serializable
-data class LoginUrl(val url: String, val code: String? = null, @SerialName("device_code") val deviceCode: String? = null, @SerialName("paste_url") val pasteUrl: Boolean = false)
+data class LoginUrl(val url: String, val code: String? = null, @SerialName("device_code") val deviceCode: String? = null, @SerialName("paste_url") val pasteUrl: Boolean = false, @SerialName("paste_code") val pasteCode: Boolean = false)
 
 @Serializable
 data class YoutubeStart(val url: String, val code: String, val interval: Int = 5, @SerialName("expires_in") val expiresIn: Int = 1800)
@@ -399,6 +399,8 @@ data class ClusterAccount(
     /** "expired" (Claude renews it next time it runs) or "unavailable". */
     @SerialName("usage_error") val usageError: String? = null,
     val tokens: Tokens? = null,
+    /** Gemini and Grok workers: which login their runs use, "account" or "key". Empty for the others. */
+    val auth: String = "",
 )
 
 @Serializable

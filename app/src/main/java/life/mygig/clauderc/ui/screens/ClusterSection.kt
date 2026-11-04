@@ -77,8 +77,10 @@ import life.mygig.clauderc.ui.components.tabular
 import life.mygig.clauderc.ui.openUrl
 import life.mygig.clauderc.ui.theme.statusColors
 import life.mygig.clauderc.ui.vm.HostsController
+import life.mygig.clauderc.ui.vm.accountName
+import life.mygig.clauderc.ui.vm.authLabel
 import life.mygig.clauderc.ui.vm.choosesSignIn
-import life.mygig.clauderc.ui.vm.usesApiKey
+import life.mygig.clauderc.ui.vm.googleCodeLooksRight
 
 private val MODES = listOf("acceptEdits", "plan", "bypassPermissions")
 private fun modeHint(m: String, kind: String = "claude"): String = when {
@@ -170,15 +172,14 @@ fun ClusterSection(vm: MainViewModel) {
                 TextButton(
                     onClick = { vm.team.addWorker(name, role, kind); name = ""; role = ""; kind = "claude"; add = false },
                     enabled = WORKER_NAME_RE.matches(name) && busy == null,
-                ) { Text(if (usesApiKey(kind)) "Add and enter key" else "Add and sign in") }
+                ) { Text("Add and sign in") }
             },
             dismissButton = { TextButton(onClick = { add = false }) { Text("Cancel") } },
             title = { Text("Add an account") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        if (usesApiKey(kind)) "It becomes a worker on this server. Next you paste its API key."
-                        else if (choosesSignIn(kind)) "It becomes a worker on this server. Next you sign in with your Grok account or paste an API key."
+                        if (choosesSignIn(kind)) "It becomes a worker on this server. Next you sign in with ${accountName(kind)} or paste an API key."
                         else "It becomes a worker on this server. Next you sign in to the account in your browser.",
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -213,7 +214,8 @@ fun ClusterSection(vm: MainViewModel) {
                         Text("Create an API key at console.x.ai (API Keys; it starts with xai-) and paste it here. It is stored only on the server, for this account. If this account is also signed in with Grok, that sign-in is used instead of the key.")
                         OutlinedButton(onClick = { openUrl(context, "https://console.x.ai") }, modifier = Modifier.fillMaxWidth()) { Text("Open xAI console") }
                     } else {
-                        Text("Google no longer lets the Gemini command-line tool sign in with a personal account. Paste an API key from aistudio.google.com/apikey instead.")
+                        Text("A free-tier key has a very small daily limit. Signing in with your Google account is usually better.")
+                        Text("Create an API key at aistudio.google.com/apikey and paste it here. It is stored only on the server, for this account. If this account is also signed in with Google, that sign-in is used instead of the key.")
                         OutlinedButton(onClick = { openUrl(context, "https://aistudio.google.com/apikey") }, modifier = Modifier.fillMaxWidth()) { Text("Open Google AI Studio") }
                     }
                     OutlinedTextField(
@@ -226,22 +228,25 @@ fun ClusterSection(vm: MainViewModel) {
         )
     }
 
-    signInChoice?.let { who ->
+    signInChoice?.let { choice ->
+        val who = choice.name
         AlertDialog(
             onDismissRequest = vm.team::closeWorkerSignInChoice,
             confirmButton = { TextButton(onClick = vm.team::closeWorkerSignInChoice) { Text("Cancel") } },
             title = { Text("Sign in $who") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = { vm.team.startGrokAccountSignIn(who) }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) { Text("Sign in with your Grok account") }
-                    OutlinedButton(onClick = { vm.team.useGrokKey(who) }, modifier = Modifier.fillMaxWidth()) { Text("Use an API key instead") }
+                    Button(onClick = { vm.team.startAccountSignIn(choice) }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) { Text("Sign in with ${accountName(choice.kind)}") }
+                    OutlinedButton(onClick = { vm.team.useApiKey(choice) }, modifier = Modifier.fillMaxWidth()) { Text("Use an API key instead") }
                 }
             },
         )
     }
 
     val deviceLogin = login?.takeIf { it.second.code != null }
+    val googleLogin = login?.takeIf { it.second.pasteCode }
     if (deviceLogin != null) GrokSignInDialog(vm, deviceLogin.first, deviceLogin.second)
+    else if (googleLogin != null) GoogleSignInDialog(vm, googleLogin.first, googleLogin.second)
     else login?.let { (who, url) ->
         AlertDialog(
             onDismissRequest = { vm.team.closeWorkerLogin(); code = "" },
@@ -322,6 +327,33 @@ private fun GrokSignInDialog(vm: MainViewModel, who: String, login: LoginUrl) {
                     CopyButton(login.code.orEmpty(), what = "code", tonal = true)
                 }
                 Text("Open the page, check that the code matches, and approve. This window closes when Grok is signed in.")
+            }
+        },
+    )
+}
+
+/** Gemini's Google sign-in: Google's page shows a code to paste here. A refused code stays in the field with the reason under it, ready to fix. */
+@Composable
+private fun GoogleSignInDialog(vm: MainViewModel, who: String, login: LoginUrl) {
+    val context = LocalContext.current
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val error by vm.team.workerLoginError.collectAsStateWithLifecycle()
+    var code by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = vm.team::closeWorkerLogin,
+        properties = DialogProperties(dismissOnClickOutside = false),
+        confirmButton = { TextButton(onClick = { vm.team.submitGoogleCode(who, code) }, enabled = googleCodeLooksRight(code) && busy == null) { Text("Sign in") } },
+        dismissButton = { TextButton(onClick = vm.team::closeWorkerLogin) { Text("Cancel") } },
+        title = { Text("Sign in $who") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Open the link, sign in with the Google account that has Gemini (Google One AI plan or a personal account), allow access, then copy the code Google shows and paste it here.")
+                OutlinedButton(onClick = { openUrl(context, login.url) }, modifier = Modifier.fillMaxWidth()) { Text("Open link") }
+                OutlinedTextField(
+                    value = code, onValueChange = { code = it.trim() }, label = { Text("Paste the code from Google") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(), isError = error.isNotEmpty(), keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                )
+                if (error.isNotEmpty()) Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
         },
     )
@@ -743,7 +775,7 @@ private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean
     CardBox {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                (if (worker) a.name else "Main account") + (if (a.kind == "codex") " · ChatGPT" else if (a.kind == "gemini") " · Gemini" else if (a.kind == "grok") " · Grok" else "") + (a.plan?.let { " · $it" } ?: "") + if (a.signedIn) "" else " · not signed in",
+                (if (worker) a.name else "Main account") + (if (a.kind == "codex") " · ChatGPT" else if (a.kind == "gemini") " · Gemini" else if (a.kind == "grok") " · Grok" else "") + (a.plan?.let { " · $it" } ?: "") + (if (a.signedIn) authLabel(a.kind, a.auth).let { if (it.isEmpty()) "" else " · $it" } else " · not signed in"),
                 style = MaterialTheme.typography.titleSmall,
             )
             a.email?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -774,7 +806,7 @@ private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean
             if (worker && canManage) {
                 Text("Mode: ${a.mode} (${modeHint(a.mode, a.kind)})", style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    OutlinedButton(onClick = { vm.team.workerLoginStart(a.name, a.kind) }, enabled = idle) { Text(if (usesApiKey(a.kind)) (if (a.signedIn) "Change key" else "Add key") else if (a.signedIn) "Re-sign in" else "Sign in") }
+                    OutlinedButton(onClick = { vm.team.workerLoginStart(a.name, a.kind) }, enabled = idle) { Text(if (a.signedIn) "Re-sign in" else "Sign in") }
                     OutlinedButton(onClick = { vm.team.setWorker(a.name, "mode", MODES[(MODES.indexOf(a.mode) + 1) % MODES.size]) }, enabled = idle) { Text("Mode") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {

@@ -32,6 +32,16 @@ GROK_AUTH_FILE = ".grok/auth.json"   # unverified: the name comes from xAI's ins
 # shows it to the host. # unverified: whether `-p` could read stdin itself; the docs only show an argument.
 # unverified: whether the account login works headless in the sandbox (network is open, the home is writable for token refreshes).
 GROK_SH = f'if [ ! -s "$HOME/{GROK_AUTH_FILE}" ]; then XAI_API_KEY=$(cat -- "$1") || exit 1; export XAI_API_KEY; fi; shift; exec "$@" -p "$(cat)"'
+GEMINI_AUTH_FILE = ".gemini/oauth_creds.json"   # the CLI's cached Google login, under $GEMINI_CLI_HOME
+# A run with an API key: the key goes from the worker's key file into gemini's environment inside the sandbox (bubblewrap's --setenv would put it in argv).
+GEMINI_KEY_SH = 'GEMINI_API_KEY=$(cat -- "$1") || exit 1; export GEMINI_API_KEY; shift; exec "$@"'
+GEMINI_WATCH_S = 2        # how often a running Gemini task's output is checked for errors retrying can't fix
+GEMINI_TAIL = 256 * 1024  # bytes of each output file checked
+GEMINI_QUOTA_RE = re.compile(r"TerminalQuotaError|exhausted your daily quota|Quota exceeded for metric", re.I)
+GEMINI_503_RE = re.compile(r"Attempt \d+ failed with status 503")
+GEMINI_QUOTA_MSG = "Gemini's daily quota is used up on this key/account (free tier?). Use a Google account sign-in or a billed API key, or try again tomorrow."
+GEMINI_503_MSG = "Gemini is overloaded right now (Google capacity). Try again later or use another worker."
+GEMINI_LOGIN_MSG = "Gemini's Google sign-in expired or isn't valid on this server: sign in again from the Claude tab."
 GROK_TEXT_KEYS = ("result", "response", "text", "output", "message", "content")   # unverified: the docs only name .sessionId in the final JSON object
 SLOTS = max(1, int(os.environ.get("CLAUDERC_WORKER_SLOTS") or 10))   # hard cap of runs of one worker at once (they share its login like several chats share one); the owner's per-chat limit is lower
 USAGE_URL = os.environ.get("CLAUDERC_USAGE_URL") or "https://api.anthropic.com/api/oauth/usage"
@@ -160,14 +170,21 @@ def kind(name):
     return k if k in CLIS else "claude"
 
 
+def has_text(p):
+    try:
+        return bool(p.read_text().strip())
+    except (OSError, ValueError):
+        return False
+
+
 def grok_signed_in(home):
     """An API key or a Grok account login in the worker's home."""
-    def has_text(p):
-        try:
-            return bool(p.read_text().strip())
-        except (OSError, ValueError):
-            return False
     return has_text(home / "xai-api-key") or has_text(home / GROK_AUTH_FILE)
+
+
+def gemini_signed_in(home):
+    """An API key or a Google account login in the worker's home."""
+    return has_text(home / "gemini-api-key") or has_text(home / GEMINI_AUTH_FILE)
 
 
 def signed_in(name):
@@ -175,8 +192,8 @@ def signed_in(name):
     k, h = kind(name), WORKERS / name / "home"
     if k != "claude":
         try:
-            if k == "gemini":   # an API key: Google ended personal-account sign-in for the Gemini CLI
-                return bool((h / "gemini-api-key").read_text().strip())
+            if k == "gemini":
+                return gemini_signed_in(h)
             if k == "grok":
                 return grok_signed_in(h)
             c = json.loads((h / "auth.json").read_text())
@@ -750,6 +767,122 @@ def grok_run(key_file, model=None, resume=None):
         + (["-m", model] if model else []) + (["-r", resume] if resume else [])
 
 
+def gemini_select_auth(home, selected):
+    """Tell the CLI which login this run uses, keeping its other settings. This runs as the owner, outside the sandbox, in a folder
+    the worker can write: a planted link must never be followed (it could aim the write at the owner's own settings)."""
+    g = os.path.join(str(home), ".gemini")
+    if os.path.islink(g):
+        os.unlink(g)
+    os.makedirs(g, exist_ok=True)
+    fd = os.open(g, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        cur = {}
+        try:   # O_NONBLOCK: a planted fifo must not hang this
+            with os.fdopen(os.open("settings.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)) as f:
+                cur = json.load(f)
+        except (OSError, ValueError):
+            pass
+        cur = cur if isinstance(cur, dict) else {}
+        sec = cur["security"] if isinstance(cur.get("security"), dict) else {}
+        auth = sec["auth"] if isinstance(sec.get("auth"), dict) else {}
+        cur = {**cur, "security": {**sec, "auth": {**auth, "selectedType": selected}}}
+        tmp = f".settings.{os.getpid()}.{threading.get_ident()}.tmp"
+        with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600, dir_fd=fd), "w") as f:
+            json.dump(cur, f)
+        os.replace(tmp, "settings.json", src_dir_fd=fd, dst_dir_fd=fd)
+    finally:
+        os.close(fd)
+
+
+def gemini_stop_reason(text):
+    """The plain message when a running Gemini CLI's output shows it can only keep retrying in vain, else None."""
+    if GEMINI_QUOTA_RE.search(text):
+        return GEMINI_QUOTA_MSG
+    if len(GEMINI_503_RE.findall(text)) >= 3:
+        return GEMINI_503_MSG
+    return None
+
+
+def gemini_error(text):
+    """The plain message for a failed Gemini run's output, else None (the output itself is then shown)."""
+    return GEMINI_LOGIN_MSG if "Manual authorization is required" in text else gemini_stop_reason(text)
+
+
+def gemini_visible_output(out_s):
+    """A finished answer is the worker's own text, which may well mention these errors: it doesn't count as the CLI's output."""
+    o = parse_output("gemini", out_s)
+    return "" if isinstance(o.get("result"), str) and not o.get("is_error") else out_s
+
+
+def tail_text(p):
+    try:
+        with open(p, "rb") as f:
+            f.seek(max(0, os.fstat(f.fileno()).st_size - GEMINI_TAIL))
+            return f.read().decode(errors="replace")
+    except OSError:
+        return ""
+
+
+def session_procs(sid):
+    """Live processes of a run's session. Not a process group: `timeout` moves itself and the CLI into one of their own."""
+    found = []
+    for p in os.listdir("/proc"):
+        if p.isdigit():
+            try:
+                f = Path("/proc", p, "stat").read_text(errors="replace")
+                f = f[f.rindex(")") + 2:].split()
+            except (OSError, ValueError):
+                continue
+            if f[0] != "Z" and int(f[3]) == sid:
+                found.append(int(p))
+    return found
+
+
+def end_run(proc):
+    """Stop a run with all its processes: politely, then for good after 5 s."""
+    def signal_all(sig):
+        for pid in session_procs(proc.pid):
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass
+    signal_all(signal.SIGTERM)
+    until = time.time() + 5
+    while time.time() < until:
+        proc.poll()   # reaps the wrapper
+        if not session_procs(proc.pid):
+            return
+        time.sleep(0.2)
+    signal_all(signal.SIGKILL)
+
+
+def watch_gemini(proc, d, tid):
+    """Until the run ends: the CLI retries quota and overload errors for minutes, so stop it as soon as its output shows one.
+    Only while this process lives; a run it left behind ends by itself and finalize still gives the plain message."""
+    while True:
+        try:
+            proc.wait(timeout=GEMINI_WATCH_S)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+        msg = gemini_stop_reason(tail_text(d / f"{tid}.err") + "\n" + gemini_visible_output(tail_text(d / f"{tid}.out")))
+        if msg:
+            (d / f"{tid}.fatal").write_text(msg)
+            end_run(proc)
+            proc.wait()
+            return
+
+
+def supervise(proc, tid, d, gemini):
+    try:
+        if gemini:
+            watch_gemini(proc, d, tid)
+    except Exception:   # the watcher is a shortcut: whatever goes wrong with it, the run must still be collected
+        pass
+    proc.wait()
+    finalize(tid)
+
+
 def launch(t):
     """Start the worker detached: it queues behind other runs of the same worker (they share one login), is capped by
     `timeout`, and writes to tasks/<id>.out, so it outlives this process."""
@@ -783,6 +916,11 @@ def launch(t):
     elif k == "gemini":
         # no session ids to resume by, so a follow-up starts fresh (the prompt carries what it needs)
         run = [CLIS[k], "-p", "", "-o", "json", "--skip-trust", "--approval-mode", GEMINI_APPROVAL[mode]] + (["-m", model] if model else [])
+        # A Google account login wins over a key: the plan is the user's own, a free key's quota is tiny. unverified: that a headless run reuses a login made by the interactive CLI.
+        account = has_text(w / "home" / GEMINI_AUTH_FILE)
+        gemini_select_auth(w / "home", "oauth-personal" if account else "gemini-api-key")
+        if not account:
+            run = ["sh", "-c", GEMINI_KEY_SH, "gemini-run", str(w / "home" / "gemini-api-key")] + run
     elif k == "grok":
         if not use_sb:
             raise ToolError(GROK_SANDBOX_ERROR)
@@ -797,8 +935,6 @@ def launch(t):
         env["STUB_STATE"] = os.environ["CLAUDERC_TEST_STUB_STATE"]
     if k != "grok":   # grok gets its folder through HOME (sandbox_argv)
         env[{"codex": "CODEX_HOME", "gemini": "GEMINI_CLI_HOME"}.get(k, "CLAUDE_CONFIG_DIR")] = str(w / "home")
-    if k == "gemini":
-        env["GEMINI_API_KEY"] = (w / "home" / "gemini-api-key").read_text().strip()
     if use_sb:
         run = sandbox_argv(t, k, w, env, read_only=(mode == "plan")) + run
     cmd = ["sh", "-c", SLOT_SH, "slot", str(w / "run.lock"), str(SLOTS), str(d / f"{tid}.started"),
@@ -809,7 +945,7 @@ def launch(t):
     t["pid"] = proc.pid
     t["pid_start"] = proc_start(proc.pid)
     save(t)
-    threading.Thread(target=lambda: (proc.wait(), finalize(tid)), daemon=True).start()
+    threading.Thread(target=supervise, args=(proc, tid, d, k == "gemini"), daemon=True).start()
 
 
 def parse_output(k, out_s, last=""):
@@ -898,7 +1034,10 @@ def _finalize_unlocked(tid):
         t["session_id"] = out.get("session_id") or t.get("resume")
         reply = out.get("result") if isinstance(out.get("result"), str) else None
         if out.get("is_error") or reply is None:
-            if not out and t.get("pid") and time.time() - t["started"] >= RUN_TIMEOUT - 5:
+            plain = (rd("fatal") or gemini_error(err_s + "\n" + out_s)) if kind(t["worker"]) == "gemini" else None
+            if plain:
+                msg = plain
+            elif not out and t.get("pid") and time.time() - t["started"] >= RUN_TIMEOUT - 5:
                 msg = f"Timed out after {RUN_TIMEOUT // 60} minutes."
             else:
                 msg = (reply or err_s or out_s or "The worker stopped without an answer (this task was lost). Delegate it again.")[-2000:]
@@ -924,7 +1063,7 @@ def _finalize_unlocked(tid):
             key = "reply" if t["status"] == "done" else "error"
             t[key] = (t.get(key) or "") + "\n\n[cluster] " + t["note"]
         t["finished"] = time.time()
-        for ext in ("in", "out", "err", "started", "last"):
+        for ext in ("in", "out", "err", "started", "last", "fatal"):
             (d / f"{tid}.{ext}").unlink(missing_ok=True)
         try:
             save(t)

@@ -2,13 +2,16 @@ package life.mygig.clauderc
 
 import kotlinx.serialization.json.Json
 import life.mygig.clauderc.api.Codes
+import life.mygig.clauderc.api.ClusterData
 import life.mygig.clauderc.api.LoginUrl
 import life.mygig.clauderc.api.WORKER_NAME_RE
 import life.mygig.clauderc.api.WorkerRunsData
 import life.mygig.clauderc.api.WorkersData
+import life.mygig.clauderc.ui.vm.accountName
+import life.mygig.clauderc.ui.vm.authLabel
 import life.mygig.clauderc.ui.vm.choosesSignIn
+import life.mygig.clauderc.ui.vm.googleCodeLooksRight
 import life.mygig.clauderc.ui.vm.grokSignInStillWaiting
-import life.mygig.clauderc.ui.vm.usesApiKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -36,14 +39,40 @@ class TeamModelsTest {
         assertNull(d.runs[0].error)
     }
 
-    @Test fun apiKeyKinds() {
-        assertTrue(usesApiKey("gemini"))
-        for (k in listOf("grok", "claude", "codex", "", "other")) assertFalse(k, usesApiKey(k))
+    @Test fun grokAndGeminiChooseHowToSignIn() {
+        for (k in listOf("grok", "gemini")) assertTrue(k, choosesSignIn(k))
+        for (k in listOf("claude", "codex", "", "other")) assertFalse(k, choosesSignIn(k))
+        assertEquals("your Google account", accountName("gemini"))
+        assertEquals("your Grok account", accountName("grok"))
     }
 
-    @Test fun onlyGrokChoosesHowToSignIn() {
-        assertTrue(choosesSignIn("grok"))
-        for (k in listOf("gemini", "claude", "codex", "", "other")) assertFalse(k, choosesSignIn(k))
+    @Test fun authLabels() {
+        assertEquals("Google account", authLabel("gemini", "account"))
+        assertEquals("Grok account", authLabel("grok", "account"))
+        for (k in listOf("gemini", "grok")) {
+            assertEquals("API key", authLabel(k, "key"))
+            assertEquals("an older server says nothing", "", authLabel(k, ""))
+            assertEquals("", authLabel(k, "other"))
+        }
+        for (k in listOf("claude", "codex")) for (a in listOf("account", "key", "")) assertEquals("", authLabel(k, a))
+    }
+
+    @Test fun clusterAuthIsOptional() {
+        val d = json.decodeFromString<ClusterData>("""{"accounts":[{"name":"g","kind":"gemini","signed_in":true,"auth":"account"},{"name":"main"}]}""")
+        assertEquals("account", d.accounts[0].auth)
+        assertEquals("", d.accounts[1].auth)
+    }
+
+    @Test fun parsesGoogleSignInStart() {
+        val d = json.decodeFromString<LoginUrl>("""{"url":"https://accounts.google.com/o/oauth2/v2/auth?x=1","session":"worker-login-g","paste_code":true}""")
+        assertTrue(d.pasteCode)
+        assertNull("no device code: it must not open the Grok dialog", d.code)
+        assertFalse(json.decodeFromString<LoginUrl>("""{"url":"https://claude.ai/x"}""").pasteCode)
+    }
+
+    @Test fun googleCodeRule() {
+        for (ok in listOf("4/0AVGzR1abc_DEF-123", "12345678", "a.b~c=d+e#f/g")) assertTrue(ok, googleCodeLooksRight(ok))
+        for (bad in listOf("", "short", "has space 123", "semi;colon123", "x".repeat(513))) assertFalse(bad, googleCodeLooksRight(bad))
     }
 
     @Test fun parsesGrokSignInStart() {

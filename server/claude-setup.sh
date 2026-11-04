@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id), 50 = grok worker kind, 51 = grok account sign-in (device code; worker-login-cancel)
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id), 50 = grok worker kind, 51 = grok account sign-in (device code; worker-login-cancel), 52 = gemini account sign-in, fail-fast quota errors
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=51
+SCRIPT_API=52
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 CLAUDERC_API="${CLAUDERC_API:-https://api.github.com}"
@@ -169,15 +169,28 @@ creds_ok() { jq -e '(.claudeAiOauth.accessToken // empty) | strings | length > 0
 # Workers can be other CLIs: kind is claude (default), codex (ChatGPT), gemini or grok. Each is signed in under its own home folder.
 WORKER_KINDS=" claude codex gemini grok "
 GROK_AUTH_FILE=".grok/auth.json"   # unverified: the name comes from xAI's installer notes; `grok login` keeps its login under $HOME/.grok
+GEMINI_AUTH_FILE=".gemini/oauth_creds.json"   # the Gemini CLI's cached Google login, under $GEMINI_CLI_HOME
+GEMINI_SIGNIN_DIR=".gemini-signin"   # the sign-in runs here, inside the worker's home, so a login in use stays until a new one has really arrived
 worker_kind() { jq -r '.kind // "claude"' "$1/meta.json" 2>/dev/null || echo claude; }
 # worker_signed <worker dir>: its login file has something in it.
 worker_signed() {
   case "$(worker_kind "$1")" in
     codex) jq -e 'length > 0' "$1/home/auth.json" >/dev/null 2>&1 ;;
-    gemini) [[ -s "$1/home/gemini-api-key" ]] ;;   # Google ended personal-account sign-in for the Gemini CLI: it uses an API key
+    gemini) [[ -s "$1/home/gemini-api-key" || -s "$1/home/$GEMINI_AUTH_FILE" ]] ;;   # an API key or a Google account login
     grok) [[ -s "$1/home/xai-api-key" || -s "$1/home/$GROK_AUTH_FILE" ]] ;;   # an API key or a Grok account login
     *) creds_ok "$1/home/.credentials.json" ;;
   esac
+}
+
+# worker_auth <worker dir>: which login a Gemini or Grok worker's runs use. The account wins when both exist (same rule as at run time). Empty for the other kinds.
+worker_auth() {
+  local account key
+  case "$(worker_kind "$1")" in
+    gemini) account="$1/home/$GEMINI_AUTH_FILE"; key="$1/home/gemini-api-key" ;;
+    grok) account="$1/home/$GROK_AUTH_FILE"; key="$1/home/xai-api-key" ;;
+    *) return 0 ;;
+  esac
+  if [[ -s "$account" ]]; then echo account; elif [[ -s "$key" ]]; then echo key; fi
 }
 
 claude_logged_in() { [[ -s "${LOGIN_CONFIG_DIR:-$HOME/.claude}/.credentials.json" ]]; }
@@ -1515,10 +1528,11 @@ start_login_session() {
   local envs=(-e "LOGIN_BIN=$bin")
   # Team: sign a worker account in to its own config dir.
   [[ -n "${LOGIN_CONFIG_DIR:-}" ]] && envs+=(-e "CLAUDE_CONFIG_DIR=$LOGIN_CONFIG_DIR" -e "CODEX_HOME=$LOGIN_CONFIG_DIR" -e "GEMINI_CLI_HOME=$LOGIN_CONFIG_DIR" -e NO_BROWSER=true)
-  # Grok has no variable for its folder: it keeps its login under $HOME/.grok.
-  [[ -n "${LOGIN_HOME:-}" ]] && envs+=(-e "HOME=$LOGIN_HOME")
+  # Grok has no variable for its folder: it keeps its login under $HOME/.grok. The pane starts there too: a Gemini CLI started in the
+  # owner's home would read the owner's ~/.gemini and .env as its workspace settings.
+  [[ -n "${LOGIN_HOME:-}" ]] && envs+=(-e "HOME=$LOGIN_HOME" -c "$LOGIN_HOME")
   tmux new-session -d -s "$name" -x 1000 -y 60 "${envs[@]}" \
-    bash -c 'env -u ANTHROPIC_API_KEY "$LOGIN_BIN" "$@"; echo "[exit $?]"; sleep 900' login "$@" >/dev/null 2>&1
+    bash -c 'env -u ANTHROPIC_API_KEY -u GEMINI_API_KEY -u GOOGLE_API_KEY "$LOGIN_BIN" "$@"; echo "[exit $?]"; sleep 900' login "$@" >/dev/null 2>&1
 }
 
 end_login() {
@@ -1616,7 +1630,7 @@ do_worker_list() {
     [[ -f "$d/meta.json" ]] || continue
     n="$(basename "$d")"; signed=false
     worker_signed "${d%/}" && signed=true
-    out+="$(jq -c --arg n "$n" --argjson s "$signed" '{name:$n, kind:(.kind // "claude"), role:(.role // ""), mode:(.mode // "acceptEdits"), signed_in:$s}' "$d/meta.json")"$'\n'
+    out+="$(jq -c --arg n "$n" --argjson s "$signed" --arg au "$(worker_auth "${d%/}")" '{name:$n, kind:(.kind // "claude"), role:(.role // ""), mode:(.mode // "acceptEdits"), signed_in:$s} + (if $au == "" then {} else {auth:$au} end)' "$d/meta.json")"$'\n'
   done
   api_ok "$(printf '%s' "$out" | jq -sc '{workers:.}')"
 }
@@ -1688,8 +1702,8 @@ do_cluster() {
     if [[ "$(worker_kind "${d%/}")" == claude ]]; then
       cluster_account "$n" "$d/home" "$d/home/.claude.json" "$(jq -r '.role // ""' "$d/meta.json")" "$(jq -r '.mode // "acceptEdits"' "$d/meta.json")" >"$tmp/$(printf %02d "$i")" &
     else   # no usage numbers or token counts for these
-      jq -c --arg n "$n" --argjson s "$({ worker_signed "${d%/}" && echo true; } || echo false)" \
-        '{name:$n, kind:.kind, email:null, plan:null, signed_in:$s, role:(.role // ""), mode:(.mode // "acceptEdits"), usage:null, usage_error:"unavailable", tokens:null}' "$d/meta.json" >"$tmp/$(printf %02d "$i")"
+      jq -c --arg n "$n" --argjson s "$({ worker_signed "${d%/}" && echo true; } || echo false)" --arg au "$(worker_auth "${d%/}")" \
+        '{name:$n, kind:.kind, email:null, plan:null, signed_in:$s, role:(.role // ""), mode:(.mode // "acceptEdits"), usage:null, usage_error:"unavailable", tokens:null} + (if $au == "" then {} else {auth:$au} end)' "$d/meta.json" >"$tmp/$(printf %02d "$i")"
     fi
   done
   wait
@@ -2524,7 +2538,7 @@ do_worker_login_start() {
   worker_login_target "${1:-}"
   case "$(worker_kind "$WORKERS_DIR/$1")" in
     codex) do_login_codex_start ;;
-    gemini) api_err invalid_name "Gemini workers sign in with an API key (worker-set-key)." ;;
+    gemini) do_login_gemini_start ;;
     grok) do_login_grok_start ;;
     *) do_login_claude_start ;;
   esac
@@ -2533,7 +2547,7 @@ do_worker_login_code() {
   worker_login_target "${1:-}"
   case "$(worker_kind "$WORKERS_DIR/$1")" in
     codex) do_login_codex_code ;;
-    gemini) api_err invalid_name "Gemini workers sign in with an API key (worker-set-key)." ;;
+    gemini) do_login_gemini_code ;;
     grok) do_login_grok_wait ;;
     *) do_login_claude_code ;;
   esac
@@ -2541,6 +2555,7 @@ do_worker_login_code() {
 do_worker_login_cancel() {
   worker_login_target "${1:-}"
   end_login "$CLAUDE_LOGIN_SESSION"
+  [[ "$(worker_kind "$WORKERS_DIR/$1")" == gemini ]] && rm -rf -- "${LOGIN_CONFIG_DIR:?}/$GEMINI_SIGNIN_DIR"
   api_ok '{"cancelled":true}'
 }
 
@@ -2605,7 +2620,7 @@ do_login_codex_code() {
 }
 
 # Success = the CLI wrote its login file under the worker's home.
-do_login_device_wait() {  # <codex|gemini>
+do_login_device_wait() {  # <codex>
   local w="${CLAUDE_LOGIN_SESSION#worker-login-}" i text=""
   exec 0</dev/null
   for ((i = 0; i < 45; i++)); do
@@ -2665,6 +2680,98 @@ do_login_grok_wait() {
   api_err login_pending "Still waiting for you to approve the sign-in in your browser."
 }
 
+# gemini_select_auth <home> <oauth-personal|gemini-api-key>: tell the CLI which login to use, keeping its other settings. Runs outside
+# the sandbox while a worker can write this folder, so a link it planted there is removed, never followed.
+gemini_select_auth() {
+  local g="$1/.gemini" f new
+  [[ -L "$g" ]] && rm -f -- "$g"
+  mkdir -p -- "$g"
+  f="$g/settings.json"; new="$g/.settings.$$.new"
+  rm -f -- "$new"
+  if [[ -f "$f" && ! -L "$f" ]]; then
+    jq -c --arg t "$2" 'if type == "object" then . else {} end | .security.auth.selectedType = $t' "$f" >"$new" 2>/dev/null || : >"$new"
+  fi
+  [[ -s "$new" ]] || jq -cn --arg t "$2" '{security:{auth:{selectedType:$t}}}' >"$new"
+  mv -fT -- "$new" "$f"
+}
+
+# Gemini with a Google account: the interactive CLI in a tmux pane prints a link and "Enter the authorization code:"; Google's page shows a
+# code the user pastes back. (A headless run can't do this: it stops with "Manual authorization is required".) It runs in a folder of its own:
+# a CLI that finds a cached login shows no link at all, and a re-sign-in must not cost the worker its current login until the new one exists.
+# `timeout`: this pane would otherwise wait for a code for ever.
+do_login_gemini_start() {
+  need tmux; ensure_cli gemini @google/gemini-cli
+  local signin="$LOGIN_CONFIG_DIR/$GEMINI_SIGNIN_DIR" i text="" url=""
+  end_login "$CLAUDE_LOGIN_SESSION"
+  rm -rf -- "$signin"
+  (umask 077; mkdir -p -- "$signin") || api_err internal "Couldn't prepare the sign-in."
+  gemini_select_auth "$signin" oauth-personal
+  LOGIN_CONFIG_DIR="$signin" LOGIN_HOME="$signin"
+  start_login_session "$CLAUDE_LOGIN_SESSION" "$(command -v timeout)" --foreground 900 "$(command -v gemini)" --skip-trust || api_err internal "Could not start the login session."
+  for ((i = 0; i < 90; i++)); do
+    sleep 0.5
+    text="$(pane_text "$CLAUDE_LOGIN_SESSION")"
+    url="$(grep -oE 'https://accounts\.google\.com/[^[:space:]]+' <<<"$text" | tail -n 1 | tr -d '\r' || true)"
+    [[ -n "$url" ]] && break
+    grep -q '\[exit ' <<<"$text" && break
+  done
+  if [[ -z "$url" ]]; then
+    end_login "$CLAUDE_LOGIN_SESSION"
+    rm -rf -- "$signin"
+    api_err login_failed "Gemini didn't show a Google sign-in link." "$(jq -cn --arg t "$(tail -n 15 <<<"$text")" '{pane:$t}')"
+  fi
+  api_ok "$(jq -cn --arg u "$url" --arg s "$CLAUDE_LOGIN_SESSION" '{url:$u, session:$s, paste_code:true}')"
+}
+
+# The CLI wrote its login into the sign-in folder: it becomes the worker's login. unverified: the file name after a real sign-in, and that headless runs reuse it.
+gemini_login_finish() {  # <worker home>
+  local signin="$1/$GEMINI_SIGNIN_DIR"
+  sleep 0.5   # the CLI may still be writing it
+  end_login "$CLAUDE_LOGIN_SESSION"
+  gemini_select_auth "$1" oauth-personal
+  mv -fT -- "$signin/$GEMINI_AUTH_FILE" "$1/$GEMINI_AUTH_FILE" || api_err internal "Couldn't save the Google sign-in."
+  chmod 600 -- "$1/$GEMINI_AUTH_FILE"
+  [[ -f "$signin/.gemini/google_accounts.json" && ! -L "$signin/.gemini/google_accounts.json" ]] && mv -fT -- "$signin/.gemini/google_accounts.json" "$1/.gemini/google_accounts.json"
+  rm -rf -- "$signin"
+  api_ok '{"logged_in":true}'
+}
+
+# Lines that mean the CLI refused the code. The URL line is left out: its random parts could spell one of these words.
+gemini_login_refusals() { grep -v 'https://' <<<"$1" | grep -ciE 'invalid|error|failed|expired' || true; }
+
+do_login_gemini_code() {
+  local code i text="" before now home="$LOGIN_CONFIG_DIR"
+  local creds="$home/$GEMINI_SIGNIN_DIR/$GEMINI_AUTH_FILE"
+  code="$(read_secret_line)"
+  exec 0</dev/null
+  code="${code//[[:space:]]/}"
+  [[ "$code" =~ ^[A-Za-z0-9/_.~=+#-]{8,512}$ ]] || api_err invalid_name "That doesn't look like the code from Google. Check you copied all of it."
+  tmux has-session -t "=$CLAUDE_LOGIN_SESSION" 2>/dev/null || api_err login_failed "This sign-in has ended. Start the sign-in again."
+  # The folder started empty, so any login in it is new. Already there = an earlier code was accepted after its answer gave up.
+  [[ -s "$creds" && ! -L "$creds" ]] && gemini_login_finish "$home"
+  text="$(pane_text "$CLAUDE_LOGIN_SESSION")"
+  before="$(gemini_login_refusals "$text")"
+  tmux send-keys -t "=$CLAUDE_LOGIN_SESSION:" -l -- "$code"
+  tmux send-keys -t "=$CLAUDE_LOGIN_SESSION:" Enter
+  for ((i = 0; i < 45; i++)); do
+    sleep 1
+    [[ -s "$creds" && ! -L "$creds" ]] && gemini_login_finish "$home"
+    text="$(pane_text "$CLAUDE_LOGIN_SESSION")"
+    grep -q '\[exit ' <<<"$text" && break
+    now="$(gemini_login_refusals "$text")"
+    ((now > before)) && break
+  done
+  sleep 2
+  [[ -s "$creds" && ! -L "$creds" ]] && gemini_login_finish "$home"
+  text="$(pane_text "$CLAUDE_LOGIN_SESSION")"
+  if grep -q '\[exit ' <<<"$text" || ! tmux has-session -t "=$CLAUDE_LOGIN_SESSION" 2>/dev/null; then   # it gave up: only a new sign-in can work now
+    end_login "$CLAUDE_LOGIN_SESSION"
+    rm -rf -- "${home:?}/$GEMINI_SIGNIN_DIR"
+  fi
+  text="${text//"$code"/[code]}"
+  api_err login_failed "That code didn't work. Check you copied all of it, or start the sign-in again." "$(jq -cn --arg t "$(tail -n 15 <<<"$text")" '{pane:$t}')"
+}
+
 # Gemini and Grok: the key (from Google AI Studio / console.x.ai) comes on stdin and is kept in the worker's home, mode 600; clauderc-team hands it to the CLI.
 do_worker_set_key() {
   local name="${1:-}" key dir kind
@@ -2685,10 +2792,8 @@ do_worker_set_key() {
   ensure_cli gemini @google/gemini-cli
   dir="$WORKERS_DIR/$name/home"
   (umask 077; printf '%s\n' "$key" >"$dir/gemini-api-key.new" && mv -f "$dir/gemini-api-key.new" "$dir/gemini-api-key")
-  # An old Google-account login would be tried first and refused: remove it and pick the key.
-  rm -f "$dir/.gemini/oauth_creds.json"
-  mkdir -p "$dir/.gemini"
-  echo '{"security":{"auth":{"selectedType":"gemini-api-key"}}}' >"$dir/.gemini/settings.json"
+  # A Google account login stays and wins over the key (same rule as Grok): clauderc-team picks again before each run.
+  [[ -s "$dir/$GEMINI_AUTH_FILE" ]] || gemini_select_auth "$dir" gemini-api-key
   api_ok "$(jq -cn --arg n "$name" '{saved:$n}')"
 }
 
