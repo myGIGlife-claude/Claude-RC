@@ -26,7 +26,7 @@ see usage across your Claude accounts and get instant alerts. Your server, your 
 ## Contents
 
 - [Quick start](#quick-start)
-- [Features](#features): [Sessions and chat](#sessions-and-chat) · [Instant alerts](#instant-alerts) · [Projects](#projects) · [Several accounts](#several-accounts-as-a-team) · [Connections and keys](#connections-and-keys) · [Move to a new server](#move-to-a-new-server)
+- [Features](#features): [Sessions and chat](#sessions-and-chat) · [Instant alerts](#instant-alerts) · [Projects](#projects) · [Several accounts](#several-accounts-as-a-team) · [Connections and keys](#connections-and-keys) · [Voice, widgets and big screens](#voice-widgets-and-big-screens) · [Servers, hosts and backup](#servers-hosts-and-backup) · [Developer knowledge pack](#developer-knowledge-pack) · [Move to a new server](#move-to-a-new-server)
 - [Screenshots](#screenshots)
 - [How it works](#how-it-works) · [Screen reference](#screen-reference)
 - [Install on the phone](#install-on-the-phone) · [Updates](#updates)
@@ -52,8 +52,10 @@ Full steps and what each part does are under [Install on the phone](#install-on-
 <td width="25%"><img src="docs/screens/session-log.png" alt="Live session log with answer keys"></td>
 <td>
 
-- Every Claude Code session on your server, with **status lights** (idle, working, waiting for you) and its last lines.
-- **Chat** inside the app behind a chat PIN: tool steps folded, Claude's questions as tappable options, **Stop**, model and permission-mode chips, 🔊 read-aloud, files Claude sends, 📎 to send files.
+- Every Claude Code session on your server, with **status lights** (amber needs you, green working, grey idle) and its last lines. Two tabs: **Code chat** (your projects) and **General chat** (plain conversations that aren't tied to a project; saved ones can be reopened).
+- **Chat** inside the app behind a chat PIN: tool steps folded, Claude's questions as tappable options, **Stop**, one controls sheet (model, permission mode, read-aloud, **Permissions**, workers), a one-tap Workers and servers button, files Claude sends, 📎 to send several photos or files at once.
+- Code and commands in replies get a **Copy** box (also `! command` lines); a whole-reply Copy sits next to Play. `/clear`, `/reset` and `/new` empty the chat view at once.
+- **Permissions screen** (also `/permissions`): edit Claude's allow, ask and deny rules and default mode for a session, at user, project or local level.
 - A full-screen **log** with answer keys (1 2 3 ↑ ↓ y n Esc Enter) for anything the chat can't show.
 - Safe **Restart** (reopens the same conversation), **Restart all**, Stop.
 
@@ -104,6 +106,7 @@ Full steps and what each part does are under [Install on the phone](#install-on-
 
 - Connect **several Claude accounts**; see each one's **usage** (5-hour and weekly, filling with what is used) and tokens used on the server.
 - The main Claude (research, planning, review on the big model) **hands code to workers**, one git branch per task, then reviews and merges.
+- Workers can be **Claude**, **ChatGPT (Codex)**, **Grok** or **Gemini** accounts. Sign in from the app (Codex and Grok with a device link, Gemini with Google's link and a code you paste) or save an API key; an account wins when a worker has both. Picture requests can go to the Grok worker, which makes and commits the image file.
 - **Cluster settings** in the app: *parallel tasks per chat* (1 to 10) and *hand work back to the main Claude* at a usage level you choose (50 to 100%, default 95%).
 
 Details and rules to give your sessions: [cLaudeCluster](#claudecluster).
@@ -121,12 +124,28 @@ Details and rules to give your sessions: [cLaudeCluster](#claudecluster).
 <td width="25%"><img src="docs/screens/apple.png" alt="Apple developer account dialog"></td>
 <td>
 
-- Everything your server is signed in to, as tiles with a live status: Claude, GitHub, AWS, GitLab, Docker/GHCR, YouTube, Cloudflare, Vercel, Supabase, Stripe, Firebase and more, plus **MCP servers** found automatically.
+- Everything your server is signed in to, as tiles with a live status: Claude, GitHub, AWS, GitLab, Docker/GHCR, YouTube, Cloudflare, Vercel, Supabase, Stripe, Firebase, OVHcloud and more, plus **MCP servers** found automatically.
 - **Keys**: Android signing keys, an **Apple developer account** (App Store Connect key for iOS builds), and any custom API key. Values are never shown; every Claude session gets them as environment variables.
 
 </td>
 </tr>
 </table>
+
+### Voice, widgets and big screens
+
+- **Natural voice** (Settings › App › Voice): a free, offline voice (Kokoro, run on the phone with sherpa-onnx) reads replies aloud with no cloud service; it falls back to the phone's own text-to-speech if anything fails. Money, units and symbols are spoken as words. The model downloads once, on your request.
+- **Home-screen widgets** (Sessions, Quick actions, Usage): each placed widget has its own settings and adapts to its size, including a foldable's cover screen. They show names, status and usage numbers only, never chat text, and tapping one opens the app at that chat once it is unlocked.
+- **Adaptive layout**: a bottom bar on phones, a side rail on tablets and unfolded foldables, and a list/detail view on the widest screens. Light and dark themes.
+
+### Servers, hosts and backup
+
+- **Add a server with a password**: *Connect with a password* on the setup screen checks the host key with you, logs in once, installs what is missing (including Claude Code and the server scripts) and then drops the password; from then on only the phone's key is used. Give each server a short **purpose** label (for example "web" or "build") shown wherever you pick a server.
+- **Hosts** (web servers that don't run Claude): attach one to a chat from the 👥 sheet and that chat's Claude can run commands and copy files there, in its own folder. See [docs/hosts-design.md](docs/hosts-design.md).
+- **Backups**: `claude-backup` makes one encrypted file of logins, keys, scripts, chat history and a rescue copy of unpushed work; an optional **Google Drive backup** uploads that encrypted file (daily if you switch it on, newest 3 kept) to a hidden app folder, with a passphrase only you know ([docs/drive-backup-design.md](docs/drive-backup-design.md)).
+
+### Developer knowledge pack
+
+cLaudeRC installs 37 `rc-*` skills (languages, Android, iOS, web, security, databases, cloud, UI/UX, testing, and U.S. legal research) for every Claude session and worker on the server, so they code against current versions and rules. They are checked against a hash list on install, can refresh monthly through a pull request you review, and show their version under Settings › Developer knowledge. See [server/knowledge](server/knowledge/README.md).
 
 ### Move to a new server
 
@@ -232,7 +251,8 @@ The only outside piece is optional: Firebase, for instant alerts, in a project y
 - **iPhone app** (`ios/`): SwiftUI, see [iPhone app](#iphone-app).
 - **Server** (`server/`): `claude-setup.sh` (menu + `--api` JSON mode), the
   forced-command runner `claude-launcher-api`, `install-launcher-key.sh`,
-  `claude-autostart.sh`, `claude-push`, `clauderc-team` and the one-line `install.sh`.
+  `claude-autostart.sh`, `claude-push`, `claude-backup`, `clauderc-team` (the worker MCP server),
+  `youtube-upload`, the `knowledge/` skill pack and the one-line `install.sh`.
   See [server/README.md](server/README.md).
 
 **What you need:** a Linux server you can SSH into, with Claude Code (a claude.ai
@@ -249,9 +269,9 @@ Five tabs, the same tile style throughout: **Sessions · Projects · New · Clau
 | --- | --- | --- |
 | **New** | Name (validated live), owner and visibility chips, “Start Claude now” | Create → repo link + **Open in Claude** |
 | **Projects** | Your repos as tiles, newest first: running / on server / GitHub only, private/public, org | Chips: **Running** (default), **On server**, **All**, **Archived** (repos archived on GitHub, kept out of All); search; tap for Open in Claude, clone/pull + start, stop, log, GitHub, rename, make public/private, delete (type `delete` to confirm); long-press a running one for its log |
-| **Sessions** | Each running Claude session with its last lines in green, busy/idle, a 🔔 bell for “finished” push alerts, and an amber **needs an answer** card when it's waiting on a question (e.g. approving a new MCP server) | **Chat** right in the app (behind a chat PIN: messages from Claude's own conversation, tool steps as short lines, tappable links, Claude's multiple-choice questions as tappable options, **Stop** while it works, a chip to switch model and one to cycle Claude's permission mode, a 🔊 switch that reads replies aloud (stays on until you turn it off) with Play/Pause under every reply, files Claude sends shown inline (image thumbnails, tap to zoom; **Save** for others), 📎 to send a file or photo into the project's `uploads/` folder; the same conversation as in the Claude app), **Open in Claude app** (menu), **Log** (a full-screen green-on-black terminal with A−/A+, live refresh and answer keys 1/2/3, ↑/↓, y/n, Esc, Enter), safe **Restart** / **Restart all** (reopens the same conversation, waits if Claude is busy), Stop; with App lock on, **Run a command** (terminal-style, type or paste, optional sudo password, keeps a scrollback of runs) |
+| **Sessions** | Two pill tabs, **Code chat** and **General chat** (plain conversations, each in its own folder, saved ones listed as Running / Saved). Each running Claude session with its last lines, status dot, a 🔔 bell for “finished” push alerts, and an amber **needs an answer** card when it's waiting on a question (e.g. approving a new MCP server) | **Chat** right in the app (behind a chat PIN: messages from Claude's own conversation, tool steps as short lines, tappable links, Claude's multiple-choice questions as tappable options, **Stop** while it works, a chip to switch model and one to cycle Claude's permission mode, a 🔊 switch that reads replies aloud (stays on until you turn it off) with Play/Pause under every reply, files Claude sends shown inline (image thumbnails, tap to zoom; **Save** for others), 📎 to send a file or photo into the project's `uploads/` folder; the same conversation as in the Claude app), **Open in Claude app** (menu), **Log** (a full-screen green-on-black terminal with A−/A+, live refresh and answer keys 1/2/3, ↑/↓, y/n, Esc, Enter), safe **Restart** / **Restart all** (reopens the same conversation, waits if Claude is busy), Stop; with App lock on, **Run a command** (terminal-style, type or paste, optional sudo password, keeps a scrollback of runs) |
 | **Claude** | Claude Code's version and three pill tabs: **Accounts** (cLaudeCluster: every Claude account with usage bars that fill with what is used, plan, email, role, mode, tokens used on this server), **Plugins** (installed plugins as tiles with a status light: green on and current, yellow update available, red can't check, hollow off; the tab shows a dot when any update is waiting), **Tools** (Doctor, Full checkup, Update Claude, other `claude` commands, marketplaces) | Accounts: **+ Add account** (signs in with a link and a code), **Sign in / Re-sign in**, **Mode**, **Tasks**, **Remove**. Plugins: tap a plugin to enable, disable, update or uninstall; **+ Install** searches every plugin across your marketplaces. Tools: **Doctor**, **Full checkup** (runs `/doctor` in its own session, shown in the chat), **Update Claude**, **+ Add marketplace** |
-| **Connections** | Everything Claude on your server is connected to as tiles, in three pill tabs: **Logins** (Core: Claude, GitHub; Services: AWS, GitLab, Docker/GHCR, YouTube, Cloudflare, Vercel, MXroute, ...), **MCP** (found automatically: your own, plugin ones and claude.ai connectors, with a live health dot, refreshed every 5 min), **Keys** (Android signing keys, an Apple developer key, custom API keys). Server update card on top. | Tap a tile for its details: status, public info, the variable names sessions get (never values), **Edit** (new key), **Test now**, **Disconnect/Remove**. **+** (top right) connects a new service from a searchable A-Z list (AWS, GitLab, Docker/GHCR, Cloudflare, Vercel, Netlify, Fly.io, Railway, Supabase, Neon, npm, Stripe, Hugging Face, Backblaze B2, Google Cloud, Firebase, MXroute, Google Play Console, YouTube with a `youtube-upload` command for every session, an **Android signing key**, an **Apple developer account** (App Store Connect key for iOS builds), or any **Custom API key**); it installs the CLI if needed, then asks for credentials. |
+| **Connections** | Everything Claude on your server is connected to as list rows, in three pill tabs: **Logins** (Core: Claude, GitHub; Services: AWS, GitLab, Docker/GHCR, YouTube, Cloudflare, Vercel, MXroute, OVHcloud, ...), **MCP** (found automatically: your own, plugin ones and claude.ai connectors, with a live health dot, refreshed every 5 min), **Keys** (Android signing keys, an Apple developer key, custom API keys). Server update card on top. | Tap a tile for its details: status, public info, the variable names sessions get (never values), **Edit** (new key), **Test now**, **Disconnect/Remove**. **+** (top right) connects a new service from a searchable A-Z list (AWS, GitLab, Docker/GHCR, Cloudflare, Vercel, Netlify, Fly.io, Railway, Supabase, Neon, npm, Stripe, Hugging Face, Backblaze B2, Google Cloud, Firebase, MXroute, OVHcloud, Google Play Console, YouTube with a `youtube-upload` command for every session, an **Android signing key**, an **Apple developer account** (App Store Connect key for iOS builds), or any **Custom API key**); it installs the CLI if needed, then asks for credentials. |
 
 **Servers**: add as many as you like; tap the server name under the title to
 switch. All of them use this phone's one key.
@@ -266,7 +286,7 @@ Use several Claude accounts from one chat. The main Claude (research, planning, 
 review) hands the code to the others ("workers") and you stay in charge of what lands in the project.
 
 1. **Accounts.** Claude tab › Accounts: **+ Add account** gives a worker a name
-   and a role and signs it in. Each account shows usage bars that fill with
+   and a role and signs it in. A worker's kind is Claude, ChatGPT (Codex), Grok or Gemini. Each account shows usage bars that fill with
    what is *used* (amber from 75%, red from 90%), its plan, email, role, mode
    and tokens used on this server (last 5 h / 7 days).
 2. **Attach per chat.** The 👥 button in a chat's header opens a sheet: switch
@@ -297,6 +317,8 @@ delegate *by role*: the server picks the matching account with the most room lef
 and spreads work across same-role accounts, so more accounts means more capacity and fewer stops at a usage limit.
 A task can also start **on another task's branch** (`from_task`), which is how a code writer's work goes to a
 security auditor before anything is merged: write, audit, fix, merge.
+
+**Other worker kinds.** Codex, Grok and Gemini workers run inside the same sandbox and the same branch-per-task flow. Grok can also create images (the file arrives on its branch for you to review). Gemini on a free key can hit Google's daily quota; the run then stops quickly with a plain message instead of hanging for 30 minutes.
 
 A worker's replies end with how long the run took and how many tokens it used. Pick each worker's
 model and effort on the server (for example Sonnet 5.5 at high); the how-to and a ready-made
