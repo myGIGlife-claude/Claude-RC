@@ -1,19 +1,23 @@
-Last updated: 2026-11-16 03:00 UTC
+Last updated: 2026-11-16 04:10 UTC
 
 ## Goal
 cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage Claude Code sessions on your own server from a phone.
 
 ## Current task
-Plan refreshed against GitHub on 2026-11-16 (main CI green, last build 2026-11-04). Nothing is half-built. Next: T1 (merge the README PR once Jonathan says OK) and T2 (clear the stale PRs), then T3-T4. Everything under "Owner" needs Jonathan's phone or accounts.
+Done today: README (#229) and PLAN (#230) merged; master ~/.claude/CLAUDE.md rewritten (backup kept) and default model set to Opus; T4 in PR #231; worker role drop-down in PR #232. Next: merge #231/#232 on green CI, then T14-T15 (starred-chat queue), then T2, T3, T5-T10.
 
 ## Model rule (Jonathan, 2026-11-16, master rule in ~/.claude/CLAUDE.md)
 Orchestrator splits work into small tasks and picks the cheapest model that does each reliably: Haiku = simple, repetitive; Sonnet = standard build, refactor, tests, moderate debugging; Opus = architecture, hard debugging, ambiguous or system-wide, security design/review (Opus takes every top-tier task by default, Agent `model: opus` or `planner`); Fable 5.2 only when Opus failed or is clearly not enough (one-line reason). Same bug survives 2 fixes: go up one level. Orchestrator keeps review, integration and final verification (real build on CI, never "it compiles").
 
 ## Tasks (open work only; each has its model and why)
-- [ ] T1 README PR #229 (README brought up to date, CI green): merge, then watch main build. Owner OK needed (merging was blocked once). Model: orchestrator, mechanical.
+- [x] T1 README PR #229 (README brought up to date, CI green): merge, then watch main build. Owner OK needed (merging was blocked once). Model: orchestrator, mechanical.
 - [ ] T2 Housekeeping: close the superseded PLAN PRs #198, #204, #211 (this refresh replaces them); merge Dependabot #214 (Gradle libraries, 5 updates) and #228 (Actions, 4 updates) only after a CI build, and install the release APK on a phone before trusting the Gradle bump (R8 can break at run time). Model: Haiku for closing and merging; Sonnet to read the Gradle changelog for breaking changes.
 - [ ] T3 PR #195 (YouTube honest channel-lookup errors): rebase on main, review, merge. Model: Sonnet, small and isolated.
 - [ ] T4 General-chat race: two `general-open` calls on one stopped chat can kill each other's tmux session (`do_general_open` has no lock). Add a per-chat `flock` and a test in `server/tests/test-api.sh`. Model: Sonnet writes, orchestrator reviews (server script, could kill sessions: run all server tests).
+- [ ] T14 Star button + queue protocol (Jonathan 2026-11-16): a star icon in the chat top bar adds the chat to the auto-continue queue (server-side state, new action, bump SCRIPT_API and MIN_SCRIPT_API). Markers a session prints: `QUESTION:` (waiting for Jonathan) and `QUEUE: nothing to do`. Model: Opus writes the protocol (unattended, system-wide), Sonnet builds app + server.
+- [ ] T15 `claude-queue` scheduler on the server, running all the time for maximum usage: round-robin over starred chats; each turn the chat finishes one PLAN task completely; reads each account's 5-hour/weekly usage and keeps going while there is room, resumes right after a window resets; skips chats waiting on a QUESTION, empty plans, and two chats in one repo at once; kill switch in the app; log. A session may merge its own PR when CI is green, never on red. Hard stops stay: deleting data, production, DNS/mail, spending money, access changes. Model: Opus designs and reviews, Sonnet builds.
+- [ ] T16 Make the "ask first" rules real: `permissions.ask` for DNS/mail/public-post tools (done 2026-11-16 in settings.json); branch protection (required CI check) and `gh pr merge --auto` so a red build cannot merge (needs Jonathan's OK on repo rules); a done-check per queue turn (`/goal` or a Stop hook), `--max-turns`. Model: Opus.
+- [ ] T17 "Ask another session": a button in the chat to pick another live session and send it a question (tools exist: `ListAgents`, `SendMessage`; messages to a session in another permission mode wait for approval, test that first). Model: Sonnet.
 - [ ] T5 Verify the `unverified` guesses in `clauderc-team` against real Grok and Gemini runs (answer JSON keys, error shape, Gemini login file name and refused-code wording, headless reuse of the login), fix, drop the markers. Needs Jonathan's logged-in workers. Model: Sonnet.
 - [ ] T6 Real cluster test with a second account: `delegate(role=...)`, failover, `from_task` writer-to-auditor, 3 parallel tasks, hand-back at 95%, all four kinds (Claude, Codex, Grok, Gemini). Report what breaks. Model: Sonnet runs; Opus (`planner`) reads the results only if something fails.
 - [ ] T7 Cluster `wait` still returns about once a minute: make it return when a task finishes. Model: Sonnet (one subsystem); Opus only if the fix touches the detached-run design.
@@ -25,6 +29,7 @@ Orchestrator splits work into small tasks and picks the cheapest model that does
 - [ ] T13 Widgets, optional next: more actions, general-chat session names, refresh-button feedback. Model: Sonnet. Only after Jonathan has seen them on the phone.
 
 ## Owner (Jonathan: needs the phone, an account or a decision)
+- [ ] Collaboration tools: this session has pair_* but not collab_new/collab_invite/collab_list because PAIR_RELAY_URL is a channel link, not the hub link (the relay only lists hub tools for the hub link). Put the hub link in the app (+ > Custom API key > PAIR_RELAY_URL), then Sessions > Restart.
 - [ ] Update now + Restart sessions, then try on the phone, one pass: release APK (SSH connect, chat, push; R8), fold/unfold and chat PIN lock, widgets (cover screen, unfolded, dark, taps), natural voice (+ speed idea), General chat, Permissions screen, add-server with a password, server purpose, Copy boxes and multi-photo attach, Plugins lights, Cluster settings, Gemini and Grok account sign-in, Apple key dialog.
 - [ ] Google Drive backup (needs real Google: Drive API, consent screen drive.appdata, OAuth client "TVs and Limited Input devices", keys GOOGLE_DRIVE_CLIENT_ID / _SECRET in the app). Untested against real Google. Phase 2 native sign-in later.
 - [ ] OVHcloud: create a read-only token, add the 4 values in the app, then test `ovh_request GET /me`. Open question: VPS or Public Cloud.
@@ -32,6 +37,8 @@ Orchestrator splits work into small tasks and picks the cheapest model that does
 - [ ] Decisions: branch protection ruleset on main (stops merging with red CI); Grok video (blocked by zero data retention even with an R2 bucket; the Antigravity worker was advised against, consumer-terms risk) drop or pursue; Gemini free tier is 20 requests a day, so use a paid key or accept fail-fast; GitHub token with `delete_repo` if repo delete is wanted; claude-mem via OmniRoute (offered, undecided).
 
 ## Decisions
+- 2026-11-16: Default model is Opus (settings.json), Fable via /model or Agent model only when Opus is not enough; the task breakdown is shown and work starts without waiting; PLAN.md stays the only task list (not the claude-mem list). Master CLAUDE.md replaced by Fable's reviewed version; "ask first" tools (DNS, mail, OVH, X posts) now need approval each time.
+- 2026-11-16: Queue: all the time, maximum usage, self-merge on green CI, stop only for a direct question or the hard-stop list.
 - 2026-11-16: Jonathan: go with every open task, but iOS is paused (he uses Android only).
 - 2026-11-16: Model rule: lead orchestrator, cheapest model that is reliable per task, Opus for every top-tier task, Fable 5.2 only when Opus is not enough. This plan lists a model for each open task.
 - 2026-11-16: PLAN refreshed from GitHub, not from memory. Finished work is one line below, not re-listed.
