@@ -21,7 +21,7 @@ Orchestrator splits work into small tasks and picks the cheapest model that does
 - [ ] T9 README: real mock-up screens for General chat, Permissions, widgets, natural voice, add-server (source in docs/mockups, never real data). Model: Sonnet builds HTML mock-ups; Grok worker only if a raster picture is needed.
 - [ ] T10 Migrate wizard follow-ups (verify first, may be partly done): re-sign-in step for Codex/Grok/Gemini workers, restart sessions and check docker/uv/tools the old server had. Model: Sonnet.
 - [ ] T11 Collaboration relay hardening (Cloudflare Worker in ~/projects/clauderc-relay, not in this repo): one-time/expiring invites, per-person revoke, encryption at rest. Model: Opus designs and reviews (security), Sonnet implements.
-- [ ] T12 iOS: decide main vs the `iOS` branch, then port logins, MCP/plugins, cluster, files, push; TestFlight needs the Apple developer account (key goes in the app: + > Apple developer account). Model: Opus for the decision and architecture, Sonnet for each screen.
+- [-] T12 iOS: PAUSED by Jonathan 2026-11-16 (Android only, no release planned). Leave `ios/` and the iOS workflow untouched; no iOS work in any task.
 - [ ] T13 Widgets, optional next: more actions, general-chat session names, refresh-button feedback. Model: Sonnet. Only after Jonathan has seen them on the phone.
 
 ## Owner (Jonathan: needs the phone, an account or a decision)
@@ -32,6 +32,7 @@ Orchestrator splits work into small tasks and picks the cheapest model that does
 - [ ] Decisions: branch protection ruleset on main (stops merging with red CI); Grok video (blocked by zero data retention even with an R2 bucket; the Antigravity worker was advised against, consumer-terms risk) drop or pursue; Gemini free tier is 20 requests a day, so use a paid key or accept fail-fast; GitHub token with `delete_repo` if repo delete is wanted; claude-mem via OmniRoute (offered, undecided).
 
 ## Decisions
+- 2026-11-16: Jonathan: go with every open task, but iOS is paused (he uses Android only).
 - 2026-11-16: Model rule: lead orchestrator, cheapest model that is reliable per task, Opus for every top-tier task, Fable 5.2 only when Opus is not enough. This plan lists a model for each open task.
 - 2026-11-16: PLAN refreshed from GitHub, not from memory. Finished work is one line below, not re-listed.
 - 2026-11-04: Gemini worker signs in with a Google account (Google's link, code pasted in the app) and stops fast on quota/overload errors (#227); Grok worker kind and account sign-in (#224-#226): image requests go to the Grok worker (`delegate(role="images")`). Grok video is blocked by ZDR; R2 test credentials were revoked and removed.
