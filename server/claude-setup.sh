@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id), 50 = grok worker kind, 51 = grok account sign-in (device code; worker-login-cancel), 52 = gemini account sign-in, fail-fast quota errors
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id), 50 = grok worker kind, 51 = grok account sign-in (device code; worker-login-cancel), 52 = gemini account sign-in, fail-fast quota errors, 53 = starred-chat queue (queue-status/-on/-off/-star/-log, sessions.starred)
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=52
+SCRIPT_API=53
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 CLAUDERC_API="${CLAUDERC_API:-https://api.github.com}"
@@ -940,7 +940,7 @@ sessions_list_json() {
     out="$(jq -c --argjson d "$([[ -e "$PUSH_DIR/$name" ]] && echo true || echo false)" \
       '.[-1].push_done = $d' <<<"$out")"
   done < <(jq -c '.[]' <<<"${s:-[]}")
-  printf '%s' "$out"
+  jq -c --argjson c "$(queue_conf)" 'map(. + {starred:(.name as $n | $c.stars | index($n) != null)})' <<<"$out"
 }
 
 # session_state_json <session>: {preview, waiting, busy}: its last lines, and whether it's waiting on a question or working.
@@ -4532,6 +4532,24 @@ do_chat_history() {
   api_ok_file "$tmp.out"
 }
 
+# chat_paste <session> <message>: paste the message into the session's box (bracketed paste) and press Enter.
+chat_paste() {
+  local sess="$1" msg="$2"
+  printf '%s' "$msg" | tmux load-buffer -b "clauderc-chat-$$" - || api_err internal "Couldn't hand the message to tmux."
+  tmux paste-buffer -p -d -b "clauderc-chat-$$" -t "=$sess:" || api_err internal "Couldn't paste the message."
+  # A long or multi-line paste is collapsed to "[Pasted text …]" and takes a moment to register: give it longer, and press Enter again if it is still sitting in the box.
+  if [[ ${#msg} -gt 300 || "$msg" == *$'\n'* ]]; then sleep 1; else sleep 0.3; fi
+  tmux send-keys -t "=$sess:" Enter
+  if [[ ${#msg} -gt 300 || "$msg" == *$'\n'* ]]; then
+    local i
+    for i in 1 2 3 4 5; do   # a busy session can swallow the Enter more than once
+      sleep 1
+      tmux capture-pane -p -t "=$sess:" 2>/dev/null | tail -n 6 | grep -q '^❯ .*\[Pasted text' || break
+      tmux send-keys -t "=$sess:" Enter
+    done
+  fi
+}
+
 # chat-send <session>: stdin = PIN, then the message (multi-line is fine: it
 # goes in as a bracketed paste, then Enter).
 do_chat_send() {
@@ -4546,22 +4564,127 @@ do_chat_send() {
   (($(printf '%s' "$msg" | wc -c) <= 20000)) || api_err invalid_name "That message is too long (20,000 characters at most)."
   while [[ "$msg" == *$'\n' ]]; do msg="${msg%$'\n'}"; done
   [[ -n "${msg//[[:space:]]/}" ]] || bad_args "empty message"
-  printf '%s' "$msg" | tmux load-buffer -b "clauderc-chat-$$" - || api_err internal "Couldn't hand the message to tmux."
-  tmux paste-buffer -p -d -b "clauderc-chat-$$" -t "=$sess:" || api_err internal "Couldn't paste the message."
-  # A long or multi-line paste is collapsed to "[Pasted text …]" and takes a moment to register: give it longer, and press Enter again if it is still sitting in the box.
-  if [[ ${#msg} -gt 300 || "$msg" == *$'\n'* ]]; then sleep 1; else sleep 0.3; fi
-  tmux send-keys -t "=$sess:" Enter
-  if [[ ${#msg} -gt 300 || "$msg" == *$'\n'* ]]; then
-    local i
-    for i in 1 2 3 4 5; do   # a busy session can swallow the Enter more than once
-      sleep 1
-      tmux capture-pane -p -t "=$sess:" 2>/dev/null | tail -n 6 | grep -q '^❯ .*\[Pasted text' || break
-      tmux send-keys -t "=$sess:" Enter
-    done
-  fi
+  chat_paste "$sess" "$msg"
   unset msg
   chat_log "$sess" send
   api_ok "$(jq -cn --arg s "$sess" '{sent:true, session:$s}')"
+}
+
+# ---- Auto-continue queue (docs/queue-design.md): state under <launcher config>/queue, files 600, dir 700 ----
+QUEUE_DIR="$LAUNCHER_CONFIG_DIR/queue"
+QUEUE_CRON_MARK="# clauderc-queue"
+QUEUE_LOG_MAX="${CLAUDERC_QUEUE_LOG_MAX:-1048576}"
+QUEUE_DEFAULTS='{"enabled":false,"parallel":1,"max_5h":90,"max_7d":95,"max_turn_min":240,"stars":[]}'
+
+queue_init() { mkdir -p "$QUEUE_DIR" && chmod 700 "$QUEUE_DIR"; }
+
+# queue_lock: one writer at a time (the tick takes the same lock); fd 7 stays open until the call ends.
+queue_lock() { queue_init; exec 7>>"$QUEUE_DIR/lock"; flock -w 20 7 || api_err busy "The queue is busy. Try again in a moment."; }
+
+# queue_conf: the owner's settings, with defaults for anything missing.
+queue_conf() { jq -c --argjson d "$QUEUE_DEFAULTS" '$d + (. // {})' "$QUEUE_DIR/queue.json" 2>/dev/null || printf '%s' "$QUEUE_DEFAULTS"; }
+
+# queue_conf_write <json>: atomic, mode 600.
+queue_conf_write() {
+  local tmp; queue_init
+  tmp="$(mktemp "$QUEUE_DIR/queue.json.XXXXXX")" || api_err internal "Couldn't save the queue settings."
+  printf '%s\n' "$1" >"$tmp" && chmod 600 "$tmp" && mv "$tmp" "$QUEUE_DIR/queue.json" || api_err internal "Couldn't save the queue settings."
+}
+
+# queue_log_add <session|-> <event> [detail]: names and states only, never chat text. Rotated at QUEUE_LOG_MAX.
+queue_log_add() {
+  local f="$QUEUE_DIR/log" d="${3:-}"
+  queue_init
+  d="${d//[$'\t\r\n']/ }"
+  if [[ -f "$f" ]] && (($(stat -c %s "$f" 2>/dev/null || echo 0) >= QUEUE_LOG_MAX)); then mv -f "$f" "$f.1"; fi
+  (umask 077; printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "$d" >>"$f")
+}
+
+# queue_cron: the one-minute tick line exists exactly while something is starred.
+queue_cron() {
+  if [[ "$(jq -r '.stars | length' <<<"$(queue_conf)")" -gt 0 ]]; then
+    cron_line_set "$QUEUE_CRON_MARK" on "* * * * * '$HOME/.local/bin/claude-queue' >/dev/null 2>&1 $QUEUE_CRON_MARK"
+  else
+    cron_line_set "$QUEUE_CRON_MARK" off
+  fi
+}
+
+# queue_status_json: settings, usage numbers and each starred chat's state (names and states only).
+queue_status_json() {
+  local usage='{}' st='{}'
+  [[ -f "$LAUNCHER_CONFIG_DIR/usage-cache/_main.json" ]] && usage="$(jq -c '{five, seven, five_resets, seven_resets}' "$LAUNCHER_CONFIG_DIR/usage-cache/_main.json" 2>/dev/null || echo '{}')"
+  [[ -f "$QUEUE_DIR/state.json" ]] && st="$(jq -c . "$QUEUE_DIR/state.json" 2>/dev/null || echo '{}')"
+  jq -cn --argjson c "$(queue_conf)" --argjson u "$usage" --argjson st "$st" --argjson now "${CLAUDERC_NOW:-$(date +%s)}" '
+    {enabled:$c.enabled, parallel:$c.parallel, max_5h:$c.max_5h, max_7d:$c.max_7d,
+     usage:({five:null, seven:null, five_resets:null, seven_resets:null} + $u),
+     limited_until:($st._limited_until // 0),
+     chats:[$c.stars[] as $s | ($st[$s] // {}) as $e
+       | {session:$s, state:($e.state // "idle"), since:($e.since // 0), note:($e.note // ""), turns:($e.turns // 0),
+          next_try:($e.next_try // 0),
+          running_min:(if $e.state == "running" and $e.turn.started then (($now - $e.turn.started) / 60 | floor) else 0 end)}]}'
+}
+
+# queue-status
+do_queue_status() { [[ $# -eq 0 ]] || bad_args "queue-status takes no arguments"; api_ok "$(queue_status_json)"; }
+
+# queue-on: stdin = PIN. Switching the queue on lets the server type into starred chats unattended.
+do_queue_on() {
+  [[ $# -eq 0 ]] || bad_args "queue-on takes no arguments"
+  local pin; pin="$(read_secret_line)"; exec 0</dev/null
+  check_pin "$pin"
+  queue_lock
+  queue_conf_write "$(queue_conf | jq -c '.enabled = true')"
+  queue_log_add - on
+  api_ok "$(queue_status_json)"
+}
+
+# queue-off: no PIN, the kill switch must always work. A running turn finishes its task.
+do_queue_off() {
+  [[ $# -eq 0 ]] || bad_args "queue-off takes no arguments"
+  queue_lock
+  queue_conf_write "$(queue_conf | jq -c '.enabled = false')"
+  queue_log_add - off
+  api_ok "$(queue_status_json)"
+}
+
+# queue-star <session> on|off: stdin = PIN for "on" only. Un-starring needs none.
+do_queue_star() {
+  [[ $# -eq 2 && ( "$2" == on || "$2" == off ) ]] || bad_args "usage: queue-star <session> on|off"
+  local pin sess screen
+  if [[ "$2" == on ]]; then
+    pin="$(read_secret_line)"; exec 0</dev/null
+    chat_session "$1"; sess="$CHAT_SESS"
+    check_pin "$pin"
+    [[ ! "$sess" =~ $GENERAL_SESS_RE ]] || api_err invalid_name "General chats can't join the queue."
+    screen="$(tmux capture-pane -p -J -t "=$sess:" 2>/dev/null)"
+    ! grep -q 'bypass permissions on' <<<"$screen" || api_err unsafe_mode "This chat skips all permission prompts, so the queue won't run it."
+  else
+    valid_project "$1" || api_err invalid_name "Invalid project name."
+    sess="$(resolve_session "$1")"
+  fi
+  queue_lock
+  if [[ "$2" == on ]]; then
+    queue_conf_write "$(queue_conf | jq -c --arg s "$sess" '.stars = ((.stars - [$s]) + [$s])')"
+    queue_log_add "$sess" star
+  else
+    queue_conf_write "$(queue_conf | jq -c --arg s "$sess" '.stars -= [$s]')"
+    # A fresh star starts clean: drop its state (failures, error) with the star.
+    if [[ -f "$QUEUE_DIR/state.json" ]]; then
+      jq -c --arg s "$sess" 'del(.[$s])' "$QUEUE_DIR/state.json" >"$QUEUE_DIR/state.json.new" 2>/dev/null &&
+        chmod 600 "$QUEUE_DIR/state.json.new" && mv "$QUEUE_DIR/state.json.new" "$QUEUE_DIR/state.json" || rm -f "$QUEUE_DIR/state.json.new"
+    fi
+    queue_log_add "$sess" unstar
+  fi
+  queue_cron
+  api_ok "$(jq -cn --arg s "$sess" --argjson on "$([[ "$2" == on ]] && echo true || echo false)" '{session:$s, starred:$on}')"
+}
+
+# queue-log [--lines N]: the last N log lines (default 100, at most 500).
+do_queue_log() {
+  local n=100
+  if [[ $# -eq 2 && "$1" == --lines && "$2" =~ ^[0-9]{1,3}$ ]]; then n=$((10#$2)); ((n >= 1 && n <= 500)) || n=500
+  elif [[ $# -ne 0 ]]; then bad_args "usage: queue-log [--lines N]"; fi
+  api_ok "$(tail -n "$n" "$QUEUE_DIR/log" 2>/dev/null | jq -Rcn '{lines:[inputs | split("\t") | {ts:.[0], session:.[1], event:.[2], detail:(.[3] // "")}]}')"
 }
 
 # chat-commands <session>: stdin = PIN. The slash commands Claude can run there beyond the built-ins:
@@ -5600,7 +5723,7 @@ api_main() {
   shift || true
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | set-secret-file | login-keystore | login-apple | youtube-login-start | \
-      chat-pin-set | chat-open | chat-history | general-rename | chat-send | chat-interrupt | chat-commands | permissions-get | permissions-set | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
+      chat-pin-set | queue-on | queue-star | chat-open | chat-history | general-rename | chat-send | chat-interrupt | chat-commands | permissions-get | permissions-set | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
       migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | host-probe | host-add | host-keyimport | host-authorize | host-harden | drive-passphrase) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
@@ -5614,6 +5737,11 @@ api_main() {
     push-register)       do_push_register "$@" ;;
     push-session)        do_push_session "$@" ;;
     push-test)           [[ $# -eq 0 ]] || bad_args "push-test takes no arguments"; do_push_test ;;
+    queue-status)        do_queue_status "$@" ;;
+    queue-on)            do_queue_on "$@" ;;
+    queue-off)           do_queue_off "$@" ;;
+    queue-star)          do_queue_star "$@" ;;
+    queue-log)           do_queue_log "$@" ;;
     sessions)            [[ $# -eq 0 ]] || bad_args "sessions takes no arguments"; do_sessions ;;
     general-list)        do_general_list "$@" ;;
     general-new)         do_general_new "$@" ;;
