@@ -4916,7 +4916,7 @@ queue_check_running() {
   elif queue_has '^QUEUE: nothing to do$' "$text" || ((quick >= 3)); then
     qmod "$s" '.plan_sum = $p | .nothing_at = $now | .quick = 0' --arg p "$cur"
     qstate "$s" nothing "plan empty"
-  else qstate "$s" idle; queue_log_add "$s" done; fi
+  else qstate "$s" idle; queue_log_add "$s" "done"; fi
 }
 
 # queue_eligible <session>: may it get a turn now? Sets states (stopped, needs_you, unsafe) as it finds them; QREPO = its checkout.
