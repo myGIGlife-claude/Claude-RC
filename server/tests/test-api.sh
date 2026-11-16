@@ -916,7 +916,7 @@ qtick 10; qtick 10
 qconf '["qa1","qa2","qb"]' 2; qtick 10
 [[ "$(qsent qa2)" == 0 && "$(qsent qb)" == 1 && "$(qsent qa1)" == 1 ]]; check "parallel 2: the chat in the same checkout is skipped, the one in another repo goes" $?
 [[ "$(qs qa1 repo)" == "$QT/repoA" && "$(qs qb repo)" == "$QT/repoB" ]]; check "the repo is the git top level (a1 and a2 share one)" $?
-! grep -qiE 'jonathan|mygig' <<<"$(grep -h "QUEUE_MSG=" "$HOME/bin/claude-setup.sh")"; check "the turn text names nobody" $?
+[[ "$(grep -h "QUEUE_MSG=" "$HOME/bin/claude-setup.sh")" != *@* && "$(grep -h "QUEUE_MSG=" "$HOME/bin/claude-setup.sh")" != */home/* ]]; check "the turn text carries no address or path" $?
 
 echo "queue tick: completion and round-robin (test 5)"
 qreset; qconf '["qa1","qa2","qb"]' 1; qusage 10
@@ -986,6 +986,75 @@ NOW=$((NOW + 90000)); qusage 10; qtick 100; [[ "$(qsent qb)" == 3 ]]; check "an 
 api "queue-star qb off"; api "queue-star qb on" "482913"; qusage 10; qtick 100
 [[ "$(qsent qb)" == 4 ]]; check "star off and on resets it" $?
 api "queue-star qb off"
+
+echo "queue tick: prompts, interrupts, errors, limits in replies, overrun (review fixes)"
+qclear() { tmux kill-session -t =qb 2>/dev/null; tmux new-session -d -s qb -x 100 -y 30 -c "$QT/repoB" cat; sleep 0.6; }
+qstat() { api "queue-status"; jq -r ".data.chats[] | select(.session==\"$1\") | .state" <<<"$OUT"; }
+qevent() { printf '%s\t%s\t%s\n' "$(date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ)" "$2" "$3" >>"$CL"; }   # a chat.log line at a fake time
+CL="$HOME/.local/state/claude-launcher/chat.log"
+# 1. A prompt keeps the turn running (slot held), shows as needs_you, and the reply is read once it is answered.
+qreset; qconf '["qb"]' 1; qusage 10; T0=$NOW
+qtick 10
+tmux send-keys -t "=qb:" -l "Do you want to proceed? (y/n)"; sleep 0.3
+qusage 10; qtick 10
+[[ "$(qs qb state)" == running && "$(qs qb waiting)" == true && "$(qstat qb)" == needs_you && "$(qlog qb needs_you)" == 1 ]]; check "a permission prompt: still running, flagged waiting, shown as needs_you, logged once" $?
+qusage 10; qtick 10; [[ "$(qsent qb)" == 1 && "$(qlog qb needs_you)" == 1 ]]; check "...and no new turn goes in over it" $?
+qclear; qusage 10; qtick 10
+[[ "$(qsent qb)" == 0 && "$(qs qb state)" == running && -z "$(qs qb waiting)" ]]; check "answered 'No' (pane idle, no reply yet): the same turn goes on, no fresh turn is sent" $?
+qfinish qb end_turn $'Asked and answered.\nQUESTION: Anything else?'; qusage 10; qtick 200; qusage 10; qtick 200
+[[ "$(qs qb state)" == question ]]; check "approved, then the turn ends with QUESTION: it is parsed, not talked over" $?
+# 2. A chat parked on a prompt while idle stays parked until the owner does something there.
+qreset; qconf '["qb"]' 1; qusage 10
+tmux send-keys -t "=qb:" -l "Continue? (y/n)"; sleep 0.3
+qtick 10; [[ "$(qs qb state)" == needs_you && "$(qsent qb)" == 0 ]]; check "an idle chat showing a prompt is parked as needs_you" $?
+SINCE="$(qs qb since)"; qclear; NOW=$((NOW + 3000)); qusage 10; qtick 10
+[[ "$(qsent qb)" == 0 && "$(qs qb state)" == needs_you ]]; check "the prompt going away is not enough: still parked" $?
+qevent $((SINCE + 5)) qb keys; NOW=$((NOW + 100)); qusage 10; qtick 10
+[[ "$(qsent qb)" == 1 ]]; check "an owner event (keys) after it was parked frees it" $?
+nk="$(grep -c $'\tkeys$' "$CL" || true)"; api "keys demo-app2 Enter"; [[ "$(grep -c $'\tkeys$' "$CL")" -gt "$nk" ]]; check "keys is written to the chat log" $?
+# 3. Interrupt, API errors, rate limit error record, overrun: the turn ends; nothing is sent over it.
+qreset; qconf '["qb"]' 1; qusage 10; qtick 100; T0=$((NOW - 100))
+qevent $((T0 + 5)) qb interrupt; qusage 10; qtick 100
+[[ "$(qs qb state)" == needs_you && -z "$(qs qb turn)" && "$(qsent qb)" == 1 ]]; check "owner pressed Esc (interrupt in chat.log): the turn ends and the chat is parked" $?
+qusage 10; qtick 100; NOW=$((NOW + 5000)); qusage 10; qtick 100; [[ "$(qsent qb)" == 1 ]]; check "...and no new turn follows" $?
+qreset; qconf '["qb"]' 1; qusage 10; qtick 100
+jq -nc '{type:"assistant",uuid:"e1",isApiErrorMessage:true,error:"server_error",message:{role:"assistant",model:"<synthetic>",stop_reason:"stop_sequence",content:[{type:"text",text:"API Error: Connection lost mid-response."}]}}' >>"$(qtr qb)"
+qusage 10; qtick 100
+[[ "$(qs qb state)" == backoff && -z "$(qs qb turn)" ]]; check "Claude Code's API error record ends the turn (backoff)" $?
+qreset; qconf '["qb"]' 1; qusage 10; qtick 100
+jq -nc '{type:"assistant",uuid:"e2",isApiErrorMessage:true,error:"rate_limit",message:{role:"assistant",model:"<synthetic>",stop_reason:"stop_sequence",content:[{type:"text",text:"Limit reached"}]}}' >>"$(qtr qb)"
+qusage 10; qtick 100
+[[ "$(qs qb state)" == limited && "$(qs qb resume)" == true ]]; check "an API error record of kind rate_limit means limited, resume set" $?
+qreset; qconf '["qb"]' 1; qusage 10; qtick 100
+qfinish qb tool_use "still going"; NOW=$((NOW + 240 * 60 + 100)); qusage 10; qtick 100
+[[ "$(qs qb state)" == needs_you && -z "$(qs qb turn)" && "$(qlog qb fail)" == 1 ]]; check "idle pane and no finished reply past max_turn_min: the turn is cut loose and parked" $?
+qusage 10; qtick 100; [[ "$(qsent qb)" == 1 ]]; check "...and no turn is sent on top" $?
+# 4. Limit words in Claude's own reply are not a limit.
+qreset; qconf '["qb"]' 1; qusage 10; qtick 200
+tmux send-keys -t "=qb:" -l "usage limit reached - resets 5pm"; sleep 0.3
+qfinish qb end_turn $'We should say "usage limit reached" in the docs.\nQUESTION: Is that wording right?'; qusage 10; qtick 200; qusage 10; qtick 200
+[[ "$(qs qb state)" == question && "$(qlog qb limited)" == 0 && "$(qs qb turns)" == 1 ]]; check "limit words in a finished reply: not limited, the QUESTION is kept" $?
+# 5. A busy pane in the same checkout holds the repo and a slot.
+qreset; qconf '["qa1","qa2","qb"]' 2; qusage 10
+tmux send-keys -t "=qa1:" -l "working... (esc to interrupt)"; sleep 0.3
+qtick 10; [[ "$(qsent qa2)" == 0 && "$(qsent qa1)" == 0 && "$(qsent qb)" == 1 ]]; check "owner working in qa1 (busy pane): qa2 in the same repo waits, qb goes, qa1 holds a slot" $?
+qusage 10; qtick 10; [[ "$(qsent qb)" == 1 && "$(qsent qa2)" == 0 ]]; check "...and parallel 2 is not exceeded" $?
+# 6. queue-off while a tick holds the lock answers at once; a tick sees the switch before it pastes.
+qreset; qconf '["qb"]' 1
+flock "$QD/lock" sleep 8 & HOLD=$!
+sleep 0.3; t0=$(date +%s); api "queue-off"; t1=$(date +%s)
+check "queue-off while a tick holds the lock: answers, not 'busy'" "$(jqt '.ok and .data.enabled==false')"
+((t1 - t0 < 6)); check "...within a few seconds" $?
+kill $HOLD 2>/dev/null; wait $HOLD 2>/dev/null
+qusage 10; qtick 10; [[ "$(qsent qb)" == 0 ]]; check "a switched-off queue sends nothing" $?
+# 7. The usage fetch: one call, cached 120 s, token only on stdin, nulls tolerated.
+mkdir -p "$HOME/.claude"; printf '{"claudeAiOauth":{"accessToken":"tok-SECRETUSAGE","expiresAt":99999999999999}}' >"$HOME/.claude/.credentials.json"
+rm -f "$QUC" "$STUB_STATE/usage-config" "$STUB_STATE/usage-argv"; qreset; qconf '["qb"]' 1
+qtick 10
+[[ "$(wc -l <"$STUB_STATE/usage-argv")" == 1 ]] && jq -e '.five==42 and .seven==7.5 and .five_resets=="2026-10-01T22:00:00Z"' "$QUC" >/dev/null; check "no cache: one call, five/seven and the reset times cached" $?
+! grep -q SECRETUSAGE "$STUB_STATE/usage-argv" && grep -q SECRETUSAGE "$STUB_STATE/usage-config"; check "...the token went through curl's stdin config, not argv" $?
+qtick 10; [[ "$(wc -l <"$STUB_STATE/usage-argv")" == 1 ]]; check "a second tick inside 120 s does not call again" $?
+rm -f "$HOME/.claude/.credentials.json" "$STUB_STATE/usage-config" "$STUB_STATE/usage-argv"
 tmux kill-session -t =qa1 2>/dev/null; tmux kill-session -t =qa2 2>/dev/null; tmux kill-session -t =qb 2>/dev/null
 rm -f "$QD/queue.json" "$QSTATE" "$QUC"
 
