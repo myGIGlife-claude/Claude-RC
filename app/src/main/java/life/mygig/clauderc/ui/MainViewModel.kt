@@ -60,6 +60,7 @@ import life.mygig.clauderc.ui.vm.KnowledgeController
 import life.mygig.clauderc.ui.vm.LoginsController
 import life.mygig.clauderc.ui.vm.GeneralChatsController
 import life.mygig.clauderc.ui.vm.PushController
+import life.mygig.clauderc.ui.vm.QueueController
 import life.mygig.clauderc.ui.vm.ServicesController
 import life.mygig.clauderc.ui.vm.TeamController
 import life.mygig.clauderc.ui.vm.VmTools
@@ -139,6 +140,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val chats: ChatController = ChatController(app, api, tools) { team.clearChat(); webHosts.clearChatHosts() }
     /** General chats (not tied to a repo): the Sessions screen's General chat tab. */
     val general = GeneralChatsController(api, tools, { _status.value?.scriptApi }, { chats.openChat(it) }) { refreshSessions() }
+    /** Auto-continue queue: kill switch, stars, log (docs/queue-design.md). */
+    val queue = QueueController(api, tools, { _status.value?.scriptApi ?: 0 }, { chats.savedPin() }) { edit -> _sessions.value = edit(_sessions.value) }
     /** Team (extra Claude accounts), cluster settings and the open chat's workers. */
     val team: TeamController = TeamController(api, store, tools, { apiFor(it) }) { chats.chatSession.value }
     /** Hosts: web servers chats can work on (docs/hosts-design.md). */
@@ -838,6 +841,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // Another server: nothing from the old one may stay on screen or in use.
         connections.clearServerState()
         general.clearServerState()
+        queue.clearServerState()
         chats.clearServerState()   // chat log, open chat, queued messages, drafts, PIN (session names repeat across servers)
     }
 

@@ -14,12 +14,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -58,7 +60,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import life.mygig.clauderc.api.QueueChip
 import life.mygig.clauderc.api.Session
+import life.mygig.clauderc.api.queueChip
 import life.mygig.clauderc.ui.LocalAppLock
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
@@ -121,12 +125,17 @@ private fun CodeSessions(vm: MainViewModel) {
     val narrow = isNarrow()
     val appLock = LocalAppLock.current
     val scope = rememberCoroutineScope()
+    val st by vm.status.collectAsStateWithLifecycle()
+    val queueOn = vm.queue.supported()   // reads st below, so a status refresh recomposes it
+    val queueStatus by vm.queue.status.collectAsStateWithLifecycle()
+    val queueStates = remember(queueStatus) { queueStatus?.chats.orEmpty().associateBy { it.session } }
 
     // Previews and "needs an answer" stay current while the tab is open.
     val foreground by vm.foreground.collectAsStateWithLifecycle()
     LaunchedEffect(foreground) {
         while (foreground) {
             vm.refreshSessions()
+            vm.queue.refresh()
             delay(15_000)
         }
     }
@@ -137,6 +146,7 @@ private fun CodeSessions(vm: MainViewModel) {
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (queueOn && st != null) item { QueueRow(vm) }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (sessions.size > 1) QuietChip("Restart all") { confirmRestartAll = true }
@@ -167,12 +177,14 @@ private fun CodeSessions(vm: MainViewModel) {
             @Composable
             fun rowFor(s: Session) = SessionRow(
                 s,
+                queueChip = if (queueOn && s.starred) queueChip(queueStates[s.name]?.state ?: "idle") else null,
                 onOpen = { if (s.waiting) vm.loadTail(s.name) else vm.chats.openChat(s.name) },
                 actions = SessionActions(
                     openInClaude = { openInClaude(context) },
                     terminal = { vm.loadTail(s.name) },
                     restart = { confirmRestart = s },
                     stop = { confirmStop = s },
+                    toggleQueue = if (queueOn) { { vm.queue.setStar(s.name, !s.starred) } } else null,
                     toggleDoneAlerts = if (pushReady) { { vm.push.setSessionPush(s.name, !s.pushDone) } } else null,
                 ),
             )
@@ -191,6 +203,9 @@ private fun CodeSessions(vm: MainViewModel) {
             }
         }
     }
+
+    val chatOpen by vm.chats.chatSession.collectAsStateWithLifecycle()
+    if (chatOpen == null) QueueDialogs(vm)   // the open chat shows its own
 
     if (confirmRestartAll) {
         AlertDialog(
@@ -237,6 +252,7 @@ private class SessionActions(
     val restart: () -> Unit,
     val stop: () -> Unit,
     val toggleDoneAlerts: (() -> Unit)?,
+    val toggleQueue: (() -> Unit)?,
 )
 
 /** A small tonal pill action, like the quick actions in the design. */
@@ -272,7 +288,7 @@ private fun SessionSummary(needs: Int, working: Int, idle: Int) {
 
 /** A session as one calm row: status dot, name, one line of what it is doing, uptime, and a menu for everything else. */
 @Composable
-private fun SessionRow(s: Session, onOpen: () -> Unit, actions: SessionActions) {
+private fun SessionRow(s: Session, queueChip: QueueChip?, onOpen: () -> Unit, actions: SessionActions) {
     var menu by remember { mutableStateOf(false) }
     val line = previewLine(s.preview)
     val state = sessionState(s.busy, s.waiting)
@@ -280,7 +296,11 @@ private fun SessionRow(s: Session, onOpen: () -> Unit, actions: SessionActions) 
         Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}.clickable(onClickLabel = "Open ${s.project}", role = Role.Button, onClick = onOpen).padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             StatusDot(claudeHealth(s.busy, s.waiting))
             Column(Modifier.weight(1f)) {
-                Text(s.project, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(s.project, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (s.starred) Icon(Icons.Filled.Star, contentDescription = "In the auto-continue queue", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                    queueChip?.let { QueueStateChip(it) }
+                }
                 Text(
                     stateLine(state, line),
                     modifier = Modifier.semantics { contentDescription = stateSpoken(state, line) },
@@ -301,6 +321,9 @@ private fun SessionRow(s: Session, onOpen: () -> Unit, actions: SessionActions) 
                     DropdownMenuItem(text = { Text("Terminal") }, onClick = { menu = false; actions.terminal() })
                     DropdownMenuItem(text = { Text("Restart") }, onClick = { menu = false; actions.restart() })
                     DropdownMenuItem(text = { Text("Open in Claude app") }, onClick = { menu = false; actions.openInClaude() })
+                    actions.toggleQueue?.let { toggle ->
+                        DropdownMenuItem(text = { Text(if (s.starred) "Remove from queue" else "Add to queue") }, onClick = { menu = false; toggle() })
+                    }
                     actions.toggleDoneAlerts?.let { toggle ->
                         DropdownMenuItem(text = { Text(if (s.pushDone) "Finished alerts: on (tap to turn off)" else "Finished alerts: off (tap to turn on)") }, onClick = { menu = false; toggle() })
                     }

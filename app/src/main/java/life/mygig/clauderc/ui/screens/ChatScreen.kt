@@ -42,6 +42,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Star
 import life.mygig.clauderc.ui.components.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledIconButton
@@ -85,6 +86,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import life.mygig.clauderc.api.ChatMessage
 import life.mygig.clauderc.api.PinStatus
+import life.mygig.clauderc.api.queueLine
 import life.mygig.clauderc.ui.LayoutKind
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.plural
@@ -149,6 +151,10 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(onClick = { vm.chats.closeChat() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                    // The top-bar state line needs the queue state and whether this chat is starred.
+                    val queueStatus by vm.queue.status.collectAsStateWithLifecycle()
+                    val starredChat = vm.sessions.collectAsStateWithLifecycle().value.any { it.name == session && it.starred }
+                    LaunchedEffect(session, starredChat) { if (starredChat) vm.queue.refresh() }
                     Column(Modifier.weight(1f)) {
                         Text(session, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
                         val c = chat
@@ -159,6 +165,13 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                                 when { pinNeeded != null -> "locked"; c == null -> "loading…"; c.waiting -> "needs an answer"; c.busy -> "working…"; else -> "idle" },
                                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            if (starredChat && pinNeeded == null) {
+                                val q = queueStatus
+                                Text(
+                                    "· " + queueLine(q?.enabled == true, q?.chats?.firstOrNull { it.session == session }, q?.limitedUntil ?: 0),
+                                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                             if (c != null && pinNeeded == null) {
                                 // Model and mode in one quiet line; tap for everything about this chat.
                                 Surface(
@@ -181,6 +194,14 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                     val generalChats by vm.general.chats.collectAsStateWithLifecycle()
                     val general = session.startsWith("chat-") &&
                         (sessionList.any { it.name == session && it.general } || generalChats.any { it.session == session })
+                    val showQueue = !general && vm.queue.supported() && pinNeeded == null
+                    if (showQueue) IconButton(onClick = { vm.queue.setStar(session, !starredChat) }) {
+                        Icon(
+                            Icons.Filled.Star,
+                            contentDescription = if (starredChat) "Remove from queue" else "Add to auto-continue queue",
+                            tint = if (starredChat) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        )
+                    }
                     val showWorkers = !general && (st?.scriptApi ?: 0) >= life.mygig.clauderc.api.Updates.MIN_SCRIPT_API && pinNeeded == null
                     chat?.takeIf { pinNeeded == null }?.let { c ->
                         if (showWorkers) IconButton(onClick = { showCluster = true; vm.team.loadChatWorkers(); vm.webHosts.loadChatHosts() }) {
@@ -195,6 +216,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                             )
                         }
                     }
+                    QueueDialogs(vm)
                     if (showCluster) ChatClusterSheet(vm, onClose = { showCluster = false })
                     val permsOpen by vm.chats.permissionsOpen.collectAsStateWithLifecycle()
                     if (permsOpen) PermissionsSheet(vm, onClose = { vm.chats.clearPermissions() })

@@ -351,6 +351,15 @@ class LauncherApi(
     suspend fun permissionsGet(session: String, pin: String): Permissions { requireName(session); return call("permissions-get $session", stdin = pin) }
     /** One change to a settings file's permissions; [json] is {scope, op, list, rule, new, mode} (see permissionChange). */
     suspend fun permissionsSet(session: String, pin: String, json: String): JsonObject { requireName(session); return call("permissions-set $session", stdin = pin + "\n" + json) }
+    suspend fun queueStatus(): QueueStatus = call("queue-status")
+    suspend fun queueOn(pin: String): QueueStatus = call("queue-on", stdin = pin)
+    suspend fun queueOff(): QueueStatus = call("queue-off")
+    /** Turning a star on needs the chat PIN (the server then types into that chat unattended); off needs none. */
+    suspend fun queueStar(session: String, on: Boolean, pin: String?): QueueStarResult {
+        requireName(session)
+        return call("queue-star $session ${if (on) "on" else "off"}", stdin = if (on) pin else null)
+    }
+    suspend fun queueLog(lines: Int = 100): QueueLog = call("queue-log --lines ${lines.coerceIn(1, 500)}")
     suspend fun chatInterrupt(session: String, pin: String): JsonObject { requireName(session); return call("chat-interrupt $session", stdin = pin) }
     suspend fun loginKeystore(name: String, alias: String, storePassword: String, keyPassword: String, fileBase64: String): JsonObject =
         call("login-keystore $name", stdin = listOf(alias.trim(), storePassword, keyPassword, fileBase64).joinToString("\n"))
