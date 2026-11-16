@@ -1487,6 +1487,27 @@ check "the worker's own role is untouched" "$(jqt '.data.workers[] | select(.nam
 api "cluster-assign demo-app2 ops role" ""
 api "cluster-session demo-app2"
 check "empty role goes back to the worker's own" "$(jqt '.data.workers[] | select(.name=="ops") | .role=="Ops" and .mode=="plan"')"
+echo "worker rename"
+for bad in "worker-rename" "worker-rename ops" "worker-rename ops ../x" "worker-rename a/b c" "worker-rename ops -x" "worker-rename ops a b"; do
+  api "$bad"; check "runner rejects: $bad" "$(jqt '.ok == false')"
+done
+api "worker-rename ops ops"; check "rename to the same name refused" "$(jqt '.ok == false')"
+api "worker-add dupw" "x"; api "worker-rename ops dupw"; check "rename onto an existing worker refused" "$(jqt '.ok == false')"; api "worker-remove dupw"
+api "worker-rename nobody x1"; check "rename of an unknown worker refused" "$(jqt '.ok == false')"
+printf '{"id":"dddd0001","worker":"ops","status":"done","wt":"%s/.config/claude-launcher/workers/ops/trees/dddd0001"}' "$HOME" >"$TD2/dddd0001.json"
+printf '{"id":"dddd0002","worker":"ops","status":"running"}' >"$TD2/dddd0002.json"
+api "worker-rename ops ops2"; check "rename refused while a task is running" "$(jqt '.ok == false')"
+[[ -f "$HOME/.config/claude-launcher/workers/ops/meta.json" ]]; check "refused rename leaves the worker where it was" $?
+rm -f "$TD2/dddd0002.json"
+api "worker-rename ops ops2"; check "rename works" "$(jqt '.ok and .data.renamed == "ops2"')"
+RW="$HOME/.config/claude-launcher/workers"
+[[ ! -e "$RW/ops" && -f "$RW/ops2/meta.json" ]]; check "folder moved" $?
+grep -q "workers/ops2/trees/dddd0001" "$RW/ops2/tasks/dddd0001.json" && ! grep -q "workers/ops/" "$RW/ops2/tasks/dddd0001.json"; check "task record paths updated" $?
+api "worker-list"; check "listed under the new name with its role" "$(jqt '(.data.workers | map(.name) | index("ops2")) != null and (.data.workers | map(.name) | index("ops")) == null')"
+api "cluster-session demo-app2"
+api "cluster-attach demo-app2 ops2 on"; api "worker-rename ops2 ops"; api "cluster-session demo-app2"
+check "attached list follows the rename" "$(jqt '.data.workers[] | select(.name=="ops") | .attached')"
+rm -f "$RW/ops/tasks/dddd0001.json"
 api "cluster-attach demo-app2 ops off"
 api "cluster-session demo-app2"
 check "detach" "$(jqt '.data.workers[] | select(.name=="ops") | .attached == false')"

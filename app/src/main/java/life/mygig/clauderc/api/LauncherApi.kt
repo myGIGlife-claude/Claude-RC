@@ -234,6 +234,8 @@ class LauncherApi(
     }
     /** Gemini and Grok workers that choose it sign in with an API key (the key travels on stdin only). The first key also installs the CLI, hence the long timeout. */
     suspend fun workerSetKey(name: String, key: String): JsonObject { requireWorker(name); return call("worker-set-key $name", stdin = key.trim(), timeoutMs = 300_000) }
+    /** Needs script API 54. */
+    suspend fun workerRename(old: String, new: String): JsonObject { requireWorker(old); requireWorker(new); return call("worker-rename $old $new") }
     suspend fun workerRemove(name: String): JsonObject { requireWorker(name); return call("worker-remove $name") }
     suspend fun workerLoginStart(name: String): LoginUrl { requireWorker(name); return call("worker-login-start $name", timeoutMs = 60_000) }
     suspend fun workerLoginCode(name: String, code: String): LoginDone {

@@ -772,6 +772,30 @@ private fun Stepper(label: String, enabled: Boolean, canDown: Boolean, canUp: Bo
 private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean, onRemove: () -> Unit) {
     val idle = vm.busy.collectAsStateWithLifecycle().value == null   // a double tap would repeat the action (Mode would skip a step)
     val worker = a.name != "main"
+    val st by vm.status.collectAsStateWithLifecycle()
+    var editing by remember { mutableStateOf(false) }
+    if (editing) {
+        var newName by remember { mutableStateOf(a.name) }
+        var newRole by remember { mutableStateOf(a.role) }
+        val canRename = (st?.scriptApi ?: 0) >= 54   // worker-rename arrived with script API 54
+        val nameOk = !canRename || WORKER_NAME_RE.matches(newName)
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            confirmButton = { TextButton(onClick = { editing = false; vm.team.editWorker(a.name, if (canRename) newName else a.name, newRole) }, enabled = nameOk && idle) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("Cancel") } },
+            title = { Text("Edit ${a.name}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (canRename) OutlinedTextField(
+                        value = newName, onValueChange = { newName = it.trim() }, label = { Text("Name") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth(), isError = !nameOk, keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                    ) else Text("Renaming needs a server update (Update now).", style = MaterialTheme.typography.bodySmall)
+                    RoleField(value = newRole, onValueChange = { newRole = it }, label = "What it's for")
+                    if (canRename) Text("It can't be renamed while it has a task running or a sign-in open.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+        )
+    }
     CardBox {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
@@ -810,6 +834,7 @@ private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean
                     OutlinedButton(onClick = { vm.team.setWorker(a.name, "mode", MODES[(MODES.indexOf(a.mode) + 1) % MODES.size]) }, enabled = idle) { Text("Mode") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { editing = true }, enabled = idle) { Text("Edit") }
                     TextButton(onClick = { vm.team.showWorkerRuns(a.name) }) { Text("Tasks") }
                     TextButton(onClick = onRemove, enabled = idle) { Text("Remove") }
                 }
