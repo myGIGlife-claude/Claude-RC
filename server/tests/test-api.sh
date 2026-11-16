@@ -924,7 +924,7 @@ qtick 200
 qfinish qa1 end_turn "All done."; qusage 10; qtick 200
 [[ "$(qs qa1 state)" == running ]]; check "one tick of quiet is not enough" $?
 qusage 10; qtick 200
-[[ "$(qs qa1 state)" == idle && "$(qs qa1 turns)" == 1 && "$(qlog qa1 done)" == 1 && "$(qs qa2 state)" == running ]]; check "two quiet ticks with end_turn: done, turns 1, the next chat (round-robin) starts" $?
+[[ "$(qs qa1 state)" == idle && "$(qs qa1 turns)" == 1 && "$(qlog qa1 "done")" == 1 && "$(qs qa2 state)" == running ]]; check "two quiet ticks with end_turn: done, turns 1, the next chat (round-robin) starts" $?
 qfinish qa2 end_turn "ok"; qusage 10; qtick 200; qusage 10; qtick 200
 qfinish qb end_turn "ok"; qusage 10; qtick 200; qusage 10; qtick 200
 [[ "$(awk -F'\t' '$3 == "sent" {printf "%s ", $2}' "$QD/log")" == "qa1 qa2 qb qa1 " ]]; check "send order over four turns: qa1 qa2 qb qa1" $?
@@ -1099,7 +1099,7 @@ qreset; qconf '["qb"]' 1; qusage 10; jq -nc --argjson t "$((NOW + 1000000000))" 
 qreset; qconf '["qb"]' 1; qusage 10; qtick 200
 jq -nc '{type:"assistant",uuid:"o1",message:{role:"assistant",stop_reason:"tool_use",content:[{type:"text",text:"other conversation"}]}}' >"$(dirname "$(qtr qb)")/other.jsonl"
 qfinish qb end_turn "All done."; qusage 10; qtick 200; qusage 10; qtick 200
-[[ "$(qlog qb done)" == 1 ]]; check "a newer transcript file in the folder does not hide the turn's own reply" $?
+[[ "$(qlog qb "done")" == 1 ]]; check "a newer transcript file in the folder does not hide the turn's own reply" $?
 rm -f "$(dirname "$(qtr qb)")/other.jsonl"
 grep -q 'timeout 55 ' "$SERVER/claude-queue"; check "claude-queue gives a tick at most 55 seconds" $?
 # 6. queue-off while a tick holds the lock answers at once; a tick sees the switch before it pastes.
