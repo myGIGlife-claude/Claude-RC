@@ -192,7 +192,7 @@ fun ClusterSection(vm: MainViewModel) {
                         singleLine = true, modifier = Modifier.fillMaxWidth(), isError = name.isNotEmpty() && !WORKER_NAME_RE.matches(name),
                         keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
                     )
-                    OutlinedTextField(value = role, onValueChange = { role = it }, label = { Text("What it's for") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    RoleField(value = role, onValueChange = { role = it }, label = "What it's for")
                     Text("To use another server's account instead, add that server (top bar) and it offers to join.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
@@ -901,11 +901,11 @@ fun ChatClusterSheet(vm: MainViewModel, onClose: () -> Unit) {
                         }
                         if (w.attached) {
                             var role by remember(w.role) { mutableStateOf(w.role) }
-                            OutlinedTextField(
-                                value = role, onValueChange = { role = it }, label = { Text("What it does here") }, singleLine = true,
-                                modifier = Modifier.fillMaxWidth().onFocusChanged { if (!it.isFocused && role != w.role) vm.team.assignWorker(w.name, "role", role) },
-                                keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
-                                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { if (role != w.role) vm.team.assignWorker(w.name, "role", role) }),
+                            // Picking from the list saves at once; typing saves when the field loses focus.
+                            RoleField(
+                                value = role, label = "What it does here", onValueChange = { role = it },
+                                onPick = { v -> if (v != w.role) vm.team.assignWorker(w.name, "role", v) },
+                                modifier = Modifier.fillMaxWidth().onFocusChanged { if (!it.hasFocus && role != w.role) vm.team.assignWorker(w.name, "role", role) },
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 MODE_LABELS.forEach { (m, label) ->
