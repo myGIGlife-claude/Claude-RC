@@ -882,6 +882,113 @@ api "queue-status"; ST_OUT="$OUT"; api "queue-log"
 export CLAUDERC_QUEUE_LOG_MAX=200; api "queue-star demo-app2 on" "482913"; api "queue-star demo-app2 on" "482913"; unset CLAUDERC_QUEUE_LOG_MAX
 [[ -s "$QD/log.1" && -s "$QD/log" && "$(stat -c %a "$QD/log")" == 600 ]]; check "log rotates to log.1 at the size limit (files stay 600)" $?
 api "queue-star demo-app2 off"
+# ---- Queue tick (tests 4-9 of docs/queue-design.md): private tmux sessions running `cat`, hand-written transcripts, fake clock. ----
+echo "queue tick"
+QT="$WORK/qt"; mkdir -p "$QT/repoA/a1" "$QT/repoA/a2" "$QT/repoB"; git -C "$QT/repoA" init -q; git -C "$QT/repoB" init -q
+QSTATE="$QD/state.json"; QUC="$HOME/.config/claude-launcher/usage-cache/_main.json"; mkdir -p "$QD" "${QUC%/*}"; chmod 700 "$QD"
+qtick() { CLAUDERC_NOW="$NOW" "$HOME/bin/claude-setup.sh" --queue-tick >/dev/null 2>&1; NOW=$((NOW + ${1:-200})); }   # tick at NOW, then move the clock on
+qs() { jq -r ".\"$1\".$2 // empty" "$QSTATE" 2>/dev/null; }
+qdir() { tmux display-message -p -t "=$1:" '#{pane_current_path}'; }
+qtr() { echo "$HOME/.claude/projects/$(qdir "$1" | sed 's/[^A-Za-z0-9]/-/g')/$1.jsonl"; }
+qsent() { local n; n="$(tmux capture-pane -p -J -S -200 -t "=$1:" | grep -c 'cLaudeRC queue\] Automatic turn' || true)"; echo $((n / 2)); }   # `cat` shows each paste twice (tty echo + its output)
+qconf() { jq -nc --argjson st "$1" --argjson p "${2:-1}" '{enabled:true, parallel:$p, stars:$st}' >"$QD/queue.json"; }
+qusage() { jq -nc --argjson ts "$NOW" --argjson f "$1" --argjson s "${2:-10}" --arg fr "${3:-}" '{ts:$ts, retry_until:0, five:$f, seven:$s, five_resets:(if $fr == "" then null else $fr end), seven_resets:null}' >"$QUC"; }
+qfinish() { # qfinish <session> <stop_reason> <text>: Claude's reply lands, the file goes quiet
+  jq -nc --arg t "$3" --arg st "$2" '{type:"assistant",uuid:"r",message:{role:"assistant",stop_reason:$st,content:[{type:"text",text:$t}]}}' >>"$(qtr "$1")"
+  touch -d "@$((NOW - 150))" "$(qtr "$1")"
+}
+qreset() { # fresh sessions, transcripts and state
+  tmux kill-session -t =qa1 2>/dev/null; tmux kill-session -t =qa2 2>/dev/null; tmux kill-session -t =qb 2>/dev/null
+  rm -f "$QSTATE" "$QD/log" "$QD/log.1" "$QT/repoB/PLAN.md"
+  for x in qa1:repoA/a1 qa2:repoA/a2 qb:repoB; do
+    tmux new-session -d -s "${x%%:*}" -x 100 -y 30 -c "$QT/${x#*:}" cat
+  done
+  sleep 0.6
+  for x in qa1 qa2 qb; do mkdir -p "$(dirname "$(qtr $x)")"; echo '{"type":"user","uuid":"u","message":{"role":"user","content":"hi"}}' >"$(qtr $x)"; done
+}
+qlog() { grep -c "	$1	$2" "$QD/log" 2>/dev/null || true; }
+NOW=$(date +%s)
+
+echo "queue tick: sends, parallel, same repo (test 4)"
+qreset; qconf '["qa1","qa2","qb"]' 1; qusage 10
+qtick 10; qtick 10
+[[ "$(qsent qa1)" == 1 && "$(qsent qa2)" == 0 && "$(qsent qb)" == 0 && "$(qs qa1 state)" == running ]]; check "parallel 1: the first chat gets the fixed text once, the others nothing" $?
+qconf '["qa1","qa2","qb"]' 2; qtick 10
+[[ "$(qsent qa2)" == 0 && "$(qsent qb)" == 1 && "$(qsent qa1)" == 1 ]]; check "parallel 2: the chat in the same checkout is skipped, the one in another repo goes" $?
+[[ "$(qs qa1 repo)" == "$QT/repoA" && "$(qs qb repo)" == "$QT/repoB" ]]; check "the repo is the git top level (a1 and a2 share one)" $?
+! grep -qiE 'jonathan|mygig' <<<"$(grep -h "QUEUE_MSG=" "$HOME/bin/claude-setup.sh")"; check "the turn text names nobody" $?
+
+echo "queue tick: completion and round-robin (test 5)"
+qreset; qconf '["qa1","qa2","qb"]' 1; qusage 10
+qtick 200
+qfinish qa1 end_turn "All done."; qusage 10; qtick 200
+[[ "$(qs qa1 state)" == running ]]; check "one tick of quiet is not enough" $?
+qusage 10; qtick 200
+[[ "$(qs qa1 state)" == idle && "$(qs qa1 turns)" == 1 && "$(qlog qa1 done)" == 1 && "$(qs qa2 state)" == running ]]; check "two quiet ticks with end_turn: done, turns 1, the next chat (round-robin) starts" $?
+qfinish qa2 end_turn "ok"; qusage 10; qtick 200; qusage 10; qtick 200
+qfinish qb end_turn "ok"; qusage 10; qtick 200; qusage 10; qtick 200
+[[ "$(awk -F'\t' '$3 == "sent" {printf "%s ", $2}' "$QD/log")" == "qa1 qa2 qb qa1 " ]]; check "send order over four turns: qa1 qa2 qb qa1" $?
+qfinish qa1 tool_use "still working"; qusage 10; qtick 200; qusage 10; qtick 200
+[[ "$(qs qa1 state)" == running ]]; check "a reply that is not end_turn does not finish the turn" $?
+
+echo "queue tick: markers (test 6)"
+qreset; qconf '["qb"]' 1; qusage 10
+qtick 200; qfinish qb end_turn $'Stopped here.\nQUESTION: Which colour?'; qusage 10; qtick 200; qusage 10; qtick 200
+[[ "$(qs qb state)" == question && "$(qsent qb)" == 1 ]]; check "a QUESTION: line parks the chat" $?
+qusage 10; qtick 200; qusage 10; qtick 200
+[[ "$(qsent qb)" == 1 ]]; check "...and it is skipped on later ticks" $?
+jq -nc '{type:"assistant",uuid:"r2",message:{role:"assistant",stop_reason:"end_turn",content:[{type:"text",text:"Thanks, carrying on."}]}}' >>"$(qtr qb)"
+qusage 10; qtick 200
+[[ "$(qsent qb)" == 2 ]]; check "a newer reply without the marker makes it eligible again" $?
+qfinish qb end_turn $'Plan is empty.\nQUEUE: nothing to do'; qusage 10; qtick 200; qusage 10; qtick 200
+[[ "$(qs qb state)" == nothing ]]; check "QUEUE: nothing to do is recorded" $?
+qusage 10; qtick 200; [[ "$(qsent qb)" == 2 ]]; check "...and skipped while PLAN.md is unchanged" $?
+echo "- [ ] new task" >"$QT/repoB/PLAN.md"; qusage 10; qtick 200
+[[ "$(qsent qb)" == 3 ]]; check "...until PLAN.md changes" $?
+
+echo "queue tick: usage and limits (test 7)"
+qreset; qconf '["qb"]' 1; X=$((NOW + 3600)); qusage 91 10 "$(date -u -d "@$X" +%Y-%m-%dT%H:%M:%SZ)"
+qtick 60
+[[ "$(qsent qb)" == 0 && "$(qlog - limited)" == 1 && "$(jq -r ._limited_until "$QSTATE")" == $((X + 120)) ]]; check "5-hour at 91%: nothing sent, limited_until = reset + 120 s" $?
+api "queue-status"; check "queue-status reports limited_until and the usage numbers" "$(jqt '.data.limited_until=='$((X + 120))' and .data.usage.five==91')"
+NOW=$((X + 130)); qusage 20; qtick 10
+[[ "$(qsent qb)" == 1 && "$(qlog - resumed)" == 1 ]]; check "clock past the reset with room: the turn goes out" $?
+qreset; qconf '["qb"]' 1; qusage 20 96
+qtick 10; [[ "$(qsent qb)" == 0 ]]; check "weekly at 96%: nothing sent" $?
+qreset; qconf '["qb"]' 1; qusage 20; qtick 60
+tmux send-keys -t "=qb:" -l "5-hour limit reached - resets 3pm"; sleep 0.3
+qusage 20; qtick 10
+[[ "$(qs qb state)" == limited && "$(qs qb resume)" == true ]]; check "usage-limit banner mid-turn: the chat is limited with resume set" $?
+NOW=$((NOW + 1000)); qusage 20; qtick 10
+[[ "$(tmux capture-pane -p -J -S -200 -t =qb: | grep -c 'Usage window reset: continue')" == 2 && "$(qsent qb)" == 1 && "$(qs qb state)" == running ]]; check "after the reset the chat gets the resume text, not the turn text" $?
+
+echo "queue tick: owner activity (test 8)"
+qreset; qconf '["qb"]' 1; qusage 10; CL="$HOME/.local/state/claude-launcher/chat.log"
+printf '%s\tqb\tsend\n' "$(date -u -d "@$((NOW - 60))" +%Y-%m-%dT%H:%M:%SZ)" >>"$CL"
+qtick 10; [[ "$(qsent qb)" == 0 ]]; check "a chat-send in the last 20 minutes: skipped" $?
+(sleep 6) | tmux -C attach -t =qb >/dev/null 2>&1 &
+sleep 1; NOW=$((NOW + 2000)); qusage 10; qtick 10
+[[ "$(qsent qb)" == 0 ]]; check "an attached terminal: skipped" $?
+wait; sleep 0.5; qusage 10; qtick 10
+[[ "$(qsent qb)" == 1 ]]; check "old send and no terminal: goes" $?
+
+echo "queue tick: failures (test 9)"
+qreset; qconf '["qb"]' 1; qusage 10; NOW=$((NOW + 5000))
+qusage 10; qtick 100; qusage 10; qtick 100   # sent, then 100 s with no new transcript line and an idle pane
+[[ "$(qs qb state)" == backoff && "$(qs qb fails)" == 1 && "$(qs qb next_try)" -gt "$NOW" ]]; check "paste that never lands: backoff after the first failure" $?
+[[ "$(qs qb next_try)" -gt "$NOW" && "$(qsent qb)" == 1 ]]; check "...and nothing is sent during the backoff" $?
+NOW=$(( $(qs qb next_try) + 1 )); qusage 10; qtick 100; qusage 10; qtick 100
+[[ "$(qsent qb)" == 2 && "$(qs qb fails)" == 2 && "$(qs qb state)" == backoff ]]; check "second failure: 60 minute backoff" $?
+[[ "$(qs qb next_try)" -ge $((NOW - 100 + 3500)) ]]; check "...really about an hour" $?
+NOW=$(( $(qs qb next_try) + 1 )); qusage 10; qtick 100; qusage 10; qtick 100
+[[ "$(qs qb state)" == error && "$(qsent qb)" == 3 ]]; check "third failure: error" $?
+NOW=$((NOW + 90000)); qusage 10; qtick 100; [[ "$(qsent qb)" == 3 ]]; check "an error chat is left alone" $?
+api "queue-star qb off"; api "queue-star qb on" "482913"; qusage 10; qtick 100
+[[ "$(qsent qb)" == 4 ]]; check "star off and on resets it" $?
+api "queue-star qb off"
+tmux kill-session -t =qa1 2>/dev/null; tmux kill-session -t =qa2 2>/dev/null; tmux kill-session -t =qb 2>/dev/null
+rm -f "$QD/queue.json" "$QSTATE" "$QUC"
+
 api "chat-send demo-app2" $'000000\nhi'; check "chat send with a wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
 for _ in 1 2 3 4; do api "chat-open demo-app2" "000000"; done
 check "5 wrong PINs lock chat" "$(jqt '.error.code=="chat_locked"')"

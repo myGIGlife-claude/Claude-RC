@@ -1663,6 +1663,13 @@ token_usage() {
   printf '%s\n' "$out"
 }
 
+# usage_fetch_raw <token>: the usage endpoint's JSON (empty on any failure). The token goes through curl's config on
+# stdin so it never shows in `ps`.
+usage_fetch_raw() {
+  printf 'header = "Authorization: Bearer %s"\nheader = "anthropic-beta: oauth-2025-04-20"\n' "$1" |
+    curl -sf --max-time 8 --config - https://api.anthropic.com/api/oauth/usage 2>/dev/null || true
+}
+
 # One account for the cluster view as a JSON line: who it is and how much usage is left.
 # $1 name, $2 config dir (holds .credentials.json), $3 .claude.json, $4 role, $5 mode
 cluster_account() {
@@ -1683,8 +1690,7 @@ cluster_account() {
   else
     # ponytail: undocumented endpoint (what Claude Code's /usage reads); if it changes the tile just says "unavailable".
     # The token goes through curl's config on stdin so it never shows in `ps`.
-    raw="$(printf 'header = "Authorization: Bearer %s"\nheader = "anthropic-beta: oauth-2025-04-20"\n' "$tok" |
-      curl -sf --max-time 8 --config - https://api.anthropic.com/api/oauth/usage 2>/dev/null || true)"
+    raw="$(usage_fetch_raw "$tok")"
     usage="$(jq -c '{five_hour:{pct:(.five_hour.utilization // null), resets_at:(.five_hour.resets_at // null)}, seven_day:{pct:(.seven_day.utilization // null), resets_at:(.seven_day.resets_at // null)}}' <<<"$raw" 2>/dev/null || true)"
     [[ -n "$usage" ]] || { usage=null; uerr='"unavailable"'; }
   fi
@@ -4728,6 +4734,221 @@ do_queue_log() {
   api_ok "$(tail -n "$n" "$QUEUE_DIR/log" 2>/dev/null | jq -Rcn '{lines:[inputs | split("\t") | {ts:.[0], session:.[1], event:.[2], detail:(.[3] // "")}]}')"
 }
 
+# ---- The tick (claude-queue runs it every minute under flock; see docs/queue-design.md). Never sends keys or answers a prompt. ----
+# The same text for every chat: no names, paths or replies from one chat ever go into another.
+QUEUE_MSG='[cLaudeRC queue] Automatic turn. Follow "Auto-continue queue" in ~/.claude/CLAUDE.md: Session start, then ONE task from PLAN.md, finished completely (tested, committed, PLAN.md updated). All "Always ask first" stops still apply. If you need the owner, put the question last, on a line starting with QUESTION:. If nothing is left, reply exactly: QUEUE: nothing to do'
+QUEUE_RESUME_MSG='[cLaudeRC queue] Usage window reset: continue the task you were on.'
+# unverified: the wording of Claude's usage-limit banner (none was found in a real transcript); matched loosely.
+QUEUE_LIMIT_RE='usage limit|limit reached|resets [0-9]'
+
+# qmod <session> <jq filter on that session's entry> [jq args]: update the in-memory state ($QST).
+qmod() { local s="$1" f="$2"; shift 2; QST="$(jq -c --arg s "$s" --argjson now "$QNOW" "$@" ".[\$s] = ((.[\$s] // {}) | $f)" <<<"$QST")"; }
+qget() { jq -r --arg s "$1" "(.[\$s] // {}) | $2" <<<"$QST"; }
+# qstate <session> <state> [note]: set the state (log only a change; names and states, never chat text).
+qstate() {
+  local old; old="$(qget "$1" '.state // ""')"
+  qmod "$1" '(if .state != $st then .since = $now else . end) | .state = $st | .note = $n' --arg st "$2" --arg n "${3:-}"
+  [[ "$old" == "$2" ]] && return 0
+  case "$2" in
+    idle | running) ;;
+    stopped | unsafe) queue_log_add "$1" skip "$2 ${3:-}" ;;
+    backoff | error) queue_log_add "$1" fail "$2 ${3:-}" ;;
+    *) queue_log_add "$1" "$2" "${3:-}" ;;
+  esac
+}
+qpane() { tmux capture-pane -p -J -t "=$1:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15; }
+
+# queue_usage: sets QFIVE/QSEVEN (empty = unknown) and their reset times. One shared cache with clauderc-team (same keys
+# plus five_resets/seven_resets): the endpoint rate-limits, so at most one call per 120 s and none before retry_until.
+queue_usage() {
+  local f="$LAUNCHER_CONFIG_DIR/usage-cache/_main.json" c ts ru tok exp raw new
+  c="$(jq -c 'if type == "object" then . else {} end' "$f" 2>/dev/null || echo '{}')"
+  ts="$(jq -r '.ts // 0 | floor' <<<"$c")"; ru="$(jq -r '.retry_until // 0 | floor' <<<"$c")"
+  if ((QNOW - ts >= 120 && QNOW >= ru)); then
+    tok=""; exp=0
+    if creds_ok "$HOME/.claude/.credentials.json"; then
+      tok="$(jq -r '.claudeAiOauth.accessToken // empty' "$HOME/.claude/.credentials.json")"
+      exp="$(jq -r '.claudeAiOauth.expiresAt // 0' "$HOME/.claude/.credentials.json")"
+    fi
+    if [[ -z "$tok" ]]; then :   # not signed in: nothing to ask
+    elif [[ "$exp" =~ ^[0-9]+$ ]] && ((exp > 0 && exp / 1000 <= QNOW)); then
+      c="$(jq -c --argjson r "$((QNOW + 120))" '.retry_until = $r' <<<"$c")"   # Claude refreshes its own token when it next runs
+    else
+      raw="$(usage_fetch_raw "$tok")"
+      new="$(jq -c --argjson now "$QNOW" '{ts:$now, retry_until:0, five:(.five_hour.utilization | numbers), seven:(.seven_day.utilization | numbers),
+        five_resets:(.five_hour.resets_at // null), seven_resets:(.seven_day.resets_at // null)}' <<<"$raw" 2>/dev/null || true)"
+      if [[ -n "$new" ]]; then c="$(jq -c --argjson n "$new" '. + $n' <<<"$c")"
+      else c="$(jq -c --argjson r "$((QNOW + 60))" '.retry_until = $r' <<<"$c")"; fi
+    fi
+    ( mkdir -p "${f%/*}" && chmod 700 "${f%/*}" && umask 077 && printf '%s\n' "$c" >"$f.$$" && mv "$f.$$" "$f" ) 2>/dev/null || true
+    ts="$(jq -r '.ts // 0 | floor' <<<"$c")"
+  fi
+  QFIVE=""; QSEVEN=""; QFIVE_R=""; QSEVEN_R=""
+  if ((QNOW - ts < 1800)); then   # a failed refresh keeps the last numbers 30 minutes (same as clauderc-team)
+    QFIVE="$(jq -r '.five // empty' <<<"$c")"; QSEVEN="$(jq -r '.seven // empty' <<<"$c")"
+    QFIVE_R="$(jq -r '.five_resets // empty' <<<"$c")"; QSEVEN_R="$(jq -r '.seven_resets // empty' <<<"$c")"
+  fi
+}
+
+# queue_over <value> <max>: true when the value is known and at or over max.
+queue_over() { [[ -n "$1" ]] && awk -v v="$1" -v m="$2" 'BEGIN{exit !(v+0 >= m+0)}'; }
+
+# queue_reset_at: epoch of the reset of the window that is over its limit (+120 s), else now + 15 min.
+queue_reset_at() {
+  local r="" t=""
+  queue_over "$QFIVE" "$QMAX5" && r="$QFIVE_R"
+  [[ -z "$r" ]] && queue_over "$QSEVEN" "$QMAX7" && r="$QSEVEN_R"
+  [[ -n "$r" ]] && t="$(date -d "$r" +%s 2>/dev/null || true)"
+  if [[ "$t" =~ ^[0-9]+$ ]] && ((t + 120 > QNOW)); then echo $((t + 120)); else echo $((QNOW + 900)); fi
+}
+
+# queue_reply <transcript> <skip lines>: {n, stop, text} of Claude's newest reply after the first <skip> lines.
+queue_reply() {
+  tail -n +$(($2 + 1)) "$1" 2>/dev/null | jq -cs '[.[] | select(.type == "assistant")] as $a
+    | {n:($a | length), stop:($a | last | .message.stop_reason // ""),
+       text:((([$a[] | select(any(.message.content[]?; .type == "text"))] | last | [.message.content[]? | select(.type == "text") | .text]) // []) | join("\n"))}' 2>/dev/null ||
+    echo '{"n":0,"stop":"","text":""}'
+}
+
+# queue_busy_owner <session>: the owner is in the chat (sent something in the last 20 minutes, or a terminal is attached).
+queue_busy_owner() {
+  local last t
+  [[ -n "$(tmux list-clients -t "=$1" 2>/dev/null)" ]] && return 0
+  last="$(awk -F'\t' -v s="$1" '$2 == s && $3 == "send" {t = $1} END {print t}' "$CHAT_LOG" 2>/dev/null)"
+  [[ -n "$last" ]] && t="$(date -d "$last" +%s 2>/dev/null)" && ((QNOW - t < 1200))
+}
+
+# queue_fail <session> <reason>: backoff 15 min, then 60 min, then error (un-star and star again resets).
+queue_fail() {
+  local n; n=$(($(qget "$1" '.fails // 0') + 1))
+  qmod "$1" '.fails = $n | .next_try = $nt | del(.turn)' --argjson n "$n" --argjson nt "$((QNOW + (n == 1 ? 900 : 3600)))"
+  if ((n >= 3)); then qstate "$1" error "$2"; else qstate "$1" backoff "$2"; fi
+}
+
+queue_plan_sum() { sha1sum "$(session_dir "$1")/PLAN.md" 2>/dev/null | cut -d' ' -f1 || true; }
+
+# queue_check_running <session>: has the turn finished, hit a prompt or a limit, or failed?
+queue_check_running() {
+  local s="$1" screen f base started r n stop text mt ticks
+  tmux has-session -t "=$s" 2>/dev/null || { qstate "$s" stopped "session gone"; return; }
+  screen="$(qpane "$s")"
+  if grep -qE "$WAIT_RE" <<<"$screen"; then qstate "$s" needs_you "waiting for you"; return; fi
+  started="$(qget "$s" '.turn.started // 0')"
+  if grep -q "esc to interrupt" <<<"$screen"; then
+    qmod "$s" '.done_ticks = 0'
+    if ((QNOW - started > QMAXTURN * 60)); then qmod "$s" 'del(.turn)'; qstate "$s" idle "overrun"; queue_log_add "$s" fail overrun; fi
+    return
+  fi
+  if ((QNOW - started >= 30)) && grep -qiE "$QUEUE_LIMIT_RE" <<<"$screen"; then
+    qmod "$s" '.resume = true | del(.turn)'
+    qstate "$s" limited "usage limit"
+    QLU="$(queue_reset_at)"; return
+  fi
+  f="$(chat_transcript "$s")"; base="$(qget "$s" '.turn.lines // 0')"
+  [[ "$f" == "$(qget "$s" '.turn.transcript // ""')" ]] || base=0
+  r="$(queue_reply "$f" "$base")"; n="$(jq -r .n <<<"$r")"; stop="$(jq -r .stop <<<"$r")"
+  if ((n == 0)); then
+    # Not busy and nothing new in the transcript: the paste did not land.
+    ((QNOW - started >= 90)) && queue_fail "$s" "no reply"
+    return
+  fi
+  mt="$(stat -c %Y "$f" 2>/dev/null || echo "$QNOW")"
+  if [[ "$stop" != end_turn ]] || ((QNOW - mt < 90)); then qmod "$s" '.done_ticks = 0'; return; fi
+  ticks=$(($(qget "$s" '.done_ticks // 0') + 1))
+  if ((ticks < 2)); then qmod "$s" '.done_ticks = $t' --argjson t "$ticks"; return; fi
+  text="$(jq -r .text <<<"$r")"
+  qmod "$s" 'del(.turn, .done_ticks, .resume) | .fails = 0 | .turns = ((.turns // 0) + 1)'
+  if grep -q '^QUESTION:' <<<"$text"; then qstate "$s" question "asked you"
+  elif grep -qE '^QUEUE: nothing to do[[:space:]]*$' <<<"$text"; then
+    qmod "$s" '.plan_sum = $p | .nothing_at = $now' --arg p "$(queue_plan_sum "$s")"
+    qstate "$s" nothing "plan empty"
+  else qstate "$s" idle; queue_log_add "$s" done; fi
+}
+
+# queue_eligible <session>: may it get a turn now? Sets states (stopped, needs_you, unsafe) as it finds them; QREPO = its checkout.
+queue_eligible() {
+  local s="$1" st screen f base r dir repo o
+  st="$(qget "$s" '.state // "idle"')"
+  case "$st" in running | error) return 1 ;; esac
+  tmux has-session -t "=$s" 2>/dev/null || { qstate "$s" stopped "session not running"; return 1; }
+  [[ "$st" == stopped || "$st" == unsafe || "$st" == needs_you ]] && st=idle   # re-checked below
+  case "$st" in
+    backoff) ((QNOW >= $(qget "$s" '.next_try // 0'))) || return 1 ;;
+    nothing)
+      ((QNOW - $(qget "$s" '.nothing_at // 0') >= 86400)) || [[ "$(queue_plan_sum "$s")" != "$(qget "$s" '.plan_sum // ""')" ]] || return 1 ;;
+    question)
+      f="$(chat_transcript "$s")"; base=$(($(wc -l <"$f" 2>/dev/null || echo 0) - 400)); ((base < 0)) && base=0
+      r="$(queue_reply "$f" "$base")"
+      ! grep -q '^QUESTION:' <<<"$(jq -r .text <<<"$r")" || return 1 ;;
+  esac
+  screen="$(qpane "$s")"
+  if grep -qE "$WAIT_RE" <<<"$screen"; then qstate "$s" needs_you "waiting for you"; return 1; fi
+  grep -q "esc to interrupt" <<<"$screen" && return 1
+  if grep -q 'bypass permissions on' <<<"$screen"; then qstate "$s" unsafe "bypass permissions"; return 1; fi
+  queue_busy_owner "$s" && return 1
+  dir="$(session_dir "$s")"
+  repo="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || echo "$dir")"
+  QREPO="$repo"
+  for o in $(jq -r --arg me "$s" 'to_entries[] | select(.key | startswith("_") | not) | select(.value.state == "running" and .key != $me) | .value.repo' <<<"$QST"); do
+    [[ "$o" == "$repo" ]] && return 1
+  done
+  return 0
+}
+
+queue_tick() {
+  exec 3>/dev/null   # api_err (inside chat_paste) writes here; the tick has no caller to answer
+  queue_init
+  local conf stars s i n running slots par room msg start f
+  QNOW="${CLAUDERC_NOW:-$(date +%s)}"
+  conf="$(queue_conf)"
+  [[ "$(jq -r .enabled <<<"$conf")" == true && "$(jq -r '.stars | length' <<<"$conf")" -gt 0 ]] || return 0
+  QMAX5="$(jq -r .max_5h <<<"$conf")"; QMAX7="$(jq -r .max_7d <<<"$conf")"; QMAXTURN="$(jq -r .max_turn_min <<<"$conf")"; par="$(jq -r .parallel <<<"$conf")"
+  QST="$(jq -c 'if type == "object" then . else {} end' "$QUEUE_DIR/state.json" 2>/dev/null || echo '{}')"
+  QLU="$(jq -r '._limited_until // 0' <<<"$QST")"
+  mapfile -t stars < <(jq -r '.stars[]' <<<"$conf")
+  queue_usage
+  running=0
+  for s in "${stars[@]}"; do
+    [[ "$(qget "$s" '.state // ""')" == running ]] && queue_check_running "$s"
+    [[ "$(qget "$s" '.state // ""')" == running ]] && running=$((running + 1))
+  done
+  if ((QNOW >= QLU)); then   # else: waiting for a window reset
+    room=true
+    queue_over "$QFIVE" "$QMAX5" && room=false
+    queue_over "$QSEVEN" "$QMAX7" && room=false
+    if [[ "$room" == false ]]; then
+      ((QLU == 0)) && queue_log_add - limited "5h ${QFIVE:-?}% 7d ${QSEVEN:-?}%"
+      QLU="$(queue_reset_at)"
+    elif ((QLU > 0)); then QLU=0; queue_log_add - resumed
+    fi
+    if [[ "$room" == true ]]; then
+      [[ -n "$QFIVE" && -n "$QSEVEN" ]] || par=1   # unknown usage: one turn at a time whatever the setting says
+      slots=$((par - running))
+      # Round-robin: start after the entry the last send went to, wrap once.
+      start=0; n=${#stars[@]}
+      for ((i = 0; i < n; i++)); do [[ "${stars[i]}" == "$(jq -r '._cursor // ""' <<<"$QST")" ]] && start=$((i + 1)); done
+      for ((i = 0; i < n && slots > 0; i++)); do
+        s="${stars[(start + i) % n]}"
+        queue_eligible "$s" || continue
+        if [[ "$(qget "$s" '.resume // false')" == true ]]; then msg="$QUEUE_RESUME_MSG"; else msg="$QUEUE_MSG"; fi
+        if ( chat_paste "$s" "$msg" ) >/dev/null 2>&1; then
+          f="$(chat_transcript "$s")"
+          qmod "$s" 'del(.resume) | .done_ticks = 0 | .repo = $r | .turn = {started:$now, transcript:$f, lines:$l}' \
+            --arg r "$QREPO" --arg f "$f" --argjson l "$(wc -l <"$f" 2>/dev/null || echo 0)"
+          qstate "$s" running
+          QST="$(jq -c --arg s "$s" '._cursor = $s' <<<"$QST")"
+          queue_log_add "$s" sent
+          slots=$((slots - 1))
+        else
+          queue_fail "$s" "paste failed"
+        fi
+      done
+    fi
+  fi
+  QST="$(jq -c --argjson lu "$QLU" '._limited_until = $lu' <<<"$QST")"
+  printf '%s\n' "$QST" >"$QUEUE_DIR/state.json.new" && chmod 600 "$QUEUE_DIR/state.json.new" && mv "$QUEUE_DIR/state.json.new" "$QUEUE_DIR/state.json"
+}
+
 # chat-commands <session>: stdin = PIN. The slash commands Claude can run there beyond the built-ins:
 # your skills and commands, the project's, and those of enabled plugins (as plugin:name).
 do_chat_commands() {
@@ -5912,6 +6133,7 @@ main() {
     --clone-worker) shift; clone_worker "$@" ;;
     --migrate-worker) shift; migrate_worker "$@" ;;
     --drive-backup-run) shift; drive_backup_run "$@" ;;
+    --queue-tick) queue_tick ;;
     --mcp-refresh) mcp_refresh_now ;;
     --version) echo "$SCRIPT_API" ;;
     -h | --help) sed -n '2,10p' "$SCRIPT_PATH" | sed 's/^# \{0,1\}//' ;;
