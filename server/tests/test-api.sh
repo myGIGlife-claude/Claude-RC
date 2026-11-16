@@ -840,6 +840,48 @@ api "chat-send demo-app2" $'482913\n'"$(head -c 20000 /dev/zero | tr '\0' a)"
 check "chat send: exactly 20,000 bytes accepted" "$(jqt '.ok and .data.sent')"
 tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "clear"; tmux send-keys -t "=demo-app2:" Enter; sleep 0.3
 api "chat-send no-such-proj" $'482913\nhi'; check "chat send to a stopped session fails once, with one JSON line" "$([[ "$(wc -l <<<"$OUT")" == 1 ]] && jqt '.ok==false' || echo 1)"
+echo "queue actions"
+echo "0 1 * * * echo mine" >"$STUB_STATE/crontab"
+QD="$HOME/.config/claude-launcher/queue"
+for bad in "queue-star" "queue-star demo-app2" "queue-star demo-app2 maybe" "queue-star demo-app2 on extra" "queue-star demo-app2;id on" "queue-star -x on" \
+  "queue-status x" "queue-on x" "queue-off x" "queue-log x" "queue-log --lines" "queue-log --lines 1000" "queue-log --lines x" "queue-log --lines 5 5" "queue-log --count 5"; do
+  api "$bad"; check "runner refuses '$bad'" "$(jqt '.ok == false')"
+done
+api "queue-status"; check "queue-status: off by default, no chats" "$(jqt '.ok and .data.enabled==false and .data.parallel==1 and .data.max_5h==90 and .data.max_7d==95 and .data.chats==[]')"
+api "queue-star demo-app2 on" "000000"; check "queue-star on: wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
+api "queue-status"; check "...and nothing starred" "$(jqt '.data.chats==[]')"
+api "queue-star demo-app2 on" "482913"; check "queue-star on with the PIN" "$(jqt '.ok and .data.starred==true and .data.session=="demo-app2"')"
+api "sessions"; check "sessions carries the star" "$(jqt '(.data.sessions | map(select(.name=="demo-app2" and .starred==true)) | length)==1 and (.data.sessions | map(select(.name!="demo-app2" and .starred==true)) | length)==0')"
+grep -q "^\* \* \* \* \* '$HOME/.local/bin/claude-queue' >/dev/null 2>&1 # clauderc-queue$" "$STUB_STATE/crontab"
+check "first star adds the one-minute crontab line" $?
+api "queue-star demo-app2 on" "482913"; [[ "$(grep -c '# clauderc-queue$' "$STUB_STATE/crontab")" == 1 ]] && jq -e '.stars==["demo-app2"]' "$QD/queue.json" >/dev/null 2>&1; check "starring twice keeps one line and one star" $?
+[[ "$(stat -c %a "$QD")" == 700 && "$(stat -c %a "$QD/queue.json")" == 600 ]]; check "queue dir 700, files 600" $?
+tmux new-session -d -s chat-20260101-000000-abcd sleep 600
+api "queue-star chat-20260101-000000-abcd on" "482913"; check "queue-star: a general chat is refused" "$(jqt '.error.code=="invalid_name"')"
+tmux kill-session -t "=chat-20260101-000000-abcd"
+api "queue-star no-such-proj on" "482913"; check "queue-star: no such session refused" "$(jqt '.error.code=="invalid_name"')"
+tmux new-session -d -s qbypass -x 100 -y 30 cat; sleep 0.3; tmux send-keys -t "=qbypass:" -l "⏵⏵ bypass permissions on (shift+tab to cycle)"; sleep 0.3
+api "queue-star qbypass on" "482913"; check "queue-star: bypass permissions mode refused" "$(jqt '.error.code=="unsafe_mode"')"
+tmux kill-session -t "=qbypass"
+api "queue-on" "000000"; check "queue-on: wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
+api "queue-status"; check "...still off" "$(jqt '.data.enabled==false')"
+api "queue-on" "482913"; check "queue-on with the PIN" "$(jqt '.ok and .data.enabled==true and (.data.chats | map(.session)==["demo-app2"]) and .data.chats[0].state=="idle"')"
+api "queue-off"; check "queue-off needs no PIN" "$(jqt '.ok and .data.enabled==false')"
+api "queue-star demo-app2 off"; check "un-star needs no PIN" "$(jqt '.ok and .data.starred==false')"
+api "queue-status"; check "...and the chat is gone from the list" "$(jqt '.data.chats==[]')"
+grep -q '# clauderc-queue' "$STUB_STATE/crontab"; [[ $? -ne 0 ]]; check "last un-star removes the crontab line" $?
+grep -q "^0 1 \* \* \* echo mine$" "$STUB_STATE/crontab"; check "...and leaves the owner's other lines" $?
+api "sessions"; check "sessions: nothing starred any more" "$(jqt '(.data.sessions | map(select(.starred==true)) | length)==0 and (.data.sessions | map(has("starred")) | all)')"
+# Log: names and events only, no chat text; rotation.
+echo '{"type":"assistant","uuid":"qm1","timestamp":"2026-09-29T10:03:00Z","message":{"role":"assistant","content":[{"type":"text","text":"QUESTION: SECRETMARKERWORD"}]}}' >>"$TF"
+api "queue-star demo-app2 on" "482913"; api "queue-log"
+check "queue-log lists star/unstar/on/off events" "$(jqt '.ok and ([.data.lines[].event] | index("on") != null and index("off") != null and index("star") != null and index("unstar") != null) and (.data.lines[0] | has("ts") and has("session") and has("detail"))')"
+api "queue-log --lines 2"; check "queue-log --lines 2 gives two" "$(jqt '.ok and (.data.lines | length)==2')"
+api "queue-status"; ST_OUT="$OUT"; api "queue-log"
+[[ "$ST_OUT$OUT" != *SECRETMARKERWORD* ]] && ! grep -rq SECRETMARKERWORD "$QD"; check "no transcript text in the log, the state or queue-status" $?
+export CLAUDERC_QUEUE_LOG_MAX=200; api "queue-star demo-app2 on" "482913"; api "queue-star demo-app2 on" "482913"; unset CLAUDERC_QUEUE_LOG_MAX
+[[ -s "$QD/log.1" && -s "$QD/log" && "$(stat -c %a "$QD/log")" == 600 ]]; check "log rotates to log.1 at the size limit (files stay 600)" $?
+api "queue-star demo-app2 off"
 api "chat-send demo-app2" $'000000\nhi'; check "chat send with a wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
 for _ in 1 2 3 4; do api "chat-open demo-app2" "000000"; done
 check "5 wrong PINs lock chat" "$(jqt '.error.code=="chat_locked"')"
