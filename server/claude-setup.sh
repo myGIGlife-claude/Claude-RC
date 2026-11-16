@@ -4826,7 +4826,7 @@ queue_reset_at() {
 # stop_sequence; seen on a real transcript: "API Error: Connection lost ...", error "server_error").
 queue_reply() {
   tail -n +$(($2 + 1)) "$1" 2>/dev/null | jq -cs '[.[] | select(.type == "assistant")] as $a
-    | (.[-1] // {}) as $l
+    | ([.[] | select(.type == "user" or .type == "assistant")] | last // {}) as $l   # not .[-1]: Claude Code appends system/last-prompt/ai-title/mode records after the last turn
     | {n:($a | length), stop:($a | last | .message.stop_reason // ""), api:(($a | last | .isApiErrorMessage) == true), err:(($a | last | .error) // ""),
        # Esc / "No" on a tool prompt: Claude Code writes a user record "[Request interrupted by user ..." and nothing after it.
        intr:(($l.type == "user") and ((($l.message.content // "") | if type == "string" then . else ([.[]? | select(.type == "text") | .text] | join(" ")) end) | startswith("[Request interrupted by user"))),
@@ -4939,7 +4939,7 @@ queue_eligible() {
       ((QNOW - $(qget "$s" '.nothing_at // 0') >= 86400)) || [[ "$(queue_plan_sum "$s")" != "$(qget "$s" '.plan_sum // ""')" ]] || return 1 ;;
   esac
   # An unanswered question in the newest reply parks the chat whatever the state says (fresh star, lost state file, reboot).
-  f="$(chat_transcript "$s")"; base=$(($(wc -l <"$f" 2>/dev/null || echo 0) - 400)); ((base < 0)) && base=0
+  f="$(chat_transcript "$s")"; base=$(($([[ -f "$f" ]] && wc -l <"$f" || echo 0) - 400)); ((base < 0)) && base=0
   r="$(queue_reply "$f" "$base")"
   if queue_has '^QUESTION:' "$(jq -r .text <<<"$r")"; then [[ "$st" == question ]] || qstate "$s" question "asked you"; return 1; fi
   screen="$(qpane "$s")"
@@ -5002,7 +5002,7 @@ queue_tick() {
         queue_eligible "$s" || continue
         queue_enabled || break   # the owner switched the queue off while this tick ran
         if [[ "$(qget "$s" '.resume // false')" == true ]]; then msg="$QUEUE_RESUME_MSG"; else msg="$QUEUE_MSG"; fi
-        f="$(chat_transcript "$s")"; lines="$(wc -l <"$f" 2>/dev/null || echo 0)"   # counted before the paste
+        f="$(chat_transcript "$s")"; lines="$([[ -f "$f" ]] && wc -l <"$f" || echo 0)"   # counted before the paste
         if ( chat_paste "$s" "$msg" guard ) >/dev/null 2>&1; then
           qmod "$s" 'del(.resume, .waiting) | .done_ticks = 0 | .repo = $r | .turn = {started:$now, transcript:$f, lines:$l}' \
             --arg r "$QREPO" --arg f "$f" --argjson l "$lines"

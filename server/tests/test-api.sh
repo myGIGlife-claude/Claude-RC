@@ -1073,6 +1073,8 @@ for _ in 1 2 3; do qfinish qb end_turn "Checked, all fine."; qusage 10; qtick 60
 qreset; qconf '["qb"]' 1; qusage 10; qtick 100
 jq -nc '{type:"assistant",uuid:"x1",message:{role:"assistant",stop_reason:"tool_use",content:[{type:"tool_use",id:"t1",name:"Bash",input:{command:"ls"}}]}}' >>"$(qtr qb)"
 jq -nc '{type:"user",uuid:"x2",message:{role:"user",content:[{type:"text",text:"[Request interrupted by user for tool use]"}]}}' >>"$(qtr qb)"
+# Real Claude Code appends bookkeeping records after it (seen on a real run): the interrupt record is not the last line.
+for t in system last-prompt ai-title mode permission-mode session-owner; do jq -nc --arg t "$t" '{type:$t}' >>"$(qtr qb)"; done
 qusage 10; qtick 100
 [[ "$(qs qb state)" == needs_you && -z "$(qs qb turn)" ]]; check "the '[Request interrupted by user' record ends the turn and parks the chat" $?
 qusage 10; qtick 100; [[ "$(qsent qb)" == 1 ]]; check "...with no new turn" $?
