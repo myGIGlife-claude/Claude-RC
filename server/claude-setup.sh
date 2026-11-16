@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id), 50 = grok worker kind, 51 = grok account sign-in (device code; worker-login-cancel), 52 = gemini account sign-in, fail-fast quota errors, 53 = starred-chat queue (queue-status/-on/-off/-star/-log, sessions.starred)
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id), 50 = grok worker kind, 51 = grok account sign-in (device code; worker-login-cancel), 52 = gemini account sign-in, fail-fast quota errors, 53 = starred-chat queue (queue-status/-on/-off/-star/-log, sessions.starred), 54 = worker-rename, 54 = worker-rename
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=53
+SCRIPT_API=54
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 CLAUDERC_API="${CLAUDERC_API:-https://api.github.com}"
@@ -1785,6 +1785,47 @@ do_worker_set() {
   jq -c --arg f "$field" --arg v "${val:0:200}" '.[$f] = $v' "$WORKERS_DIR/$name/meta.json" >"$tmp" &&
     mv -f "$tmp" "$WORKERS_DIR/$name/meta.json" || { rm -f "$tmp"; api_err internal "Couldn't save the worker."; }
   api_ok "$(jq -cn --arg n "$name" '{saved:$n}')"
+}
+
+# worker-rename <old> <new>: moves the folder, then rewrites every stored mention of the old name (task records and the
+# worker's own .claude.json hold absolute workers/<old>/ paths; attach/*.json are keyed by worker). Names are [A-Za-z0-9_-]: safe in sed.
+# Branches already made (cluster/<old>/<id>) keep their names: the task records still point at them.
+worker_rewrite() {  # $1 = from, $2 = to, $3 = worker folder
+  local f t
+  for f in "$3"/tasks/*.json "$3"/home/.claude.json; do
+    [[ -f "$f" ]] || continue
+    t="$(mktemp "$3/rw.XXXXXX")" && sed "s#/workers/$1/#/workers/$2/#g" "$f" >"$t" && cat "$t" >"$f" || { rm -f "$t"; return 1; }
+    rm -f "$t"
+  done
+}
+worker_rename_locked() {  # $1 = old, $2 = new
+  local old="$1" new="$2" f t
+  mv -T -- "$WORKERS_DIR/$old" "$WORKERS_DIR/$new" || api_err internal "Couldn't rename the worker's folder."
+  if ! worker_rewrite "$old" "$new" "$WORKERS_DIR/$new"; then
+    worker_rewrite "$new" "$old" "$WORKERS_DIR/$new"; mv -T -- "$WORKERS_DIR/$new" "$WORKERS_DIR/$old"
+    api_err internal "Couldn't update the worker's saved tasks, so nothing was renamed."
+  fi
+  for f in "$ATTACH_DIR"/*.json; do
+    [[ -f "$f" ]] || continue
+    jq -e --arg o "$old" 'type == "object" and has($o)' "$f" >/dev/null 2>&1 || continue
+    t="$(mktemp "$ATTACH_DIR/a.XXXXXX")" &&
+      jq -c --arg o "$old" --arg n "$new" '.[$n] = .[$o] | del(.[$o])' "$f" >"$t" && mv -f "$t" "$f" || { rm -f "$t"; api_err internal "Renamed the worker, but couldn't update a project's attached list; rename it back and try again."; }
+  done
+}
+do_worker_rename() {
+  [[ $# -eq 2 ]] || bad_args "usage: worker-rename <old> <new>"
+  worker_exists "$1"; worker_check "$2"
+  [[ "$1" != "$2" ]] || api_err invalid_name "That is already its name."
+  [[ ! -e "$WORKERS_DIR/$2" ]] || api_err invalid_name "A worker named '$2' already exists."
+  tmux has-session -t "=worker-login-$1" 2>/dev/null && api_err busy "Finish or cancel the sign-in first."
+  local f st
+  for f in "$WORKERS_DIR/$1"/tasks/*.json; do
+    [[ -f "$f" ]] || continue
+    st="$(jq -r '.status // ""' "$f" 2>/dev/null)"
+    [[ "$st" != running ]] || api_err busy "It has a task running. Wait for it to finish, then rename."
+  done
+  with_state_lock worker_rename_locked "$1" "$2"
+  api_ok "$(jq -cn --arg o "$1" --arg n "$2" '{renamed:$n, from:$o}')"
 }
 
 do_worker_remove() {
@@ -5795,6 +5836,7 @@ api_main() {
     worker-list)         [[ $# -eq 0 ]] || bad_args "worker-list takes no arguments"; do_worker_list ;;
     worker-add)          do_worker_add "$@" ;;
     worker-set)          do_worker_set "$@" ;;
+    worker-rename)       do_worker_rename "$@" ;;
     worker-set-key)      do_worker_set_key "$@" ;;
     cluster-config)      do_cluster_config "$@" ;;
     cluster-config-set)  do_cluster_config_set "$@" ;;

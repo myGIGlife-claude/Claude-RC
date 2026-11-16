@@ -239,6 +239,12 @@ class TeamController(
         api.workerSet(name, field, value)
         _cluster.value = clusterGroups()
     }
+    /** Edit dialog: role first, then the name (a failed rename leaves the saved role; the error is shown). */
+    fun editWorker(name: String, newName: String, role: String) = tools.action("Saving…") {
+        api.workerSet(name, "role", role)
+        if (newName != name) api.workerRename(name, newName)
+        _cluster.value = clusterGroups()
+    }
     fun removeWorker(name: String) = tools.action("Removing $name…") {
         api.workerRemove(name)
         _cluster.value = clusterGroups()
