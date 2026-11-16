@@ -116,6 +116,8 @@ data class Session(
     val general: Boolean = false,
     /** The general chat's id when [general]. */
     @SerialName("chat_id") val chatId: String = "",
+    /** In the auto-continue queue; missing on servers before SCRIPT_API 53. */
+    val starred: Boolean = false,
 )
 
 /** A saved general chat: a Claude conversation in its own folder, not tied to a repo. */

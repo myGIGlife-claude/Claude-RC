@@ -112,6 +112,9 @@ class ChatController(
         return withContext(Dispatchers.Default) { android.util.Base64.decode(f.data, android.util.Base64.DEFAULT) }.also { fileCache.put(path, it) }
     }
 
+    /** The chat PIN if it is in memory or kept in the vault (null = ask the owner). */
+    fun savedPin(): String? = chatPin ?: pinVault.load()
+
     fun closeChat() {
         fileCache.evictAll()
         chatPoller?.cancel()
