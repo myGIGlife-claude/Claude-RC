@@ -337,6 +337,15 @@ api "general-open $GID"
 check "general-open again: already running" "$(jqt '.ok and .data.already_running == true')"
 api "general-stop $GID2"; api "general-open $GID2"
 tmux list-panes -t "=chat-$GID2" -F '#{pane_start_command}' | grep -q -- "--resume"; [[ $? -ne 0 ]]; check "a chat with no conversation starts fresh" $?
+# Two opens racing on one stopped chat: both succeed, exactly one starts it, the session survives.
+api "general-stop $GID2"
+R1="$(mktemp)"; R2="$(mktemp)"
+SSH_ORIGINAL_COMMAND="general-open $GID2" "$HOME/bin/claude-launcher-api" </dev/null >"$R1" &
+SSH_ORIGINAL_COMMAND="general-open $GID2" "$HOME/bin/claude-launcher-api" </dev/null >"$R2" &
+wait
+[[ "$(cat "$R1" "$R2" | jq -s '[.[] | select(.ok and .data.already_running == false)] | length')" == 1 && "$(cat "$R1" "$R2" | jq -s '[.[] | select(.ok)] | length')" == 2 ]]; check "two racing general-open: one starts it, none fails" $?
+tmux has-session -t "=chat-$GID2" 2>/dev/null; check "...and the session is still running" $?
+rm -f "$R1" "$R2"
 api "restart chat-$GID"
 check "restart keeps the chat-<id> name and resumes" "$(jqa --arg a "$GID" --arg s "$GSID" '.ok and .data.session == ("chat-" + $a) and .data.resumed and .data.conversation == $s')"
 tmux has-session -t "=$GID" 2>/dev/null; [[ $? -ne 0 ]]; check "...no session named after the bare folder" $?

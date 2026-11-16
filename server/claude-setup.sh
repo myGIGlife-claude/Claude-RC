@@ -1087,6 +1087,9 @@ do_general_open() {
   need tmux
   command -v claude >/dev/null 2>&1 || api_err internal "'claude' is not installed on the server."
   local sid rc=0 already=false
+  # One open per chat at a time: two phones/taps racing on a stopped chat could kill each other's new tmux session. fd 9 is closed for tmux (see the tmux wrapper).
+  exec 9>>"$CHAT_DIR/.open-$GEN_ID.lock"
+  flock -w 20 9 || api_err busy "This chat is still opening. Try again in a moment."
   if general_running; then
     already=true
   else
