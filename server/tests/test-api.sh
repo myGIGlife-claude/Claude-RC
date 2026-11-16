@@ -1039,6 +1039,69 @@ qreset; qconf '["qa1","qa2","qb"]' 2; qusage 10
 tmux send-keys -t "=qa1:" -l "working... (esc to interrupt)"; sleep 0.3
 qtick 10; [[ "$(qsent qa2)" == 0 && "$(qsent qa1)" == 0 && "$(qsent qb)" == 1 ]]; check "owner working in qa1 (busy pane): qa2 in the same repo waits, qb goes, qa1 holds a slot" $?
 qusage 10; qtick 10; [[ "$(qsent qb)" == 1 && "$(qsent qa2)" == 0 ]]; check "...and parallel 2 is not exceeded" $?
+# 5b. Second review: reboots, marker spellings, flood guard, Esc record, resume reservation, waiting time, clock, transcript.
+# A missing session leaves every park alone (a reboot before claude-autostart restores the sessions).
+qreset; qconf '["qb"]' 1; qusage 10; qtick 200
+qfinish qb end_turn $'Waiting on you.\nQUESTION: Which one?'; qusage 10; qtick 200; qusage 10; qtick 200
+tmux kill-session -t =qb; qusage 10; qtick 100
+[[ "$(qs qb state)" == question && "$(qstat qb)" == stopped ]]; check "no session: a parked QUESTION stays parked, shown as stopped" $?
+qclear; qusage 10; qtick 100
+[[ "$(qs qb state)" == question && "$(qsent qb)" == 0 && "$(qstat qb)" == question ]]; check "...and when the session is back it is still parked, no turn" $?
+rm -f "$QSTATE"; qusage 10; qtick 100
+[[ "$(qs qb state)" == question && "$(qsent qb)" == 0 ]]; check "a lost state file: the question in the newest reply still parks it" $?
+qreset; qconf '["qb"]' 1; qusage 10; qtick 100
+tmux kill-session -t =qb; qusage 10; qtick 100
+[[ "$(qs qb state)" == needs_you && -z "$(qs qb turn)" ]]; check "session gone while a turn runs: parked, not forgotten" $?
+qclear; NOW=$((NOW + 4000)); qusage 10; qtick 100
+[[ "$(qsent qb)" == 0 ]]; check "...and no fresh turn after the session returns" $?
+# Marker spellings.
+for t in '`QUEUE: nothing to do`' 'QUEUE: nothing to do.' '**QUEUE: nothing to do**' '> QUEUE: nothing to do'; do
+  qreset; qconf '["qb"]' 1; qusage 10; qtick 200; qfinish qb end_turn "Plan is done.
+$t"; qusage 10; qtick 200; qusage 10; qtick 200
+  [[ "$(qs qb state)" == nothing ]]; check "nothing-to-do spelled $t" $?
+done
+for t in '**QUESTION:** Which one?' '> QUESTION: Which one?' '`QUESTION: Which one?`'; do
+  qreset; qconf '["qb"]' 1; qusage 10; qtick 200; qfinish qb end_turn "Stuck.
+$t"; qusage 10; qtick 200; qusage 10; qtick 200
+  [[ "$(qs qb state)" == question ]]; check "question spelled $t" $?
+done
+# Flood guard: three quick turns in a row with PLAN.md unchanged park the chat.
+qreset; qconf '["qb"]' 1; qusage 10; qtick 60
+for _ in 1 2 3; do qfinish qb end_turn "Checked, all fine."; qusage 10; qtick 60; qusage 10; qtick 60; done
+[[ "$(qs qb state)" == nothing && "$(qsent qb)" == 3 ]]; check "three quick turns, PLAN.md unchanged: parked as nothing" $?
+# Esc / "No" on a tool prompt: the real record shape ends the turn at once.
+qreset; qconf '["qb"]' 1; qusage 10; qtick 100
+jq -nc '{type:"assistant",uuid:"x1",message:{role:"assistant",stop_reason:"tool_use",content:[{type:"tool_use",id:"t1",name:"Bash",input:{command:"ls"}}]}}' >>"$(qtr qb)"
+jq -nc '{type:"user",uuid:"x2",message:{role:"user",content:[{type:"text",text:"[Request interrupted by user for tool use]"}]}}' >>"$(qtr qb)"
+qusage 10; qtick 100
+[[ "$(qs qb state)" == needs_you && -z "$(qs qb turn)" ]]; check "the '[Request interrupted by user' record ends the turn and parks the chat" $?
+qusage 10; qtick 100; [[ "$(qsent qb)" == 1 ]]; check "...with no new turn" $?
+# A chat that will resume keeps its checkout reserved.
+qreset; qconf '["qa1","qa2"]' 1; qusage 10; qtick 60
+tmux send-keys -t "=qa1:" -l "5-hour limit reached - resets 3pm"; sleep 0.3
+qusage 10; qtick 10
+NOW=$((NOW + 1000)); qconf '["qa1","qa2"]' 2; qusage 10; qtick 10
+[[ "$(qsent qa2)" == 0 && "$(tmux capture-pane -p -J -S -200 -t =qa1: | grep -c 'Usage window reset: continue')" == 2 ]]; check "limited with resume: the other chat in the same repo waits, the resumer goes first" $?
+# Time spent waiting on a prompt does not count towards max_turn_min.
+qreset; qconf '["qb"]' 1; qusage 10; qtick 10
+tmux send-keys -t "=qb:" -l "Proceed? (y/n)"; sleep 0.3
+qusage 10; qtick $((5 * 3600)); qusage 10; qtick 10
+qclear; qusage 10; qtick 10
+[[ "$(qs qb state)" == running && -n "$(qs qb turn)" ]]; check "five hours spent on a prompt: not an overrun once answered" $?
+# The clock going backwards.
+qreset; qconf '["qb"]' 1; NOW=$((NOW + 99999)); qusage 99; NOW=$((NOW - 99999)); qtick 10
+[[ "$(qsent qb)" == 1 ]]; check "a usage cache stamped in the future is stale, not a limit" $?
+qreset; qconf '["qb"]' 1; qusage 10; jq -nc --argjson t "$((NOW + 1000000000))" '{_limited_until:$t}' >"$QSTATE"; qtick 10
+[[ "$(jq -r ._limited_until "$QSTATE")" -le $((NOW + 8 * 86400)) && "$(qsent qb)" == 0 ]]; check "a limited_until far in the future is clamped to a window" $?
+qreset; qconf '["qb"]' 1; qusage 10; jq -nc --argjson t "$((NOW + 1000000000))" '{qb:{state:"backoff",fails:1,next_try:$t}}' >"$QSTATE"; qtick 10
+[[ "$(qs qb next_try)" -le $((NOW + 3600)) && "$(qsent qb)" == 0 ]]; check "a backoff time far in the future is clamped to an hour" $?
+# The turn's own transcript, not the newest file in the folder.
+qreset; qconf '["qb"]' 1; qusage 10; qtick 200
+jq -nc '{type:"assistant",uuid:"o1",message:{role:"assistant",stop_reason:"tool_use",content:[{type:"text",text:"other conversation"}]}}' >"$(dirname "$(qtr qb)")/other.jsonl"
+qfinish qb end_turn "All done."; qusage 10; qtick 200; qusage 10; qtick 200
+[[ "$(qlog qb done)" == 1 ]]; check "a newer transcript file in the folder does not hide the turn's own reply" $?
+rm -f "$(dirname "$(qtr qb)")/other.jsonl"
+grep -q 'timeout 55 ' "$SERVER/claude-queue"; check "claude-queue gives a tick at most 55 seconds" $?
 # 6. queue-off while a tick holds the lock answers at once; a tick sees the switch before it pastes.
 qreset; qconf '["qb"]' 1
 flock "$QD/lock" sleep 8 & HOLD=$!

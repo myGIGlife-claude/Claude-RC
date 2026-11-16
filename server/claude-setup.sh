@@ -4680,7 +4680,7 @@ queue_status_json() {
      usage:({five:null, seven:null, five_resets:null, seven_resets:null} + $u),
      limited_until:($st._limited_until // 0),
      chats:[$c.stars[] as $s | ($st[$s] // {}) as $e
-       | {session:$s, state:(if $e.waiting then "needs_you" else ($e.state // "idle") end), since:($e.since // 0), note:($e.note // ""), turns:($e.turns // 0),
+       | {session:$s, state:(if $e.waiting then "needs_you" elif $e.gone then "stopped" else ($e.state // "idle") end), since:($e.since // 0), note:($e.note // ""), turns:($e.turns // 0),
           next_try:($e.next_try // 0),
           running_min:(if $e.state == "running" and $e.turn.started then (($now - $e.turn.started) / 60 | floor) else 0 end)}]}'
 }
@@ -4780,6 +4780,8 @@ queue_usage() {
   local f="$LAUNCHER_CONFIG_DIR/usage-cache/_main.json" c ts ru tok exp raw new
   c="$(jq -c 'if type == "object" then . else {} end' "$f" 2>/dev/null || echo '{}')"
   ts="$(jq -r '.ts // 0 | floor' <<<"$c")"; ru="$(jq -r '.retry_until // 0 | floor' <<<"$c")"
+  ((ts > QNOW)) && ts=0                  # the clock went backwards: that number is not from "now"
+  ((ru > QNOW + 900)) && ru=$((QNOW + 900))
   if ((QNOW - ts >= 120 && QNOW >= ru)); then
     tok=""; exp=0
     if creds_ok "$HOME/.claude/.credentials.json"; then
@@ -4801,7 +4803,7 @@ queue_usage() {
     ts="$(jq -r '.ts // 0 | floor' <<<"$c")"
   fi
   QFIVE=""; QSEVEN=""; QFIVE_R=""; QSEVEN_R=""
-  if ((QNOW - ts < 1800)); then   # a failed refresh keeps the last numbers 30 minutes (same as clauderc-team)
+  if ((ts <= QNOW && QNOW - ts < 1800)); then   # a failed refresh keeps the last numbers 30 minutes (same as clauderc-team)
     QFIVE="$(jq -r '.five // empty' <<<"$c")"; QSEVEN="$(jq -r '.seven // empty' <<<"$c")"
     QFIVE_R="$(jq -r '.five_resets // empty' <<<"$c")"; QSEVEN_R="$(jq -r '.seven_resets // empty' <<<"$c")"
   fi
@@ -4824,9 +4826,12 @@ queue_reset_at() {
 # stop_sequence; seen on a real transcript: "API Error: Connection lost ...", error "server_error").
 queue_reply() {
   tail -n +$(($2 + 1)) "$1" 2>/dev/null | jq -cs '[.[] | select(.type == "assistant")] as $a
+    | (.[-1] // {}) as $l
     | {n:($a | length), stop:($a | last | .message.stop_reason // ""), api:(($a | last | .isApiErrorMessage) == true), err:(($a | last | .error) // ""),
+       # Esc / "No" on a tool prompt: Claude Code writes a user record "[Request interrupted by user ..." and nothing after it.
+       intr:(($l.type == "user") and ((($l.message.content // "") | if type == "string" then . else ([.[]? | select(.type == "text") | .text] | join(" ")) end) | startswith("[Request interrupted by user"))),
        text:((([$a[] | select(any(.message.content[]?; .type == "text"))] | last | [.message.content[]? | select(.type == "text") | .text]) // []) | join("\n"))}' 2>/dev/null ||
-    echo '{"n":0,"stop":"","api":false,"err":"","text":""}'
+    echo '{"n":0,"stop":"","api":false,"err":"","intr":false,"text":""}'
 }
 
 # queue_last_event <session> [action regex]: epoch of the newest chat.log entry for the session (0 = none).
@@ -4836,6 +4841,9 @@ queue_last_event() {
   last="$(awk -F'\t' -v s="$1" -v a="${2:-.}" '$2 == s && $3 ~ a {t = $1} END {print t}' "$CHAT_LOG" 2>/dev/null)"
   [[ -n "$last" ]] && t="$(date -d "$last" +%s 2>/dev/null)" && echo "$t" || echo 0
 }
+
+# queue_has <regex> <text>: some line of the text matches, after stripping what Claude wraps markers in (quotes, bold, code, a final period).
+queue_has() { sed -E 's/^[[:space:]>*_`#-]+//; s/[[:space:]*_`.]+$//' <<<"$2" | grep -qE "$1"; }
 
 # queue_busy_owner <session>: the owner is in the chat (any chat.log entry in the last 20 minutes, or a terminal is attached).
 queue_busy_owner() {
@@ -4855,28 +4863,31 @@ queue_fail() {
 queue_plan_sum() { sha1sum "$(session_dir "$1")/PLAN.md" 2>/dev/null | cut -d' ' -f1 || true; }
 
 # queue_park <session> <note>: the turn is over (or was stopped) and the chat waits for the owner (any chat.log entry newer than now).
-queue_park() { qmod "$1" 'del(.turn, .waiting, .done_ticks, .resume)'; qstate "$1" needs_you "$2"; }
+queue_park() { qmod "$1" 'del(.turn, .waiting, .wait_since, .done_ticks, .resume)'; qstate "$1" needs_you "$2"; }
 
 # queue_check_running <session>: has the turn finished, hit a prompt, a limit or an error, or gone on too long?
 # A prompt keeps the chat `running` with waiting=true: the turn is still the chat's (slot and repo stay held) and is read
 # normally once the owner has answered from the app.
 queue_check_running() {
-  local s="$1" screen f base started r n stop apierr errk text mt ticks tail3
-  tmux has-session -t "=$s" 2>/dev/null || { qmod "$s" 'del(.turn, .waiting)'; qstate "$s" stopped "session gone"; return; }
+  local s="$1" screen f base started r n stop apierr errk text mt ticks tail3 dur cur prev quick
+  tmux has-session -t "=$s" 2>/dev/null || { queue_park "$s" "session gone"; return; }   # a reboot: park, never a fresh turn
   started="$(qget "$s" '.turn.started // 0')"
   screen="$(qpane "$s")"
   if ((started > 0 && $(queue_last_event "$s" '^interrupt$') >= started)); then queue_park "$s" "interrupted"; return; fi
-  if grep -qE "$WAIT_RE" <<<"$screen"; then
-    [[ "$(qget "$s" '.waiting // false')" == true ]] || { qmod "$s" '.waiting = true'; queue_log_add "$s" needs_you "waiting for you"; }
-    return
-  fi
-  [[ "$(qget "$s" '.waiting // false')" != true ]] || qmod "$s" 'del(.waiting)'
-  if ((QNOW - started > QMAXTURN * 60)); then queue_log_add "$s" fail overrun; queue_park "$s" "turn took too long"; return; fi
-  if grep -q "esc to interrupt" <<<"$screen"; then qmod "$s" '.done_ticks = 0'; return; fi
-  f="$(chat_transcript "$s")"; base="$(qget "$s" '.turn.lines // 0')"
-  [[ "$f" == "$(qget "$s" '.turn.transcript // ""')" ]] || base=0
+  # The turn's own transcript while it exists (a newer file in the folder is another conversation).
+  f="$(qget "$s" '.turn.transcript // ""')"; base="$(qget "$s" '.turn.lines // 0')"
+  [[ -n "$f" && -f "$f" ]] || { f="$(chat_transcript "$s")"; base=0; }
   r="$(queue_reply "$f" "$base")"; n="$(jq -r .n <<<"$r")"; stop="$(jq -r .stop <<<"$r")"
   apierr="$(jq -r .api <<<"$r")"; errk="$(jq -r .err <<<"$r")"; text="$(jq -r .text <<<"$r")"
+  if [[ "$(jq -r .intr <<<"$r")" == true ]]; then queue_park "$s" "interrupted"; return; fi
+  if grep -qE "$WAIT_RE" <<<"$screen"; then
+    [[ "$(qget "$s" '.waiting // false')" == true ]] || { qmod "$s" '.waiting = true | .wait_since = $now'; queue_log_add "$s" needs_you "waiting for you"; }
+    return
+  fi
+  # Answered: the time spent waiting does not count against max_turn_min.
+  [[ "$(qget "$s" '.waiting // false')" != true ]] || { qmod "$s" '.turn.started += ($now - (.wait_since // $now)) | del(.waiting, .wait_since)'; started="$(qget "$s" '.turn.started')"; }
+  if ((QNOW - started > QMAXTURN * 60)); then queue_log_add "$s" fail overrun; queue_park "$s" "turn took too long"; return; fi
+  if grep -q "esc to interrupt" <<<"$screen"; then qmod "$s" '.done_ticks = 0'; return; fi
   if [[ "$apierr" == true ]]; then
     if [[ "$errk" == rate_limit ]] || grep -qiE "$QUEUE_LIMIT_RE" <<<"$text"; then
       qmod "$s" '.resume = true | del(.turn, .done_ticks)'; qstate "$s" limited "usage limit"; QLU="$(queue_reset_at)"
@@ -4897,32 +4908,40 @@ queue_check_running() {
   if ((QNOW - mt < 90)); then qmod "$s" '.done_ticks = 0'; return; fi
   ticks=$(($(qget "$s" '.done_ticks // 0') + 1))
   if ((ticks < 2)); then qmod "$s" '.done_ticks = $t' --argjson t "$ticks"; return; fi
-  qmod "$s" 'del(.turn, .done_ticks, .resume) | .fails = 0 | .turns = ((.turns // 0) + 1)'
-  if grep -q '^QUESTION:' <<<"$text"; then qstate "$s" question "asked you"
-  elif grep -qE '^QUEUE: nothing to do[[:space:]]*$' <<<"$text"; then
-    qmod "$s" '.plan_sum = $p | .nothing_at = $now' --arg p "$(queue_plan_sum "$s")"
+  dur=$((QNOW - started)); cur="$(queue_plan_sum "$s")"; prev="$(qget "$s" '.plan_last // "-"')"
+  # Flood guard: three quick turns in a row with PLAN.md unchanged (a "nothing to do" in words the markers miss) park it.
+  if ((dur < 300)) && [[ "$prev" == "-" || "$prev" == "x$cur" ]]; then quick=$(($(qget "$s" '.quick // 0') + 1)); else quick=0; fi
+  qmod "$s" 'del(.turn, .done_ticks, .resume) | .fails = 0 | .turns = ((.turns // 0) + 1) | .quick = $q | .plan_last = $p' --argjson q "$quick" --arg p "x$cur"
+  if queue_has '^QUESTION:' "$text"; then qstate "$s" question "asked you"
+  elif queue_has '^QUEUE: nothing to do$' "$text" || ((quick >= 3)); then
+    qmod "$s" '.plan_sum = $p | .nothing_at = $now | .quick = 0' --arg p "$cur"
     qstate "$s" nothing "plan empty"
   else qstate "$s" idle; queue_log_add "$s" done; fi
 }
 
 # queue_eligible <session>: may it get a turn now? Sets states (stopped, needs_you, unsafe) as it finds them; QREPO = its checkout.
 queue_eligible() {
-  local s="$1" st screen f base r dir repo o
+  local s="$1" st screen f base r dir repo o nt
   st="$(qget "$s" '.state // "idle"')"
   case "$st" in running | error) return 1 ;; esac
   [[ "$(qget "$s" '.turn // empty')" == "" ]] || return 1
-  tmux has-session -t "=$s" 2>/dev/null || { qstate "$s" stopped "session not running"; return 1; }
-  [[ "$st" == stopped || "$st" == unsafe ]] && st=idle   # re-checked below
+  # No session (a reboot before claude-autostart ran): leave every park as it is, just say "stopped".
+  tmux has-session -t "=$s" 2>/dev/null || { [[ "$(qget "$s" '.gone // false')" == true ]] || { qmod "$s" '.gone = true'; queue_log_add "$s" skip "session not running"; }; return 1; }
+  [[ "$(qget "$s" '.gone // false')" != true ]] || qmod "$s" 'del(.gone)'
+  [[ "$st" == unsafe ]] && st=idle   # re-checked below
   case "$st" in
     needs_you) (($(queue_last_event "$s") > $(qget "$s" '.since // 0'))) || return 1 ;;   # parked until the owner has done something here
-    backoff) ((QNOW >= $(qget "$s" '.next_try // 0'))) || return 1 ;;
+    backoff)
+      nt="$(qget "$s" '.next_try // 0')"
+      ((nt > QNOW + 3600)) && { nt=$((QNOW + 3600)); qmod "$s" '.next_try = $n' --argjson n "$nt"; }   # the clock went backwards once
+      ((QNOW >= nt)) || return 1 ;;
     nothing)
       ((QNOW - $(qget "$s" '.nothing_at // 0') >= 86400)) || [[ "$(queue_plan_sum "$s")" != "$(qget "$s" '.plan_sum // ""')" ]] || return 1 ;;
-    question)
-      f="$(chat_transcript "$s")"; base=$(($(wc -l <"$f" 2>/dev/null || echo 0) - 400)); ((base < 0)) && base=0
-      r="$(queue_reply "$f" "$base")"
-      ! grep -q '^QUESTION:' <<<"$(jq -r .text <<<"$r")" || return 1 ;;
   esac
+  # An unanswered question in the newest reply parks the chat whatever the state says (fresh star, lost state file, reboot).
+  f="$(chat_transcript "$s")"; base=$(($(wc -l <"$f" 2>/dev/null || echo 0) - 400)); ((base < 0)) && base=0
+  r="$(queue_reply "$f" "$base")"
+  if queue_has '^QUESTION:' "$(jq -r .text <<<"$r")"; then [[ "$st" == question ]] || qstate "$s" question "asked you"; return 1; fi
   screen="$(qpane "$s")"
   if grep -qE "$WAIT_RE" <<<"$screen"; then qstate "$s" needs_you "waiting for you"; return 1; fi
   grep -q "esc to interrupt" <<<"$screen" && return 1
@@ -4931,9 +4950,9 @@ queue_eligible() {
   dir="$(session_dir "$s")"
   repo="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || echo "$dir")"
   QREPO="$repo"
-  # The checkout is taken by another starred chat that holds a turn (running or still has one) or is busy right now.
+  # The checkout is taken by another starred chat that holds a turn (running or still has one), will resume one, or is busy right now.
   [[ "$(jq -r --arg me "$s" --arg r "$repo" '[to_entries[] | select(.key | startswith("_") | not) | select(.key != $me)
-    | select(.value.state == "running" or .value.turn != null) | select(.value.repo == $r)] | length' <<<"$QST")" == 0 ]] || return 1
+    | select(.value.state == "running" or .value.turn != null or .value.resume == true) | select(.value.repo == $r)] | length' <<<"$QST")" == 0 ]] || return 1
   for o in "${QSTARS[@]}"; do
     [[ "$o" != "$s" ]] && qpane "$o" | grep -q "esc to interrupt" || continue
     dir="$(session_dir "$o")"
@@ -4954,6 +4973,7 @@ queue_tick() {
   QMAX5="$(jq -r .max_5h <<<"$conf")"; QMAX7="$(jq -r .max_7d <<<"$conf")"; QMAXTURN="$(jq -r .max_turn_min <<<"$conf")"; par="$(jq -r .parallel <<<"$conf")"
   QST="$(jq -c 'if type == "object" then . else {} end' "$QUEUE_DIR/state.json" 2>/dev/null || echo '{}')"
   QLU="$(jq -r '._limited_until // 0' <<<"$QST")"
+  ((QLU > QNOW + 8 * 86400)) && QLU=$((QNOW + 8 * 86400))   # the clock went backwards once: a window is at most a week
   mapfile -t QSTARS < <(jq -r '.stars[]' <<<"$conf")
   queue_usage
   running=0
