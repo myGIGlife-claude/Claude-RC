@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.activity.result.PickVisualMediaRequest
 import life.mygig.clauderc.ui.vm.AttachQueue
 import life.mygig.clauderc.ui.vm.PHOTO_PICK_MAX
+import life.mygig.clauderc.ui.components.FoldedRow
 import life.mygig.clauderc.ui.components.Hub
 import life.mygig.clauderc.ui.components.Tune
 import android.content.Context
@@ -300,6 +301,10 @@ private fun Messages(vm: MainViewModel, voice: ChatVoice, messages: List<ChatMes
                 }
                 is Row0.Msg -> if (r.m.role == "file") {
                     FileCard(vm, r.m)
+                } else if (foldKind(r.m.role, r.m.text) != null) {
+                    val kind = foldKind(r.m.role, r.m.text)!!
+                    val fk = "f-" + r.m.id
+                    FoldedRow(kind.label, remember(r.m.text) { foldPreview(kind, r.m.text) }, r.m.text, fk in open, onToggle = { open = if (fk in open) open - fk else open + fk })
                 } else if (r.m.role == "user") {
                     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
                         // "[attached: path]" tokens show as file-name chips; the message itself (sent, copied) is unchanged.
