@@ -304,7 +304,7 @@ private fun Messages(vm: MainViewModel, voice: ChatVoice, messages: List<ChatMes
                 } else if (foldKind(r.m.role, r.m.text) != null) {
                     val kind = foldKind(r.m.role, r.m.text)!!
                     val fk = "f-" + r.m.id
-                    FoldedRow(kind.label, remember(r.m.text) { foldPreview(kind, r.m.text) }, r.m.text, fk in open) { open = if (fk in open) open - fk else open + fk }
+                    FoldedRow(kind.label, remember(r.m.text) { foldPreview(kind, r.m.text) }, r.m.text, fk in open, onToggle = { open = if (fk in open) open - fk else open + fk })
                 } else if (r.m.role == "user") {
                     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
                         // "[attached: path]" tokens show as file-name chips; the message itself (sent, copied) is unchanged.
