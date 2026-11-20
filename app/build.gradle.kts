@@ -158,5 +158,8 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
 
+    // Google sign-in (Identity Authorization) for the Drive app-folder backup.
+    implementation(libs.play.services.auth)
+
     testImplementation(libs.junit)
 }
