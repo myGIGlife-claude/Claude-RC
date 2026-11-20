@@ -2,7 +2,7 @@
 name: rc-ui-ux-design
 description: UI and UX design rules for building web and mobile interfaces that look intentional and are usable and accessible - layout, spacing, type, color/OKLCH, dark mode, design tokens (DTCG), components, forms, states, motion, WCAG 2.2, EAA, Material 3 Expressive vs Apple Liquid Glass, responsive/adaptive, i18n, AI-feature UX, dark-pattern law. Use when designing or reviewing any screen, component, CSS/Tailwind theme, Compose MaterialTheme, SwiftUI view, Figma handoff, dashboard, form, onboarding, settings or landing page, or when the output risks looking like generic "AI slop".
 ---
-# UI and UX design for web and mobile  (as of 2026-10)
+# UI and UX design for web and mobile  (as of 2026-11)
 
 > Facts here are dated (see Sources). Versions, deadlines and policies move: confirm the primary source before pinning a version or promising a date. Anything marked (unverified) is a lead, not a fact.
 
@@ -12,18 +12,18 @@ References: `references/components-and-states.md` (component and state patterns,
 
 ## Currency check
 
-| Thing | Status (2026-10) |
+| Thing | Status (2026-11) |
 |---|---|
 | WCAG | **2.2** is the target (W3C Rec Oct 2023; ISO/IEC 40500:2025 since 2025-10-21). 2.2 removed 4.1.1 Parsing. |
 | WCAG 3.0 | Working Draft only (latest 2026-09-10). Not a compliance target. Its contrast algorithm is "yet to be determined"; APCA is NOT in it. |
-| European Accessibility Act | Applies since **2025-06-28**. Services already in use may run under transition until 2030-06-28; micro-enterprise *services* exempt. Presumption of conformity via EN 301 549 v3.2.1 (= WCAG 2.1 AA); ETSI published WCAG 2.2-based **v4.1.1 on 2026-09-02**, OJ citation pending (date unverified). Design to WCAG 2.2 AA. |
+| European Accessibility Act | Applies since **2025-06-28**. Services already in use may run under transition until 2030-06-28; micro-enterprise *services* exempt. Presumption of conformity via EN 301 549 v3.2.1 (= WCAG 2.1 AA); ETSI/CEN/CENELEC published WCAG 2.2-based **v4.1.1 on 2026-09-02**; as of 2026-11-19 no Official Journal citation found (press forecasts ~end of Nov 2026, unverified), so v3.2.1 still carries the presumption. Design to WCAG 2.2 AA. |
 | EU withdrawal button | Directive (EU) 2023/2673 (new CRD Art. 11a) applies from **2026-06-19**: online B2C contracts need a clearly labelled "withdraw from contract here"-style function. |
-| EU Digital Fairness Act | Commission proposal planned Q4 2026, not law yet. Dark patterns already covered by UCPD, DSA Art. 25, GDPR consent rules. |
-| US "click to cancel" | FTC 2024 rule vacated by the 8th Circuit on 2025-07-08; FTC ANPRM in the Federal Register 2026-03-13 (comments closed 2026-04-13). ROSCA + ~30 state auto-renewal laws (California AB 2863, in force 2025-07-01: cancel in the same medium) still apply. |
-| Design tokens | DTCG Format **2025.10** = first stable spec (2025-10-28). Style Dictionary v5 supports it partially (structured color since 5.3.0, object dimensions since 5.4.0). Figma announced native DTCG variable import/export (Nov 2025; ship date unverified, check your Figma). |
-| Material | M3 **Expressive** (announced May 2025). Compose material3 stable 1.4.x; 1.5.0 is in beta (2026-10) and promotes most expressive components (buttons, FAB menu, toolbars, lists) to stable. Check the release notes before using `MaterialExpressiveTheme`. |
-| Apple | **Liquid Glass** (iOS/macOS 26, 2025-06). iOS 27 (WWDC 2026-06) reportedly refines it and adds a user clear-to-tinted slider (press reports; not confirmed on Apple docs). Respects Reduce Transparency / Increase Contrast. |
-| Android adaptive | Window size classes now 5 widths: compact <600, medium 600-839, expanded 840-1199, **large 1200-1599, extra-large ≥1600** dp (WindowManager 1.5; Compose: `currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true)`). Android 17 (2026-06): apps targeting API 37 cannot lock orientation/resizability on ≥600dp displays (no opt-out; games exempt). Play requires target 37 from 2027-08. |
+| EU Digital Fairness Act | **Proposed by the Commission on 2026-11-11** (with a Simplification Directive); not law, Parliament and Council now discuss it (law-firm summaries, official text not read; reportedly it would replace the 2005 UCPD). Targets dark patterns, addictive design, unfair personalisation, subscription cancellation/auto-renewal/free-trial conversion, access to a human. Until adopted, UCPD, DSA Art. 25 and GDPR consent rules apply. |
+| US "click to cancel" | FTC 2024 rule vacated by the 8th Circuit on 2025-07-08; FTC issued an ANPRM on 2026-03-11 (law-firm summaries; comments were due 2026-04-13; Federal Register date not re-checked). ROSCA + ~30 state auto-renewal laws (California AB 2863, in force 2025-07-01: cancel in the same medium) still apply. |
+| Design tokens | DTCG Format **2025.10** = first stable spec (2025-10-28). Style Dictionary v5 supports it partially (structured color 5.3.0 and object dimensions 5.4.0 per earlier notes, not re-confirmed; `duration` + `$root` in 5.7.0; latest 5.8.0, 2026-11-03; 5.7.1 fixed a prototype-pollution bug, so use 5.7.1+). Figma announced native DTCG variable import/export (Schema, Nov 2025); users report a staged rollout from Dec 2025 with gaps (composite tokens such as typography, descriptions); no official changelog date found (unverified). |
+| Material | M3 **Expressive** (announced May 2025). Compose material3 **1.5.0 went stable 2026-11-18** (1.6.0-alpha01 same day). Stable now: ToggleButton/SplitButton/ButtonGroup, floating toolbars, wavy progress indicators, expressive ListItem, time pickers, top/bottom app bars, carousels. Still experimental in 1.5.0: `LoadingIndicator`, `MaterialShapes`, `AppBarWithSearch`, `carouselParallaxScrollEffect`, the standalone bottom sheet (named `BottomSheet` or `Sheet` in the notes: check the API reference). Older projects on 1.4.x: use `@ExperimentalMaterial3ExpressiveApi` opt-ins. |
+| Apple | **Liquid Glass** (iOS/macOS 26, 2025-06). iOS 27 (WWDC 2026-06) refines it (updated material foundations, a user transparency slider incl. a more opaque "clearest" setting; apps built for iOS 26 get it automatically; some controls render larger in the iOS 27 SDK). Press and forum sources only, not confirmed on Apple docs; release date unverified. Respects Reduce Transparency / Increase Contrast. |
+| Android adaptive | Window size classes now 5 widths: compact <600, medium 600-839, expanded 840-1199, **large 1200-1599, extra-large ≥1600** dp (WindowManager 1.5; Compose: `currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true)`). Android 17: apps targeting API 37 ignore orientation/resizability/aspect-ratio restrictions on smallest-width ≥600dp displays (Android 16 opt-out removed; games and a user per-app setting exempt). Play: from 2026-08-31 new apps/updates must target API 36 (extension to 2026-11-01); the Android developers blog (2026-11-18) says new and updated apps must target API 37 from August 2027 (the Play Help page does not list it yet). |
 | Web platform | Baseline: container size queries, `:has()`, OKLCH/`color-mix()`, `light-dark()`, popover, `@starting-style`, same-document View Transitions (2025-10), `contrast-color()` (2026-04, black/white only). Not Baseline: cross-document view transitions (no Firefox), customizable `<select>` (`appearance: base-select`: Chromium 135+, Safari 27; Firefox no), scroll-state queries, `corner-shape`. Interop 2026 includes anchor positioning, container style queries, dialog/popover additions, scroll-driven animations, view transitions. |
 
 ## What changed / stop doing
@@ -39,7 +39,7 @@ References: `references/components-and-states.md` (component and state patterns,
 | JS modal libs, z-index wars | `<dialog>` (`showModal`), `popover`, anchor positioning (progressive), `closedby` for light dismiss (check support) | 2023-26 |
 | JS page-transition libraries | View Transitions API (same-document Baseline); cross-document as progressive enhancement | 2025-10 |
 | Custom JS dropdown for styling | Native `<select>`; `appearance: base-select` as enhancement | Chromium 135, Safari 27 |
-| Lock phone apps to portrait | Adaptive layouts by window size class; Android 17 ignores the lock on ≥600dp | Android 16/17 |
+| Lock phone apps to portrait | Adaptive layouts by window size class; Android 17 (target 37) ignores the lock on ≥600dp | Android 16/17 |
 | Material 2 / M3 baseline easing only | M3 motion scheme springs (`MotionScheme.standard()/expressive()`) | M3 Expressive 2025 |
 | Flat opaque iOS bars, custom blurred tab bars | System bars/controls get Liquid Glass for free; use `.glassEffect()` only for custom floating controls, never on content | iOS 26 |
 | Tokens in ad-hoc JSON / Tokens Studio dialect | DTCG 2025.10 (`$value`, `$type`, `$extends`, structured colors) | 2025-10 |
@@ -280,13 +280,20 @@ UI is part of the attack surface; the design must make the safe path the easy on
 - [ ] Top task tested with ≥1 real person (ideally 5), events instrumented
 
 ## Sources
-- https://www.w3.org/TR/WCAG22/ - WCAG 2.2 criteria and levels (2.4.11 AA, 2.4.13 AAA, 2.5.7, 2.5.8, 3.2.6, 3.3.7, 3.3.8) - 2026-10-09
-- https://www.w3.org/WAI/news/2025-10-21/wcag22-iso - WCAG 2.2 = ISO/IEC 40500:2025 - 2026-10-09
-- https://www.w3.org/TR/wcag-3.0/ - WCAG 3 WD 2026-09-10, contrast algorithm TBD, no APCA - 2026-10-09
+- https://www.w3.org/TR/WCAG22/ - WCAG 2.2 criteria and levels (2.4.11 AA, 2.4.13 AAA, 2.5.7, 2.5.8, 3.2.6, 3.3.7, 3.3.8) - 2026-10-09 (not re-fetched 2026-11-19)
+- https://www.w3.org/WAI/news/2025-10-21/wcag22-iso - WCAG 2.2 = ISO/IEC 40500:2025 - 2026-10-09 (not re-fetched)
+- https://www.w3.org/TR/wcag-3.0/ - WCAG 3 WD 2026-09-10 still latest, contrast algorithm TBD - 2026-11-19
+- https://commission.europa.eu/law/law-topic/consumer-protection-law/digital-fairness-act_en - DFA proposal adopted 2026-11-11, scope - 2026-11-19
+- https://developer.android.com/google/play/requirements/target-sdk - Play target API 36 from 2026-08-31, extension 2026-11-01 - 2026-11-19
+- https://developer.android.com/blog/posts/google-play-adaptive-quality-standards - target API 37 required August 2027, adaptive Tier 3 and foldable screenshots April 2027 (published 2026-11-18) - 2026-11-19
+- https://webkit.org/blog/17967/news-from-wwdc26-webkit-in-safari-27/ - Safari 27 customizable select (via search result; not fully read) - 2026-11-19
+- https://developer.apple.com/forums/thread/839061 - iOS 27 SDK Liquid Glass changes (forum lead) - 2026-11-19
 - https://eur-lex.europa.eu/eli/dir/2019/882/oj - EAA application 2025-06-28, transition to 2030, micro-enterprise exemption - 2026-10-09
 - https://commission.europa.eu/strategy-and-policy/policies/justice-and-fundamental-rights/disability/union-equality-strategy-rights-persons-disabilities-2021-2030/european-accessibility-act_en - EAA scope - 2026-10-09
 - https://eur-lex.europa.eu/eli/dir/2023/2673/oj - withdrawal function (CRD Art. 11a) from 2026-06-19 - 2026-10-09
 - https://www.europarl.europa.eu/legislative-train/theme-protecting-our-democracy-upholding-our-values/file-digital-fairness-act - DFA planned Q4 2026, no proposal yet - 2026-10-09
+- https://registry.npmjs.org/style-dictionary/latest (5.8.0), https://www.designtokens.org/tr/2025.10/format/ (dated 2025-10-28, "considered stable"), https://developer.android.com/develop/ui/compose/layouts/adaptive/use-window-size-classes (re-read: compact/medium/expanded/large 1200/extra-large 1600) - 2026-11-19
+- Search leads re-checked 2026-11-19 (law-firm and vendor summaries, not official texts): EN 301 549 v4.1.1 published 2026-09-02 and not yet cited in the Official Journal; DFA proposed 2026-11-11 (COM(2026) 1100); Directive 2023/2673 withdrawal function applies from 2026-06-19; FTC ANPRM issued 2026-03-11
 - https://www.jonesday.com/en/insights/2026/05/ftc-revives-clicktocancel-rule-new-risks-for-subscription-businesses - FTC ANPRM March 2026, ROSCA/state laws (lead; law firm) - 2026-10-09
 - https://www.wilmerhale.com/en/insights/client-alerts/20250801-eighth-circuit-vacates-the-ftcs-click-to-cancel-rule-but-federal-and-state-regulators-likely-to-remain-active - 8th Circuit vacatur 2025-07-08 - 2026-10-09
 - https://btlaw.com/en/insights/alerts/2025/california-expands-automatic-renewal-law-new-requirements-now-in-effect - CA AB 2863 effective 2025-07-01 - 2026-10-09
@@ -294,16 +301,16 @@ UI is part of the attack surface; the design must make the safe path the easy on
 - https://www.designtokens.org/tr/2025.10/format/ - DTCG token shapes, aliases, $extends, types, media type - 2026-10-09
 - https://www.designtokens.org/tr/2025.10/resolver/ - DTCG resolver (sets, modifiers, contexts) - 2026-10-09
 - https://www.reedsmith.com/articles/doj-extends-digital-accessibility-compliance-dates-under-title-ii-of-the-ada/ - DOJ IFR 2026-04-20, Title II dates 2027/2028 (law firm; DOJ Federal Register not opened) - 2026-10-09
-- https://github.com/style-dictionary/style-dictionary/releases - SD v5 DTCG 2025.10 partial support (5.3.0 colors, 5.4.0 dimensions) - 2026-10-09
+- https://github.com/style-dictionary/style-dictionary/releases - SD 5.8.0 (2026-11-03), 5.7.0 duration, 5.7.1 security fix - 2026-11-19
 - https://www.federalregister.gov/documents/2026/03/13/2026-04952/rule-concerning-the-use-of-prenotification-negative-option-plans - FTC ANPRM 2026-03-13 - 2026-10-09
 - https://www.federalregister.gov/documents/2026/04/20/2026-07663/ - DOJ IFR: Title II dates 2027-04-26 / 2028-04-26 - 2026-10-09
 - https://www.etsi.org/deliver/etsi_en/301500_301599/301549/ - EN 301 549 v4.1.1 published 2026-09-02 - 2026-10-09
 - https://developer.android.com/develop/ui/compose/layouts/adaptive/use-window-size-classes - 5 width classes, `supportLargeAndXLargeWidth` - 2026-10-09
 - https://digital-strategy.ec.europa.eu/en/faqs/transparency-obligations-under-article-50-ai-act - AI Act Art. 50 from 2026-08-02, marking grace to 2026-12-02 - 2026-10-09
 - https://figma.obra.studio/design-tokens-community-group-w3c-release/ - Figma native DTCG import/export announcement (third-party; ship date unverified) - 2026-10-09
-- https://developer.android.com/jetpack/androidx/releases/compose-material3 - material3 1.4 stable, 1.5.0-beta01, expressive APIs promotion - 2026-10-09
+- https://developer.android.com/jetpack/androidx/releases/compose-material3 - material3 1.5.0 stable 2026-11-18, stable vs experimental APIs - 2026-11-19
 - https://android-developers.googleblog.com/2025/10/jetpack-windowmanager-15-is-stable.html - large/extra-large size classes - 2026-10-09
-- https://developer.android.com/about/versions/17/changes/ff-restrictions-ignored - Android 17 orientation/resizability ignored on ≥600dp - 2026-10-09
+- https://developer.android.com/about/versions/17/changes/ff-restrictions-ignored - Android 17 orientation/resizability ignored on ≥600dp, exceptions - 2026-11-19
 - https://www.macrumors.com/2026/06/10/how-liquid-glass-is-changing-in-ios-27/ - iOS 27 Liquid Glass changes (press only; not confirmed on Apple sources) - 2026-10-09
 - https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Values/color_value/contrast-color - contrast-color() Baseline 2026, black/white only - 2026-10-09
 - https://developer.chrome.com/blog/new-in-web-ui-io26 - current web UI features (closedby, scroll-state, corner-shape, view transitions) - 2026-10-09

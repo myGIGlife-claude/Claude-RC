@@ -1,4 +1,5 @@
-# C/C++ compiler support and hardening flags (as of 2026-10-09)
+# C/C++ compiler support and hardening flags (as of 2026-11-19; rows not marked were last checked 2026-10-09)
+Note: the C++26 DIS ballot reportedly failed in 2026-10 (news only; see SKILL.md); the tables below track compiler support, not ISO publication.
 
 Check the live pages before relying on a row: gcc.gnu.org/projects/cxx-status.html, clang.llvm.org/cxx_status.html,
 learn.microsoft.com/cpp (MSVC conformance), libcxx.llvm.org/Status, github.com/microsoft/STL/wiki/Changelog.
@@ -10,7 +11,7 @@ learn.microsoft.com/cpp (MSVC conformance), libcxx.llvm.org/Status, github.com/m
 | GCC 15 | 15.3 | 2026-06-12 | gnu++17 | gnu23 | `import std`, `#embed`, pack indexing |
 | GCC 14 | 14.4 | 2026-06-26 | gnu++17 | gnu17 | `-fhardened`; modules usable with CMake |
 | GCC 13 | 13.5 | 2026-09-11 | gnu++17 | gnu17 | final GCC 13 release; branch closed, unsupported |
-| Clang 23 | 23.1.3 | 2026-10-06 | gnu++17 (since Clang 16) | gnu17 (no change in 23 notes) | 23.1.0 2026-08-25; `-Wlifetime-safety`; expansion statements partial |
+| Clang 23 | 23.1.6 | 2026-11-17 | gnu++17 (since Clang 16) | gnu17 (no change in 23 notes) | 23.1.0 2026-08-25; `-Wlifetime-safety`; expansion statements partial |
 | Clang 22 | 22.1.8 | 2026-06-16 | | | 22.1.0 2026-02-24 |
 | MSVC 14.51 | VS 2026 18.6 | 2026-05 | C++14 for cl.exe; new VS projects use C++20 | | `/std:c++latest`, `/std:c++23preview` |
 | MSVC 14.50 | VS 2026 18.0 | 2025-11 | | | Win10+ targets only, ARM32 removed |
@@ -37,7 +38,7 @@ learn.microsoft.com/cpp (MSVC conformance), libcxx.llvm.org/Status, github.com/m
 | `std::simd` | 16 (experimental) | no | no |
 | `std::inplace_vector` | 16 (experimental) | no | no |
 | `std::optional<T&>` | 16 | 22 | (unverified) |
-| `std::function_ref` | 16 | 24 (unreleased trunk, 2026-10) | (unverified) |
+| `std::function_ref` | 16 | 24 (unreleased trunk, 2026-10; not rechecked) | (unverified) |
 | `std::indirect`/`polymorphic` | 16 | no | (unverified) |
 | `std::text_encoding` | (unverified) | 23 | (unverified) |
 

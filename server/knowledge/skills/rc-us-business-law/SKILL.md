@@ -1,8 +1,8 @@
 ---
 name: rc-us-business-law
-description: "US business law research and drafting (2026-10): entity choice (LLC, operating agreement, incorporate, S corp election, EIN, registered agent, annual report) with NC, Ohio and Delaware detail; beneficial ownership BOI/CTA status; contracts (NDA, indemnity, limitation of liability, SaaS agreement, MSA, non-compete); independent contractor vs employee classification; trademark and copyright basics."
+description: "US business law research and drafting (2026-11): entity choice (LLC, operating agreement, incorporate, S corp election, EIN, registered agent, annual report) with NC, Ohio and Delaware detail; beneficial ownership BOI/CTA status; contracts (NDA, indemnity, limitation of liability, SaaS agreement, MSA, non-compete); independent contractor vs employee classification; trademark and copyright basics."
 ---
-# US business law: entities, contracts, workers  (as of 2026-10)
+# US business law: entities, contracts, workers  (as of 2026-11)
 
 > Research aid, not legal or tax advice, and no attorney-client relationship. Every fee, form and deadline below is dated; re-check the
 > official source on the day you rely on it. Anything marked (unverified) is a lead, not a fact. State law decides most of this: name the
@@ -19,22 +19,33 @@ duties, foreign qualification, other states), `contract-clauses.md` (contract la
   to do business in a US state still report (non-US owners and applicants only). Interim rule: announced 2025-03-21, published
   2025-03-26. The final rule's preamble says FinCEN **intends** to delete BOI of US companies and US persons in one sweep, with no
   confirmations, and does not anticipate deleting such data included in filings made after 2027-02-10 (final rule text; fincen.gov/boi
-  says nothing on deletion, 2026-10-10). It is a stated plan, not a rule text: don't promise a client their data is gone.
+  says nothing on deletion, rechecked 2026-11-19: page last updated 2026-08-11). It is a stated plan, not a rule text: don't promise a
+  client their data is gone. **Challenge pending**: 21 states/DC (led by Oregon and Illinois AGs) sued in D. Or. on **2026-10-27**
+  (*State of Oregon v. Bessent*, reported as No. 6:26-cv-02359; filed APA and constitutional claims to vacate the 2025 interim and 2026
+  final rules and bar the data purge). No ruling found as of 2026-11-19 (secondary reports of the complaint: case number and party
+  count unverified against the docket). Re-check before telling a US company it never has to file again.
 - **State transparency laws fill the gap**: New York's LLC Transparency Act took effect **2026-01-01**. Its "reporting company" is the
   federal CTA definition limited to LLCs formed or authorized in NY (LLC Law §1106(b)); NY DOS says only LLCs **formed under a foreign
   country's law** and authorized in NY report (NY-formed and other-US-state LLCs are not reporting companies); the governor vetoed the
   bill that would have covered NY LLCs (2025-12-19, law-firm reports). LLCs authorized before 2026-01-01 file by **2026-12-31**, new
   ones within 30 days of the application for authority (§1107(d)-(e)); exempt companies file an exemption attestation; $25 per filing;
-  AG fines up to $500/day when past due (dos.ny.gov FAQ, 2026-10-10).
+  AG fines up to $500/day when past due or delinquent; suspended status plus a $250 fine to cure (dos.ny.gov FAQ, which states it
+  reflects law as of 2025-12-23; rechecked 2026-11-19, no announced change).
 - **Non-competes**: the FTC rule is **not in effect and not enforceable** (FTC page, 2026-10-10): set aside by a federal district court
   2024-08-20; FTC moved to drop its appeal 2025-09-05; Federal Register removal notice 2026-02-12 (91 FR 6507). The FTC now attacks
   overbroad non-competes case by case as unfair methods of competition under FTC Act §5 (Gateway Services, a pet-cremation company:
-  complaint and proposed order 2025-09-04, 90 FR 43606; consent order finalized **2025-11-26**, FTC press release). State law governs
-  enforceability.
-- **FLSA contractor test**: DOL's 2024 six-factor rule (eff. 2024-03-11) is still on the books; **FAB 2025-1 (2025-05-01)** told WHD to
-  stop applying it in investigations. **NPRM announced 2026-02-26, published 2026-02-27 (91 FR 9932)** would return to the 2021 "core
-  factors" (control, profit/loss) and extend it to FMLA and MSPA; comments closed 2026-04-28; **no final rule in the Federal Register as
-  of 2026-10-10**. Courts apply their own circuit's economic-reality test regardless.
+  complaint and proposed order announced 2025-09-04, 90 FR 43606; final order approved 2025-11-25, announced 2025-11-26). More matters
+  (ftc.gov/nonmerger/noncompete, 2026-11-19): **Adamas Amenity Services** (no-hire agreements, final order 2026-02-12); **Rollins**
+  (pest control; proposed order 2026-04-15, final order approved **2026-06-22**; reported 10-year ban on non-competes for covered
+  workers, from law-firm reports); warning letter to Mortgage Connect 2026-05-08. State law governs enforceability.
+- **FLSA contractor test**: **NEW 2026-11-19: DOL announced a FINAL rule** (RIN 1235-AA46; DOL pages, 2026-11-19) that rescinds the
+  2024 six-factor rule and replaces it with a streamlined economic-reality analysis built on two "core" factors (control; opportunity
+  for profit or loss) plus 14 worked examples (CFR section: unverified, DOL pages cite none); it also governs FMLA and MSPA status. Effective **60 days after
+  Federal Register publication**; the Federal Register citation, publication date and calendar effective date were **not found on
+  2026-11-19 (unverified)**: check federalregister.gov. Until it takes effect the 2024 text is still codified; **FAB 2025-1 (2025-05-01)**
+  already stopped WHD from applying it in investigations (whether the final rule changes FAB 2025-1: not stated). History: NPRM
+  91 FR 9932 (published 2026-02-27, comments closed 2026-04-28, 16,000+ comments); OIRA review of the final rule concluded 2026-10-28.
+  Courts apply their own circuit's economic-reality test regardless; the rule does not bind state law.
 - **1099 threshold**: Form 1099-NEC/MISC reporting threshold rose from $600 to **$2,000** for tax years beginning after 2025 (OBBBA
   §70433; IRS 1099-MISC/NEC instructions, 2026-10-10), inflation-indexed from 2027.
 - **UCC 2022 amendments** (hybrid goods/services rule, "record" replaces "writing", new Article 12 controllable electronic records):
@@ -43,16 +54,24 @@ duties, foreign qualification, other states), `contract-clauses.md` (contract la
   deals (disinterested committee or stockholder approval, or fairness; both for going-private) and a defined "controlling stockholder";
   §220 lists the "books and records" a stockholder may demand, with a particularity and confidentiality regime (delcode text, 2026-10-10).
 - **Delaware fees**: Division of Corporations fee schedule **revised 2026-08-01**: LLC certificate of formation $110, corporation from $109,
-  foreign LLC registration $200, foreign corp qualification $245, name reservation $75; LLC/LP/GP annual tax $400 due June 1.
+  foreign LLC registration $200, foreign corp qualification $245, name reservation $75 (schedule read 2026-10-10). **HB 400, signed
+  2026-05-21** (legis.delaware.gov BillDetail 143069, 2026-11-19: signed 5/21/26, annual-tax change effective 2026-01-01; the $300 to $400 amounts and the 2027-06-01 first due date are from secondary summaries: unverified): LLC/LP/GP
+  annual tax raised from $300 to **$400** for the **2026 tax year**, so the first $400 bill falls due **2027-06-01**; foreign
+  corporation annual report $250; service of process $100; other fees up Aug 1. The Division's tax page shows $400, due June 1 for the
+  prior year, without saying which year the change began. Don't tell a client $400 was due 2026-06-01.
 - **North Carolina**: SOS warns of "priority annual report" vendor mailings. S.L. 2026-59 §§12-16 (eff. **2026-10-01**): an entity more
   than 50% owned by a deployed service member that files an affidavit of deployment **before** deployment gets relief: corporations and
   LLPs may file the annual report within 90 days after deployment ends, LLCs by April 15 of the following year; fee waived (ncleg text;
-  the SOS page summarizes it as "90 days", 2026-10-10).
+  the SOS page summarizes it as "90 days", rechecked 2026-11-19). **S.L. 2026-52** (H 517, signed 2026-07-07): from **2027-01-01**
+  every Chapter 55A nonprofit (domestic and foreign; includes most HOAs) files an annual report by **November 15** (G.S. 55A-16-22.1,
+  $25 paper / $18 electronic; first due 2027-11-15); new domestication filing fees $25/$10 eff. 2026-10-01 (ncleg text, 2026-11-19).
 - **Ohio CAT**: gross-receipts exclusion $6M for 2025 and later ($3M for 2024); annual minimum tax gone for periods from 2024-01-01;
   at or under the exclusion no return is due (Ohio Dept. of Taxation information release CAT 2023-01, a 2023 scanned PDF; the
   tax.ohio.gov CAT pages returned 404 to this session 2026-10-10: confirm current thresholds there).
 - **USPTO**: trademark base application fee $350 per class (electronic) for applications filed on or after 2025-01-18 (89 FR 91062,
-  2024-11-18); the same rule adds per-class surcharges for incomplete applications and free-form goods/services text (amounts unverified).
+  2024-11-18); the same rule adds per-class surcharges: $100 for insufficient information, $200 for free-form goods/services text, $200 per
+  extra 1,000 characters (law-firm and USPTO compliance-guide summaries; uspto.gov fee pages returned 403/404 on 2026-11-19: confirm
+  there). No 2026 trademark fee rule found.
 - **FTC "click-to-cancel"** amendments to the Negative Option Rule were vacated by the 8th Circuit on 2025-07-08 (*Custom
   Communications v. FTC*, No. 24-3137, law-firm reports); the FTC recodified the pre-2024 rule text 2026-02-12 (91 FR 6507).
   ROSCA, the 1973 rule and state auto-renewal laws still apply to SaaS subscriptions.
@@ -68,9 +87,9 @@ duties, foreign qualification, other states), `contract-clauses.md` (contract la
 ## What changed / stop doing
 | Stop | Do instead | Since |
 |---|---|---|
-| "Every new LLC must file a BOI report within 30/90 days" | US-formed entities file nothing with FinCEN; check state laws (e.g. NY for foreign-formed LLCs) | IFR 2025-03-26; final rule eff. 2026-08-14 |
+| "Every new LLC must file a BOI report within 30/90 days" | US-formed entities file nothing with FinCEN (state-AG suit filed 2026-10-27 could change that); check state laws (e.g. NY for foreign-formed LLCs) | IFR 2025-03-26; final rule eff. 2026-08-14 |
 | "The FTC banned non-competes" | No federal ban; state law + FTC §5 case-by-case scrutiny of overbroad clauses | rule set aside 2024-08-20; appeal dropped 2025-09 |
-| Citing the 2024 DOL contractor rule as the enforcement standard | Cite the circuit's economic-reality test; note the 2026 NPRM and check for a final rule | FAB 2025-1 (2025-05-01); NPRM 2026-02-27 |
+| Citing the 2024 DOL contractor rule or the 2026 NPRM as current | Cite the circuit's economic-reality test; DOL's final rule (two core factors) was announced 2026-11-19, effective 60 days after FR publication: check the FR date | FAB 2025-1 (2025-05-01); final rule 2026-11-19 |
 | 1099-NEC at $600 for 2026 payments | $2,000 (indexed from 2027) | OBBBA, tax years beginning after 2025 |
 | "LLC vs S corp" as alternative entities | LLC/corporation is the state-law entity; S corp is a federal **tax election** (Form 2553) either can make | always |
 | Delaware for every small business by default | Form where you operate unless investors or counsel need Delaware; Delaware + home-state qualification = two sets of fees/filings | always |
@@ -201,7 +220,7 @@ Checklist (directive §13, 15 steps); mark each done, N/A or "owner decision":
 - [ ] Disclaimer present: not legal/tax advice, no attorney-client relationship; where an attorney or CPA must review.
 - [ ] Jurisdiction(s) and "as of" date stated; law at the relevant time vs today separated.
 - [ ] Every statute/fee/form/deadline cited to an official source with date, or marked (unverified).
-- [ ] BOI/state transparency status checked today (fincen.gov, state SOS).
+- [ ] BOI/state transparency status checked today (fincen.gov, state SOS, the Oregon v. Bessent docket); DOL contractor rule FR date checked.
 - [ ] Entity name, type, state and signer capacity match the SOS record.
 - [ ] Open business decisions and high-risk clauses listed for the owner.
 - [ ] Worker classification checked under each regime that applies.
@@ -210,7 +229,16 @@ Checklist (directive §13, 15 steps); mark each done, N/A or "owner decision":
 - [ ] Adversarial review (directive §21) done; unresolved items listed.
 
 ## Sources
-- https://www.fincen.gov/boi : final BOI rule 2026-08-11 (eff. 2026-08-14), IFR 2025-03-21/26, who still reports (accessed 2026-10-10)
+Accessed 2026-11-19 (re-read that day): fincen.gov/boi, dol.gov rulemaking pages, ftc.gov noncompete pages, dos.ny.gov FAQ, copyright.gov DMCA FAQ,
+irs.gov i1099mec, codes.ohio.gov 111.16, NC 57D-1-22 and SL 2026-52, sosnc.gov, corp.delaware.gov, nlrb.gov. Other dates below are 2026-10-10.
+- https://www.fincen.gov/boi : final BOI rule 2026-08-11 (eff. 2026-08-14), IFR 2025-03-21/26, who still reports (accessed 2026-11-19)
+- https://www.dol.gov/agencies/whd/flsa/misclassification/2026rulemaking and /2026rulemaking/faqs : final contractor rule announced 2026-11-19, two core factors, 60 days after FR publication, FMLA/MSPA (2026-11-19)
+- https://www.reginfo.gov/public/do/eoDetails?rrid=1546211 : OIRA review of the DOL final rule, received 2026-09-28, concluded 2026-10-28 (2026-11-19)
+- https://www.investmentnews.com/regulation-legal-compliance/fincen-rule-essentially-dead-for-us-firms-compliance-experts-warn/268789 and https://www.courthousenews.com/articles/attorneys-general-sue-treasury-department-over-corporate-ownership-reporting-exemptions : lead only, State of Oregon v. Bessent filed 2026-10-27 (secondary; 2026-11-19)
+- https://www.ftc.gov/nonmerger/noncompete : Gateway, Adamas, Rollins and warning-letter dates (2026-11-19)
+- https://www.capitolservices.com/insights/legislative-articles/delaware-fee-and-annual-tax-changes/ : lead only, Delaware HB 400 signed 2026-05-21, tax $300 to $400 for 2026 tax year (secondary; 2026-11-19)
+- https://www.ncleg.gov/EnactedLegislation/SessionLaws/HTML/2025-2026/SL2026-52.html : nonprofit annual report from 2027-01-01, domestication fees eff. 2026-10-01 (2026-11-19)
+- https://www.copyright.gov/dmca-directory/faq.html : $6 fee, 3-year renewal (2026-11-19)
 - https://www.federalregister.gov/documents/2026/08/14/2026-16576/beneficial-ownership-information-reporting-requirement-revision : final rule text, 91 FR 52508, effective 2026-08-14, data-deletion plan (2026-10-10)
 - https://www.nysenate.gov/legislation/laws/LLC/1106 and /1107 : NY LLC Transparency Act scope and deadlines (2026-10-10)
 - https://delcode.delaware.gov/title8/c001/sc04/index.html and /sc07/index.html : DGCL §144 and §220 as amended by 85 Del. Laws c. 6 (2026-10-10)
@@ -224,7 +252,7 @@ Checklist (directive §13, 15 steps); mark each done, N/A or "owner decision":
 - https://www.ftc.gov/news-events/news/press-releases/2025/11/ftc-approves-final-order-prohibiting-noncompete-enforcement-gateway-services : Gateway Services final order 2025-11-26; proposed order 2025-09-04 (90 FR 43606, FTC Act §5) (2026-10-10)
 - https://dos.ny.gov/beneficial-ownership-disclosure-frequently-asked-questions : NY LLCTA scope (foreign-country LLCs only), 2026-12-31 deadline, $25 fee, penalties (2026-10-10)
 - https://www.sec.gov/rules-regulations/no-action-interpretive-exemptive-letters/division-corporation-finance-no-action/latham-watkins-503c-031225 : 506(c) verification staff letter 2025-03-12 (2026-10-10)
-- https://www.legislature.ohio.gov/legislation/136/sb11 : Ohio SB 11 non-compete ban, in Senate committee, not reported (2026-10-10)
+- https://www.legislature.ohio.gov/legislation/136/sb11 : Ohio SB 11 non-compete ban, in Senate committee, not reported (2026-10-10; the page failed a certificate check 2026-11-19 and searches found no 2026 action: status since then unverified)
 - https://www.federalregister.gov/documents/2024/11/18/2024-26644/setting-and-adjusting-trademark-fees-during-fiscal-year-2025 : $350 base application fee, eff. 2025-01-18 (2026-10-10)
 - https://www.ncleg.gov/EnactedLegislation/Statutes/HTML/BySection/Chapter_57D/GS_57D-1-22.html : NC LLC fees ($125 articles, $200 annual report, $250 certificate of authority) (2026-10-10)
 - https://www.ncleg.gov/EnactedLegislation/Statutes/HTML/BySection/Chapter_57D/GS_57D-2-24.html : NC LLC annual report due April 15 (2026-10-10)

@@ -2,7 +2,7 @@
 name: rc-javascript-typescript
 description: Current JavaScript (ES2024-ES2027) and TypeScript (6.0 / native 7.0) standards, tsconfig, module systems (ESM/CJS, require(esm), package.json exports), async patterns, runtime validation, linting, package managers, testing, bundling and npm supply-chain security. Use when writing or reviewing .js/.mjs/.cjs/.ts/.mts/.tsx files, tsconfig.json, package.json, eslint.config.*, biome.json, pnpm-workspace.yaml, vitest/playwright config, or publishing to npm.
 ---
-# JavaScript & TypeScript (as of 2026-10)
+# JavaScript & TypeScript (as of 2026-11)
 
 > Facts here are dated (see Sources). Versions, deadlines and policies move: confirm the primary source before pinning a version or promising a date. Anything marked (unverified) is a lead, not a fact.
 
@@ -10,23 +10,23 @@ Language feature support tables: `references/es-features.md`. Tool versions and 
 
 ## Currency check
 
-| Thing | Current (2026-10) | Notes |
+| Thing | Current (2026-11-19) | Notes |
 |---|---|---|
-| ECMAScript | ES2026 is the latest edition (June 2026) | Temporal, `using`, iterator chunking/join/zip are Stage 4 but slated for **ES2027** per TC39 finished-proposals list |
-| TypeScript | **7.0.2** (`typescript` on npm, 2026-07-08) | Go-based native compiler, binary still `tsc`. 8-12x faster full builds. **No programmatic API until 7.1** |
+| ECMAScript | ES2026 is the latest edition (June 2026) | Temporal, `using`, iterator chunking/join/includes, `Atomics.pause`, joint iteration (zip) are Stage 4 but slated for **ES2027** per TC39 finished-proposals list (no additions seen since 2026-10) |
+| TypeScript | **7.0.2** (`typescript` on npm latest, 2026-07-08) | Go-based native compiler, binary still `tsc`. 8-12x faster full builds. No programmatic API in 7.0. **7.1 Beta shipped 2026-10-20** (`typescript@beta`): first compiler API (entry points `typescript/sync`, `/async`, `/fs`, `/ast`; still being refined), stable `--target/--lib es2026`; RC "in about a month", no stable date given |
 | TypeScript 6.0 | 6.0.2 (2026-03-23), also as `@typescript/typescript6` (binary `tsc6`) | Last JS-based compiler. Bridge release: new defaults + deprecations that 7.0 removes |
-| Node.js | 26 = Current (2026-05-05), **LTS from 2026-10-28**; 24 = Active LTS, maintenance from 2026-10-20, EOL 2028-04-30; 22 = Maintenance, EOL 2027-04-30; 20 EOL 2026-04-30 | From Node 27 (2027-04) one major per year, every major becomes LTS |
-| npm | 12.x (12.0.0 on 2026-07-08) | Dependency install scripts blocked by default; git/remote deps off by default |
-| pnpm | 12.x (Rust rewrite, 12.0.0 on 2026-08-26); 11 (2026-04-28) | 11 added `minimumReleaseAge` 1 day default and `allowBuilds` |
-| Yarn | 4.18 (Berry) | Yarn 1 classic is legacy |
-| Bun | 1.4.x (1.4.0 on 2026-08-20) | |
-| ESLint | 10.x (10.0.0 on 2026-02-06) | eslintrc removed entirely |
-| typescript-eslint | 8.71 | peer `typescript >=4.8.4 <6.1.0`: does NOT run on TS 7 (no API) |
-| Vitest | 5.x (5.0.0 on 2026-09-03) | Node >=22.12 |
-| Vite / Rolldown | Vite 8 (2026-03-12, Rolldown inside); Rolldown 1.0 (2026-05-07) | |
-| Zod / Valibot / ArkType | 4.6 / 1.5 / 2.2 | All implement Standard Schema |
+| Node.js | **26 = LTS ("Lithium", since 2026-10-28; 26.13.1)**, EOL 2029-04-30; 24 = Maintenance since 2026-10-20, EOL 2028-04-30; 22 = Maintenance, EOL 2027-04-30; 25 EOL 2026-06-01 (schedule.json); 20 EOL 2026-04-30. **27 alpha since 2026-10-29**, release 2027-04-22 | From Node 27 one major per year, every major becomes LTS |
+| npm | 12.2.3 (12.0.0 on 2026-07-08) | Dependency install scripts blocked by default; git/remote deps off by default |
+| pnpm | 12.21.0 (Rust rewrite, 12.0.0 on 2026-08-26); 11 (2026-04-28) | 11 added `minimumReleaseAge` 1 day default and `allowBuilds` |
+| Yarn | 4.18.1 (Berry) | Yarn 1 classic is legacy |
+| Bun | 1.4.5 (1.4.0 on 2026-08-20) | |
+| ESLint | 10.15.0 (10.0.0 on 2026-02-06) | eslintrc removed entirely |
+| typescript-eslint | 8.73.0 | peer `typescript >=4.8.4 <6.1.0`: does NOT run on TS 7 (no API); tracked in issue 10940 |
+| Vitest | 5.1.1 (5.0.0 on 2026-09-03) | Node `^22.12 \|\| ^24 \|\| >=26` |
+| Vite / Rolldown | Vite 8.3.8 (8.0 on 2026-03-12, Rolldown inside); Rolldown 1.3.3 (1.0 on 2026-05-07) | |
+| Zod / Valibot / ArkType | 4.6.7 / 1.5.0 / 2.2.10 | All implement Standard Schema |
 
-What shipped in the last ~12 months: TS 6.0 + 7.0, Node 26 with Temporal on by default, Temporal (2026-03) and Explicit Resource Management (2026) reach Stage 4, decorators moved **back to Stage 2.7**, ESLint 10, npm 12, pnpm 11/12, Vitest 5, Vite 8, Rolldown 1.0, oxfmt beta (2026-02), classic npm tokens revoked (2025-12-09).
+What shipped in the last ~12 months: TS 6.0 + 7.0 (+ 7.1 Beta 2026-10-20), Node 26 with Temporal on by default (LTS 2026-10-28), Temporal (2026-03) and Explicit Resource Management (2026) reach Stage 4, decorators moved **back to Stage 2.7**, ESLint 10, npm 12, pnpm 11/12, Vitest 5, Vite 8, Rolldown 1.0, oxfmt beta (2026-02), classic npm tokens revoked (2025-12-09), Safari 27 (2026-09-14).
 
 ## What changed / stop doing
 
@@ -56,7 +56,7 @@ What shipped in the last ~12 months: TS 6.0 + 7.0, Node 26 with Temporal on by d
 | Hand-written regex escaping | `RegExp.escape(str)` | ES2025 |
 | `try/finally` cleanup boilerplate | `using` / `await using` + `Symbol.dispose` (TS, Node 24+, Chrome 134+, Firefox 141+; not Safari) | Stage 4 2026 |
 | `btoa(String.fromCharCode(...bytes))` | `bytes.toBase64()`, `Uint8Array.fromBase64()` | Baseline 2025-09 |
-| `instanceof Error` across realms | `Error.isError(x)` (not Safari yet) | ES2026 |
+| `instanceof Error` across realms | `Error.isError(x)` (Safari support unverified: Apple notes pages conflict) | ES2026 |
 | Float sums with drift | `Math.sumPrecise(iterable)` (browsers; not yet in Node 26) | Baseline 2026-04 |
 | `if (!m.has(k)) m.set(k, v); m.get(k)` | `m.getOrInsert(k, v)` / `getOrInsertComputed(k, fn)` | Baseline 2026-02 |
 | `setTimeout` + manual abort wiring | `AbortSignal.timeout(ms)`, `AbortSignal.any([...])` | Baseline 2024 |
@@ -142,7 +142,7 @@ const snapshot = structuredClone(state);                       // handles Map/Se
 { await using conn = await pool.connect(); /* auto [Symbol.asyncDispose] */ }
 const all = await Array.fromAsync(asyncIterable);
 ```
-- Temporal for date/time logic (`Temporal.Now.zonedDateTimeISO()`, `Temporal.PlainDate`). Native: Node 26, Chrome/Edge 144+, Firefox 139+. **Not Safari** as of 2026-10: ship `temporal-polyfill` for browsers or keep `Date` + `Intl`.
+- Temporal for date/time logic (`Temporal.Now.zonedDateTimeISO()`, `Temporal.PlainDate`). Native: Node 26, Chrome/Edge 144+, Firefox 139+. MDN still says not Baseline (2026-11-19) and the Safari 27 notes (2026-09-14) list only a Temporal bug fix, so treat Safari as unsupported (a Technology Preview note mentions added support; stable status unverified): ship `temporal-polyfill` for browsers or keep `Date` + `Intl`.
 
 ### Async patterns
 ```ts
@@ -164,7 +164,7 @@ for await (const chunk of res.body!.pipeThrough(new TextDecoderStream())) { /* w
 
 ## Security
 
-- **Install scripts** are the main npm attack path (2025 worm campaigns hit popular packages). npm 12 and pnpm 10+ block dependency lifecycle scripts by default: keep it. Approve explicitly: npm `allowScripts` in package.json (recorded with `npm install-scripts approve`, then `npm rebuild`; `--allow-scripts` is for npx/global installs), `strict-allow-scripts=true`; pnpm `allowBuilds` in `pnpm-workspace.yaml`.
+- **Install scripts** are the main npm attack path (2025 worm campaigns; in 2026 Mini Shai-Hulud, late 2026-04 to 2026-05, and ChainDrop, disclosed by Microsoft 2026-08-04, a self-propagating worm that hit 400+ packages through stolen npm/GitHub credentials). A Sonatype note reports 12 releases of 10 hijacked packages on 2026-11-03 (single secondary source, unverified). npm 12 and pnpm 10+ block dependency lifecycle scripts by default: keep it. Approve explicitly: npm `allowScripts` in package.json (recorded with `npm install-scripts approve`, then `npm rebuild`; `--allow-scripts` is for npx/global installs), `strict-allow-scripts=true`; pnpm `allowBuilds` in `pnpm-workspace.yaml`.
 - **Release-age gate** against freshly hijacked versions: pnpm `minimumReleaseAge` (default 1440 min in pnpm 11+); npm `min-release-age=<days>` in `.npmrc`.
 - Block git/tarball deps: npm 12 `allow-git`/`allow-remote` default `none`; pnpm 11 `blockExoticSubdeps: true` default. Consider pnpm `trustPolicy: no-downgrade`.
 - CI installs: `npm ci` / `pnpm install --frozen-lockfile`; never `npm install` in CI. Review lockfile diffs.
@@ -180,7 +180,7 @@ for await (const chunk of res.body!.pipeThrough(new TextDecoderStream())) { /* w
 
 - Type-check time: TS 7 `tsc --noEmit` should be 8-12x faster than 6.0; measure with `tsc --extendedDiagnostics`. `skipLibCheck: true`, `types: [...]` explicit, project references for big monorepos.
 - Bundle: measure with `vite build` + `rollup-plugin-visualizer` or Rolldown's analyzer; keep deps ESM so tree-shaking works; `zod/mini` or Valibot when schema code ships to browsers.
-- Startup: `import defer * as m from "./heavy.js"` (Stage 3, TS 5.9 syntax; check runtime support, unverified in Node as of 2026-10) or dynamic `import()` for cold paths.
+- Startup: `import defer * as m from "./heavy.js"` (Stage 3, TS 5.9 syntax; check runtime support, unverified in Node as of 2026-11) or dynamic `import()` for cold paths.
 - Prefer iterator helpers over chained array methods on large/lazy data (no intermediate arrays).
 - Lint for floating promises (`@typescript-eslint/no-floating-promises`, oxlint type-aware equivalent).
 
@@ -219,12 +219,17 @@ for await (const chunk of res.body!.pipeThrough(new TextDecoderStream())) { /* w
 - [ ] Every external input parsed by a schema; no `any` leaking from it.
 - [ ] Lockfile committed; CI uses frozen install; install scripts allow-listed; release-age gate on.
 - [ ] Lint (incl. no-floating-promises) and tests green; E2E for user flows.
-- [ ] Features used are Baseline for your browser targets, or polyfilled (Temporal, `using`, `Error.isError` lack Safari).
+- [ ] Features used are Baseline for your browser targets, or polyfilled (Temporal and `using` lack stable Safari support; `Error.isError` unverified).
 - [ ] Publishing via trusted publishing, tokens disallowed on the package.
 
 ## Sources
 
-All accessed 2026-10-09.
+All accessed 2026-11-19 (items marked earlier were last fully re-read 2026-10-09 and spot-checked now).
+- https://devblogs.microsoft.com/typescript/announcing-typescript-7-1-beta/ : 7.1 Beta (2026-10-20): API entry points, es2026 target, RC timing
+- https://nodejs.org/en/about/previous-releases : Node 26 LTS, 27 alpha, latest 26.13.1 / 24.22.3 / 22.23.5
+- https://developer.apple.com/documentation/safari-release-notes/safari-27-release-notes.md : Safari 27 (2026-09-14): async-iterable ReadableStream, Temporal fix only
+- https://www.microsoft.com/en-us/security/blog/2026/08/04/chaindrop-supply-chain-compromise-anatomy-self-propagating-worm : ChainDrop worm (read 2026-11-19: 400+ npm packages, stolen publish tokens, preinstall hook injected, some releases with valid provenance via OIDC abuse)
+- https://www.akamai.com/blog/security-research/2026/may/mini-shai-hulud-worm-returns-goes-public and https://tanstack.com/blog/npm-supply-chain-compromise-postmortem : Mini Shai-Hulud waves (TanStack 2026-05-11, 42 packages), via search summary plus postmortem
 - https://github.com/tc39/proposals/blob/main/finished-proposals.md : finished proposals by ES year (2024-2027)
 - https://github.com/tc39/proposals (README) : Stage 3 list; decorators and ShadowRealm at Stage 2.7
 - https://devblogs.microsoft.com/typescript/ : TS 5.9 (2025-08-01), 6.0 (2026-03-23), 7.0 (2026-07-08) dates
@@ -233,7 +238,7 @@ All accessed 2026-10-09.
 - https://devblogs.microsoft.com/typescript/announcing-typescript-5-9/ : `import defer`, `--module node20`
 - https://github.com/typescript-eslint/typescript-eslint/issues/12518 : TS 7 not supported; side-by-side install
 - https://registry.npmjs.org/<pkg> : latest versions and release dates of typescript, eslint, typescript-eslint (peer range), vitest, vite, rolldown, zod, valibot, arktype, pnpm, npm, yarn, bun, tsdown, tsup, biome, oxlint, oxfmt, playwright, jest, prettier, turbo, nx
-- https://raw.githubusercontent.com/nodejs/Release/main/schedule.json : Node LTS/EOL dates
+- https://raw.githubusercontent.com/nodejs/Release/main/schedule.json : Node LTS/EOL dates (re-read 2026-11-19; schedule says Node 25 EOL 2026-06-01; the nodejs.org previous-releases page only lists v25 as EOL with "last updated 2026-03-31", no EOL date, so use 2026-06-01)
 - https://nodejs.org/en/about/previous-releases : annual release schedule from Node 27
 - https://nodejs.org/en/blog/release/v26.0.0 : Temporal default, upsert, Iterator.concat, removals, module.register deprecation
 - https://nodejs.org/api/typescript.html : type stripping stable (24.12/25.2), unsupported syntax, recommended tsconfig

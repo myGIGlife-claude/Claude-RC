@@ -1,4 +1,4 @@
-# Copy-ready configs (as of 2026-10)
+# Copy-ready configs (as of 2026-11)
 
 Minimal, own examples. Replace `app`, `example.com`, ports and paths. Test each with its checker before reloading.
 

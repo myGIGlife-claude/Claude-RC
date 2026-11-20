@@ -2,7 +2,7 @@
 name: rc-devops-linux
 description: Running software in production on Linux servers and containers - Ubuntu/Debian admin, systemd units and timers, SSH hardening, ufw/nftables (Docker bypasses UFW), backups (restic/borg), monitoring, Caddy/Nginx/Apache, DNS/ACME, Docker Compose, Podman, Terraform/OpenTofu, Ansible, cloud-init, deploys and rollbacks, secrets (SOPS), DR. Use for a VPS, Dockerfile, compose.yaml, *.service, sshd_config, Caddyfile, nginx.conf, *.tf or deploy workflow.
 ---
-# Linux servers, containers and operations (as of 2026-10)
+# Linux servers, containers and operations (as of 2026-11)
 
 > Facts here are dated (see Sources). Versions, deadlines and policies move: confirm the primary source before pinning a version or promising a date. Anything marked (unverified) is a lead, not a fact.
 
@@ -13,29 +13,29 @@ safe-change procedure: `references/vps-runbook.md`.
 
 ## Currency check
 
-| Thing | Current (verified 2026-10-09) | Notes |
+| Thing | Current (verified 2026-11-19) | Notes |
 |---|---|---|
-| Ubuntu LTS | **26.04** (2026-04, standard support to 2031-05), **24.04** (to 2029-05), **22.04** (to **2027-05**) | Ubuntu Pro ESM adds 5 years (26.04 to 2036). Interim releases get only 9 months. |
+| Ubuntu LTS | **26.04** (2026-04, standard support to 2031-05), **24.04** (to 2029-05), **22.04** (to **2027-05**) | Ubuntu Pro ESM adds 5 years (26.04 to 2036). Interim releases get only 9 months: **26.10** shipped 2026-10 (support to 2027-07); servers stay on LTS. |
 | Debian | **13 trixie** (2025-08-09, point 13.7 2026-09-12, LTS to 2030-06-30); **12 bookworm** oldstable (LTS to 2028-06-30); 11 bullseye LTS ended **2026-08-31** | trixie ships OpenSSH 10.0p1, systemd 257. |
 | Ubuntu 26.04 server changes | **chrony** (with NTS, encrypted/authenticated time) replaces systemd-timesyncd on new installs; **sudo-rs** is the default `sudo` (classic sudo still installed as `sudo.ws`); OpenSSH 10.2p1; kernel 7.0 | Scripts that parse `sudo` output or rely on obscure sudoers features: test on 26.04. |
-| OpenSSH | **10.6** (2026-10-06) | 10.0: DSA removed, pre-auth split into `sshd-auth`, `mlkem768x25519-sha256` (post-quantum hybrid) default kex, finite-field DH off in the server. 10.1: client warns on non-PQ kex (`WarnWeakCrypto`). 9.8+: `PerSourcePenalties` built-in. |
-| systemd | 262 (2026-09-22) upstream; Ubuntu 26.04 ships 259 | **260 (2026-03-17) removed SysV init script support** (sysv-generator, rc-local). Distros on <=259 still run them, but write native units. |
-| Nginx | stable **1.30.5**, mainline 1.31.6 | HTTP/3 via `listen 443 quic` (since 1.25); `http2 on;` replaces `listen ... http2` (1.25.1). |
-| Caddy | **2.11.7** (2026-10-03) | 2.11.6 (2026-10-01) added 1-minute default idle read/write timeouts (slowloris) - long-poll/SSE/websocket backends may need tuning - and fixed CVE-2026-52844 plus several path-canonicalization/header fixes; 2.11.4 and 2.11.5 also carried security fixes: stay patched. |
-| Apache httpd | **2.4.69** (2026-10-01) | HTTP/2 via mod_http2; no native HTTP/3 (put a CDN or Caddy/Nginx in front if needed) (unverified for 2026). |
-| Docker Engine | **29.9.0** (2026-10-08); 29.0 (2025-11-10) | 29.0: containerd image store default on fresh installs, min API 1.44, Docker Content Trust removed from CLI, cgroup v1 deprecated (supported to 2029-05). nftables firewall backend is **experimental**. |
-| Docker Compose | **v5.6.0** (2026-10-02) | v5.x: manual jobs, init containers (5.3), digest reconciliation honours `pull_policy` refresh windows (5.5). File is still the Compose Specification: no `version:` key. |
-| Podman | **6.1.3** (2026-09-29), 5.8.x maintained | Quadlet (`.container` units under systemd) is the way to run it in production. |
+| OpenSSH | **10.6p2** (2026-11-05; 10.6p1 was 2026-10-06) | 10.6p2 works around a password-auth bypass in sshd, only on Linux builds with **musl libc and PAM disabled** (portable OpenSSH); glibc/PAM distro packages are not described as affected: update anyway. 10.0: DSA removed, pre-auth split into `sshd-auth`, `mlkem768x25519-sha256` (post-quantum hybrid) default kex, finite-field DH off in the server. 10.1: client warns on non-PQ kex (`WarnWeakCrypto`). 9.8+: `PerSourcePenalties` built-in. |
+| systemd | 262 (point release **262.2**, 2026-11-05) upstream; Ubuntu 26.04 ships 259 | **260 (2026-03-17) removed SysV init script support** (sysv-generator, rc-local). Distros on <=259 still run them, but write native units. 262 announces removal in v263 of `/run/boot-loader-entries/` support and the experimental sysupdated D-Bus API; `journalctl -F` now rejects filter options. |
+| Nginx | stable **1.30.7**, mainline 1.31.9 | HTTP/3 via `listen 443 quic` (since 1.25); `http2 on;` replaces `listen ... http2` (1.25.1). |
+| Caddy | **2.11.9** (2026-11-05) | 2.11.9 fixes several FastCGI/php_fastcgi issues (env values now override request headers, ambiguous script paths return 400, encoded-path mismatch), a Windows path bypass, HTTP/2 host mismatch, a dropped `client_auth`; conflicting `client_auth` for one host is now a Caddyfile error; if you serve PHP on 2.11.8, upgrade. 2.11.6 (2026-10-01) added 1-minute default idle read/write timeouts (slowloris) - long-poll/SSE/websocket backends may need tuning - and fixed CVE-2026-52844 plus several path-canonicalization/header fixes; 2.11.4 and 2.11.5 also carried security fixes: stay patched. |
+| Apache httpd | **2.4.71** (2026-11-11) | HTTP/2 via mod_http2; no native HTTP/3 (put a CDN or Caddy/Nginx in front if needed) (unverified for 2026). |
+| Docker Engine | **29.10.0** (2026-11-16); 29.9.3 (2026-11-03) carried CVE fixes (crafted RSA keys, zstd panic, Swarm overlay after firewalld flush, BuildKit 0.34.2); 29.0 (2025-11-10) | 29.10: runc 1.5.3 (static binaries), loopback no longer auto-insecure registry when `insecure-registries` is set. Earlier 29.9.x fixes for HTTP/2 and containerd CVEs and the AppArmor/seccomp socket-family change are (unverified); stay on the latest patch. 29.0: containerd image store default on fresh installs, min API 1.44, Docker Content Trust removed from CLI, cgroup v1 deprecated (supported to 2029-05). nftables firewall backend is **experimental**. |
+| Docker Compose | **v5.8.0** (2026-11-17) | v5.x: manual jobs, init containers (5.3), digest reconciliation honours `pull_policy` refresh windows (5.5). File is still the Compose Specification: no `version:` key. |
+| Podman | **6.2.0** (2026-11-10); 5.8.x still getting patches (5.8.10, 2026-11-10) | Quadlet (`.container` units under systemd) is the way to run it in production. |
 | Kubernetes | see rc-web-backend (1.35-1.37 maintained; ingress-nginx retired 2026-03 -> Gateway API) | |
-| Terraform | **1.16.5** (2026-10-02), **BUSL 1.1** (not open source) | IBM-owned HashiCorp. |
-| OpenTofu | **1.13.1** (2026-10-01), MPL-2.0, Linux Foundation | Native state encryption (1.7+) with key providers (PBKDF2, AWS/GCP/Azure KMS, OpenBao transit, external). Drop-in for most Terraform <=1.5-era code. |
-| Ansible | ansible-core **2.21.5** (2026-10-05), control node Python >= 3.12 | |
-| Prometheus | **3.15.0** (2026-09-24); LTS line **3.13.x** | 3.x: UTF-8 metric names, native histograms, OTLP ingest. |
-| Grafana | **13.2.3** (2026-09-29) | Security patches are frequent: auto-update or pin + Renovate. |
-| Uptime Kuma | **2.5.6** (2026-10) | 2.x supports MariaDB/embedded DB; 1.x is legacy. |
-| restic / borg | restic **0.19.1** (2026-07-05); borg **1.4.5** stable (2026-07-18), **borg 2.0 still beta** (b25) | Do not put production backups on borg 2 betas. |
-| SOPS / OpenBao | SOPS **3.13.3** (2026-07-23); OpenBao **2.7.1** (2026-10-01) | OpenBao = MPL fork of Vault; Vault itself is BUSL. |
-| Certificates | Max public TLS lifetime **200 days since 2026-03-15**, 100 days 2027-03-15, 47 days 2029-03-15; Let's Encrypt default -> 64 days 2027-02-10, 45 days 2028-02-16; `tlsserver` profile issues 45-day certs now | Details in rc-web-security-perf. Manual renewal is no longer viable. DNS-PERSIST-01 (static DNS record, no per-renewal DNS edit): Let's Encrypt staging only, production slipped past its Q2 2026 target (2026-10); other CAs offering it in production: unverified. |
+| Terraform | **1.17.2** (2026-11-11; 1.17.0 on 2026-10-21; 1.16.7 patch line), **BUSL 1.1** (not open source) | IBM-owned HashiCorp. |
+| OpenTofu | **1.13.9** (2026-11-05; newer minor line unverified), MPL-2.0, Linux Foundation | Native state encryption (1.7+) with key providers (PBKDF2, AWS/GCP/Azure KMS, OpenBao transit, external). Drop-in for most Terraform <=1.5-era code. |
+| Ansible | ansible-core **2.22.0** (GA Nov 2026; exact day unverified), control node Python >= 3.13 (3.13-3.15) | 2.21 (control node Python 3.12-3.14) is the previous line. |
+| Prometheus | **3.16.0** (2026-11-05); LTS line 3.13.x (unverified for Nov) | 3.x: UTF-8 metric names, native histograms, OTLP ingest. |
+| Grafana | **13.3.1** (2026-11-10; patches 13.2.6, 13.1.10, 13.0.13 same day) | Security patches are frequent: auto-update or pin + Renovate. |
+| Uptime Kuma | **2.5.12** (2026-11-17); 3.0.0-beta.1 (2026-11-17) | 2.x supports MariaDB/embedded DB; 1.x is legacy; do not run the 3.0 beta in production. |
+| restic / borg | restic **0.20.0** (2026-11-19; 0.19.1 was 2026-07-05); borg **1.4.5** stable (2026-07-18; 1.4.6rc1 pre-release 2026-11-16), **borg 2.0 still beta** (b25) | Do not put production backups on borg 2 betas. |
+| SOPS / OpenBao | SOPS **3.13.3** (2026-07-23); OpenBao **2.7.3** (2026-11-19) | OpenBao = MPL fork of Vault; Vault itself is BUSL. |
+| Certificates | Max public TLS lifetime **200 days since 2026-03-15**, 100 days 2027-03-15, 47 days 2029-03-15; Let's Encrypt default -> 64 days 2027-02-10, 45 days 2028-02-16; opt-in `tlsserver` profile has issued 45-day certs since 2026-05-13 (the old `classic` default is still 90 days today) | Details in rc-web-security-perf. Manual renewal is no longer viable. DNS-PERSIST-01 (static DNS record, no per-renewal DNS edit): Let's Encrypt staging only; production missed its Q2 2026 target and a secondary source says it is on hold pending an IETF ACME issue (as of 2026-09; nothing newer found); other CAs offering it in production: unverified. |
 
 ### Older versions (what differs on legacy hosts)
 - **Ubuntu 22.04**: standard support ends 2027-05: plan the 24.04/26.04 move now; `do-release-upgrade` only one LTS hop at a time (22.04 -> 24.04 -> 26.04). systemd-timesyncd, classic sudo, OpenSSH 8.9 (no PQ kex by default; DSA still compiled in).
@@ -220,7 +220,14 @@ safe-change procedure: `references/vps-runbook.md`.
 - [ ] Change made via the safe-change procedure (`references/vps-runbook.md`): snapshot, one change, verify, rollback ready
 
 ## Sources
-- https://ubuntu.com/about/release-cycle - Ubuntu 22.04/24.04/26.04 support dates (2026-10-09)
+- Independent fact-check 2026-11-19 (accessed 2026-11-19): OpenSSH release notes (10.6p2 musl/no-PAM, 2026-11-05), letsencrypt.org/2025/12/02/from-90-to-45 (64 days 2027-02-10, 45 days 2028-02-16, tlsserver 2026-05-13), Let's Encrypt profiles page (classic 90 days), ansible docs + PyPI (2.22 needs Python >=3.13), GitHub releases for Caddy, Terraform, OpenTofu, Compose, Podman, systemd, restic, Prometheus, Grafana, Uptime Kuma, OpenBao, SOPS; nginx download page; Apache httpd page; Ubuntu and Debian release pages.
+- Refresh 2026-11-19: all version rows above re-checked against the release pages listed below (GitHub releases API for each project; "accessed" dates below are 2026-10-09 originals, refreshed 2026-11-19 where the row changed).
+- https://ubuntu.com/about/release-cycle - Ubuntu 22.04/24.04/26.04 support dates, 26.10 interim (2026-11-19)
+- https://www.openssh.org/txt/release-10.6p2 - 10.6p2 musl/no-PAM password bypass workaround, 2026-11-05 (2026-11-19)
+- https://docs.docker.com/engine/release-notes/29/ - 29.9.x CVE fixes, 29.10.0 (2026-11-19)
+- https://github.com/caddyserver/caddy/releases/tag/v2.11.9 - 2.11.9 security and breaking changes (2026-11-19)
+- https://docs.ansible.com/projects/ansible/devel/reference_appendices/release_and_maintenance.html - 2.21/2.22 control node Python (2026-11-19)
+- https://letsencrypt.org/docs/profiles/ - classic 90 days, tlsserver 45 days (2026-11-19)
 - https://ubuntu.com/blog/canonical-releases-ubuntu-26-04-lts-resolute-raccoon and https://launchpad.net/ubuntu/+source/openssh - 26.04 released 2026-04-23, Linux 7.0, sudo-rs, OpenSSH 10.2p1; chrony with NTS pools, `sudo.ws`, no `apt-key`, `ssh.socket` confirmed on a 26.04.1 host (2026-10-09)
 - https://discourse.ubuntu.com/t/sshd-now-uses-socket-based-activation-ubuntu-22-10-and-later/30189 - ssh.socket activation and port changes (2026-10-09)
 - https://www.debian.org/releases/ - trixie/bookworm/bullseye dates and LTS ends (2026-10-09)

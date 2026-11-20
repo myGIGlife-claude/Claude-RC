@@ -1,4 +1,4 @@
-# Deadline computation: federal vs Ohio vs North Carolina  (as of 2026-10)
+# Deadline computation: federal vs Ohio vs North Carolina  (as of 2026-11)
 
 Read on the official texts 2026-10-10: FRCP/FRAP (uscourts.gov, via law.cornell.edu), Ohio Civ.R./App.R. effective 2026-07-01,
 N.C. G.S. 1A-1 (ncleg.gov), N.C. R. App. P. 2025-09-02 codification (nccourts.gov). Local rules and orders can change response times.

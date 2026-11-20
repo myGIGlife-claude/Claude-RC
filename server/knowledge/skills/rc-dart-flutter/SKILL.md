@@ -1,16 +1,19 @@
 ---
 name: rc-dart-flutter
-description: "How to write current Dart 3.13 / Flutter 3.47 code: language features (records, patterns, sealed, primary constructors, dot shorthands), widget build performance, Impeller, Material/Cupertino packages, go_router, Riverpod/Bloc, data and storage, platform channels/Pigeon/FFI, testing, release. Use when editing *.dart, pubspec.yaml, analysis_options.yaml, build.yaml, l10n.yaml, *.arb, or Flutter android/ios/web runners."
+description: "How to write current Dart 3.14 / Flutter 3.50 code: language features (records, patterns, sealed, primary constructors, dot shorthands), widget performance, Impeller, material_ui/cupertino_ui, go_router, Riverpod/Bloc, storage, Pigeon/FFI, testing, release. Use when editing *.dart, pubspec.yaml, analysis_options.yaml, build.yaml, l10n.yaml, *.arb, or Flutter runners."
 ---
-# Dart and Flutter  (as of 2026-10)
+# Dart and Flutter  (as of 2026-11)
 
 > Facts are dated (see Sources). Choosing Flutter vs other stacks is in `rc-cross-platform`; this skill is how to write good Dart/Flutter
 > code once chosen. Anything marked (unverified) is a lead, not a fact. Package versions: `references/packages.md`.
 
 ## Currency check
-- **Flutter 3.47.7** (2026-10-08) on **Dart 3.13.5**. Flutter 3.47.0 and Dart 3.13.0 shipped 2026-08-12. Cadence: Flutter stable
-  quarterly (3.41 Feb, 3.44 2026-05-18, 3.47 Aug), Dart minor alongside (3.11 2026-02-11, 3.12 2026-05-18). Only the latest stable gets
-  hotfixes; there is no LTS. Beta 3.49.0-0.2.pre (2026-10-01); next stable expected 2026-11 (version unverified).
+- **Flutter 3.50.0** (2026-11-11) on **Dart 3.14.0** (a 3.50.1 hotfix is listed in the Flutter CHANGELOG; its date is unverified). Before it: 3.47.9 (2026-10-29, Dart 3.13.7) was the last 3.47 patch seen. Flutter 3.47.0 and
+  Dart 3.13.0 shipped 2026-08-12. Cadence: Flutter stable quarterly (3.41 Feb, 3.44 2026-05-18, 3.47 Aug, 3.50 Nov; minor numbers skip),
+  Dart minor alongside (3.11 2026-02-11, 3.12 2026-05-18, 3.14 2026-11-11). Only the latest stable gets hotfixes; no LTS.
+  Beta 3.51.0-0.2.pre (2026-11-19); next stable not announced (unverified).
+- **Dart 3.14** (2026-11-11): `dart migrate` command (updates packages to newer SDKs), `dart run -e` for inline code, `dart:mirrors` deprecated,
+  new `--[no-]deprecated-js-interop` flag for dart2js/dartdevc (`dart:html` itself was officially deprecated in Dart 3.7); some experimental isolate APIs removed, dart2wasm: `try_table` exceptions and `v128` SIMD (last two unverified). No change to primary constructor syntax.
 - **Dart language, newest first**
   - 3.13: **primary constructors** `class Point(var int x, var int y);` (language version >= 3.13). `final`/`var` no longer allowed
     on non-declaring parameters (breaks old `void f(final int x)` style; freezed 4.0 adapted). Type-promotion soundness fixes.
@@ -22,8 +25,17 @@ description: "How to write current Dart 3.13 / Flutter 3.47 code: language featu
   - **Macros: cancelled** (Dart blog, 2025-01-29). Augmentations were to ship separately; not in 3.13 (2026-10). Code generation
     (`build_runner`) is still the answer for JSON/immutability; primary constructors remove much hand boilerplate.
 - **Flutter, last ~12 months**
-  - 3.47: Material and Cupertino available as standalone packages **`material_ui` / `cupertino_ui` 1.0** (weekly releases; SDK copies
-    still exist, deprecation planned for the November stable; migrate with `dart fix --apply --code=migrate_design_widgets`).
+  - 3.50 (2026-11-11): `package:flutter/material.dart`, `cupertino.dart` (and `flutter_localizations` delegates) **formally deprecated**;
+    `flutter create` now imports `package:material_ui`; migrate with `dart fix --apply --code=migrate_design_widgets`. FFIgen (C, Obj-C)
+    and JNIgen stable; Pigeon native interop mode in preview. Legacy JS interop (`dart:html`, `dart:js`, `dart:js_util`, `package:js`)
+    deprecated; `--no-deprecated-js-interop` fails builds that use it; `--web-content-hash` for caching; Wasm runs on Safari 26.2+/Firefox 147+
+    (opt-in via `flutter_bootstrap.js`, not default). Disabling SPM now warns; Intel Macs untested. Android release builds ignore
+    `route`/`dart_entrypoint`/`cached_engine_id` Intent extras and block runtime engine flags. New Android projects: AGP 9.3.1, Gradle 9.5.0,
+    KGP 2.4.20, Java 17+, default minSdk 24, compile/target 36; HCPP needs API 34 + Vulkan Impeller. Removed `ignoringSemantics`
+    (IgnorePointer/AbsorbPointer). `RegularWindow` -> `Window`, `sizedToContent` -> `shrinkWrap` (multi-window). CocoaPods trunk goes
+    read-only in December 2026 (per the 3.50 blog).
+  - 3.47: Material and Cupertino available as standalone packages **`material_ui` / `cupertino_ui` 1.0** (frequent releases; SDK copies
+    deprecated in 3.50).
     **Impeller default on macOS/Windows/Linux.** Widget Previews stable. Multi-window still experimental. Min iOS 15, macOS 12; Android needs Java 17, AGP 9.1, Gradle 9.3.1, KGP 2.4. UIScene lifecycle required for iOS 27.
     `describeEnum` removed (use `enum.name`).
   - 3.44: Swift Package Manager is the default (CocoaPods legacy). Material/Cupertino frozen in the SDK ahead of decoupling. Hybrid
@@ -36,7 +48,7 @@ description: "How to write current Dart 3.13 / Flutter 3.47 code: language featu
 - **Web**: HTML renderer removed; renderers are CanvasKit and skwasm (`flutter build web --wasm`). `dart:html`/`dart:js_util`/`package:js`
   -> `package:web` + `dart:js_interop` (required for Wasm).
 - **Older versions (legacy projects)**
-  - Flutter < 3.47: import `package:flutter/material.dart` and stay there; do not migrate to `material_ui` unless asked. iOS 13-14 still OK.
+  - Flutter < 3.50 (and any project not yet migrated): `package:flutter/material.dart` still works but is deprecated since 3.50; migrate to `material_ui` only when asked. Flutter < 3.47: iOS 13-14 still OK.
   - Dart < 3.13: no primary constructors; `final` on parameters still legal. < 3.10: no dot shorthands, write `MainAxisAlignment.center`.
     < 3.8: no `?elem`. Check `environment: sdk:` in pubspec before using any of these; the language version gates them.
   - Flutter < 3.29: HTML web renderer may still be configured. Flutter < 3.27: Impeller on Android is opt-in (default on API 29+ since 3.27).
@@ -68,7 +80,9 @@ description: "How to write current Dart 3.13 / Flutter 3.47 code: language featu
 | `flutter_secure_storage` `encryptedSharedPreferences: true` | Deprecated in v10 (AES-GCM default, migrates data); removed in v11: upgrade via v10 first | v10 2025-12 / v11 2026-08 |
 | `isar` 3.x / `hive` 2.x (pub releases 2023 / 2022) | `drift` (SQLite) or `sqflite`; `hive_ce`/`isar_community` forks only for existing data | - |
 | CocoaPods-only iOS plugins | Swift Package Manager default | Flutter 3.44 |
-| `dart:html`, `package:js`, HTML web renderer | `package:web`, `dart:js_interop`, CanvasKit/skwasm | Flutter 3.29 (HTML renderer removed) |
+| `dart:html`, `dart:js_util`, `package:js`, HTML web renderer | `package:web`, `dart:js_interop`, CanvasKit/skwasm | HTML renderer removed 3.29; `dart:html` deprecated Dart 3.7; Flutter 3.50 deprecates the whole legacy set (blog) |
+| `import 'package:flutter/material.dart'` | `package:material_ui` (and `cupertino_ui`) | deprecated Flutter 3.50 |
+| `dart:mirrors` | Codegen / `dart:js_interop` etc.; mirrors deprecated | Dart 3.14 |
 | `pedantic`, `effective_dart`, `lint` packages | `flutter_lints` 6 / `lints` or `very_good_analysis` 11 | - |
 | `flutter_driver` | `integration_test` (+ Patrol for native dialogs) | - |
 | Skia shader warm-up (`--cache-sksl`) | Not needed with Impeller (shaders compiled at build time) | Impeller |
@@ -123,7 +137,7 @@ final (lat, lng) = parseCoords(raw);                                    // recor
 - Widget Previews: `@Preview(name: ...)` from `package:flutter/widget_previews.dart` on top-level/static functions or public no-arg widget constructors; `flutter widget-preview start`.
 
 ### Navigation
-- `go_router` 18 (Flutter team package; README calls it feature-complete, focus on bug fixes): `GoRouter(routes: [...], redirect: ...)`, `MaterialApp.router`.
+- `go_router` 18.1.x (Flutter team package; README calls it feature-complete, focus on bug fixes): `GoRouter(routes: [...], redirect: ...)`, `MaterialApp.router`.
   `StatefulShellRoute.indexedStack` for bottom tabs keeping state; typed routes via `go_router_builder` (optional). URLs case-sensitive
   since v15. Use `context.go` (replace stack, deep link) vs `context.push` (stack on top).
 - Auth redirect: `redirect` reads auth state from a `Listenable` passed as `refreshListenable`. Never trust a route guard for security
@@ -168,8 +182,9 @@ test/  integration_test/
   for tokens. Never store tokens in shared_preferences.
 
 ### Platform integration
-- **Pigeon** (29.x) generates typed Dart <-> Kotlin/Swift/C++ channel code: use it instead of hand-written `MethodChannel` string maps.
-- **FFI**: `dart:ffi` + `package:ffigen` (23.x) for C libraries; `jnigen` (1.0, 2026-10) for Java/Kotlin; `swiftgen` (0.2, pre-1.0) for Swift.
+- **Pigeon** (30.x) generates typed Dart <-> Kotlin/Swift/C++ channel code: use it instead of hand-written `MethodChannel` string maps
+  (a native interop mode that skips channel serialization is in preview per the 3.50 blog).
+- **FFI**: `dart:ffi` + `package:ffigen` (23.x, C and Objective-C stable in 3.50) for C libraries; `jnigen` (1.1) for Java/Kotlin; `swiftgen` (0.2, pre-1.0, unverified since 2026-10) for Swift.
   Build hooks (`hook/build.dart`, formerly native assets; since Dart 3.10, `package:hooks` 1.0) bundle native code without a plugin.
 - Federated plugin = app-facing package + `_platform_interface` + per-platform packages (`_android`, `_ios`/`_darwin`, `_web`). Write
   one only if publishing; for app-only native code put a Pigeon API in the app's runner.
@@ -218,7 +233,7 @@ test/  integration_test/
 - Release: Android App Bundle (`flutter build appbundle`) signed with an upload key, Play App Signing holds the app key; iOS
   `flutter build ipa` with automatic signing or fastlane `match`. fastlane or Codemagic/Bitrise automate uploads (Play internal track,
   TestFlight). Code push: Shorebird (third-party, store-policy limits apply; unverified current terms). Bump `version: x.y.z+build` every upload.
-- Desktop/web realities: desktop is production-usable (Impeller default 3.47, multi-window experimental in 3.47); web is for
+- Desktop/web realities: desktop is production-usable (Impeller default 3.47; multi-window still changing in 3.50: `RegularWindow` renamed `Window`); web is for
   app-like SPAs, not SEO/content sites (canvas rendering, large initial download; use `--wasm` + skwasm when browsers allow).
 
 ## Common mistakes in AI-written code
@@ -245,13 +260,16 @@ test/  integration_test/
 - [ ] Version/build number bumped; signed AAB/IPA from CI; staged rollout + previous build kept for rollback.
 
 ## Sources
-- https://docs.flutter.dev/release/release-notes : stable list up to 3.47 (accessed 2026-10-09)
-- https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json : 3.47.7 2026-10-08 with Dart 3.13.5; patch dates (2026-10-09)
+- https://flutter.dev/blog/whats-new-in-flutter-3-50 : 2026-11-11, deprecation of material/cupertino libs, legacy JS interop, Android/AGP defaults, FFI/Pigeon, web, CocoaPods (2026-11-19)
+- https://docs.flutter.dev/release/release-notes : stable list up to 3.50 (accessed 2026-11-19)
+- https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json : 3.50.0 2026-11-11 with Dart 3.14.0; 3.47.9 2026-10-29; beta 3.51.0-0.2.pre (2026-11-19)
 - https://flutter.dev/blog/whats-new-in-flutter-3-47 : 2026-08-12, material_ui/cupertino_ui, desktop Impeller, min iOS 15/macOS 12, AGP/Gradle/Java, UIScene, previews stable (2026-10-09)
 - https://flutter.dev/blog/whats-new-in-flutter-3-44 : 2026-05-20, SPM default, HCPP, Material frozen, web hot reload flag deprecation (2026-10-09)
-- https://docs.flutter.dev/release/breaking-changes : 3.38-3.47 breaking changes and deprecations (2026-10-09)
-- https://dart.dev/changelog : Dart 3.6-3.13 dates and language/tool changes (2026-10-09)
-- https://dart.dev/language/primary-constructors : syntax, requires language 3.13 (2026-10-09)
+- https://docs.flutter.dev/release/breaking-changes : 3.38-3.50 breaking-change guide titles (2026-11-19)
+- https://dart.dev/changelog : Dart 3.6-3.14 dates and language/tool changes; 3.14 `dart migrate`, `dart run -e`, mirrors deprecated, deprecated-js-interop flag; 3.13 (2026-08-12) primary constructors (2026-11-19, re-fetched)
+- https://github.com/flutter/flutter/blob/stable/CHANGELOG.md : 3.50.1 exists (2026-11-19)
+- https://pub.dev/packages/material_ui : 1.11.1 latest (2026-11-19)
+- https://dart.dev/language/primary-constructors : syntax, requires language 3.13 (2026-11-19)
 - https://dart.dev/language/macros (via search) : macros work stopped 2025-01-29, augmentations planned separately (2026-10-09)
 - https://docs.flutter.dev/perf/impeller : Impeller per platform, Android Vulkan/GLES fallback, web not Impeller, opt-out flags (2026-10-09)
 - https://docs.flutter.dev/platform-integration/web/wasm : `--wasm`, JS fallback without WasmGC, `package:web`/`dart:js_interop` (2026-10-10)
@@ -262,8 +280,8 @@ test/  integration_test/
 - https://docs.flutter.dev/tools/widget-previewer : `@Preview`, `flutter widget-preview start` (2026-10-09)
 - https://riverpod.dev/docs/whats_new : Riverpod 3 Notifier unification, legacy providers, retry, mutations, test utils (2026-10-09)
 - https://pub.dev/packages/freezed/changelog : 3.0 (2025-02-25) removed when/map, 3.1.0 re-added them; 4.0 (2026-08-22) no `final` params (2026-10-09)
-- https://pub.dev/packages/go_router/changelog : v15 case-sensitive URLs, v16-v18 changes, v18 needs Flutter 3.44 (2026-10-10)
+- https://pub.dev/packages/go_router/changelog : v15 case-sensitive URLs, v18 needs Flutter 3.44/Dart 3.12, 18.1.4 fixes (2026-11-19)
 - https://pub.dev/packages/flutter_secure_storage/changelog : v10/v11 Android cipher changes, encryptedSharedPreferences removed (2026-10-09)
 - https://pub.dev/packages/shared_preferences : SharedPreferencesAsync/WithCache recommended, legacy API (2026-10-09)
-- https://pub.dev/api/packages/<name> : versions and publish dates in references/packages.md (2026-10-09)
+- https://pub.dev/api/packages/<name> : versions and publish dates in references/packages.md (2026-11-19)
 - https://github.com/isar/isar : v4 not production ready; GitHub API last push 2025-06-14 (2026-10-09)

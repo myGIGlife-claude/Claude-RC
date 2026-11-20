@@ -2,7 +2,7 @@
 name: rc-cloud-platforms
 description: "Choosing and using cloud platforms - AWS, Azure, Google Cloud, Cloudflare (Workers, R2, D1, KV, Durable Objects, Tunnel), OVHcloud, IBM Cloud, plus Hetzner, DigitalOcean, Fly.io, Vercel, Netlify, Railway, Render, Supabase, Firebase. Use for picking a host, service mapping, IAM/OIDC from CI, serverless limits, egress/NAT cost traps, budgets, EU data residency, lock-in and DR. Triggers: wrangler.toml, serverless.yml, vercel.json, fly.toml, *.tf."
 ---
-# Cloud platforms: choose, secure, pay less (as of 2026-10)
+# Cloud platforms: choose, secure, pay less (as of 2026-11)
 
 > Facts are dated (see Sources). Clouds rename products and change limits monthly: confirm on the provider's docs before pinning a
 > number in code or a quote. Anything marked (unverified) is a lead, not a fact.
@@ -13,19 +13,19 @@ and serverless/edge limits: `references/service-map.md`.
 
 ## Currency check
 
-| Thing | State (verified 2026-10-09) |
+| Thing | State (verified 2026-11-19 unless marked) |
 |---|---|
 | AWS Free Tier | Accounts created since 2025-07-15: **Free plan** with up to $200 credits ($100 at sign-up + up to $100 earned) for 6 months (no charges; account closes after 6 months or when credits run out unless upgraded) or **Paid plan**. 30+ always-free offers remain. The old "12 months free t2.micro" advice is wrong for new accounts. |
-| AWS European Sovereign Cloud | **GA 2026-01-14**, Brandenburg (DE), partition `aws-eusc`, Region `eusc-de-east-1`; EU-resident operators; separate accounts/IAM from global AWS. Sovereign Local Zones planned (BE, NL, PT). |
-| AWS Lambda | 15 min max, 10,240 MB, 6 MB sync payload, 200 MB streamed response. New in the last year: **durable functions** (checkpointed multi-step), **Lambda Managed Instances** (up to 90 min async), **Lambda MicroVMs** (up to 8 h, Graviton). New accounts get reduced concurrency quotas that grow with use. |
+| AWS European Sovereign Cloud | **GA 2026-01-14** (not re-checked 2026-11, unverified), Brandenburg (DE), partition `aws-eusc`, Region `eusc-de-east-1`; EU-resident operators; separate accounts/IAM from global AWS. Sovereign Local Zones planned (BE, NL, PT). |
+| AWS Lambda | The quotas page now lists a **30 min (1,800 s)** function timeout (was 15 min; a third-party post dated 2026-11-19 says it shipped for on-demand Event Functions; AWS announcement not found), 10,240 MB, 6 MB sync payload, 200 MB streamed response. **Web Functions**: 30 s default request timeout (3-900 s). New in the last year: **durable functions** (checkpointed multi-step), **Lambda Managed Instances** (up to 90 min async/ESM, announced 2026-09-09), **Lambda MicroVMs** (up to 8 h, x86_64 and ARM64). New accounts get reduced concurrency quotas that grow with use. |
 | AWS VPC | NAT gateway $0.045/h + **$0.045/GB processed** (us-east-2 example); **regional NAT gateway** bills per AZ; every public IPv4 $0.005/h (in use or idle, since 2024-02). 100 GB/month internet egress free across AWS. |
 | Azure Functions | **Flex Consumption** is the serverless default. Consumption plan is legacy; **Linux Consumption retires 2028-09-30**; v3 runtime on Linux Consumption stopped 2026-09-30. HTTP responses still cap at 230 s. |
 | Azure sovereignty | EU Data Boundary completed 2025-02-26; Microsoft Sovereign Cloud (Sovereign Public Cloud, Sovereign Private Cloud on Azure Local incl. disconnected). |
 | Google Cloud | Docs moved to `docs.cloud.google.com`. Cloud Run: 60 min requests, 7-day jobs, 8 vCPU/32 GiB, GPUs. "Cloud Functions" is now **Cloud Run functions**. Orgs created since **2024-05-03** block service-account key creation/upload by default. Sovereign: Data Boundary (Assured Workloads), **Google Cloud Dedicated** (S3NS PREMI3NS in France, SecNumCloud 3.2 qualified 2025-12-17), Distributed Cloud air-gapped. |
-| Cloudflare | Workers Paid CPU up to **5 min** per request; Containers + Sandbox SDK **GA 2026-04-13**; D1 10 GB per DB; Durable Objects SQLite on Free; R2 zero egress. |
-| OVHcloud | **Object Storage egress free since 2026-01-01** (incl. API calls). VPS range 2 to 8 vCores, unmetered traffic, anti-DDoS included. |
+| Cloudflare | Workers Paid CPU up to **5 min** per request (default 30 s); **spend limits** for Workers and Durable Objects (2026-11-13); Workers versions and Pages deployments kept 30 days (2026-11-19); inbound TCP/gRPC to Workers/Containers via Spectrum, public beta (2026-11-19); `cf` CLI 1.0 release candidate (2026-11-17); Containers + Sandbox SDK **GA 2026-04-13**; D1 10 GB per DB; Durable Objects SQLite on Free; R2 zero egress. |
+| OVHcloud | **Object Storage: no egress or API-call charges** per the vendor page (the 2026-01-01 start date is not on that page, unverified). VPS range 2 to 8 vCores (VPS-1 to VPS-4), unmetered traffic except APAC locations (1-3 TB quota, then 10 Mbps), anti-DDoS included. |
 | IBM Cloud | **IBM Sovereign Core GA 2026-05-05** (software platform to build and run sovereign environments, continuous compliance checks); Cloud Sovereignty Risk Profile (2026-05-28, in SCC Workload Protection). |
-| Hetzner | Price increases **2026-04-01** (~30-35% cloud, per heise) and **2026-06-15** for new orders/rescales (DE/FI e.g. CCX13 EUR 15.99 -> 42.99, CPX22 7.99 -> 19.49); cloud servers include 20 TB traffic in EU (unverified on a Hetzner page). |
+| Hetzner | Price increases **2026-04-01** (~30-35% cloud, per heise) and **2026-06-15** for new orders and rescales (existing servers keep their price until reordered or resized). Example figures differ between secondary sources (CCX13 15.99 -> 42.99, CPX22 7.99 -> 19.49 EUR in one): read the official table (unverified; the docs page 404'd to fetch). 20 TB EU traffic included (unverified). |
 | EU Data Act | Applies since **2025-09-12**; cloud providers must drop **all switching and egress-for-switching charges from 2027-01-12**. |
 
 ### Older versions (what differs on legacy setups)
@@ -86,7 +86,7 @@ GCP: Workload Identity Federation pool + provider with `attribute.repository` co
 
 ### Serverless: limits and cold starts
 - **Cold start** is the time to create a sandbox + load your code. Edge isolates (Workers) are near-zero; Lambda/Cloud Run/Functions range from ~100 ms (small Node/Go/Python) to seconds (JVM, big images). Fixes: smaller bundles, lazy imports, Lambda **SnapStart** (Java 11+, Python 3.12+, .NET 8+; not Node), provisioned concurrency / Cloud Run min instances / Flex always-ready (these cost money while idle).
-- Hard limits that break designs: Lambda 15 min and 6 MB sync payload; Azure HTTP 230 s; Cloud Run 60 min request; Workers 128 MB memory and 10 ms CPU on Free; KV 1 write/s per key; Queues 128 KB message.
+- Hard limits that break designs: Lambda 30 min and 6 MB sync payload; Azure HTTP 230 s; Cloud Run 60 min request; Workers 128 MB memory and 10 ms CPU on Free; KV 1 write/s per key; Queues 128 KB message.
 - Long work: return 202 + queue + worker; or durable workflows (Step Functions, Lambda durable functions, Durable Functions, Cloudflare Workflows, Cloud Run jobs).
 - DB connections from serverless: use a pooler (RDS Proxy, Hyperdrive, Supabase pooler, PgBouncer) or an HTTP-based driver.
 
@@ -113,9 +113,9 @@ GCP: Workload Identity Federation pool + provider with `attribute.repository` co
 ### App platforms (one line of judgment each)
 - **Hetzner**: cheapest serious EU VMs and dedicated servers, 20 TB traffic included, simple firewall/LB/volumes/object storage; no managed DB, few managed services. 2026 price rises narrowed the gap but it is still cheap. You run ops.
 - **DigitalOcean**: simple VMs (Droplets), App Platform (PaaS), managed Postgres/MySQL/Valkey, Spaces (S3-compatible + CDN), managed K8s; predictable pricing with bundled transfer. Good middle ground for small teams.
-- **Fly.io**: Firecracker micro-VMs near users, per-second billing, stopped machines pay only rootfs ($0.15/GB-month), volumes $0.15/GB-month, egress $0.02/GB NA/EU; **no free tier** (trial: 2 h runtime or 7 days). Volumes are single-host: you own replication/backups.
+- **Fly.io**: Firecracker micro-VMs near users, per-second billing, stopped machines pay only rootfs ($0.15/GB-month), volumes $0.15/GB-month, egress $0.02/GB NA/EU; **no free tier** (trial: $1 credit, 7 days or until used; card needed after). Volumes are single-host: you own replication/backups.
 - **Vercel**: best fit for Next.js; Fluid compute with **Active CPU** pricing (you pay for CPU, not I/O wait); functions 300 s default, 800 s max on Pro. Watch bandwidth, image optimization and function costs at scale; set spend management.
-- **Netlify**: static/Jamstack and framework sites, functions + edge functions; credit-based plans for accounts created since 2025-09-04 (Free 300 credits/month; older accounts keep legacy plans). Good for marketing sites and docs.
+- **Netlify**: static/Jamstack and framework sites, functions + edge functions; credit-based plans for new accounts (Free 300 credits/month; existing accounts keep legacy plans; the 2025-09-04 start date is unverified). Good for marketing sites and docs.
 - **Railway / Render**: Heroku-style PaaS: git push, services + managed Postgres/Redis, preview environments; Render free web services spin down after 15 min idle and free Postgres expires after 30 days; Railway is usage-based. Fine for MVPs; check DB backup/PITR tier before production.
 - **Supabase**: Postgres + Auth + Storage + Realtime + Edge Functions; Free: 500 MB DB, 50k MAU, 5 GB egress, 2 projects, **paused after 1 week idle**; Pro from $25/month with spend cap on by default. RLS on every table (see `supabase` skill).
 - **Firebase**: Firestore/Auth/Hosting/Cloud Functions/FCM, best for mobile realtime; Blaze plan needed for Functions; set budget alerts (budgets alert, they do not cap) and Security Rules + App Check.
@@ -206,7 +206,11 @@ Prefer managed when: data loss would hurt (databases, object storage, queues), y
 - [ ] Rollback path for deploys (previous version/alias/traffic split) tested.
 
 ## Sources
-- https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html - Lambda quotas, durable functions, Managed Instances, MicroVMs (2026-10-09)
+Independent fact-check 2026-11-19 (accessed 2026-11-19) against the Lambda quotas page (30 min timeout, 30,000 durable operations, 8 h MicroVMs, Web Functions 3-900 s confirmed), Cloudflare DO/Workers/D1/KV/Queues/R2 docs and changelog (8 MB key+value, spend limits 2026-11-13 confirmed), Azure functions-scale, AWS VPC and Free pages, Fly.io, Supabase, Vercel, Cloud Run quotas (GPU jobs 12 h), API Gateway quotas, OVH Object Storage page.
+Re-fetched 2026-11-19 (accessed 2026-11-19): Lambda quotas, AWS Free, VPC pricing, Azure Functions scale, Workers/D1/DO/KV/Queues/R2/Containers docs, Cloud Run quotas, Vercel limits, Supabase, Render, Fly.io, App Runner, API Gateway, SnapStart, Data Act, OVH object storage and VPS, IBM Sovereign Core, GCP SA-key policy (enforced by default for orgs created since 2024-05-03), Netlify, LocalStack, R2 S3 API, DO SQLite API. Entries dated 2026-10-xx below were NOT re-fetched and stay (unverified) if they carry no 2026-11-19 date.
+- https://aws.amazon.com/about-aws/whats-new/2026/09/aws-lambda-90-minute-function/ - 90 min Managed Instances async; sync was 15 min on 2026-09-09 (2026-11-19)
+- https://developers.cloudflare.com/changelog/ - Nov 2026: spend limits, version retention, Spectrum TCP beta, cf CLI RC (2026-11-19)
+- https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html - Lambda quotas: 1,800 s timeout, 90 min Managed Instances, durable functions 30,000 ops, MicroVMs 8 h, Web Functions (2026-11-19)
 - https://aws.amazon.com/free/ - Free plan/Paid plan, $200 credits, 6 months (2026-10-09)
 - https://aws.amazon.com/vpc/pricing/ - NAT gateway, regional NAT, public IPv4 prices (2026-10-09)
 - https://aws.amazon.com/ec2/pricing/on-demand/ - 100 GB/month free internet egress (2026-10-09)

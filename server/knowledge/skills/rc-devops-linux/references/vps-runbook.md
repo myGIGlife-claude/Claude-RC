@@ -1,4 +1,4 @@
-# Single-VPS runbook: hardening checklist and safe changes (as of 2026-10)
+# Single-VPS runbook: hardening checklist and safe changes (as of 2026-11)
 
 ## Safe-change procedure (every production change)
 1. **Snapshot first**: provider snapshot of the VM (or at least a fresh restic/DB backup) and note its ID.

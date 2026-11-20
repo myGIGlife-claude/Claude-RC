@@ -1,8 +1,8 @@
 ---
 name: rc-cross-platform
-description: "Decision guide for cross-platform apps as of 2026-10: native (Kotlin+Compose, Swift+SwiftUI) vs Flutter, React Native/Expo, Kotlin/Compose Multiplatform, .NET MAUI, Capacitor, PWA, Tauri 2, Electron. Use when choosing or auditing a stack, or touching pubspec.yaml, app.json/eas.json, metro.config.js, capacitor.config.ts, tauri.conf.json, electron-builder, *.csproj with MAUI, or a KMP shared module."
+description: "Decision guide for cross-platform apps as of 2026-11: native (Kotlin+Compose, Swift+SwiftUI) vs Flutter, React Native/Expo, Kotlin/Compose Multiplatform, .NET MAUI, Capacitor, PWA, Tauri 2, Electron. Use when choosing or auditing a stack, or touching pubspec.yaml, app.json/eas.json, metro.config.js, capacitor.config.ts, tauri.conf.json, electron-builder, *.csproj with MAUI, or a KMP shared module."
 ---
-# Cross-platform app development: decide, then build  (as of 2026-10)
+# Cross-platform app development: decide, then build  (as of 2026-11)
 
 > Facts are dated (see Sources). Versions move every few weeks: confirm on the primary source before pinning. "(unverified)" = a lead, not a fact.
 > Per-framework profiles (plugins/bridges, build and signing, testing, a11y, security, viability) are in `references/frameworks.md`.
@@ -10,27 +10,27 @@ description: "Decision guide for cross-platform apps as of 2026-10: native (Kotl
 
 ## Currency check
 
-| Stack | Current stable (verified 2026-10-09) | Cadence | Notes |
+| Stack | Current stable (verified 2026-11-19) | Cadence | Notes |
 |---|---|---|---|
-| **Flutter / Dart** | Flutter **3.47** (2026-08-12) on **Dart 3.13** (2026-08-12) | Quarterly SDK | 3.47: `material_ui` and `cupertino_ui` **1.0 as standalone pub packages** (weekly releases), Impeller default on macOS/Windows/Linux, Widget Previews stable, **min iOS 15**, min macOS 12. Dart 3.13 added primary constructors |
-| **React Native** | **0.87** (2026-08-11); 0.88 in RC | ~every 2 months; latest + previous 2 minors supported | New Architecture only since **0.82** (2025-10-08). Hermes V1 default since **0.84** (2026-02). 0.87: Strict TypeScript API default, experimental SwiftPM, Node >= 22.13, AGP 9 |
-| **Expo** | **SDK 57** (2026-06-30, RN 0.86, React 19.2); **SDK 58 beta** (2026-09-15, RN 0.88 RC) | ~3 SDKs a year; Expo is moving toward more frequent non-breaking releases | SDK 56: Expo UI (SwiftUI / Jetpack Compose primitives) stable, Expo Router no longer depends on React Navigation, Expo Go SDK 56 not in stores. SDK 57: Android 7+, iOS 16.4+, Xcode 26.4+. SDK 58 beta: iOS 27 scene lifecycle, Android widgets, App Intents |
-| **Kotlin Multiplatform / Compose Multiplatform** | Kotlin **2.4.21** (2026-10-08); CMP **1.12.1** (2026-09-22) | Kotlin: language release ~yearly + x.y.20; CMP follows Jetpack Compose by 1-3 months | **CMP for iOS stable since 1.8.0 (2025-05-06)**. CMP for web (Wasm) **Beta since 1.9.0 (2025-09)**. Swift export **Alpha** in Kotlin 2.4 (suspend -> async, Flow -> AsyncSequence). Targets: Android 5+, iOS 14+, macOS 13 arm64, Windows 10, Linux, WasmGC browsers |
-| **.NET MAUI** | **MAUI 10** (2025-11-11), patch 10.0.110 (2026-09-22), EOS **2027-05-11**. MAUI 9 out of support since 2026-05-12 | Yearly with .NET (November) | .NET 11 (RC 1 as of 2026-10): CoreCLR is the default runtime on Android/iOS (Mono still available), NativeAOT opt-in, Material 3 on Android. Each major is supported until 6 months after the next ships, so plan a yearly upgrade |
-| **Capacitor** | **8.5.3** (2026-10-07); 9.0 in alpha | ~yearly major | Cap 8: iOS 15+, Xcode 26+, Android minSdk 24 / target 36, **SwiftPM default for new iOS projects**, new System Bars plugin for edge-to-edge |
-| **Tauri** | **2.12.2** (2026-10-09); 3.0 in alpha | Frequent minors | Desktop (Windows/macOS/Linux) + iOS + Android, system WebView, Rust core, capability-based permissions |
-| **Electron** | **44.7.0** (2026-10-07; Chromium 152, Node 24.21); 45 in beta | New major every **8 weeks**; latest **3** majors supported | An Electron app older than ~6 months is out of support |
+| **Flutter / Dart** | Flutter **3.50** (2026-11-11) on **Dart 3.14** (2026-11-11); previous 3.47 / Dart 3.13 (2026-08-12) | Quarterly SDK | 3.50: `package:flutter/material.dart` and `cupertino.dart` (and their localization delegates) **formally deprecated**; `flutter create` now uses standalone `material_ui` / `cupertino_ui`; migrate with `dart fix --apply --code=migrate_design_widgets`. FFIgen/JNIgen stable. New Android projects default minSdk 24. SwiftPM opt-out now warns. Still min iOS 15 (from 3.47) |
+| **React Native** | **0.88** (2026-10-15 per release schedule; blog post 2026-10-19); 0.89 planned 2026-12-07 | ~every 2 months; latest + previous 2 minors maintained (0.88, 0.87 Active; 0.86 End of Cycle; 0.85 and older Unsupported) | New Architecture only since **0.82** (2025-10-08). Hermes V1 default since **0.84** (2026-02). 0.87 (2026-08-11): Strict TypeScript API default, Node 22 (exact minor 22.13 unverified), AGP 9. 0.88: React 19.3.0, no user-facing breaking changes, web-based event dispatching default, iOS SceneDelegate support, experimental SwiftPM; Xcode 26+, Android 7+, JDK 17 |
+| **Expo** | **SDK 58** (2026-10-15, RN 0.88); SDK 57 (2026-06-30, RN 0.86) | ~3 SDKs a year | SDK 58: built for iOS 27 (UIKit scene lifecycle), Node 22.13+/24.3+/26+, R8 on by default in Android release builds, Expo Router data loaders/native tabs/SSR stable, `expo-widgets` (Android home-screen widgets), `expo-app-intents` (alpha), Expo Modules 2.0 beta; no macOS support yet. New Expo Go (SDK 58 only) was announced as "within a few weeks" of 2026-10-15; store date unverified, until then `create-expo-app` makes SDK 57 projects. SDK 57: Android 7+, iOS 16.4+, Xcode 26.4+. SDK 56: Expo UI stable, Router independent of React Navigation |
+| **Kotlin Multiplatform / Compose Multiplatform** | Kotlin **2.4.21** (2026-10-08; 2.4.20 on 2026-09-07); CMP **1.12.2** (2026-10-15); 1.13.0-rc01 pre-release (2026-11-18) | Kotlin: language release ~yearly + x.y.20; CMP follows Jetpack Compose by 1-3 months | **CMP for iOS stable since 1.8.0 (2025-05-06)**. CMP for web (Wasm) **Beta since 1.9.0 (2025-09)** (no newer status confirmed). Swift export **Alpha** in Kotlin 2.4. Targets (1.12.2): Android 5+, iOS 14+, macOS 13 arm64, Windows 10, Ubuntu 20.04+, WasmGC browsers; 64-bit only |
+| **.NET MAUI** | **MAUI 11** (2026-11-10, with .NET 11 STS), patch 11.0.10 (2026-11-11), EOS **2028-05-09**. **MAUI 10** patch 10.0.130 (2026-11-09), EOS **2027-05-11**. MAUI 9 out of support since 2026-05-12 | Yearly with .NET (November) | .NET 11 (GA 2026-11-10, STS, EOS 2028-11-14): per the MAUI docs, CoreCLR is the default runtime for Android Release builds (Mono still available), NativeAOT experimental opt-in, Material 3 handlers on Android. Each major is supported until 6 months after the next ships |
+| **Capacitor** | **8.6.2** (2026-11-12); **9.0.0-rc.0** (2026-11-12), no stable 9 yet | ~yearly major | Cap 8: iOS 15+, Xcode 26+, Android minSdk 24 / target 36, **SwiftPM default for new iOS projects**, System Bars plugin for edge-to-edge. Do not adopt 9 in production until stable |
+| **Tauri** | **2.12.7** core (2026-11-18), CLI 2.12.6; 3.0.0-alpha.3 seen (alpha, no date) | Frequent minors | Desktop (Windows/macOS/Linux) + iOS + Android, system WebView, Rust core, capability-based permissions |
+| **Electron** | **45.4.1** (Chromium 156, Node 24.22.3) and 44.11.5 (2026-11-18); 45.0.0 stable 2026-10-20; 46 planned 2027-01-05 (tentative) | New major every **8 weeks**; latest **3** majors supported (45, 44, 43); 42 EOL 2026-10-20, 43 EOL 2027-01-05 (tentative) | An Electron app older than ~6 months is out of support |
 | **PWA** | iOS/iPadOS 26: any site added to Home Screen **opens as a web app by default**, manifest optional | Browser releases | Web Push for Home Screen apps since iOS 16.4; Declarative Web Push since iOS 18.4. Periodic Background Sync: Chromium-only, experimental |
-| **Games** | Godot **4.7.2** (2026-08-18); Unity 6 line (unverified exact version) | | See the games note below |
+| **Games** | Godot **4.7.2** (2026-08-18; 4.8-beta4 on 2026-11-18); Unity 6 line (unverified exact version) | | See the games note below |
 
 ### Older versions (legacy projects)
-- **RN < 0.82** still allows the legacy bridge. Upgrading past 0.81 means every native module must support the New Architecture (TurboModules/Fabric) or be replaced. Go one RN minor at a time with the Upgrade Helper; RN 0.84 is already unsupported (2026-08).
-- **Expo SDK <= 55** still uses React Navigation underneath Expo Router; SDK 56 needs the router codemod. Expo Go only runs the current SDK: older projects need a development build.
-- **Flutter < 3.47**: Material/Cupertino are in the SDK (`package:flutter/material.dart`); nothing forces the switch yet. Do not migrate unless the task asks. iOS 13-14 support ends at 3.47.
+- **RN < 0.82** still allows the legacy bridge. Upgrading past 0.81 means every native module must support the New Architecture (TurboModules/Fabric) or be replaced. Go one RN minor at a time with the Upgrade Helper; RN 0.85 and older are Unsupported (2026-11); 0.86 is End of Cycle.
+- **Expo SDK <= 55** still uses React Navigation underneath Expo Router; SDK 56 needs the router codemod. Expo Go only runs the current SDK: older projects need a development build. SDK 58 changes the iOS lifecycle (scene-based): hand-edited `AppDelegate.swift` needs the migration guide.
+- **Flutter < 3.50**: Material/Cupertino are in the SDK (`package:flutter/material.dart`) and still work (deprecated from 3.50, with a `dart fix` migration). Do not migrate unless the task asks. iOS 13-14 support ended at 3.47.
 - **CMP < 1.8**: iOS was Beta; K1 compiler support ended at 1.8. CMP 1.8+ needs Kotlin >= 2.1.0.
 - **MAUI 8/9**: out of support (8 since 2025-05-14, 9 since 2026-05-12). **Xamarin**: out of support since **2024-05-01** (last SDKs: Android API 34, Xcode 15) and cannot meet current store target-API rules.
 - **Capacitor <= 7** creates CocoaPods iOS projects; `android.adjustMarginsForEdgeToEdge` exists there and is removed in 8.
-- **Electron**: anything below 42 gets no security fixes (2026-10).
+- **Electron**: anything below 43 gets no security fixes (42 EOL 2026-10-20); 43 ends 2027-01-05 (tentative).
 
 ## What changed / stop doing
 
@@ -44,12 +44,13 @@ description: "Decision guide for cross-platform apps as of 2026-10: native (Kotl
 | "Eject from Expo" / "bare vs managed workflow" | Continuous Native Generation (`npx expo prebuild`) + config plugins + development builds; any RN app can use Expo modules and EAS | Ejecting retired years ago (SDK 41 era, unverified) |
 | Expo Go for real development | Development builds (`expo-dev-client`); Expo Go is for quick demos of the current SDK | SDK 56 Expo Go not even in stores |
 | Expo Router on top of React Navigation | Expo Router has its own forked navigation core | SDK 56 |
-| Flutter `material.dart` gets every new Material spec | `material_ui` / `cupertino_ui` packages ship design updates; Flutter paused Material 3 Expressive and Liquid Glass work in the SDK (2025-07) | 3.47 (2026-08) |
+| Flutter `material.dart` gets every new Material spec | `material_ui` / `cupertino_ui` packages ship design updates (bundled libraries deprecated, new projects use the packages); Flutter paused Material 3 Expressive and Liquid Glass work in the SDK (2025-07) | 3.47 (1.0 packages), 3.50 (deprecation, 2026-11) |
+| `dart:html`, `dart:js`, `dart:js_util`, `package:js` | `dart:js_interop` + `package:web` | `dart:html` deprecated Dart 3.7; whole set deprecated in Flutter 3.50 (Dart 3.14 adds `--no-deprecated-js-interop`) |
 | Skia shader-compile jank in Flutter | Impeller everywhere (mobile earlier, desktop default in 3.47) | 3.47 |
 | "KMP is only for business logic; CMP iOS is experimental" | CMP iOS is stable; shared UI is a valid choice. KMP-logic + native UI remains the safer default when platform look matters | CMP 1.8.0 (2025-05) |
 | Kotlin -> Objective-C headers only | Swift export (Alpha) | Kotlin 2.4 (2026-06) |
 | "PWAs can't do push on iOS" | They can, once added to the Home Screen and after a user gesture; Declarative Web Push on 18.4+ | iOS 16.4 (2023-03) |
-| Mono runtime for MAUI mobile | CoreCLR default (Mono still available, NativeAOT opt-in) | .NET 11 (RC) |
+| Mono runtime for MAUI mobile | CoreCLR default for Android Release builds (Mono still available, NativeAOT experimental opt-in) | .NET 11 (GA 2026-11-10) |
 | Electron: `nodeIntegration: true`, no sandbox | `contextIsolation` + sandbox + `contextBridge` preload (defaults for years); keep them on | Electron 12 (contextIsolation default), 20 (sandbox default) |
 
 ## Do this
@@ -71,7 +72,7 @@ Answer in order; the first rule that fires usually decides.
 
 Record the decision in the project's PLAN.md / docs with the deciding rule, so later sessions don't relitigate it.
 
-### 2. App-type recommendations (default picks, 2026-10)
+### 2. App-type recommendations (default picks, 2026-11)
 
 | App type | Pick | Why |
 |---|---|---|
@@ -114,7 +115,7 @@ Record the decision in the project's PLAN.md / docs with the deciding rule, so l
 - No third-party plugin for one small native call: write a 30-line native module/plugin you own. Abandoned plugins are the #1 upgrade blocker in RN, Flutter and Capacitor.
 - No state-management, navigation or UI kit on top of what the framework/Expo already ships unless a concrete need appears.
 - No analytics, ad or attribution SDKs by default (privacy labels, Data safety, binary size, startup time).
-- Before adding a plugin, check: last release < 6 months, supports current framework major (RN New Architecture, Flutter 3.47, Capacitor 8), open-issue health, license, native permissions it adds.
+- Before adding a plugin, check: last release < 6 months, supports current framework major (RN New Architecture, Flutter 3.50, Capacitor 8), open-issue health, license, native permissions it adds.
 
 ### 6. Migration and exit costs
 
@@ -156,7 +157,7 @@ Use an engine, not an app framework. **Godot 4.7** (MIT license, free, 2D strong
 - Flutter: `flutter test` (unit/widget), `integration_test`, golden tests; `flutter analyze` + `dart format`; Widget Previews.
 - RN/Expo: Jest (preset is now a separate package since 0.85), React Native Testing Library, Maestro or Detox for E2E; EAS Build / EAS Submit / EAS Update / EAS Workflows for CI; TypeScript strict.
 - KMP: `kotlin.test` in `commonTest`, run on every target (`allTests`); XCTest on the Swift side; Android Compose UI tests.
-- MAUI: xUnit/NUnit for logic; .NET 11 RC 1 adds device test templates (`androidtest`, `iostest`) runnable with `dotnet test`.
+- MAUI: xUnit/NUnit for logic; .NET 11 adds device test templates (`androidtest`, `iostest`, documented as of RC 1) runnable with `dotnet test`.
 - Capacitor/PWA/Tauri/Electron: Vitest + Playwright for the web layer; native smoke tests on devices; Electron Playwright support; Tauri WebDriver (unverified maturity).
 - Always: real-device test matrix (oldest supported OS + newest), store-build CI with signing secrets in CI only, crash reporting without PII.
 
@@ -164,8 +165,9 @@ Use an engine, not an app framework. **Godot 4.7** (MIT license, free, 2D strong
 - Writing RN bridge-era code: `NativeModules.X`, `RCT_EXPORT_MODULE` without TurboModule spec, `requireNativeComponent` Paper components, JSC flags. Use Codegen specs / Expo Modules API.
 - Telling the user to "eject" Expo or to edit `ios/`/`android/` in a CNG project (changes get wiped by `prebuild`); use config plugins.
 - Using Expo Go for features needing custom native code; use a development build.
-- Importing deep RN paths (`react-native/Libraries/...`): broken by the Strict TypeScript API in 0.87.
-- Flutter: assuming Liquid Glass or Material 3 Expressive widgets exist in `cupertino`/`material` (they don't, 2026-10); inventing `CupertinoLiquidGlass`-style APIs. Check `cupertino_ui`/`material_ui` changelogs.
+- Importing deep RN paths (`react-native/Libraries/...`): broken by the Strict TypeScript API in 0.87. Expo SDK 58 also removed `InteractionManager` and the `Touchable` root export.
+- Flutter: new code importing `package:flutter/material.dart` without knowing it is deprecated in 3.50 (use `material_ui`); `dart:html` / `package:js` for web interop (use `package:web`).
+- Flutter: assuming Liquid Glass or Material 3 Expressive widgets exist in `cupertino`/`material` (they don't, 2026-11); inventing `CupertinoLiquidGlass`-style APIs. Check `cupertino_ui`/`material_ui` changelogs.
 - Flutter: `WillPopScope` (replaced by `PopScope`), `MaterialStateProperty` (now `WidgetStateProperty`) and other renamed APIs (verify on the breaking-changes page).
 - KMP: putting Android-only libraries in `commonMain`; old `kotlin-multiplatform-mobile` plugin/KMM naming; Kotlin/Native old memory model `freeze()` (gone).
 - MAUI: Xamarin.Forms renderers, `Device.BeginInvokeOnMainThread` (use `MainThread`/`Dispatcher`), `Application.MainPage` setter patterns deprecated in MAUI 9+ (unverified detail).
@@ -176,7 +178,7 @@ Use an engine, not an app framework. **Godot 4.7** (MIT license, free, 2D strong
 
 ## Before you ship
 - [ ] Decision recorded with the rule that chose the stack; native-only features listed with how they're implemented.
-- [ ] Framework and every plugin on a supported version (RN latest 3 minors, Electron latest 3 majors, MAUI in support window, Expo current or previous SDK).
+- [ ] Framework and every plugin on a supported version (RN latest + previous 2 minors, Electron latest 3 majors, MAUI in support window, Expo current or previous SDK).
 - [ ] Platform feel check against the red-flag table on a real iPhone (iOS 26+) and Android (15+ edge-to-edge).
 - [ ] TalkBack + VoiceOver pass, 200% text, dark mode, reduced motion.
 - [ ] No secrets in the bundle; tokens in Keychain/Keystore; bridges validate input; WebView apps have CSP; Electron/Tauri hardening applied.
@@ -186,37 +188,41 @@ Use an engine, not an app framework. **Godot 4.7** (MIT license, free, 2D strong
 - [ ] Exit path: backend API independent of the client framework.
 
 ## Sources
-- https://docs.flutter.dev/release/release-notes : Flutter 3.47 latest stable (accessed 2026-10-09)
-- https://docs.flutter.dev/release/release-notes/release-notes-3.47.0 : Impeller desktop, macOS 12 minimum (2026-10-09)
-- https://flutter.dev/blog/whats-new-in-flutter-3-47 : 2026-08-12, material_ui/cupertino_ui 1.0, iOS 15 minimum, quarterly cadence (2026-10-09)
-- https://dart.dev/changelog : Dart 3.13 (2026-08-12), 3.12, 3.11 (2026-10-09)
-- https://github.com/flutter/flutter/issues/170310 : Flutter paused Liquid Glass / M3 Expressive in core, work moves to packages (2026-10-09)
-- https://reactnative.dev/versions : RN 0.87 latest (2026-10-09)
-- https://reactnative.dev/blog : RN 0.80-0.87 release dates and highlights (New Arch only 0.82, Hermes V1 default 0.84) (2026-10-09)
-- https://reactnative.dev/blog/2026/08/11/react-native-0.87 : 0.87 requirements and breaking changes (2026-10-09)
-- https://github.com/reactwg/react-native-releases/blob/main/docs/support.md : latest + previous two minors supported (2026-10-09)
-- https://expo.dev/changelog : SDK 56/57/58-beta dates (2026-10-09)
-- https://expo.dev/changelog/sdk-56 : Expo UI stable, Router independent of React Navigation, Hermes v1 (2026-10-09)
-- https://expo.dev/changelog/sdk-57 : RN 0.86, cadence direction (2026-10-09)
-- https://expo.dev/changelog/sdk-58-beta : RN 0.88 RC, iOS 27, widgets, App Intents (2026-10-09)
-- https://docs.expo.dev/versions/latest/ : SDK 57 platform minimums (2026-10-09)
-- https://kotlinlang.org/docs/multiplatform/compose-compatibility-and-versioning.html : CMP 1.12.1, targets, release alignment (2026-10-09)
-- https://blog.jetbrains.com/kotlin/2025/05/compose-multiplatform-1-8-0-released-compose-multiplatform-for-ios-is-stable-and-production-ready/ : CMP iOS stable 2025-05-06 (2026-10-09)
-- https://blog.jetbrains.com/kotlin/2025/09/compose-multiplatform-1-9-0-compose-for-web-beta/ : CMP web Beta (2026-10-09)
-- https://blog.jetbrains.com/kotlin/2026/06/kotlin-2-4-0-released/ : Kotlin 2.4, Swift export Alpha (2026-10-09)
-- https://dotnet.microsoft.com/en-us/platform/support/policy/maui : MAUI 10 dates, support policy (2026-10-09)
-- https://dotnet.microsoft.com/en-us/platform/support/policy/xamarin : Xamarin EOS 2024-05-01 (2026-10-09)
-- https://learn.microsoft.com/en-us/dotnet/maui/whats-new/dotnet-11 : .NET 11 CoreCLR default (Mono available), NativeAOT opt-in, Material 3, device test templates (2026-10-09)
-- https://www.electronjs.org/docs/latest/breaking-changes : contextIsolation default (12), sandbox default (20), remote removed (14) (2026-10-09)
-- https://capacitorjs.com/docs/updating/8-0 : Capacitor 8 requirements, SPM default (2026-10-09)
-- https://github.com/ionic-team/capacitor/releases : 8.5.3 latest, 9.0 alpha (2026-10-09)
-- https://github.com/tauri-apps/tauri/releases : Tauri 2.12.2 (2026-10-09), 3.0.0-alpha (2026-10-09)
-- https://v2.tauri.app/start/ : Tauri platforms, capabilities, system WebView (2026-10-09)
-- https://releases.electronjs.org/ : Electron 44.7.0, Chromium 152, Node 24.21 (2026-10-09)
-- https://www.electronjs.org/docs/latest/tutorial/electron-timelines : 8-week cadence, 3 majors supported (2026-10-09)
-- https://webkit.org/blog/16993/news-from-wwdc25-web-technology-coming-this-fall-in-safari-26-beta/ : iOS 26 Home Screen web app default (2026-10-09)
-- https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/ : Web Push iOS 16.4 (2026-10-09)
-- https://webkit.org/blog/16535/meet-declarative-web-push/ : Declarative Web Push iOS 18.4 (2026-10-09)
-- https://developer.mozilla.org/en-US/docs/Web/API/Web_Periodic_Background_Synchronization_API : Chromium-only, experimental (2026-10-09)
-- https://developer.apple.com/app-store/review/guidelines/ : 4.2 minimum functionality, 4.7 mini apps (2026-10-09)
-- https://godotengine.org/article/maintenance-release-godot-4-7-2/ : Godot 4.7.2 (2026-10-09)
+- https://docs.flutter.dev/release/release-notes : Flutter 3.50.0 latest stable, list of stable releases (accessed 2026-11-19)
+- https://flutter.dev/blog/whats-new-in-flutter-3-50 : 2026-11-11, Material/Cupertino deprecation, FFIgen/JNIgen stable, minSdk 24, dart:html deprecation (2026-11-19)
+- https://flutter.dev/blog/whats-new-in-flutter-3-47 : 2026-08-12, material_ui/cupertino_ui 1.0, iOS 15 minimum (2026-10-09, not rechecked)
+- https://dart.dev/changelog : Dart 3.14 (2026-11-11), 3.13 (2026-08-12), 3.12 (2026-05-18) (2026-11-19)
+- https://github.com/flutter/flutter/issues/170310 : Flutter paused Liquid Glass / M3 Expressive in core (2026-10-09, not rechecked)
+- https://reactnative.dev/versions : RN 0.88 latest stable (2026-11-19)
+- https://reactnative.dev/blog : 0.88 post (2026-10-19): React 19.3, no breaking changes, SceneDelegate; 0.87 date (2026-11-19)
+- https://reactnative.dev/docs/next/releases : support status per version, 0.89 planned 2026-12-07 (2026-11-19)
+- https://github.com/reactwg/react-native-releases/blob/main/docs/support.md : support policy, Node/Xcode/JDK minimums for 0.87-0.89 (2026-11-19)
+- https://expo.dev/changelog : SDK 58 release 2026-10-15, SDK 57 2026-06-30 (2026-11-19)
+- https://expo.dev/changelog/sdk-58 : RN 0.88, iOS 27 scene lifecycle, R8, widgets, App Intents, breaking changes, Expo Go note (2026-11-19)
+- https://expo.dev/changelog/sdk-56 and https://expo.dev/changelog/sdk-57 : Expo UI stable, Router independence, SDK 57 baseline (2026-10-09, not rechecked)
+- https://kotlinlang.org/docs/releases.html : Kotlin 2.4.21 (2026-10-08), 2.4.20 (2026-09-07), 2.4.0 (2026-06-03) (2026-11-19)
+- https://kotlinlang.org/docs/multiplatform/compose-compatibility-and-versioning.html : CMP 1.12.2, targets and minimums (2026-11-19)
+- https://github.com/JetBrains/compose-multiplatform/releases : 1.12.2 latest, 1.13.0-rc01 pre-release (2026-11-19)
+- https://blog.jetbrains.com/kotlin/2025/05/compose-multiplatform-1-8-0-released-compose-multiplatform-for-ios-is-stable-and-production-ready/ : CMP iOS stable 2025-05-06 (2026-10-09, not rechecked)
+- https://blog.jetbrains.com/kotlin/2025/09/compose-multiplatform-1-9-0-compose-for-web-beta/ : CMP web Beta (2026-10-09, not rechecked)
+- https://blog.jetbrains.com/kotlin/2026/06/kotlin-2-4-0-released/ : Kotlin 2.4, Swift export Alpha (2026-10-09, not rechecked)
+- https://dotnet.microsoft.com/en-us/platform/support/policy/maui : MAUI 11 and 10 dates, EOS (2026-11-19)
+- https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core : .NET 11 GA 2026-11-10, STS, EOS 2028-11-14 (2026-11-19)
+- https://dotnet.microsoft.com/en-us/platform/support/policy/xamarin : Xamarin EOS 2024-05-01 (2026-10-09, not rechecked)
+- https://learn.microsoft.com/en-us/dotnet/maui/whats-new/dotnet-11 : CoreCLR default on Android Release, NativeAOT experimental, Material 3, device test templates (page dated 2026-09, RC 1 content) (2026-11-19)
+- https://www.electronjs.org/docs/latest/breaking-changes : contextIsolation default (12), sandbox default (20), remote removed (14) (2026-10-09, not rechecked)
+- https://capacitorjs.com/docs/updating/8-0 : Capacitor 8 requirements, SPM default (2026-10-09, not rechecked)
+- https://github.com/ionic-team/capacitor/releases : 8.6.2 latest, 9.0.0-rc.0 (2026-11-19)
+- https://github.com/tauri-apps/tauri/releases and https://v2.tauri.app/release/ : tauri 2.12.7, CLI 2.12.6 (2026-11-18) (2026-11-19)
+- https://newreleases.io/project/github/tauri-apps/tauri/release/tauri-v3.0.0-alpha.3 : Tauri 3 alpha exists (mirror of GitHub releases; lead only) (2026-11-19)
+- https://v2.tauri.app/start/ : Tauri platforms, capabilities, system WebView (2026-10-09, not rechecked)
+- https://releases.electronjs.org/ : Electron 45.4.1 / 44.11.5 (both 2026-11-18, Node 24.22.3) (2026-11-19, re-fetched)
+- Fact-check pass 2026-11-19 re-fetched: reactnative.dev/docs/next/releases (status table), reactnative.dev/blog (0.87 2026-08-11, 0.88 2026-10-19), expo.dev/changelog/sdk-58, kotlinlang.org releases, GitHub releases for Capacitor/Tauri, godotengine.org archive, MAUI support policy.
+- https://releases.electronjs.org/schedule : stable and EOL dates for 42-46 (2026-11-19)
+- https://www.electronjs.org/docs/latest/tutorial/electron-timelines : 8-week cadence, 3 majors supported (2026-11-19)
+- https://webkit.org/blog/16993/news-from-wwdc25-web-technology-coming-this-fall-in-safari-26-beta/ : iOS 26 Home Screen web app default (2026-10-09, not rechecked)
+- https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/ : Web Push iOS 16.4 (2026-10-09, not rechecked)
+- https://webkit.org/blog/16535/meet-declarative-web-push/ : Declarative Web Push iOS 18.4 (2026-10-09, not rechecked)
+- https://developer.mozilla.org/en-US/docs/Web/API/Web_Periodic_Background_Synchronization_API : Chromium-only, experimental (2026-10-09, not rechecked)
+- https://developer.apple.com/app-store/review/guidelines/ : 4.2, 2.5.2, 4.7 exist with this numbering (2026-11-19)
+- https://godotengine.org/download/archive/ : Godot 4.7.2 stable, 4.8-beta4 (2026-11-19)

@@ -1,4 +1,4 @@
-# Headers and policies reference  (as of 2026-10)
+# Headers and policies reference  (as of 2026-11)
 
 ## Response header cheat table
 | Header | Recommended value | Notes |
@@ -84,8 +84,9 @@ jobs:
 ## Supply chain settings
 | Tool | Setting |
 |---|---|
-| npm (11.10+) | `.npmrc`: `min-release-age=7`, CI `npm ci --ignore-scripts` (then run needed builds explicitly) |
-| pnpm 10/11 | `minimumReleaseAge` (minutes; 1440 default in 11); build allow-list `onlyBuiltDependencies` (10) / `allowBuilds` map (11, old keys removed) |
+| npm 11.10+ | `.npmrc`: `min-release-age=7` (days, unset by default), CI `npm ci --ignore-scripts` (then run needed builds explicitly) |
+| npm 12 | Dependency scripts off by default: `allowScripts` in package.json (`npm install-scripts approve`, `npm rebuild`); `allow-git`/`allow-remote` default none |
+| pnpm 10/11/12 | `minimumReleaseAge` (minutes; 1440 default on current pnpm); build allow-list `onlyBuiltDependencies` (10) / `allowBuilds` (11+); `blockExoticSubdeps` on |
 | Renovate | `minimumReleaseAge: "3 days"`, `pinDigests: true` for Actions/Docker |
 | Dependabot | `cooldown:` (`default-days`, `semver-*-days`) in `dependabot.yml`; 3-day default since 2026-07-14, security updates exempt |
 | pip | `--require-hashes` with `pip-compile --generate-hashes` or `uv lock` |

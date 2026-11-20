@@ -2,7 +2,7 @@
 name: rc-ios
 description: Native iOS/iPadOS app development with Swift 6, SwiftUI, UIKit, Xcode and App Store Connect, including UI/UX per the Human Interface Guidelines. Use when touching .swift, .xcodeproj, project.yml (XcodeGen), Package.swift, Info.plist, PrivacyInfo.xcprivacy, entitlements, xcconfig, fastlane, Xcode Cloud or a macOS CI runner, or when planning features like widgets, Live Activities, App Intents, Foundation Models, push (APNs), StoreKit, Sign in with Apple/passkeys, Keychain, TestFlight or App Review.
 ---
-# Native iOS / iPadOS development (as of 2026-10)
+# Native iOS / iPadOS development (as of 2026-11)
 
 > Facts here are dated (see Sources). Versions, deadlines and policies move: confirm the primary source before pinning a version or promising a date. Anything marked (unverified) is a lead, not a fact.
 
@@ -12,9 +12,13 @@ Longer tables: `references/platform-policy.md` (dates, review rules) and `refere
 
 ## Currency check
 - **OS numbering**: year-based since WWDC25. iOS 18 was followed by **iOS 26** (2025), then **iOS 27** (Sep 2026).
-  Same number on iPadOS, macOS, tvOS, watchOS, visionOS (macOS 26 Tahoe, macOS 27). Current betas: iOS 27.2 (beta 3, 2026-10-05), Xcode 27.1 RC (2026-10-05).
-- **Xcode 27** (released 2026-09-14): Swift 6.4, SDKs for all "27" OSes, needs macOS Tahoe 26.6+, **Apple silicon Macs only**.
-  Debugs on-device iOS 17+. Xcode 27.1 adds iPhone Duo (foldable, ships 2026-10-23).
+  Same number on iPadOS, macOS, tvOS, watchOS, visionOS (macOS 26 Tahoe, macOS 27). Latest releases (Apple releases feed, 2026-11-19):
+  iOS/iPadOS 27.2.1 (2026-11-09), iPadOS 26.7.3 and iOS/iPadOS 18.7.12 security updates (2026-11-09; an iPhone iOS 26.7.x entry was not on the feed, unverified); in beta: iOS 27.3 beta 2 (2026-11-16/19), Xcode 27.3 beta 2 (2026-11-16).
+- **Xcode 27** (released 2026-09-14): Swift 6.4, SDKs for all "27" OSes, needs macOS Tahoe 26.6+, **Apple silicon Macs only**
+  (these requirements and "debugs on-device iOS 17+" were not re-confirmed on 2026-11-19: unverified).
+  Later: Xcode 27.1 (27A9275, 2026-10-15; the iPhone Duo foldable support claim is unverified),
+  Xcode 27.2 (27B52, 2026-10-29; Apple's own 27.2 notes page title still says beta, so treat details as unverified).
+- **Swift**: 6.4 is the latest announced on swift.org (2026-09-15); the site's install page lists 6.4.2 without a blog post (unverified details).
 - **Swift 6.4** (2026-09-15). Before it: 6.3 (2026-03-24, `@c`, official Android SDK), 6.2 (2025-09-15, approachable
   concurrency, `InlineArray`, `Span`), 6.0 (2024-09, Swift 6 language mode).
 - **App Store upload minimum**: Xcode 26 + iOS/iPadOS 26 SDK since **2026-04-28**. Apple announced Xcode 27 / iOS 27 SDK
@@ -23,14 +27,24 @@ Longer tables: `references/platform-policy.md` (dates, review rules) and `refere
   so the opt-out is gone: every standard control renders as Liquid Glass.
 - **UIKit scene life cycle is mandatory**: from iOS 27, apps built with the latest SDK that lack a scene-based life cycle
   fail to launch.
-- **CocoaPods trunk goes read-only 2026-12-02** (planned; test run Nov 1-7). Existing pods still install; nothing new is published.
+- **CocoaPods trunk goes read-only 2026-12-02** (author says dates could be extended, not moved earlier; test run was Nov 2-6
+  2026, new podspecs refused then). Existing pods still install; nothing new is published.
 - **Age assurance**: Declared Age Range API (iOS 26+), PermissionKit Significant Change API, StoreKit age-rating property;
   required for Texas (SB 2420, from 2026-06-04) and other regions. Age rating questionnaire was redone (answers due
-  2026-01-31; social-media questions required since 2026-09).
+  2026-01-31; social-media questions required since 2026-09). **New (announced 2026-11-02)**: Shared Location and Dating and
+  Relationships declarations appear in App Store Connect from 2026-11-16; all apps must answer by **2027-01-12**
+  (Dating and Relationships = minimum 18+).
+- **App Review Guidelines update 2026-10-16**: new 2.3.14 (about creative assets; the exact wording was not readable on Apple's news page: read the guideline before relying on it)
+  and 2.5.19 (clarifies the hidden, dormant or undocumented features rule, formerly covered by 2.3.1);
+  1.2 UGC tightened (incl. nonconsensual intimate imagery, AI-generated); 3.1.1(a) music-streaming bullet merged into the
+  external-purchase-link entitlement bullet. DPLA updated 2026-10-13.
+- **Siri AI developer preview** (2026-11-03): App Intents based, in the iOS 27.3 betas; App Store submission for it opens in
+  spring 2027 per Apple; not available in the EU. Check the Siri AI developer preview docs before building on it.
 - **Foundation Models**: on-device LLM API (`LanguageModelSession`, iOS 26+). iOS 27 adds the `LanguageModel` protocol
   (plug any model), `PrivateCloudComputeLanguageModel`, image input. The model changes with OS updates: re-test prompts.
 - **GitHub Actions**: `macos-26` / `macos-26-arm64` images carry Xcode 26.x; Xcode 27 is on the `xcode-27` image label
-  (preview as of 2026-10). `macos-14` images are unsupported from 2026-11-02.
+  (still "preview" on 2026-11-19; the macos-26-arm64 image of 2026-11-02 has Xcode 26.6 default, up to 26.0.1). `macos-14` images
+  retired from GitHub Actions and ADO arm64 2026-11-02 (ADO Intel 2026-11-23; actions/runner-images #13518); use `macos-26` or `macos-15`.
 
 ## What changed / stop doing
 | Old advice | Do instead | Since |
@@ -255,11 +269,13 @@ struct EditItem: View { @Bindable var model: ItemModel   /* $model.name bindings
 - [ ] No CocoaPods-only dependencies left without an SPM path (trunk read-only 2026-12-02).
 
 ## Sources
-- https://developer.apple.com/news/upcoming-requirements/ : SDK minimum (Xcode 26 since 2026-04-28), iOS 13+ target, age rating deadline; accessed 2026-10-09
-- https://developer.apple.com/news/ : Sep 9 2026 submissions open + April 2027 iOS 27 SDK minimum; Texas age assurance (2026-06-03); social media age questions (2026-07-09); EU ATT alt prompt; Sign in with Apple domain; iPhone Duo; accessed 2026-10-09
+- https://developer.apple.com/news/upcoming-requirements/ : SDK minimum (Xcode 26 since 2026-04-28), iOS 13+ target (2026-09-09), age rating deadline; no newer entry; accessed 2026-11-19
+- https://developer.apple.com/news/ : Oct 16 guidelines update, Oct 13 DPLA, Nov 2 age-rating declarations (due 2027-01-12), Nov 3 Siri AI preview, Sep 9 submissions + April 2027 SDK minimum, EU ATT alt prompt, iPhone Duo; accessed 2026-11-19
+- https://developer.apple.com/app-store/review/guidelines/ : 2.3.14, 2.5.19, 4.8, 5.1.1(v), 5.1.2(i), 3.1.1(a) wording; accessed 2026-11-19
 - https://developer.apple.com/documentation/xcode-release-notes/xcode-27-release-notes : Swift 6.4, SDKs, macOS 26.6, Apple silicon only, ODR deprecated, ld64 removed; accessed 2026-10-09
-- https://developer.apple.com/news/releases/ : Xcode 27 release 2026-09-14, iOS 27.2 beta 3 and Xcode 27.1 RC 2026-10-05; accessed 2026-10-09
+- https://developer.apple.com/news/releases/ : Xcode 27 (09-14), 27.1 (10-15), 27.2 (10-29); iOS 27.2.1 (11-09); 27.3 betas (11-16/19); accessed 2026-11-19
 - https://developer.apple.com/xcode/ : Xcode 27 features (coding intelligence, Swift Testing + XCTest); accessed 2026-10-09
+- https://www.swift.org/blog/ : latest posts (6.4 on 2026-09-15; no 6.4.x or 6.5 post as of Nov 11 digest); accessed 2026-11-19
 - https://www.swift.org/blog/swift-6.4-released/ : Swift 6.4 features and date; accessed 2026-10-09
 - https://www.swift.org/blog/swift-6.3-released/ : Swift 6.3 date (2026-03-24), @c, Android SDK; accessed 2026-10-09
 - https://www.swift.org/blog/swift-6.2-released/ : approachable concurrency, @concurrent, InlineArray/Span, Swift Testing exit tests; accessed 2026-10-09
@@ -275,6 +291,8 @@ struct EditItem: View { @Bindable var model: ItemModel   /* $model.name bindings
 - https://developer.apple.com/app-store/review/guidelines/ : 5.1.1(v), 5.1.2(i), 4.7, 1.2, 3.1.1(a); accessed 2026-10-09
 - https://developer.apple.com/help/app-store-connect/manage-app-accessibility/overview-of-accessibility-nutrition-labels : labels voluntary, later required; accessed 2026-10-09
 - https://developer.apple.com/xcode-cloud/ : 25 free compute hours/month; accessed 2026-10-09
-- https://blog.cocoapods.org/CocoaPods-Specs-Repo/ : trunk read-only 2026-12-02, test run Nov 1-7; accessed 2026-10-09
-- https://github.com/actions/runner-images (images/macos, issue #14404) : macos-26 Xcode 26.x, xcode-27 label preview, macos-14 end 2026-11-02; accessed 2026-10-09
+- https://blog.cocoapods.org/CocoaPods-Specs-Repo/ : trunk read-only 2026-12-02, test run Nov 2-6 (corrected from Nov 1-7); accessed 2026-11-19
+- https://github.com/actions/runner-images : labels (macos-26, macos-15, xcode-27 preview), macos-14 retired 2026-11-02; accessed 2026-11-19
+- https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md : image 20261102 has Xcode 26.6 default; accessed 2026-11-19
+- Fact-check pass 2026-11-19: developer.apple.com/news/releases (iPadOS 26.7.3 only, no iPhone 26.7 entry), /news (2.3.14/2.5.19 titles only, age-rating 2027-01-12, Texas 2026-06-04, April 2027 SDK), blog.cocoapods.org (2026-12-02), actions/runner-images #13518 (macos-14 retired 2026-11-02, ADO Intel 2026-11-23); Xcode 27 requirements and Duo claim could not be re-read (marked unverified).
 - Apple doc JSON for deprecations (NavigationView/foregroundColor/cornerRadius deprecated 27.2 SDK, UIScreen.main iOS 26, SKPaymentQueue iOS 18, onChange(of:perform:) iOS 17); accessed 2026-10-09

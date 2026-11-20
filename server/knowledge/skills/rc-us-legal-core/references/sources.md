@@ -1,4 +1,4 @@
-# Official sources by level, and how to get the version in force on a date (checked 2026-10-10)
+# Official sources by level, and how to get the version in force on a date (checked 2026-10-10; statute, eCFR and rule-schedule items rechecked 2026-11-19)
 
 Use the official source first. A free finder (CourtListener, Google Scholar, Cornell LII, Justia) is fine for locating text; confirm
 anything you cite against the official version when one exists, and say which one you used.
@@ -6,7 +6,7 @@ anything you cite against the official version when one exists, and say which on
 ## Federal
 | Need | Official source | Notes |
 |---|---|---|
-| Statutes (current) | uscode.house.gov (Office of the Law Revision Counsel) | Up on 2026-10-10 (current through Pub. L. 119-118) after a brief maintenance notice; fall back to govinfo when it is down. Positive-law titles are legal evidence of the law; other titles are only prima facie evidence and the Statutes at Large govern (govinfo help page). |
+| Statutes (current) | uscode.house.gov (Office of the Law Revision Counsel) | Current through Pub. L. 119-118 on 2026-10-10; did not load for the fetch tool on 2026-11-19 (release point unverified); fall back to govinfo when it is down. Positive-law titles are legal evidence of the law; other titles are only prima facie evidence and the Statutes at Large govern (govinfo help page). |
 | Statutes (historical) | govinfo.gov US Code collection (1994 to present, annual editions + supplements); uscode.house.gov "prior release points" | Before 1994: Statutes at Large and print editions (law library, HeinOnline (paid)). Read the public law that amended the section and its effective-date note. |
 | Public laws, bills, legislative history | congress.gov; govinfo.gov (Statutes at Large, public laws) | A bill is not law. Check "became public law" and the enacted text. congress.gov blocked automated fetches on 2026-10-10 (open it in a browser). |
 | Regulations (current) | ecfr.gov | Unofficial editorial compilation, current within about two business days (Office of the Federal Register). |
@@ -26,7 +26,7 @@ anything you cite against the official version when one exists, and say which on
 ## North Carolina
 | Need | Source | Notes |
 |---|---|---|
-| General Statutes | ncleg.gov, Laws, General Statutes | Showed "changes through S.L. 2026-30" on 2026-10-10; links to law changes not yet reflected; Statutes Archive for prior versions; site carries a not-official caveat. |
+| General Statutes | ncleg.gov, Laws, General Statutes | Showed "changes through S.L. 2026-40" on 2026-11-19; links to law changes not yet reflected; Statutes Archive for prior versions; site carries a not-official caveat. |
 | Session Laws | ncleg.gov, Session Laws | The enacted text and its effective-date section decide timing. |
 | Court rules, opinions, forms | nccourts.gov | HTML pages blocked automated fetches on 2026-10-10 (the rule PDFs under /assets/inline-files/ did download); open in a browser. Appellate rules: the official codified PDF from the Supreme Court's rules page. Unpublished Court of Appeals opinions: N.C. R. App. P. 30(e)(3) (not controlling; citation disfavored except preclusion or law of the case; allowed with a served copy when no published opinion serves as well; text read in the 2023-03-01 codification, re-check the current one). |
 

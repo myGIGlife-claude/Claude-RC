@@ -3,7 +3,7 @@ name: rc-dev-playbook
 kind: process
 description: How to approach any software task like a senior engineer - understand first, read existing code, pick the right rc-* skills for the project type, privacy-first and minimal-dependency defaults, root-cause debugging, production-quality definition of done, honest verification. Use at the start of any build, fix, refactor, review or deploy task.
 ---
-# Senior engineering playbook (process, not facts)
+# Senior engineering playbook (process, not facts) (as of 2026-11)
 
 > This skill is about judgment and workflow. The facts (versions, APIs, deadlines) live in the topic skills it points to; those are dated, so confirm anything volatile on the primary source before relying on it.
 
@@ -28,7 +28,27 @@ Look at the files, then read the matching skill(s) before writing code (they are
 | `pom.xml`, `build.gradle(.kts)` with Java/Spring | rc-java |
 | `AndroidManifest.xml`, `build.gradle.kts` with `com.android.*`, Compose | rc-android (+ rc-ui-ux-design) |
 | `*.xcodeproj`, `Package.swift`, `*.swift`, `Info.plist`, `project.yml` | rc-ios (+ rc-ui-ux-design) |
-| An API, auth flow, database schema, queue, Dockerfile, deploy pipeline | rc-web-backend (+ rc-web-security-perf) |
+| An API, auth flow, queue, Dockerfile, deploy pipeline | rc-web-backend (+ rc-web-security-perf) |
+| SQL, schema, migrations, ORM, Postgres/MySQL/SQLite/Redis | rc-databases |
+| `*.kt`, `build.gradle.kts` (non-Android), Kotlin Multiplatform | rc-kotlin |
+| `build.sbt`, `*.scala` | rc-scala |
+| `*.csproj`, `*.cs`, `global.json` | rc-csharp-dotnet |
+| `Cargo.toml`, `*.rs` | rc-rust |
+| `CMakeLists.txt`, `*.c/*.cpp/*.h`, Makefile for C | rc-c-cpp |
+| `Gemfile`, `*.rb`, Rails | rc-ruby-rails |
+| `pubspec.yaml`, `*.dart`, Flutter | rc-dart-flutter |
+| `mix.exs`, `*.ex/*.exs`, `rebar.config` | rc-elixir-erlang |
+| `*.sh`, bash/POSIX scripts, CI shell steps | rc-shell-scripting |
+| React Native, Expo, Capacitor, Tauri, KMP, multi-platform choice | rc-cross-platform |
+| `*.wasm`, WebGPU/WebGL, image/audio/video/data file formats | rc-wasm-graphics-formats |
+| VPS, systemd, Docker Compose, Terraform, Caddy/Nginx, backups | rc-devops-linux |
+| AWS/Azure/GCP/Cloudflare/Vercel/Fly choices, `wrangler.toml`, `*.tf` | rc-cloud-platforms |
+| Design reviews, threat models, audits, compliance, secrets/crypto | rc-security-engineering |
+| System design, ADRs, service boundaries, scaling, event-driven design | rc-architecture-systems |
+| Flaky tests, test strategy, hard bugs, profiling | rc-testing-debugging |
+| User-facing prose: emails, UI copy, docs, release notes | rc-american-english-writing |
+| Privacy policy, terms, EULA, refund or store-listing policy text | rc-us-platform-policy-law (via rc-us-legal-core) |
+| Legal research or drafting (contracts, entities, filings, vehicles/carriers, child support) | rc-us-legal-core first; it routes to rc-us-business-law, rc-us-litigation-procedure, rc-us-motor-vehicle-carrier-law, rc-ohio-child-support |
 | Anything user-facing | rc-ui-ux-design |
 | Anything that handles credentials, user data, uploads, payments, or the network | rc-web-security-perf |
 

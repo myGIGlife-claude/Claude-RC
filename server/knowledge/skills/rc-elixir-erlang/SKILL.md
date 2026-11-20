@@ -2,14 +2,18 @@
 name: rc-elixir-erlang
 description: "Current Elixir (1.20) and Erlang/OTP (27-29) practice: BEAM processes, OTP behaviours, supervision, Phoenix 1.8, LiveView 1.x, Ecto, Oban, Req/Finch, Bandit, releases, clustering, telemetry, ExUnit/Mox, Credo/Dialyzer, Sobelow. Use when writing or reviewing *.ex, *.exs, *.heex, *.erl, mix.exs, rebar.config, config/runtime.exs, Dockerfiles for releases, or when advice might be Distillery/HTTPoison/pre-1.0 LiveView era."
 ---
-# Elixir and Erlang/OTP  (as of 2026-10)
+# Elixir and Erlang/OTP  (as of 2026-11)
 
 > Facts are dated (see Sources). Confirm the primary source before pinning a version. Anything marked (unverified) is a lead, not a fact.
 
 ## Currency check
-- **Elixir 1.20** (released 2026-06-03; latest patches 1.20.4 / 1.19.6 / 1.18.5 on 2026-08-28). Support: 1.20 gets bug fixes + security;
+- **Elixir 1.20** (released 2026-06-03; latest patches **1.20.5 / 1.19.7 / 1.18.6 on 2026-10-29**; 1.20.5 has security fixes: `URI.parse` port limit,
+  JSON integers beyond float64 range now raise, `mix deps.partition` validation). Support: 1.20 gets bug fixes + security;
   1.16-1.19 get security patches only. A new minor arrives roughly every 6 months (1.19 was 2025-10-16).
-- **Erlang/OTP 29** (29.0 2026-05-13; latest 29.1.1 2026-09-22). OTP supports the **last 3 majors**: 29, 28 (28.5.0.7), 27 (27.3.4.18). OTP 26 and older: no fixes.
+- **Erlang/OTP 29** (29.0 2026-05-13; latest **29.1.2 2026-10-14**). OTP supports the **last 3 majors**: 29, 28 (**28.5.0.8**), 27 (**27.3.4.19**). OTP 26 and older: no fixes.
+  29.1.2 fixes several security issues: ssl (CVE-2026-105236: session resumption across different SNI names; CVE-2026-94200: malicious TLS 1.3 NewSessionTicket crashes clients),
+  public_key (CVE-2026-42789: v1/v2 X.509 certs no longer accepted as CA), inets (credentials sent to cross-origin redirects, CVE-2026-48856), `erl_tar` endless loop. Earlier 2026 fixes (patched in
+  29.0.2 / 28.5.0.2 / 27.3.4.13): TLS distribution auth relying on IP (CVE-2026-48860), sftpd path disclosure (CVE-2026-48855). Patch OTP, not just deps.
 - Compatibility: Elixir 1.20 needs OTP 27-29; 1.19 needs OTP 26-28 (28.1+ for 28); 1.18 needs OTP 25-27.
 - What shipped in the last ~18 months:
   - **Elixir 1.20**: "gradually typed language": every program is type-checked by inference (set-theoretic types, `dynamic()`), no annotations;
@@ -26,10 +30,13 @@ description: "Current Elixir (1.20) and Erlang/OTP (27-29) practice: BEAM proces
   - **OTP 28**: priority messages (`alias([priority])`), strict generators `<:-`, zip generators `&&`, `erlang:hibernate/0`, PCRE2 regex
     (stricter: some old regexes now fail to compile), TLS 1.3 15-25% faster, `-nominal` types.
   - **OTP 27**: `json` module, `proc_lib:set_label/1`, triple-quoted strings and sigils, `-doc` attributes, `maybe` on by default, `tprof`, `trace` sessions.
-- Ecosystem (hex.pm, 2026-10-09): Phoenix **1.8.15** (1.8.0 2025-08-05); LiveView **1.2.12** (1.2.0 2026-06-10, 1.1.0 2025-07-30, 1.0.0 2024-12-03);
-  Ecto 3.14.2 / ecto_sql 3.14.0; Postgrex 0.22.4; Oban 2.24.1; Req 0.7.5 (0.8.0-rc.0 out); Finch 0.24.0; Mint 1.11.0; Bandit 1.12.5;
-  Plug 1.20.3; Credo 1.7.19; Dialyxir 1.4.8; Sobelow 0.16.0; Mox 1.3.2; StreamData 1.4.0; Broadway 1.3.0; libcluster 3.5.0 (2025-01);
-  Igniter 0.8.4; Nerves 1.15.0 (2.0 in pre-release); Gleam 1.19.1 (2026-10-07).
+- Ecosystem (hex.pm, 2026-11-19): Phoenix **1.8.16** (2026-10-20; 1.8.0 2025-08-05); LiveView **1.2.13** (2026-10-20; 1.2.0 2026-06-10, 1.1.0 2025-07-30, 1.0.0 2024-12-03);
+  Ecto 3.14.3 (2026-11-04) / ecto_sql 3.14.0; Postgrex 0.22.4; Oban 2.24.2; Req 0.7.5 (0.8.0-rc.0 out); Finch 0.25.0; Mint 1.11.0; Bandit 1.15.0;
+  Plug 1.20.4; Credo 1.7.19; Dialyxir 1.4.9; Sobelow 0.19.0; Mox 1.3.2; StreamData 1.4.0; Broadway 1.3.1; libcluster 3.6.0;
+  Igniter 0.8.5; Nerves 1.15.1 (2.0.0-pre.10 pre-release); Gleam 1.19.2 (2026-10-12).
+- Advisories 2026 (update promptly): Phoenix longpoll DoS, CVE-2026-32689 (2026-05-05; fixed 1.7.22 / 1.8.6; LiveView's `/live` socket enables longpoll by default,
+  or set `longpoll: false`). LiveView open redirect via tab/LF/CR in `redirect/2` targets (and `push_patch/2` before 0.7.0), EEF-CVE-2026-64941 (2026-08-10; fixed 1.0.19 / 1.1.33 / 1.2.9).
+  Oban Web: a read-only user could change a job's worker (missing authorization in `save-job`), CVE-2026-48592 (2026-05-26; affects 2.12.0-2.12.4, fixed oban_web 2.12.5).
 
 ### Older versions (legacy projects)
 - Stay inside the project's existing Elixir/OTP pins (`.tool-versions`, `mix.exs` `elixir:`); do not upgrade unless asked.
@@ -207,13 +214,19 @@ Supervisor.start_link(children, strategy: :one_for_one, name: MyApp.Supervisor)
 - [ ] Previous release kept for rollback; clustering cookie from secret; distribution not exposed publicly.
 
 ## Sources
-- https://elixir.hexdocs.pm/compatibility-and-deprecations.html : support levels, Elixir/OTP compatibility, deprecations 1.18-1.20 (accessed 2026-10-09)
-- https://github.com/elixir-lang/elixir/releases : 1.20.4/1.19.6/1.18.5 patches 2026-08-28 (2026-10-09)
+- https://elixir.hexdocs.pm/compatibility-and-deprecations.html : support levels, Elixir/OTP compatibility, deprecations 1.18-1.20 (accessed 2026-11-19)
+- https://github.com/elixir-lang/elixir/releases : 1.20.5/1.19.7/1.18.6 patches 2026-10-29 and their security fixes (2026-11-19)
+- https://osv.dev/vulnerability/EEF-CVE-2026-64941 : LiveView open redirect, fixed 1.0.19/1.1.33/1.2.9 (2026-11-19)
+- https://osv.dev/vulnerability/EEF-CVE-2026-32689 : Phoenix longpoll DoS, fixed 1.7.22/1.8.6 (2026-11-19)
+- https://elixirforum.com/t/patch-package-otp-29-1-2-released/77046 : OTP 29.1.2 (2026-10-14) security fixes (2026-11-19)
+- https://osv.dev/vulnerability/CVE-2026-48592 : oban_web CVE-2026-48592, affected 2.12.0-2.12.4, fixed 2.12.5, published 2026-05-26 (primary advisory data, 2026-11-19)
+- https://osv.dev/vulnerability/CVE-2026-48856 , CVE-2026-42789, CVE-2026-48860, CVE-2026-48855 : OTP advisories (2026-11-19)
+- https://github.com/erlang/otp/releases/tag/OTP-29.1.2 : 29.1.2 on 2026-10-14, ssl/public_key/inets/erl_tar fixes (2026-11-19)
 - https://elixir-lang.org/blog/2026/06/03/elixir-v1-20-0-released/ : gradual typing, dynamic(), module_definition option (2026-10-09)
 - https://elixir-lang.org/blog/2025/10/16/elixir-v1-19-0-released/ : protocol/fn type checking, MIX_OS_DEPS_COMPILE_PARTITION_COUNT, OTP 28.1+ (2026-10-09)
 - https://elixir-lang.org/blog/2024/12/19/elixir-v1-18-0-released/ : JSON module, parameterized tests, format --migrate (2026-10-09)
 - https://elixir-lang.org/blog/2024/06/12/elixir-v1-17-0-released/ : Duration, shift, to_timeout, Process.set_label (2026-10-09)
-- https://www.erlang.org/downloads : latest 29.1.1, 28.5.0.7, 27.3.4.18 (2026-10-09)
+- https://www.erlang.org/downloads : latest 29.1.2, 28.5.0.8, 27.3.4.19 (2026-11-19)
 - https://github.com/erlang/otp/releases : OTP 29.0 2026-05-13, 28.0 2025-05-21, 27.0 2024-05-20, patches 2026-09-22 (2026-10-09)
 - https://github.com/erlang/otp/blob/master/SECURITY.md : last 3 OTP releases supported (2026-10-09)
 - https://www.erlang.org/blog/highlights-otp-29/ : native records, PQ TLS default, SSH daemon defaults, warnings (2026-10-09)
@@ -226,7 +239,7 @@ Supervisor.start_link(children, strategy: :one_for_one, name: MyApp.Supervisor)
 - https://raw.githubusercontent.com/elixir-ecto/ecto/master/CHANGELOG.md : Repo.transact, all_by, 3.14 features (2026-10-09)
 - https://raw.githubusercontent.com/oban-bg/oban/main/CHANGELOG.md : Oban 2.24 unified config, Oban.Cron rename (2026-10-09)
 - https://raw.githubusercontent.com/wojtekmach/req/main/CHANGELOG.md : Req 0.6 security fixes, 0.7 adapters, 0.8-rc redesign (2026-10-09)
-- https://hex.pm/api/packages/<name> : current versions/dates of all listed packages (2026-10-09)
-- https://api.github.com/repos/gleam-lang/gleam/releases/latest : Gleam v1.19.1, 2026-10-07 (2026-10-09)
+- https://hex.pm/api/packages/<name> : current versions/dates of all listed packages (2026-11-19)
+- https://api.github.com/repos/gleam-lang/gleam/releases/latest : Gleam v1.19.2, 2026-10-12 (2026-11-19)
 - https://raw.githubusercontent.com/phoenixframework/phoenix_live_view/v1.0/CHANGELOG.md : phx-feedback-for removed 1.0.0-rc.0, live_patch/live_redirect deprecated 0.20.0 (2026-10-10)
 - https://docs.fly.io/elixir/getting-started : `fly launch` Phoenix detection, rel/env.sh.eex (2026-10-10)

@@ -1,55 +1,57 @@
 ---
 name: rc-php
-description: Current PHP standards (PHP 8.2-8.5, 8.6 in RC), Composer 2.10, PER-CS, PHPStan/Psalm/Rector, PHPUnit/Pest, Laravel 13, Symfony 8/7.4 LTS, FrankenPHP/Octane, PDO, PHP security and WordPress. Use when writing, reviewing or upgrading any .php file, composer.json, phpunit.xml, phpstan.neon, Blade/Twig templates, WordPress themes/plugins, or when choosing a PHP version, framework or host.
+description: Current PHP standards (PHP 8.2-8.6), Composer 2.11, PER-CS, PHPStan/Psalm/Rector, PHPUnit/Pest, Laravel 13, Symfony 8/7.4 LTS, FrankenPHP/Octane, PDO, PHP security and WordPress. Use when writing, reviewing or upgrading any .php file, composer.json, phpunit.xml, phpstan.neon, Blade/Twig templates, WordPress themes/plugins, or when choosing a PHP version, framework or host.
 ---
-# PHP (as of 2026-10)
+# PHP (as of 2026-11)
 
 > Facts here are dated (see Sources). Versions, deadlines and policies move: confirm the primary source before pinning a version or promising a date. Anything marked (unverified) is a lead, not a fact.
 
 ## Currency check
-Verified 2026-10-09 on php.net, packagist.org and project sites.
+Verified 2026-11-19 on php.net, packagist.org and project sites.
 
 | Branch | Released | Active support until | Security until | Status now |
 |---|---|---|---|---|
 | 8.1 and older | - | - | ended 2025-12-31 | EOL: do not deploy |
-| 8.2 | 2022-12-08 | 2024-12-31 | **2026-12-31** | security-only, EOL in ~3 months |
+| 8.2 | 2022-12-08 | 2024-12-31 | **2026-12-31** | security-only, EOL in ~6 weeks |
 | 8.3 | 2023-11-23 | 2025-12-31 | 2027-12-31 | security-only |
 | 8.4 | 2024-11-21 | 2026-12-31 | 2028-12-31 | active |
 | 8.5 | 2025-11-20 | 2027-12-31 | 2029-12-31 | active, **default for new projects** |
-| 8.6 | GA planned 2026-11-19 | | | RC3 out 2026-10-08; not for production |
+| 8.6 | 2026-11-19 | 2028-12-31 | 2030-12-31 | GA today; wait for a few patch releases and framework/host support before production |
 
-Latest patches (2026-09-24 security release): 8.5.11, 8.4.26, 8.3.35, 8.2.34. Policy: 2 years active + 2 years security.
+Latest patches (2026-11-19, all security releases): 8.6.0, 8.5.13, 8.4.28, 8.3.37, 8.2.36. Policy: 2 years active + 2 years security.
+**Patch now**: 8.5.13 and siblings fix many CVEs (session-file/serializer RCE, FPM use-after-free and request smuggling, Phar OpenSSL signature bypass, Date/DOM/SOAP memory bugs); the 2026-10 releases (8.5.12, 8.4.27, 8.3.36, 8.2.35) fixed two critical state-corruption bugs in Core (GHSA ids only, no CVE listed). Temporary mitigation php.net gave for the October issue: `session.upload_progress.enabled = 0` in php.ini (not `ini_set`/`.user.ini`), then restart workers. Not a substitute for updating.
 
 What shipped recently (details per version in `references/versions.md`):
 - **8.4** (2024-11): property hooks, asymmetric visibility (`public private(set)`), lazy objects, `#[\Deprecated]`, `array_find/_key/any/all`, `new Foo()->bar()` without parens, `Dom\HTMLDocument` (HTML5), `BcMath\Number`, `Pdo\Mysql`/`Pdo\Sqlite` subclasses, `mb_trim`/`mb_ucfirst`, new IR-based JIT, bcrypt default cost 10 -> 12.
 - **8.5** (2025-11): pipe operator `|>`, URI extension (`Uri\Rfc3986\Uri`, `Uri\WhatWg\Url`), clone-with `clone($obj, ['prop' => $v])`, `#[\NoDiscard]`, `array_first()`/`array_last()`, closures and first-class callables in constant expressions, fatal-error backtraces, `#[\Override]` on properties, final promoted properties, persistent cURL share handles.
-- **8.6** (RC, may still change): partial function application, `clamp()`, readonly properties with defaults, safer session cookie defaults (`use_strict_mode=1`, `cookie_httponly=1`, `cookie_samesite=Lax`), URI builders.
+- **8.6** (2026-11-19): partial function application (`f(?, 1)`, `f(...)` for the rest), `clamp()`, readonly properties with default values, `\Time\Duration`, `SortDirection` enum, `Io\Poll` stream polling API, stream exceptions (`StreamException`, `StreamErrorMode`), `Uri\Rfc3986\UriBuilder`/`Uri\WhatWg\UrlBuilder`, `mysqli::quote_string()`, `ZipArchive::openString()`, `#[\Override]` on class constants/enum cases, sodium ML-KEM-768/X-Wing, stricter session defaults (`use_strict_mode=1`, `cookie_httponly=1`, `cookie_samesite=Lax`). Details and deprecations in `references/versions.md`.
 
-Tooling and frameworks, latest stable on Packagist (2026-10-09):
+Tooling and frameworks, latest stable on Packagist unless noted (2026-11-19):
 
 | Thing | Version | Notes |
 |---|---|---|
-| Composer | 2.10.3 (2026-08-27) | 2.10 (2026-05-28) added `policy` config; malware blocking on by default |
-| Laravel | 13.x (13.0 on 2026-03-17) | PHP 8.3-8.5; security fixes to 2028-03-17. L12 security ends 2027-02-24 |
-| Symfony | 8.1 (stable, PHP >= 8.4); **7.4 LTS** (bugs to 2028-11, security to 2029-11); 6.4 security to 2027-11 | 8.2 due 2026-11 |
-| PHPUnit | 13.4 (13.0 on 2026-02-06, PHP >= 8.4) | 12 = PHP >= 8.3, bugfixes to 2027-02-05; 11 out of bugfix support |
-| Pest | 5.3 (PHP >= 8.4, PHPUnit 13) | 5.0 at Laracon US 2026: test impact analysis |
-| PHPStan | 2.3.1 | levels 0-10 (`max` = 10) |
-| Psalm | 6.20 (7.0 in RC) | |
-| Rector | 2.7 | |
-| PHP-CS-Fixer | 3.95 | Pint 1.32 (Laravel wrapper) |
-| PHP_CodeSniffer | 4.0 | WPCS 3.4 for WordPress |
-| Infection | 0.35 | mutation testing |
-| Doctrine ORM | 3.7 | Twig 3.30 |
-| Slim | 4.15 | CodeIgniter 4.7 (PHP >= 8.2) |
-| Laminas MVC | 3.8, **security-only until 2028-12-31** | Mezzio and Laminas components still active |
-| FrankenPHP | 1.13 (2026-10-04) | worker mode, Caddy-based |
-| WordPress | 7.1 (2026-08) | supports PHP 7.4-8.5 |
+| Composer | 2.11.2 (2026-11-10) | 2.11.0 (2026-10-29): cooldown policy (config key `config.policy.cooldown.period`, e.g. `"7 days"`, default null = off; also `policy.cooldown.block`/`ignore`, env `COMPOSER_POLICY_COOLDOWN_PERIOD`; getcomposer.org config docs, introduction version not stated there), `audit --direct` (unverified), `strict-psr-autoloader` config; `source-fallback` removed. 2.10 (2026-05-28) added `policy` config |
+| Laravel | 13.43 (13.0 on 2026-03-17) | PHP 8.3-8.5; bug fixes to Q3 2027, security to 2028-03-17. L12: bug fixes ended 2026-08-13, security to 2027-02-24 |
+| Symfony | 8.1.11 (PHP >= 8.4, bugs+security to 2027-01); **7.4 LTS** 7.4.23 (bugs to 2028-11, security to 2029-11); 6.4.50 (bugs to 2026-11, security to 2027-11); 8.0 EOL | 8.2 due 2026-11 (beta2 seen 2026-11-19), PHP >= 8.4 |
+| PHPUnit | 13.4.8 (13.0 on 2026-02-06, PHP >= 8.4, bugfix to 2028-02-04) | 12.5 = PHP >= 8.3, bugfixes to 2027-02-05; 11 in life support only; PHPUnit 14 planned 2027-02-05 |
+| Pest | 5.3.7 (PHP >= 8.4, PHPUnit 13) | 5.0 at Laracon US 2026: test impact analysis |
+| PHPStan | 2.3.7 | levels 0-10 (`max` = 10) |
+| Psalm | 7.11 (7.0.0 stable 2026-11-02; Packagist only) | 6.x still exists |
+| Rector | 2.8.5 | |
+| PHP-CS-Fixer | 3.95.32 | Pint 1.32.3 (Laravel wrapper) |
+| PHP_CodeSniffer | 4.0.4 | WPCS 3.4 for WordPress (not re-checked) |
+| Infection | 0.35.12 | mutation testing |
+| Doctrine ORM | 3.8.0 | Twig 3.30.0 (4.0 alpha only) |
+| Slim | 4.15.3 | CodeIgniter 4.7.6 (PHP >= 8.2, not re-checked) |
+| Laminas MVC | 3.8.0, **security-only until 2028-12-31** | Mezzio and Laminas components still active |
+| FrankenPHP | 1.13.6 (2026-11-19) | worker mode, Caddy-based; has PHP 8.6 compatibility work |
+| WordPress | 7.1.5 (7.1 in 2026-08) | supports PHP 7.4-8.5; 8.6 not listed yet |
 
 ## What changed / stop doing
 | Old / outdated | Do instead | Since |
 |---|---|---|
 | Running PHP 8.1 or older, or "PHP 7 is fine" | 8.4 or 8.5; plan off 8.2 before 2026-12-31 | 8.1 EOL 2025-12-31 |
+| `spl_object_hash()`, `is_double/is_long/is_integer/doubleval`, `mb_ereg*`/`mb_split`, `metaphone()`, `let`/`is`/`_` as class/function names | `spl_object_id()`, `is_float/is_int/floatval`, `preg_*` with `/u`; rename identifiers | deprecated 8.6 |
 | `mysql_*` functions | PDO with prepared statements (or mysqli prepared) | removed in 7.0 |
 | String-built SQL, `addslashes`, `mysql_real_escape_string` | bound parameters | always |
 | Dynamic properties on plain classes | declare properties; `#[\AllowDynamicProperties]` only for legacy | deprecated 8.2 |
@@ -110,7 +112,7 @@ Only `public/` is the web root. Everything else is outside it.
 - `config.platform.php` = the LOWEST production PHP, so the lock never pulls packages needing newer PHP.
 - Deploy: `composer install --no-dev --classmap-authoritative --no-interaction` (or `--optimize-autoloader`, plus `--apcu-autoloader` if APCu exists).
 - `allow-plugins` defaults to nothing allowed: whitelist each plugin by name; never `"allow-plugins": true`.
-- `composer audit` in CI (exit 1 on findings). By default `composer update`/`require` refuse versions with security advisories (since 2.9; `policy.advisories.block` since 2.10), and versions flagged as malware are also blocked on `composer install` (`policy.malware.block`, 2.10). `composer install` from an existing lock does NOT block advisories: keep `composer audit` in CI. Ignore a specific advisory with `policy.advisories.ignore-id`, with a comment why.
+- `composer audit` in CI (exit 1 on findings). By default `composer update`/`require` refuse versions with security advisories (since 2.9; `policy.advisories.block` since 2.10), and versions flagged as malware are also blocked on `composer install` (`policy.malware.block`, 2.10). `composer install` from an existing lock does NOT block advisories: keep `composer audit` in CI. Ignore a specific advisory with `policy.advisories.ignore-id`, with a comment why. Composer 2.11 adds a cooldown policy (hold back brand-new releases for a set period); check `getcomposer.org/doc/06-config.md` for the exact key before using it.
 - `composer validate --strict`, `composer dump-autoload --strict-psr` in CI. `secure-http` stays `true`.
 
 **Modern class (8.4/8.5)**
@@ -167,7 +169,7 @@ $st->execute(['id' => $id]);
 - Eloquent: kill N+1 with `with()`/`load()`; call `Model::preventLazyLoading(! app()->isProduction())` in a service provider. Doctrine: fetch joins / `addSelect`, watch the Symfony profiler query count.
 - Schema changes only through migrations (Laravel migrations, Doctrine Migrations); never edit a migration that has run in production; make destructive changes in two deploys (expand, then contract).
 
-**Frameworks: what to pick (2026-10)**
+**Frameworks: what to pick (2026-11)**
 - Laravel 13 (PHP >= 8.3): slim skeleton (`bootstrap/app.php` holds middleware/exception config, no HTTP Kernel since L11), starter kits for React/Vue/Svelte/Livewire, controller attributes `#[Middleware]`, `#[Authorize]`, CSRF middleware now `PreventRequestForgery` (origin-aware + token), `Queue::route()`, first-party AI SDK, JSON:API resources.
 - Symfony: new apps on 8.1 (PHP >= 8.4) if you will follow minors every 6 months; 7.4 LTS if you upgrade every few years.
 - Slim 4 / Mezzio for small PSR-7/15 services. CodeIgniter 4.7 for simple hosting-friendly apps. Laminas MVC: do not start new projects (security-only).
@@ -181,7 +183,7 @@ $st->execute(['id' => $id]);
 - **File uploads**: check `$_FILES[...]['error']`, size limit, detect type with `finfo` (not the client MIME or extension), generate your own filename, store outside the web root or in object storage, serve via a controller with `Content-Disposition`, never execute (no `.php` in upload dirs; deny in web server config).
 - **SSRF**: user-supplied URLs fetched by Guzzle/cURL/`file_get_contents`: parse with `Uri\WhatWg\Url`, allow-list scheme + host, resolve DNS and reject private/loopback/link-local/metadata IPs (169.254.169.254), disable redirects or re-check each hop. `allow_url_include=Off` always.
 - **Command injection**: `escapeshellarg` is a last resort; prefer `proc_open(['cmd', $arg])` (array form, no shell) or Symfony Process with an array.
-- **Sessions**: `session.use_strict_mode=1`, `cookie_httponly=1`, `cookie_secure=1`, `cookie_samesite=Lax`, `use_only_cookies=1`; `session_regenerate_id(true)` after login and privilege change. (8.6 makes the first three defaults; set them explicitly until then.)
+- **Sessions**: `session.use_strict_mode=1`, `cookie_httponly=1`, `cookie_secure=1`, `cookie_samesite=Lax`, `use_only_cookies=1`; `session_regenerate_id(true)` after login and privilege change. (8.6 makes strict mode, HttpOnly and SameSite=Lax the defaults, not Secure; set all explicitly so older versions behave the same.)
 - **php.ini (production)**: `display_errors=Off`, `log_errors=On`, `expose_php=Off`, `allow_url_include=Off`, `error_reporting=E_ALL`, sensible `upload_max_filesize`/`post_max_size`/`memory_limit`, `open_basedir` on shared hosts. `disable_functions` is defence in depth, not a sandbox. (`disable_classes` was removed in 8.5.)
 - **Dependencies**: `composer audit` in CI plus Dependabot/Renovate; `roave/security-advisories` as a dev conflict guard is optional now that Composer blocks advisories on update.
 - **Secrets**: from env / secret manager, never in the repo; `.env` must not be web-reachable (only `public/` is the docroot). Laravel `APP_DEBUG=false` in production (debug pages leak env).
@@ -199,15 +201,15 @@ $st->execute(['id' => $id]);
 ## Testing & tooling
 - Tests: PHPUnit 12 (PHP 8.3) / 13 (PHP 8.4+), or Pest 4 (PHPUnit 12) / Pest 5 (PHP 8.4, PHPUnit 13). Use attributes (`#[Test]`, `#[DataProvider]`, `#[CoversClass]`): docblock annotations were removed in PHPUnit 12.
 - `createStub()` when you only need return values, `createMock()` only when verifying calls (PHPUnit 13 adds opt-in `seal()` for doubles and hard-deprecates `any()`).
-- Static analysis: PHPStan 2.x (Larastan for Laravel, phpstan-symfony/doctrine extensions) or Psalm 6. One is enough.
+- Static analysis: PHPStan 2.x (Larastan for Laravel, phpstan-symfony/doctrine extensions) or Psalm (7.x current, 6.x older). One is enough.
 - Refactoring/upgrades: Rector 2.x (`withPhpSets(php85: true)`, `withPreparedSets(deadCode: true, typeDeclarations: true)`); run in CI with `--dry-run`.
 - Formatting: PHP-CS-Fixer with `@PER-CS` (+ the matching `@PHPxxMigration` set) or Laravel Pint (preset `laravel` or `per`). PHPCS 4 + WPCS 3 for WordPress.
 - Mutation: Infection on the domain layer (`--min-msi`).
-- CI order: `composer validate` -> `composer install` -> `composer audit` -> cs check -> PHPStan -> tests with coverage -> (Rector dry-run). Matrix the PHP versions you support (e.g. 8.4, 8.5; add 8.6 as allowed-failure until GA).
+- CI order: `composer validate` -> `composer install` -> `composer audit` -> cs check -> PHPStan -> tests with coverage -> (Rector dry-run). Matrix the PHP versions you support (e.g. 8.4, 8.5; add 8.6 as allowed-failure until your dependencies and host support it).
 - Local env: Docker (official `php:8.5-fpm` images), Laravel Herd/Sail, Symfony CLI, or `php -S` for tiny things. WordPress: `wp-env` or WordPress Playground.
 
 ## WordPress (concise)
-- WP 7.1 (2026-08) runs on PHP 7.4-8.5; run 8.4/8.5 anyway. Plugins should still declare `Requires PHP` honestly.
+- WP 7.1 (2026-08; 7.1.5 current) runs on PHP 7.4-8.5 (8.6 not listed yet); run 8.4/8.5 anyway. Plugins should still declare `Requires PHP` honestly.
 - Block themes: `theme.json` (schema version 3 since WP 6.6; check for newer (unverified)) for settings/styles, HTML templates in `templates/` and `parts/`, patterns in `patterns/`. Avoid new classic-theme PHP template hierarchies for new themes.
 - Blocks: `block.json` + `@wordpress/scripts`; `register_block_type( __DIR__ . '/build/my-block' )`. Front-end interactivity via the Interactivity API (`data-wp-interactive`, `@wordpress/interactivity` store) instead of jQuery.
 - Security: escape late (`esc_html`, `esc_attr`, `esc_url`, `wp_kses_post`), sanitize early (`sanitize_text_field`, `absint`), nonces for intent AND `current_user_can()` for permission (a nonce is not authorization), `$wpdb->prepare()` for every query, REST routes need a real `permission_callback` (never `__return_true` on writes).
@@ -224,7 +226,7 @@ $st->execute(['id' => $id]);
 - Generating PHP 7-era code: no types, no `strict_types`, `array()` syntax, `isset($a[$k]) ? $a[$k] : null` instead of `??`, `switch` instead of `match`, docblock types instead of native ones.
 - `function f(Type $x = null)`: deprecated (8.4). Write `?Type $x = null`.
 - Inventing APIs: there is no `array_find_index()` (it is `array_find_key()`), no `str_contains_any()`, no `Uri\Url` (it is `Uri\WhatWg\Url` or `Uri\Rfc3986\Uri`), no `array_first()` before 8.5, no `clamp()` before 8.6.
-- Pipe operator misuse: `$x |> str_replace(' ', '-', ...)` is not valid in 8.5 (partial application is 8.6, RC); wrap multi-arg calls in `(fn($s) => ...)` with parentheses.
+- Pipe operator misuse: `$x |> str_replace(' ', '-', ...)` is not valid in 8.5 (partial application only exists from 8.6, with `?` placeholders); on 8.5 wrap multi-arg calls in `(fn($s) => ...)` with parentheses.
 - Property hooks on `readonly` properties (not allowed) or expecting hooks to work with `public private(set)` + `readonly` the same way: check the RFC rules; readonly props are implicitly `protected(set)` since 8.4.
 - PHPUnit `@test`/`@dataProvider` annotations: ignored since PHPUnit 12. `withConsecutive()`: removed in PHPUnit 10.
 - Laravel: editing `app/Http/Kernel.php` or `app/Console/Kernel.php` (gone since L11), recommending Breeze/Jetstream (no longer updated), `$guarded = []`, `env()` outside config files (null after `config:cache`).
@@ -233,7 +235,7 @@ $st->execute(['id' => $id]);
 - `$_SERVER['HTTP_X_FORWARDED_FOR']` trusted as client IP without a trusted-proxy list.
 - Catching `Exception` but not `Error` (`TypeError`, `ValueError`) - catch `\Throwable` at the top boundary only.
 - `composer update` in deploy scripts; `"minimum-stability": "dev"` without `prefer-stable`.
-- `mb_*` assumptions: set `default_charset=UTF-8`; use `mb_str_pad` (8.3) and `mb_trim` (8.4) instead of byte functions for user text; `mbregex` is deprecated in 8.6 (RC) - prefer `preg_*` with `/u`.
+- `mb_*` assumptions: set `default_charset=UTF-8`; use `mb_str_pad` (8.3) and `mb_trim` (8.4) instead of byte functions for user text; `mbregex` is deprecated in 8.6 (removal planned for 9.0) - prefer `preg_*` with `/u`.
 
 ## Before you ship
 - [ ] PHP 8.4 or 8.5 in production; `composer.json` `require.php` and `config.platform.php` match it.
@@ -247,24 +249,26 @@ $st->execute(['id' => $id]);
 - [ ] OPcache enabled and sized; worker mode (if used) tested for state leaks.
 
 ## Sources
-- https://www.php.net/supported-versions.php - branch support/EOL dates - 2026-10-09
-- https://www.php.net/ - latest patch releases, 8.6 RC schedule - 2026-10-09
-- https://wiki.php.net/todo/php86 - 8.6 GA target 2026-11-19 - 2026-10-09
-- https://github.com/php/php-src/blob/php-8.6.0RC3/UPGRADING - 8.6 changes (RC) - 2026-10-09
+- https://www.php.net/supported-versions.php - branch support/EOL dates incl. 8.6 - 2026-11-19
+- https://www.php.net/ and https://www.php.net/releases/index.php?json&max=3 - latest patch releases, Oct/Nov 2026 security releases, interim mitigation - 2026-11-19
+- https://www.php.net/ChangeLog-8.php - 8.5.12/8.5.13 security fixes (GHSA/CVE ids) - 2026-11-19
+- https://www.php.net/releases/8.6/en.php - 8.6 features and deprecation summary - 2026-11-19
+- https://www.php.net/manual/en/migration86.deprecated.php and https://www.php.net/manual/en/migration86.incompatible.php - 8.6 deprecations and BC breaks - 2026-11-19
 - https://www.php.net/releases/8.5/en.php - 8.5 features - 2026-10-09
 - https://www.php.net/manual/en/migration85.deprecated.php - 8.5 deprecations - 2026-10-09
 - https://www.php.net/releases/8.4/en.php - 8.4 features/deprecations - 2026-10-09
 - https://www.php.net/manual/en/migration84.deprecated.php - 8.4 deprecations - 2026-10-09
 - https://www.php.net/manual/en/function.password-hash.php - bcrypt cost 12 since 8.4, 72-byte limit - 2026-10-09
 - https://getcomposer.org/doc/06-config.md - policy, allow-plugins, platform, autoloader options - 2026-10-09
-- https://github.com/composer/composer/releases - Composer 2.10.x dates and features - 2026-10-09
-- https://repo.packagist.org/p2/<vendor>/<package>.json - latest stable versions of all tools/frameworks in the table - 2026-10-09
-- https://laravel.com/docs/13.x/releases - Laravel 13 date, PHP range, features, support table - 2026-10-09
-- https://symfony.com/releases - Symfony 8.1 / 7.4 LTS / 6.4 support dates - 2026-10-09
-- https://phpunit.de/supported-versions.html and https://phpunit.de/announcements/phpunit-13.html - PHPUnit support and 13 changes - 2026-10-09
-- https://pestphp.com/docs/installation and https://pestphp.com/docs/pest5-now-available - Pest 5 requirements - 2026-10-09
-- https://www.php-fig.org/per/coding-style/ - PER-CS 3.1 replaces PSR-12; covers hooks, set-visibility, pipe - 2026-10-09
+- https://github.com/composer/composer/releases - Composer 2.10/2.11.x dates and features - 2026-11-19
+- https://repo.packagist.org/p2/<vendor>/<package>.json - latest stable versions of all tools/frameworks in the table - 2026-11-19
+- https://laravel.com/docs/13.x/releases - Laravel 13 date, PHP range, features, support table - 2026-11-19
+- https://symfony.com/releases - Symfony 8.1 / 7.4 LTS / 6.4 / 8.2 dates - 2026-11-19
+- https://phpunit.de/supported-versions.html - PHPUnit support table - 2026-11-19
+- https://pestphp.com/docs/installation - Pest 5 requires PHP 8.4+ - 2026-11-19
+- https://www.php-fig.org/per/coding-style/ - PER-CS 3.1 current - 2026-11-19
+- https://github.com/php/frankenphp/releases - FrankenPHP 1.13.6, PHP 8.6 work - 2026-11-19
 - https://getlaminas.org/blog/2026-03-06-laminas-mvc-eol-schedule.html - Laminas MVC security-only to 2028-12-31 - 2026-10-09
 - https://frankenphp.dev/docs/worker/ - worker mode, MAX_REQUESTS, state gotchas - 2026-10-09
-- https://make.wordpress.org/core/handbook/references/php-compatibility-and-wordpress-versions/ - WP 7.1 PHP 7.4-8.5 - 2026-10-09
-- https://api.wordpress.org/core/version-check/1.7/ - current WordPress version - 2026-10-09
+- https://make.wordpress.org/core/handbook/references/php-compatibility-and-wordpress-versions/ - WP 7.1 PHP 7.4-8.5 - 2026-11-19
+- https://api.wordpress.org/core/version-check/1.7/ - current WordPress version 7.1.5 - 2026-11-19

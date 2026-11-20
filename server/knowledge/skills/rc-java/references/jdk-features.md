@@ -1,4 +1,5 @@
-# JDK 21 to 28: what shipped, by release (verified on openjdk.org, 2026-10-09)
+# JDK 21 to 28: what shipped, by release (verified on openjdk.org, 2026-10-09; openjdk.org returned 403 on 2026-11-19; JDK 27 JEP list re-checked on InfoQ and JDK 28 GA date 2027-03-23 on the openjdk GitHub build config, 2026-11-19)
+Update 2026-11: Oracle CPU 2026-10-20 shipped 27.0.1, 25.0.5, 21.0.13, 17.0.21 (press-reported, unverified). JDK 28 may finalize structured concurrency (JEP 543) and add lazy constants (unverified, from a news roundup): keep treating both as preview until the JDK 28 GA notes say otherwise.
 
 Status legend: FINAL = permanent feature; PREVIEW = needs `--enable-preview` (compile and run) and may change; INCUBATOR = `--add-modules jdk.incubator.*`; EXP = experimental VM flag.
 
@@ -11,7 +12,7 @@ Status legend: FINAL = permanent feature; PREVIEW = needs `--enable-preview` (co
 | 25 | 2025-09-16 | LTS | 2030-09 / 2033-09 | 2031-09 |
 | 26 | 2026-03-17 | feature | ended 2026-09 | ended (superseded) |
 | 27 | 2026-09-15 | feature (current) | until 2027-03 | 2027-03 |
-| 28 | 2027-03 (planned) | feature (EA builds now) | until 2027-09 | - |
+| 28 | 2027-03-23 (build config) | feature (EA builds now) | until 2027-09 | - |
 | 29 | 2027-09 (planned) | next LTS | 2032-09 / 2035-09 | - |
 
 Non-LTS releases get updates for 6 months only: never run production on 26 now.

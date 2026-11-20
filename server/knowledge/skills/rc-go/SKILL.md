@@ -2,16 +2,16 @@
 name: rc-go
 description: Current Go (1.26/1.27) language, stdlib, modules/toolchain, concurrency, testing, tooling, web, security and deployment practice. Use when writing, reviewing or upgrading Go code (*.go, go.mod, go.work, .golangci.yml), Go HTTP services, CLIs, tests/benchmarks, Dockerfiles for Go, or when advice might be GOPATH-era or pre-generics.
 ---
-# Go  (as of 2026-10)
+# Go  (as of 2026-11)
 
 > Facts here are dated (see Sources). Versions, deadlines and policies move: confirm the primary source before pinning a version or promising a date. Anything marked (unverified) is a lead, not a fact.
 
 ## Currency check
-- **Supported: Go 1.27 and Go 1.26.** Policy: a major is supported until two newer majors ship. Latest: go1.27.2 and go1.26.9 (both 2026-10-08).
+- **Supported: Go 1.27 and Go 1.26.** Policy: a major is supported until two newer majors ship. Latest: go1.27.4 and go1.26.11 (both 2026-11-10, security fixes to cgo, go command, compiler, linker, net/http).
   Go 1.25 (last patch go1.25.14, 2026-08-19) and older get no security fixes. Next major (1.28) expected ~2027-02 (unverified; cadence is Feb/Aug).
 - Release dates: 1.27 2026-08-19, 1.26 2026-02-10, 1.25 2025-08-12, 1.24 2025-02-11.
 - Per-release details: `references/releases.md`. Headline items of the last ~20 months:
-  - **1.27**: generic methods; `encoding/json/v2` + `jsontext` GA (v1 `encoding/json` now runs on the v2 engine; `GOEXPERIMENT=nojsonv2` opts out); new `uuid` package (`uuid.NewV7()`); `crypto/mldsa`;
+  - **1.27**: generic methods; new `encoding/json/v2` + `jsontext` (v1 `encoding/json` now runs on the v2 engine; `GOEXPERIMENT=nojsonv2` opts out); new `uuid` package (`uuid.NewV7()`); `crypto/mldsa`;
     `goroutineleak` pprof profile GA; `strings.CutLast`; `synctest.Sleep`; `httptest.NewTestServer`.
   - **1.26**: Green Tea GC default (10-40% less GC overhead); `new(expr)`; `go fix` = modernizers; `errors.AsType[T]`;
     `slog.NewMultiHandler`; PQ hybrid TLS key exchange default; crypto/* ignore caller `rand` args.
@@ -21,8 +21,8 @@ description: Current Go (1.26/1.27) language, stdlib, modules/toolchain, concurr
     `testing.B.Loop`; `T.Context`; `omitzero`; FIPS 140-3 module; `crypto/mlkem|hkdf|pbkdf2|sha3`.
 - Still-current older baselines: 1.21 `min/max/clear`, `slog`, `slices`, `maps`, `cmp`, toolchain lines; 1.22 per-iteration loop vars,
   `range n`, `math/rand/v2`, ServeMux method+wildcard routing; 1.23 range-over-func, `iter`, `unique`.
-- Ecosystem (verify before pinning): golangci-lint v2.14.0 (2026-09-24); Fiber v3.0.0 GA 2026-02-02 (needs Go 1.25+);
-  Echo v5.4.0 and v4.16.0 both released 2026-09-27; gorilla/mux not archived, last push 2024-08-15.
+- Ecosystem (verify before pinning): golangci-lint v2.15.0 (2026-10-16); Fiber v3.7.0 (2026-11-09; v3.6.0 notes say Go 1.26 required; v3.0.0 GA was 2026-02-02);
+  Echo v5.4.6 and v4.16.5 (2026-11-15; v5.4.6 fixes proxy middleware allowing a client to strip X-Forwarded-Proto); gorilla/mux not archived, last push 2024-08-15.
 
 ## What changed / stop doing
 | Old | New | Since |
@@ -70,10 +70,10 @@ tool (
     golang.org/x/vuln/cmd/govulncheck
 )
 ```
-- `go` line = minimum requirement (enforced since 1.21; older toolchains refuse the module). `toolchain go1.27.2` = preferred toolchain,
+- `go` line = minimum requirement (enforced since 1.21; older toolchains refuse the module). `toolchain go1.27.4` = preferred toolchain,
   only add it in apps when you need a newer compiler than the `go` line. Since 1.25 `go get` no longer adds it automatically.
 - `GOTOOLCHAIN=auto` (default) downloads the needed toolchain via the proxy; CI images that must not download: `GOTOOLCHAIN=local`.
-- Upgrade: `go get go@1.27.2 && go mod tidy && go fix ./...` (modernizers rewrite old idioms), then run tests with `-race`.
+- Upgrade: `go get go@1.27.4 && go mod tidy && go fix ./...` (modernizers rewrite old idioms), then run tests with `-race`.
 - Workspaces (`go work init ./a ./b`) for local multi-module dev; usually do not commit `go.work` for libraries.
 - Private modules: `GOPRIVATE=example.com/org/*` (implies no proxy/sumdb); auth via `.netrc` or git `insteadOf`. Never disable `GOSUMDB` globally.
 - Vendoring (`go mod vendor`) only if builds must be hermetic offline; otherwise rely on the module proxy + `go.sum`.
@@ -177,7 +177,7 @@ ENTRYPOINT ["/app"]
   No `math/rand` for secrets, no MD5/SHA-1 for security, no RSA PKCS#1 v1.5 encryption.
 - **TLS**: defaults are good (TLS 1.2 min for clients, 1.3 preferred, PQ hybrid `X25519MLKEM768` on). Do not set `InsecureSkipVerify`,
   do not hand-pick cipher suites; set `MinVersion: tls.VersionTLS13` for internal services.
-- **FIPS 140-3**: build with `GOFIPS140=certified` (v1.0.0 has CMVP cert #5247; v1.26.0 was "in process" as of 2026-04-28) or
+- **FIPS 140-3**: build with `GOFIPS140=certified` (v1.0.0 has CMVP cert #5247; v1.26.0 now has cert #5581, shipped from Go 1.26.12 / 1.27.5 / 1.28, per go.dev 2026-11-19) or
   `latest`, and/or run with `GODEBUG=fips140=on` (`only` is for testing). Check `crypto/fips140.Enabled()`.
   Native Go Cryptographic Module; no BoringCrypto/cgo needed anymore.
 - Secrets never in logs: implement `slog.LogValuer` on secret-bearing types to redact.
@@ -234,19 +234,19 @@ ENTRYPOINT ["/app"]
 - [ ] Static `CGO_ENABLED=0 -trimpath` build on distroless/scratch, non-root; `GOMEMLIMIT` set.
 
 ## Sources
-- https://go.dev/doc/devel/release : release dates, latest patches, support policy (accessed 2026-10-09)
-- https://go.dev/doc/go1.27 : generic methods, json/v2 GA, uuid, mldsa, goroutineleak, removed GODEBUGs (2026-10-09)
+- https://go.dev/doc/devel/release : release dates, latest patches (go1.27.4, go1.26.11 on 2026-11-10), support policy (accessed 2026-11-19)
+- https://go.dev/doc/go1.27 : generic methods, json/v2 packages, uuid, mldsa, goroutineleak, nojsonv2 (re-checked 2026-11-19)
 - https://pkg.go.dev/uuid : uuid package API (New, NewV4, NewV7, Parse) (2026-10-09)
 - https://go.dev/doc/go1.26 : Green Tea default, new(expr), go fix modernizers, errors.AsType, crypto changes (2026-10-09)
 - https://go.dev/doc/go1.25 : container GOMAXPROCS, synctest, WaitGroup.Go, CrossOriginProtection, os.Root methods, nil-check fix (2026-10-09)
 - https://go.dev/doc/go1.24 : type aliases, tool directive, swiss maps, os.Root, weak, B.Loop, omitzero, FIPS 140-3, rand.Seed no-op (2026-10-09)
 - https://go.dev/doc/go1.23 and https://go.dev/doc/go1.22 : iterators/unique; loopvar, ServeMux patterns, math/rand/v2 (from release notes; not re-fetched, 2026-10-09)
-- https://go.dev/doc/security/fips140 : GOFIPS140 values, fips140 GODEBUG, certified module versions (2026-10-09)
+- https://go.dev/doc/security/fips140 : GOFIPS140 values, fips140 GODEBUG, certified module versions, v1.26.0 cert #5581 (2026-11-19)
 - https://pkg.go.dev/net/http#CrossOriginProtection : constructor and methods (2026-10-09)
 - https://go.dev/doc/toolchain : go/toolchain lines, GOTOOLCHAIN (2026-10-09)
 - https://golangci-lint.run/docs/product/migration-guide/ : v2 config, migrate command, merged staticcheck (2026-10-09)
-- https://github.com/golangci/golangci-lint/releases : v2.14.0, 2026-09-24 (2026-10-09)
-- https://github.com/gofiber/fiber/releases/tag/v3.0.0 : Fiber v3 GA 2026-02-02, requires Go 1.25 (2026-10-09)
-- https://github.com/labstack/echo/releases : Echo v5.4.0 / v4.16.0 (2026-10-09)
+- https://github.com/golangci/golangci-lint/releases : v2.15.0, 2026-10-16 (2026-11-19)
+- https://github.com/gofiber/fiber/releases : Fiber v3.7.0 (11-09), Go 1.26 required per v3.6.0 notes (2026-11-19)
+- https://github.com/labstack/echo/releases : Echo v5.4.6 / v4.16.5 (2026-11-19)
 - https://go.dev/doc/pgo : PGO 2-14% (as of Go 1.22), default.pgo (2026-10-09)
 - https://github.com/gorilla/mux : repo not archived, last push 2024-08-15 (GitHub API, 2026-10-09)

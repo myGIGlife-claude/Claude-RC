@@ -1,4 +1,4 @@
-# Debugging and profiling toolbox (as of 2026-10)
+# Debugging and profiling toolbox (as of 2026-11)
 
 Commands are minimal starting points; check `--help` on the installed version. Bind every debug port to localhost.
 
@@ -19,7 +19,7 @@ Commands are minimal starting points; check `--help` on the installed version. B
 ## Python
 - `breakpoint()` (honours `PYTHONBREAKPOINT`), `python -m pdb -c continue script.py` for post-mortem, `pytest --pdb` / `--lf -x`.
 - 3.14+: `python -m pdb -p PID` attaches to a live process; `python -m asyncio ps PID` / `pstree PID` show stuck tasks.
-- 3.15+: `python -m profiling.sampling run script.py` or `attach PID` (flame graph, Firefox Profiler output); `cProfile` remains.
+- 3.15+: `python -m profiling.sampling run script.py` or `attach PID` (flame graph, Firefox Profiler output); `profiling.sampling dump PID` prints one snapshot of all threads (`--async-aware` for asyncio tasks); `cProfile` remains (now also under `profiling`; `profile` is deprecated for removal in 3.17).
 - Older: `py-spy top --pid PID`, `py-spy dump --pid PID` (stacks of all threads, finds deadlocks), `py-spy record -o out.svg`.
 - Memory: `memray run` + `memray flamegraph`, `tracemalloc` snapshots compared over time. Faulthandler: `python -X faulthandler` for segfault stacks.
 - Remote/IDE: debugpy (VS Code). Disable remote attach in hardened prod: `PYTHON_DISABLE_REMOTE_DEBUG=1`.
@@ -27,7 +27,7 @@ Commands are minimal starting points; check `--help` on the installed version. B
 ## Go
 - Delve: `dlv debug`, `dlv test ./pkg -- -test.run TestX`, `dlv attach PID`, `dlv core ./bin core`.
 - pprof: import `net/http/pprof` on an internal-only port; `go tool pprof -http=:0 http://127.0.0.1:6060/debug/pprof/profile?seconds=30`;
-  heap diff with `-base`; `goroutine?debug=2` for full stacks; 1.27 `goroutineleak` profile.
+  heap diff with `-base`; `goroutine?debug=2` for full stacks; 1.27 `goroutineleak` profile (GA, `/debug/pprof/goroutineleak`; misses leaks reachable via globals). `go tool trace -http` binds localhost only since 1.27.
 - Tracing: `go test -trace trace.out` + `go tool trace`; `runtime/trace.FlightRecorder` (1.25) keeps the last seconds in memory to dump on an anomaly.
 - Races: `go test -race`; timing bugs: `testing/synctest`. Crash: `GOTRACEBACK=all` (or `crash` for a core dump).
 

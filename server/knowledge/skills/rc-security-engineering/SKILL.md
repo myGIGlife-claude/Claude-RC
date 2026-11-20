@@ -2,7 +2,7 @@
 name: rc-security-engineering
 description: "Security engineering process and non-web surfaces: secure SDLC, threat modeling (STRIDE, LINDDUN, 30-minute method), ASVS 5/MASVS/SAMM, mobile app security, secrets/KMS, crypto and post-quantum, vuln triage (CVSS, EPSS, KEV, SBOM/VEX), SAST/DAST/SCA, cloud/container IAM, security.txt, incident response, GDPR/CCPA/HIPAA/PCI/COPPA basics, LLM/agent security. Use for design reviews, threat models, audits, compliance questions."
 ---
-# Security engineering, privacy and compliance  (as of 2026-10)
+# Security engineering, privacy and compliance  (as of 2026-11)
 
 > Facts here are dated (see Sources). Standards, laws and deadlines move: confirm the primary source before promising a date. Anything marked (unverified) is a lead, not a fact. Compliance notes are engineering guidance, not legal advice.
 
@@ -16,24 +16,25 @@ Process and non-web surfaces. Web recipes (headers, CSP, cookies, CSRF, XSS, SSR
 - **OWASP SAMM 2.2.0** (2026-07-06; 2.1.0 was 2024-09-18). **NIST SSDF** SP 800-218 v1.1 + SP 800-218A (generative AI profile). NIST CSF 2.0 (2024-02).
 - **OWASP Top 10 for LLM Apps 2025** (LLM01 Prompt Injection ... LLM10 Unbounded Consumption) and **OWASP Top 10 for Agentic
   Applications 2026** (released 2025-12-09: ASI01 Agent Goal Hijack, ASI02 Tool Misuse, ASI03 Identity and Privilege Abuse, ...).
-- **Post-quantum**: FIPS 203 ML-KEM, 204 ML-DSA, 205 SLH-DSA final 2024-08-13. FIPS 206 FN-DSA (Falcon) not final (no FIPS 206 on the
-  csrc FIPS list, 2026-10); HQC selected 2025-03-11 as backup KEM (NIST: draft ~1 year later, final 2027). NIST IR 8547 (deprecate 112-bit
-  RSA/ECC after 2030, disallow after 2035) is still the 2024-11-12 **initial public draft** on csrc.nist.gov as of 2026-10.
+- **Post-quantum**: FIPS 203 ML-KEM, 204 ML-DSA, 205 SLH-DSA final 2024-08-13. FIPS 206 FN-DSA (Falcon) not final (no FIPS 206 or 207 on the
+  csrc FIPS list, 2026-11-19; NIST SP 800-230 initial public draft, six extra SLH-DSA parameter sets capped at 2^24 signatures per key (not for general use), 2026-04-13, comments closed 2026-06-12: confirmed on csrc.nist.gov); HQC selected 2025-03-11 as backup KEM (NIST: draft ~1 year later, final 2027). **NIST IR 8547 is now FINAL (2026-10-27)**:
+  per secondary reports (full text not read) every approved quantum-vulnerable public-key algorithm (RSA, ECDSA, EdDSA, DH, ECDH) is deprecated after 2030 and disallowed after 2035, with no exemption for stronger key sizes (the 2024 draft only named 112-bit strength); hybrid modes are not meant to be hit by the 2035 cut (details unverified on the NIST text).
 - **Hybrid TLS key exchange X25519MLKEM768 is on by default** in OpenSSL 3.5 (2025-04-08, an LTS), Go 1.24+ (when `CurvePreferences` is nil;
   `GODEBUG=tlsmlkem=0` reverts), Chrome 131+, and all TLS 1.3 on iOS/macOS 26. CryptoKit on 26 adds ML-KEM, ML-DSA and X-Wing HPKE.
   JDK 24 (2025-03-18) adds ML-KEM/ML-DSA (JEP 496/497).
-- **Vuln data**: CVSS 4.0 (2023-11). EPSS v4 (2025-03-17). CISA KEV is the "exploited in the wild" list. The CVE program survived the
+- **Vuln data**: CVSS 4.0 (2023-11). EPSS v4 (2025-03-17). CISA KEV is the "exploited in the wild" list. **CISA BOD 26-04** (2026-06-10, federal civilian agencies only) replaced BOD 19-02 and BOD 22-01: remediation timelines by
+  exposure, KEV status and exploit automation instead of CVSS alone; a 3-day tier with forensic triage (other tier days not read: image table). Useful model for your own SLAs. The CVE program survived the
   2025 funding scare (CISA/MITRE contract renegotiated, reported 2026-03; budget details unconfirmed). NVD enrichment backlog persists: don't depend on NVD CVSS alone.
-- **SBOM**: CISA "2026 Minimum Elements for an SBOM" (2026-07, guidance, not a legal requirement) replaced the 2021 NTIA list; adds component hash, license, tool, generation context.
+- **SBOM**: CISA "2026 Minimum Elements for an SBOM" (PDF metadata 2026-07-28; CISA, FBI and international partners; guidance, not a legal requirement) updates the 2021 NTIA list; reported additions (component hash, license, tool, generation context) and "replaces NTIA" are (unverified: PDF body not readable).
 - **EU Cyber Resilience Act**: actively exploited vulns and severe incidents in products sold in the EU must be reported via ENISA's
-  Single Reporting Platform from **2026-09-11** (24 h early warning, 72 h notification); full obligations (SBOM, security updates,
+  Single Reporting Platform (live, initial capability, 2026-09-11) from **2026-09-11** (24 h early warning, 72 h notification); full obligations (SBOM, security updates,
   vulnerability handling) from **2027-12-11**. Open-source stewards have lighter duties (reporting from 2027-12-11).
-- **EU AI Act**: Digital Omnibus on AI (Reg. (EU) 2026/1744, per law-firm reports) in force 2026-07-27: Annex III high-risk duties moved to 2027-12-02, Annex I to 2028-08-02; Art. 50 transparency (tell users
+- **EU AI Act**: Digital Omnibus on AI (Reg. (EU) 2026/1744, published in the OJ 2026-07-24, per several law-firm reports) in force 2026-07-27: Annex III high-risk duties moved to 2027-12-02, Annex I to 2028-08-02; Art. 50 transparency (tell users
   they're talking to AI, label synthetic content) still from 2026-08-02.
 - **Privacy law**: COPPA amended rule full compliance **2026-04-22** (separate parental consent for third-party disclosure/ads, written
   retention limits, written security program). California CPPA rules effective 2026-01-01 (risk assessments now; ADMT duties 2027-01-01;
   cybersecurity audit certifications 2028-04-01 to 2030-04-01 by revenue). UK Data (Use and Access) Act 2025: DSAR search only "reasonable and proportionate"; mandatory complaints
-  procedure from 2026-06-19. HIPAA Security Rule overhaul still a **proposal** (NPRM 2025-01-06; final targeted 2027, unverified):
+  procedure from 2026-06-19. HIPAA Security Rule overhaul still a **proposal** (NPRM 2025-01-06; the 2026 Unified Agenda moved final action from May 2026 to July 2027 and to "long term actions", per law-firm reports of reginfo.gov; agency dates are not binding):
   the current rule applies. PCI DSS 4.0.1: all future-dated requirements mandatory since 2025-03-31 (incl. 6.4.3/11.6.1 payment-page scripts).
 - **Android 17** (stable 2026-06): `usesCleartextTraffic` slated for deprecation (use network security config), per-app Keystore key cap
   (50,000 when targeting 17, else 200,000), cross-profile loopback blocked, OTP SMS withheld from most apps for 3 h (use SMS Retriever/User
@@ -252,7 +253,7 @@ to notice any of these, and LLM agents with ambient permissions.
 - Logging full request/response bodies, tokens or emails "for debugging"; error messages that echo secrets.
 - IAM policies with `"Action": "*"`, Dockerfiles running as root with `ENV API_KEY=...`, `latest` image tags.
 - Citing outdated standards: ASVS 4 IDs, MASVS L1/L2/R, PCI DSS 3.2.1, OWASP LLM Top 10 2023 names, SafetyNet, "NIST requires password rotation".
-- Claims PQ is "not standardized yet" (FIPS 203-205 are final) or that RSA/ECC are already banned (IR 8547 is a draft with 2030/2035 targets).
+- Claims PQ is "not standardized yet" (FIPS 203-205 are final) or that RSA/ECC are already banned (IR 8547, final 2026-10-27, sets deprecate-after-2030 and disallow-after-2035 dates per secondary reports (unverified); nothing is banned today).
 - Says "anonymized" for hashed or tokenized personal data; treats a cookie banner as GDPR compliance.
 - LLM agents given a shared admin token, or tool calls executed without confirmation because "the system prompt says not to".
 
@@ -271,7 +272,13 @@ to notice any of these, and LLM agents with ambient permissions.
 - [ ] Rollback plan for security changes (key rotation, policy gates) so a bad rollout can be reverted without exposure
 
 ## Sources
-- https://github.com/OWASP/ASVS/releases - ASVS 5.0.0, 2025-05-30 (accessed 2026-10-09)
+- https://github.com/OWASP/ASVS/releases - ASVS 5.0.0 still latest stable (a rolling "bleeding edge" build exists, preview only) (accessed 2026-11-19)
+- https://github.com/OWASP/mastg/releases - MASTG 2.0.0 latest (2026-11-19)
+- https://csrc.nist.gov/publications/fips - FIPS 203-205 final; no FIPS 206/207 listed (2026-11-19)
+- https://csrc.nist.gov/projects/post-quantum-cryptography - PQC project page, updated 2026-10-27 (2026-11-19)
+- https://www.cisa.gov/news-events/directives/bod-26-04-prioritizing-security-updates-based-risk - BOD 26-04, 2026-06-10 (2026-11-19)
+- https://www.dwt.com/blogs/privacy--security-law-blog/2026/07/hhs-updates-hipaa-rulemaking-timeframes - HIPAA Security Rule final action July 2027 (lead, reports reginfo.gov) (2026-11-19)
+- https://www.whitecase.com/insight-alert/eu-ai-omnibus-enters-force-amending-ai-act - AI omnibus in force 2026-07-27 (lead) (2026-11-19)
 - https://github.com/OWASP/mastg/releases/tag/v2.0.0 - MASTG 2.0.0 (2026-10-09)
 - https://mas.owasp.org/MASVS/ - MASVS 2.1.0, MASVS-PRIVACY (2026-10-09)
 - https://github.com/OWASP/maswe/releases - MASWE 1.0.0, 2026-08-17 (2026-10-10)
@@ -283,13 +290,14 @@ to notice any of these, and LLM agents with ambient permissions.
 - https://csrc.nist.gov/projects/ssdf - SSDF 1.1, SP 800-218A (2026-10-09)
 - https://genai.owasp.org/llm-top-10/ - LLM Top 10 2025; https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/ - Agentic Top 10, 2025-12-09 (2026-10-10)
 - https://csrc.nist.gov/pubs/fips/203/final (and /204, /205) - PQC standards 2024-08-13 (2026-10-09)
-- https://csrc.nist.gov/pubs/ir/8547/ipd - IR 8547 still initial public draft (2026-10-09)
+- https://csrc.nist.gov/pubs/ir/8547/final - IR 8547 final 2026-10-27 (draft page says obsoleted by final); 2030/2035 dates via https://postquantum.com/security-pqc/nist-ir-8547-final/ (secondary) (2026-11-19)
+- https://csrc.nist.gov/pubs/sp/800/230/ipd - SP 800-230 IPD, 2026-04-13 (2026-11-19)
 - https://openssl-library.org/news/openssl-3.5-notes/ - OpenSSL 3.5 PQC, default hybrid keyshare (2026-10-09)
 - https://support.apple.com/en-us/122756 - iOS/macOS 26 X25519MLKEM768 by default (2026-10-09)
 - https://www.first.org/epss/ - EPSS v4 2025-03-17; https://www.cisa.gov/known-exploited-vulnerabilities-catalog - KEV (2026-10-09)
 - https://www.csoonline.com/article/4142600/cve-program-funding-secured-easing-fears-of-repeat-crisis.html - CVE contract renegotiated 2026-03 (lead; budget line unconfirmed) (2026-10-10)
 - https://www.cisa.gov/sites/default/files/2026-07/2026_cisa_sbom_minimum_elements_508c.pdf - SBOM minimum elements 2026 (2026-10-09)
-- https://www.enisa.europa.eu/news/the-cra-single-reporting-platform-is-launched - CRA reporting from 2026-09-11 (2026-10-09)
+- https://www.enisa.europa.eu/news/the-cra-single-reporting-platform-is-launched - SRP live 2026-09-11, manufacturer reporting from then, main CRA duties and OSS steward reporting 2027-12-11 (2026-11-19)
 - https://www.orrick.com/en/Insights/2026/07/EU-AI-Act-Update-Digital-Omnibus-Finalizes-8-Compliance-Changes - AI Act omnibus dates (lead) (2026-10-09)
 - https://developer.android.com/about/versions/17/behavior-changes-all - Android 17 security changes (2026-10-09)
 - https://developer.android.com/about/versions/16/behavior-changes-all - Android 16 intent redirection protection (2026-10-09)

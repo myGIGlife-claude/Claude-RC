@@ -1,14 +1,14 @@
-# Worker classification (as of 2026-10-10)
+# Worker classification (as of 2026-11-19)
 
 Classification is decided separately under each regime. Label used in a contract never controls; actual working relationship does.
 Tests change with administrations: check the agency page on the day.
 
 ## Federal
-| Regime | Test | Status 2026-10 |
+| Regime | Test | Status 2026-11 |
 |---|---|---|
-| FLSA (minimum wage, overtime) | Economic reality: is the worker economically dependent on the business or in business for themselves? | 2024 DOL rule (six factors, totality; eff. 2024-03-11) still codified; Field Assistance Bulletin 2025-1 (2025-05-01) stopped WHD from applying it in investigations. NPRM published 2026-02-27 (91 FR 9932): two core factors (control; opportunity for profit/loss) + skill, permanence, integral; also FMLA and MSPA. Comments closed 2026-04-28. No final rule in the Federal Register as of 2026-10-10. Courts use their circuit's test (4th Cir. for NC, 6th Cir. for OH) |
+| FLSA (minimum wage, overtime) | Economic reality: is the worker economically dependent on the business or in business for themselves? | **DOL announced a final rule 2026-11-19** (RIN 1235-AA46): rescinds the 2024 six-factor rule, adopts an economic-reality test with two core factors (control; opportunity for profit/loss), 14 examples, and applies it to FMLA and MSPA too. Effective 60 days after Federal Register publication; FR cite and date not found 2026-11-19 (unverified). Until then the 2024 text is still codified, but Field Assistance Bulletin 2025-1 (2025-05-01) stopped WHD from applying it in investigations. Predecessor NPRM: 91 FR 9932 (2026-02-27). Courts use their circuit's test (4th Cir. for NC, 6th Cir. for OH) |
 | Federal employment tax (IRS) | Common-law control: behavioral, financial, type of relationship; no single factor decides | IRS page updated 2026-05-19. Form SS-8 determination (6+ months). Section 530 relief (reasonable basis, consistent 1099 filing, consistent treatment). VCSP (Form 8952) to reclassify prospectively with reduced liability |
-| NLRA (union rights) | Common-law agency test; entrepreneurial opportunity weighed as one factor (is the worker running an independent business?) | *The Atlanta Opera, Inc.* (Board, 2023-06-13) restored the 2014 *FedEx Home Delivery* approach and overruled *SuperShuttle* (2019) (nlrb.gov news story, 2026-10-10). No later Board decision found as of 2026-10-10 (whether a later Board has revisited it: unverified; check nlrb.gov) |
+| NLRA (union rights) | Common-law agency test; entrepreneurial opportunity weighed as one factor (is the worker running an independent business?) | *The Atlanta Opera, Inc.* (Board, 2023-06-13) restored the 2014 *FedEx Home Delivery* approach and overruled *SuperShuttle* (2019) (nlrb.gov news story, 2026-10-10). nlrb.gov page (2026-11-19) mentions no later change; whether a later Board has revisited it: unverified, check nlrb.gov |
 | Title VII / ADA / ADEA | Common-law agency (control) | Contractors not covered; misclassified employees are |
 | ERISA / benefits | Common-law test | Plan eligibility terms matter |
 

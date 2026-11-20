@@ -1,8 +1,8 @@
 ---
 name: rc-us-litigation-procedure
-description: US litigation procedure as of 2026-10 (federal FRCP/FRAP/FRE, Ohio Civ.R./App.R./Sup.R., N.C. R. Civ. P./App. P.). Use to draft or check a complaint, answer, motion, motion to dismiss, summary judgment, default judgment, TRO, injunction, stay, notice of appeal, service of process, a deadline, e-filing, or a pro se filing. Rules, deadlines, evidence, templates.
+description: US litigation procedure as of 2026-11 (federal FRCP/FRAP/FRE, Ohio Civ.R./App.R./Sup.R., N.C. R. Civ. P./App. P.). Use to draft or check a complaint, answer, motion, motion to dismiss, summary judgment, default judgment, TRO, injunction, stay, notice of appeal, service of process, a deadline, e-filing, or a pro se filing. Rules, deadlines, evidence, templates.
 ---
-# US litigation procedure: federal, Ohio, North Carolina  (as of 2026-10)
+# US litigation procedure: federal, Ohio, North Carolina  (as of 2026-11)
 
 > Research and drafting support, not legal advice and not representation. Every rule below was read on the official text on the
 > date in Sources; rules change every July 1 (Ohio) and December 1 (federal). Anything marked (unverified) is a lead, not a fact.
@@ -19,11 +19,17 @@ Plain-English style for filings: **rc-american-english-writing**. Data protectio
   Bankruptcy 3002.1 and 8006 plus Chapter 13 mortgage forms. No FRE or Criminal changes in 2025.
 - **2026-12-01** (Supreme Court order 2026-04-08, sent to Congress): **FRE 801(d)(1)(A)** drops the "under penalty of perjury at a
   proceeding" condition, so a testifying witness's prior inconsistent statement becomes substantive evidence (still subject to
-  Rule 403). Also listed for 2026-12-01: FRAP Form 4; Bankruptcy 1007, 3018, 5009, 9006, 9014, 9017 and new 7043. No FRCP change.
-- In the pipeline (not law yet): **2027-12-01** proposals before the Judicial Conference in 2026-09 (Standing Committee report; the
-  uscourts page does not state the Conference's vote): FRCP 7.1, 26, 41, 45, 81; FRAP 15, 29, 32 and the length appendix; Criminal 17
-  (proposed FRE 609 change withdrawn). **2028-12-01** drafts published for comment 2026-08: FRCP 5, 5.2, 6, 55; FRAP 25; FRE 104, 902.
-  Content of these drafts (unverified here): read the uscourts "Pending" and "Proposed" pages before advising.
+  Rule 403). Also listed for 2026-12-01: FRAP Form 4; Bankruptcy 1007, 2007.1, 3001, 3018, 5009, 9006, 9014, 9017 and new 7043 (2007.1 and 3001 (unverified): only a search summary of the
+  2026-04-08 order lists them, not the uscourts list). No FRCP change.
+- Re-checked 2026-11-19: the uscourts pending page lists nothing for FRCP or Criminal on 2026-12-01. It lists Bankruptcy Official
+  Forms 101 and 106C under 2027, but a footnote says they take effect 2026-12-01.
+- In the pipeline (not law yet): **2027-12-01** package: the Standing Committee report to the Judicial Conference is dated 2026-09
+  (revised 2026-08-27) and the Rules Committee chair's transmittal to the Supreme Court is dated **2026-10-20**; it takes effect only if
+  the Court adopts it and sends it to Congress by 2027-05-01 and Congress does not act. No Court adoption order found as of
+  2026-11-19. Contents: FRCP 7.1, 26, 41, 45, 81; FRAP 15, 29, 32 and the length appendix; Criminal 17; Bankruptcy 2002. The proposed
+  FRE 609 change was withdrawn before the Conference's 2026-09 session. **2028-12-01** drafts published for comment **2026-08-14**
+  (comments due 2027-02-15): FRCP 5, 5.2, 6, 55; FRAP 25; Criminal 11, 32, 45, 49, 49.1; FRE 104, 902. Draft content (unverified
+  here): read the uscourts "Pending" and "Proposed" pages before advising.
 - Recent: FRE 107 (illustrative aids), 613(b), 801(d)(2), 804(b)(3), 1006 amended 2024-12-01. FRCP 6(a)(6) lists Juneteenth (2023).
 - Local layer: **N.D. Tex. LR 7.2(f)** (effective 2024-09-03) makes a brief prepared with generative AI say so on page 1 under a set
   heading; silence certifies no AI use. Dozens of individual judges have AI standing orders (law-firm trackers; counts unverified).
@@ -34,18 +40,22 @@ Plain-English style for filings: **rc-american-english-writing**. Data protectio
 **Ohio** (supremecourt.ohio.gov rules page, read 2026-10-10)
 - Civ.R., App.R., Juv.R. amended effective **2026-07-01**; Evid.R. last amended 2025-07-01 (Evid.R. 615); Sup.R. amended to 2026-08-06.
 - **Rules of Superintendence restructured 2026-07-01** and renumbered: public access Sup.R. 44-47 are now **Sup.R. 11.09-11.16**
-  (personal identifiers: old 45(D) is now **Sup.R. 11.13**; definition in 11.09(H)); local-rule filing old Sup.R. 5(B) is now
-  **Sup.R. 3.00**; magistrates old Sup.R. 19 is **4.20**; case time limits old 39 is **5.21**; records retention old 26 is
+  (personal identifiers: old 45(D) is now **Sup.R. 11.13**; definition in 11.09(H)); local-rule filing is now **Sup.R. 3.00**
+  (its old number is disputed between sources: unverified); magistrates old Sup.R. 19 is **4.20**; case time limits old 39 is **5.21**; records retention old 26 is
   **11.28**; GAL standards old 48 is **8.00+**. Old **Sup.R. 7** (journalizing judgment entries) moved into **Civ.R. 58(A)**
   (entry filed and journalized within 30 days absent good cause). Old Sup.R. 41(A) (continuances) moved into **Civ.R. 6(B)**.
   Probate Sup.R. 50+ became Civ.R. 73.1+. AI-in-interpreting rule old Sup.R. 87 is **Sup.R. 9.09**.
 - App.R. 2026 changes: service of the notice of appeal, delayed-appeal requests, clerk duties, reconsideration/en banc, forms.
+- Pending in Ohio (checked 2026-11-19 by search, rules page itself would not load): proposed Sup.R. 37-37.03, 39, 42 (comment closed
+  2026-07-13), Juv.R. 15, 16, 24, 25 and traffic rules (comment closed 2026-09-28); no 2027 Civ.R. or App.R. amendment found. Effective
+  dates of these proposals: unverified. Ohio rules normally take effect July 1.
 - R.C. 2505.02 (final orders) and R.C. 2323.52 (vexatious litigators): current versions effective 2025-04-09.
 
 **North Carolina** (ncleg.gov; nccourts.gov answers 403 to plain fetches, use a browser user-agent)
 - N.C. R. Civ. P. = G.S. 1A-1 (read on ncleg.gov 2026-10-10). N.C. R. App. P.: the **2025-09-02 codification** is current (Rule 36
   amended 2025-09-02; Rules 14, 15, 16 and appendixes 2025-04-01); read 2026-10-10 from nccourts.gov, whose rules page listed no later
-  amending order that day. Re-check the Supreme Court's orders page before relying on an appellate rule.
+  amending order that day. A 2026-11-19 search found no 2026 amending order (latest found: Rule 36, effective 2025-09-02; not
+  confirmed on the rules page itself). Re-check the Supreme Court's orders page before relying on an appellate rule.
 - **eCourts**: all 100 counties on Enterprise Justice (Odyssey) e-filing and case management **since 2025-10-13** (nccourts.gov
   eCourts page, archived 2026-04-15). File & Serve is the e-filing portal; Rule 5(b) now makes e-service through it the default.
 - Unsworn declarations: **G.S. 7A-98** (S.L. 2021-47) allows a declaration under penalty of perjury only for matters **filed
@@ -243,10 +253,17 @@ Adversarial review (directive 21) on every filing draft; any "no" means revise o
 - [ ] Final list for the person: what they must verify, sign, serve, file, and by when; recommend a licensed lawyer for high stakes.
 
 ## Sources
-Accessed 2026-10-10 unless noted.
-- https://www.uscourts.gov/forms-rules/current-rules-practice-procedure - federal rules in force, 2025-12-01 amendments
-- https://www.uscourts.gov/forms-rules/pending-rules-and-forms-amendments - 2026/2027/2028 pipeline
-- https://www.supremecourt.gov/orders/courtorders/frev26_da3i.pdf - FRE 801 order 2026-04-08, effective 2026-12-01
+Accessed 2026-10-10 unless noted; items marked 2026-11-19 were re-checked that day (other rule texts were not re-read).
+- https://www.uscourts.gov/forms-rules/current-rules-practice-procedure - federal rules in force, 2025-12-01 amendments (re-read 2026-11-19: no 2026-12-01 item listed)
+- https://www.uscourts.gov/forms-rules/pending-rules-and-forms-amendments - 2026/2027/2028 pipeline; Forms 101/106C footnote; Rule 609 withdrawal footnote (re-read 2026-11-19)
+- https://www.govinfo.gov/content/pkg/CDOC-119hdoc151/html/CDOC-119hdoc151.htm - Chief Justice transmittal dated 2026-04-08 (Evidence amendment), House Doc. 119-151 (read 2026-11-19)
+- https://www.supremecourt.gov/orders/courtorders/frbk26_o7jp.pdf - Bankruptcy order 2026-04-08 incl. Rules 2007.1 and 3001 (via search summary 2026-11-19; PDF unreadable)
+- https://www.uscourts.gov/sites/default/files/document/2026_scotus_package.pdf - 2026 Supreme Court package (found by search 2026-11-19; not opened)
+- https://www.uscourts.gov/sites/default/files/document/sept_2026_rules_report_and_attachments_final.pdf - Standing Committee report 2026-09 (search result 2026-11-19; not opened)
+- https://www.uscourts.gov/sites/default/files/document/preliminary_draft_of_proposed_amendments_-_august_2026.pdf - 2028 drafts for comment (search result 2026-11-19; not opened)
+- https://www.supremecourt.gov/orders/courtorders/frev26_da3i.pdf - FRE 801 order 2026-04-08, effective 2026-12-01 (2026-11-19: PDF unreadable here; 801 for 2026-12-01 confirmed on the uscourts pending page)
+- https://courtnewsohio.gov/happening/2026/PracticeAndProcedureRules_070126.asp - Ohio practice and procedure rules effective 2026-07-01 (search result 2026-11-19)
+- https://www.supremecourt.ohio.gov/ruleAmendments/ - Ohio pending proposals (search result 2026-11-19; page not opened)
 - https://www.law.cornell.edu/rules/frcp - FRCP 4, 5, 5.2, 6, 11, 12, 55, 56, 60, 62, 65 text (finder; matches official rules)
 - https://www.law.cornell.edu/rules/frap/rule_4 and /rule_8 - FRAP 4 and 8 text
 - https://www.law.cornell.edu/uscode/text/28/1746 , /1446 , /1654 - declarations, removal, self-representation

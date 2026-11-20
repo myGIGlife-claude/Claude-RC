@@ -1,4 +1,4 @@
-# SQL patterns (PostgreSQL syntax unless noted; as of 2026-10)
+# SQL patterns (PostgreSQL syntax unless noted; as of 2026-11)
 
 Own minimal examples. Test each on your engine/version; dialect notes inline.
 
@@ -63,7 +63,7 @@ INSERT INTO stock (tenant_id, sku, qty) VALUES ($1, $2, $3)
 ON CONFLICT (tenant_id, sku) DO UPDATE SET qty = stock.qty + EXCLUDED.qty
 RETURNING qty;
 ```
-- `DO NOTHING ... RETURNING` returns no row on conflict; PG 19 adds `ON CONFLICT DO SELECT ... RETURNING` for get-or-create.
+- `DO NOTHING ... RETURNING` returns no row on conflict; PG 19 (GA 2026-11-19) adds `ON CONFLICT DO SELECT ... RETURNING` for get-or-create.
 - MySQL 8.0.19+: `INSERT ... VALUES (...) AS new ON DUPLICATE KEY UPDATE qty = qty + new.qty` (the `VALUES(col)` function is deprecated). Beware: any unique key collision triggers the update, not only the one you meant.
 - SQLite 3.24+: `ON CONFLICT (...) DO UPDATE SET ... excluded.col`.
 - SQL Server: `MERGE` needs `WITH (HOLDLOCK)` to avoid duplicate-key races; the update-then-insert pattern under `UPDLOCK, SERIALIZABLE` is simpler.

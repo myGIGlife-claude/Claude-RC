@@ -1,4 +1,4 @@
-# Portability reference (as of 2026-10)
+# Portability reference (as of 2026-11)
 
 Items without a source in SKILL.md "Sources" are from long-standing tool behaviour; re-check with `man` on the target before relying on an edge case.
 

@@ -1,4 +1,4 @@
-# Accessibility as design, and dark-pattern law (as of 2026-10)
+# Accessibility as design, and dark-pattern law (as of 2026-11)
 
 ## WCAG 2.2 criteria new designs commonly fail
 | SC | Level | Design rule |
@@ -29,7 +29,7 @@ Mobile: same rules apply to native apps under EN 301 549 chapter 11 (EAA). Apple
 - In force for products/services placed on the market after **2025-06-28**. Covers e-commerce, consumer banking, e-books, transport ticketing/info, telecom, computers/OS, smartphones, self-service terminals, AV media access.
 - Transitional: service contracts agreed before 2025-06-28 may continue unchanged until 2030-06-28; self-service terminals in use may stay until end of useful life (max 20 years).
 - Micro-enterprises (<10 staff and ≤€2M turnover/balance) providing services are exempt.
-- Technical baseline: EN 301 549 v3.2.1 (WCAG 2.1 AA) is the cited harmonised standard; ETSI published v4.1.1 (WCAG 2.2 AA) on 2026-09-02, OJ citation pending (unverified). Also requires an accessibility statement/information about how the service meets requirements. Enforcement and penalties are national.
+- Technical baseline: EN 301 549 v3.2.1 (WCAG 2.1 AA) is the cited harmonised standard; ETSI/CEN/CENELEC published v4.1.1 (WCAG 2.2 AA) on 2026-09-02; no OJ citation found as of 2026-11-19 (a ~2026-11-30 forecast is unverified). Also requires an accessibility statement/information about how the service meets requirements. Enforcement and penalties are national.
 - Practical: WCAG 2.2 AA for web and native, accessible docs (PDF), accessible authentication and payment, support channels that are accessible.
 
 ## US
@@ -39,7 +39,7 @@ Mobile: same rules apply to native apps under EN 301 549 chapter 11 (EAA). Apple
 | Pattern | Do instead | Rules that bite |
 |---|---|---|
 | Cookie wall / reject hidden in second layer / pre-ticked | Accept and Reject equally prominent on first layer; granular, no pre-ticks; withdraw as easy as give | GDPR Art. 4(11), 7; ePrivacy; CJEU Planet49 (2019); EDPB guidelines 03/2022 on deceptive design; CNIL fines |
-| Roach motel (easy join, hard cancel) | Cancel online, same medium, few steps, one optional save offer | EU: CRD as amended by 2023/2673 (withdrawal function from 2026-06-19); DFA proposal planned Q4 2026. US: ROSCA, state ARLs (CA AB 2863 from 2025-07-01), FTC enforcement; FTC 2024 rule vacated 2025-07-08, new ANPRM 2026-03 |
+| Roach motel (easy join, hard cancel) | Cancel online, same medium, few steps, one optional save offer | EU: CRD as amended by 2023/2673 (withdrawal function from 2026-06-19); DFA proposed by the Commission 2026-11-11 (cancellation, auto-renewal and free-trial rules included; not yet law). US: ROSCA, state ARLs (CA AB 2863 from 2025-07-01), FTC enforcement; FTC 2024 rule vacated 2025-07-08, new ANPRM 2026-03 |
 | Confirmshaming ("No, I hate saving money") | Neutral decline label ("No thanks") | UCPD (misleading/aggressive practices), DSA Art. 25 (platforms) |
 | Fake urgency/scarcity timers, fake "3 people viewing" | Real deadlines and stock only | UCPD Annex I, FTC Act §5 |
 | Fake reviews/testimonials, review gating | Real, verified, unfiltered reviews | FTC consumer reviews rule (2024), UCPD (Omnibus 2019/2161) |

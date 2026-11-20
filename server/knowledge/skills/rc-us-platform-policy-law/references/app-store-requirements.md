@@ -1,7 +1,10 @@
-# App-store and platform privacy rules  (as of 2026-10-10)
+# App-store and platform privacy rules  (as of 2026-11)
 
 > Contract terms, not law, but a mismatch gets the app rejected or removed. Re-read the live pages before each release:
-> Apple's guidelines were last updated 2026-06-08; Google's policy pages show no revision date (© 2026).
+> Apple's guidelines were updated 2026-10-16 (Apple news, read 2026-11-19: 1.2 covers nonconsensual intimate imagery incl. AI-generated,
+> new 2.3.14 (creative assets) and 2.5.19 (hidden features), 3.1.1(a) and Section 5 edits; 5.1.1(i)/(v) and 3.1.2 text re-read, still as below). A new Developer Program
+> License Agreement was posted 2026-10-13. From 2026-11-16 App Store Connect asks age-rating declarations for Shared Location and
+> Dating and Relationships; all apps must answer by 2027-01-12 (Apple news 2026-11-02). Earlier note: previous update was 2026-06-08; Google's policy pages show no revision date (© 2026).
 > Native implementation details (manifest keys, Play Console screens) are in **rc-ios** and **rc-android**.
 
 ## Apple (App Store Review Guidelines, read 2026-10-10)
@@ -68,7 +71,12 @@
 | Server logs with IP | Logs, retention | Only if linked/used (check guidance) | Collected if transmitted off device |
 | No ad SDKs | "We don't use advertising trackers" | Tracking = No; no tracking domains | No "Advertising" purpose |
 
-## Sources (accessed 2026-10-10)
+Google Play Age Signals API (age-law support for Texas/Utah/Louisiana): status and dates conflict between Google's help page and press
+(live responses, global expansion by end of 2026); the API may not be used for ads, profiling or analytics. Check
+https://support.google.com/googleplay/android-developer/answer/16569691 before relying on it (unverified, 2026-11-19 search only).
+
+## Sources (accessed 2026-10-10; Apple news and guidelines re-read 2026-11-19)
+- https://developer.apple.com/news/ (2026-10-13, 10-16, 11-02 items)
 - https://developer.apple.com/app-store/review/guidelines/ (last updated 2026-06-08)
 - https://developer.apple.com/support/third-party-SDK-requirements/ (SDK list, manifest and signature rules) ; https://developer.apple.com/news/?id=3d8a9yyh (2024-03-13 / 2024-05-01 dates)
 - https://developer.apple.com/news/?id=8jzbigf4 (2025-12-23: Texas paused after injunction; tool list) ; https://developer.apple.com/news/?id=sg176nne (2026-06-03: new Texas accounts covered)

@@ -1,8 +1,8 @@
 ---
 name: rc-csharp-dotnet
-description: Current C# and .NET practice as of 2026-10 (.NET 10 LTS, .NET 11 RC, C# 14/15), covering ASP.NET Core minimal APIs/Blazor/SignalR, EF Core 10, Dapper, hosted services, Aspire, DI/config, OpenTelemetry, xUnit v3/Testcontainers, Native AOT, performance and security. Use for *.cs, *.csproj, *.sln/*.slnx, global.json, Directory.Packages.props, appsettings.json, Program.cs, dotnet CLI, or .NET upgrades.
+description: Current C# and .NET practice as of 2026-11 (.NET 10 LTS, .NET 11 STS GA, C# 14/15), covering ASP.NET Core minimal APIs/Blazor/SignalR, EF Core 10/11, Dapper, hosted services, Aspire, DI/config, OpenTelemetry, xUnit v3/Testcontainers, Native AOT, performance and security. Use for *.cs, *.csproj, *.sln/*.slnx, global.json, Directory.Packages.props, Program.cs, dotnet CLI, or .NET upgrades.
 ---
-# C# and .NET (as of 2026-10)
+# C# and .NET (as of 2026-11)
 
 > Facts here are dated (see Sources). Versions, deadlines and policies move: confirm the primary source before pinning a version or promising a date. Anything marked (unverified) is a lead, not a fact.
 
@@ -11,37 +11,38 @@ C# features by version and per-area detail: `references/language-and-libraries.m
 
 ## Currency check
 
-| Thing | Current (2026-10) | Notes |
+| Thing | Current (2026-11-19) | Notes |
 |---|---|---|
-| .NET LTS | **10** (2025-11-11), patch 10.0.12 (2026-09-08) | Supported until **2028-11-14** |
-| .NET 9 (STS) | 9.0.20 | Ends **2026-11-10** (STS is now 24 months) |
-| .NET 8 (LTS) | 8.0.31 | Ends **2026-11-10**: same day as 9. Plan the move to 10 now |
-| .NET 11 (STS) | **RC1** (2026-09-08, go-live license) | GA expected 2026-11; C# 15 default |
+| .NET LTS | **10** (2025-11-11), patch 10.0.15 (2026-11-10, SDK 10.0.404 / 10.0.115) | Supported until **2028-11-14** |
+| .NET 11 (STS) | **11.0.0 GA (2026-11-10)** | 24 months, until **2028-11-14**; C# 15 default. Take the latest patch |
+| .NET 9 / .NET 8 | **Out of support since 2026-11-10** (last patches 9.0.23 / 8.0.34) | No more security fixes: move to 10 (or 11) now |
 | Out of support | 7, 6, 5, Core 3.1 and older | No security patches |
 | C# | **14** with .NET 10; **15** with .NET 11 | `LangVersion` follows the TFM; don't force `latest` on old TFMs |
-| EF Core | **10** (LTS, until 2028-11-10); 11 in RC | EF10 needs the .NET 10 runtime; no .NET Framework |
-| Aspire | **13.6** (2026-09-29), `Aspire.Hosting` 13.6.1 (2026-10-07) | Renamed from ".NET Aspire" in 13; polyglot (C#, TS, Python, Java, Rust) |
-| .NET MAUI | **10** (10.0.110), supported to 2027-05-11 | MAUI 9 ended 2026-05-12 |
-| Windows App SDK (WinUI 3) | 2.5.1 (2026-09-16) | |
-| xUnit v3 | `xunit.v3` **4.0.2** (2026-10-09) | Package went 3.2.x -> 4.0 within the v3 line; .NET 8+ / net472+ |
-| Testcontainers | 4.16.0 (2026-10-08) | |
+| EF Core | **10** (LTS, until 2028-11-10); **11** ships with .NET 11 | EF11 needs the .NET 11 SDK/runtime; neither runs on .NET Framework. EF11 support end date: (unverified) |
+| Aspire | **17.0** (2026-11-17 on aspire.dev; NuGet shows 2026-11-18); last 13.x was 13.6.5 (2026-11-10; 13.6.0-13.6.4 carry a NuGet high-severity vulnerability flag, so use 13.6.5+) | Version jumped 13 -> 17 (no reason given on the release page). Min .NET 10; `AddCSharpApp` obsolete (use `AddDotnetProject`); removed packages listed on the 17 page |
+| .NET MAUI | **11** (11.0.10, 2026-11-11), supported to 2028-05-09; **10** (10.0.130) to 2027-05-11 | MAUI 9 ended 2026-05-12; `Microsoft.Maui.Controls.Compatibility` no longer ships in 11 |
+| Windows App SDK (WinUI 3) | 2.7.0 (2026-11-17) | |
+| xUnit v3 | `xunit.v3` **4.0.3** (2026-11-09) | Package went 3.2.x -> 4.0 within the v3 line; .NET 8+ / net472+ |
+| Testcontainers | 4.17.0 (2026-11-16) | |
 | Dapper | 2.1.89 (2026-09-23) | Apache-2.0 |
-| Hangfire / Quartz.NET | 1.8.25 (LGPLv3) / 4.4.0 (Apache-2.0) | |
-| BenchmarkDotNet | 0.15.8 (2025-11-30) | |
-| MediatR / AutoMapper | 14.2.0 / 16.2.0: **commercial** (RPL-1.5 or paid) | Since MediatR 13 / AutoMapper 15 (2025-07-02) |
+| Hangfire / Quartz.NET | 1.8.25 (LGPLv3) / 4.7.3 (2026-11-09; Apache-2.0 per earlier check) | |
+| BenchmarkDotNet | 0.15.8 (2025-11-30) stable; 0.16.0-preview.2 (2026-09-23) | |
+| MediatR / AutoMapper | 15.0.0 / 17.0.0 (both 2026-11-12): **commercial**, license key required | Since MediatR 13 / AutoMapper 15 (2025-07-02); exact license text not on the NuGet page, read it before use |
+| FluentAssertions | 8.11.0 (2026-09-14) | Free for OSS/non-commercial only; paid for commercial use |
 
 Shipped in the last ~12 months (dated):
 - **.NET 10 LTS (2025-11-11)**: C# 14 (extension members, `field`, `?.=` assignment, first-class spans); file-based apps (`dotnet run app.cs`, `#:package`, publish to Native AOT by default); `dotnet tool exec` / `dnx`; Microsoft.Testing.Platform in `dotnet test`; post-quantum ML-DSA/ML-KEM; `WebSocketStream`; JSON duplicate-property rejection and strict options.
 - **ASP.NET Core 10**: minimal API validation (`AddValidation()`), OpenAPI 3.1 default + YAML, SSE (`TypedResults.ServerSentEvents`), Identity passkeys, cookie auth returns 401/403 for API endpoints, Blazor `[PersistentState]`, `NavigationManager.NotFound()`. Obsoleted: `WebHostBuilder`, `IWebHost`, `WithOpenApi()`, Razor runtime compilation.
 - **EF Core 10**: complex types (optional, JSON, structs), `LeftJoin`/`RightJoin`, named query filters, `ExecuteUpdateAsync` with a normal lambda, SQL Server 2025 `vector`/`json` types, parameterized collections as padded scalar parameters.
-- **.NET 11 RC1 (2026-09-08)**: runtime-native async (no preview flag for `net11.0`), C# 15 unions/`closed`/extension indexers/labeled `break`/`continue`, Zstandard, `Process` run-and-capture helpers, `DnsResolver`, LINQ `FullJoin`, async DataAnnotations validation, higher minimum CPU instruction sets. ASP.NET Core 11: SignalR auth refresh, OpenAPI 3.2, union types in minimal APIs, Blazor `CacheView`/`TempData`, antiforgery auto-enabled for Blazor Web Apps.
+- **.NET 11 GA (2026-11-10)**: runtime-native async (no preview flag for `net11.0`), C# 15 unions/`closed`/extension indexers/labeled `break`/`continue`/`with(...)` collection arguments, Zstandard, `Process` run-and-capture helpers, `DnsResolver`, LINQ `FullJoin`, async DataAnnotations validation, higher minimum CPU instruction sets. SDK 11: Native AOT CLI host and MSBuild server on by default, `#:include` for file-based apps, `.slnf` editing, `dotnet test` run-level `--timeout`, built-in xUnit v3 templates, `mcpserver` template. ASP.NET Core 11: SignalR auth refresh, OpenAPI 3.2 default (`Microsoft.OpenApi` 3.x; set `OpenApiVersion` to stay on 3.1), union types in minimal APIs (JSON bodies only), Blazor `CacheView`/`TempData`, antiforgery middleware auto-injected (`UseAntiforgery()` gone from the Blazor Web App template; breaking change).
+- **Servicing 2026-11-10** (10.0.15, 9.0.23, 8.0.34): many CVEs across ASP.NET Core, the runtime and Visual Studio (list on the 10.0.15 release-notes page). CVE-2026-118741 (ASP.NET Core Identity scaffolding/templates, elevation of privilege) is NOT fixed by a runtime update: update the SDK/scaffolding packages, then fix, rebuild and redeploy apps generated earlier. CVE-2026-118746 (Negotiate channel binding on Unix) only affected .NET 11 previews; fixed in 11.0.0.
 
-**Pick a version:** new production work targets **net10.0** (LTS). Use net11.0 only if the team takes yearly upgrades (STS, 24 months). Projects on .NET 8 or 9 must move to 10 before **2026-11-10**. Never start new work on .NET Framework.
+**Pick a version:** new production work targets **net10.0** (LTS) unless the team takes yearly upgrades, then net11.0 (STS, 24 months, both end 2028-11-14). Projects still on .NET 8 or 9 are out of support since **2026-11-10**: tell the owner, plan the move to 10. Never start new work on .NET Framework. After moving to net11.0 re-test decimal/double conversions and CollectionView-heavy MAUI pages (reader-reported regressions, unverified).
 
 ### Older versions (legacy projects)
-- **.NET 8 / C# 12** (until 2026-11-10): has primary constructors, collection expressions, keyed DI, `TimeProvider`, `FrozenDictionary`, Native AOT for minimal APIs, `IExceptionHandler`. No `field`, no extension blocks, no `?.=`, no `Lock` type, no built-in OpenAPI (`Microsoft.AspNetCore.OpenApi` arrived in 9; on 8 use Swashbuckle or NSwag), no HybridCache GA, no `AddValidation()`, no `LeftJoin`. EF Core 8: no complex-type JSON, no named filters; `Contains` on a list uses `OPENJSON`.
+- **.NET 8 / C# 12** (ended 2026-11-10; same for 9): has primary constructors, collection expressions, keyed DI, `TimeProvider`, `FrozenDictionary`, Native AOT for minimal APIs, `IExceptionHandler`. No `field`, no extension blocks, no `?.=`, no `Lock` type, no built-in OpenAPI (`Microsoft.AspNetCore.OpenApi` arrived in 9; on 8 use Swashbuckle or NSwag), no HybridCache GA, no `AddValidation()`, no `LeftJoin`. EF Core 8: no complex-type JSON, no named filters; `Contains` on a list uses `OPENJSON`.
 - **.NET 9 / C# 13**: `params` collections, `System.Threading.Lock`, `\e`, `MapStaticAssets`, built-in OpenAPI document (3.0), `BinaryFormatter` always throws. HybridCache shipped after 9 as `Microsoft.Extensions.Caching.Hybrid` (supports net472+ too).
-- **.NET Framework 4.8.x**: maintenance only, follows the Windows lifecycle. No C# beyond what the old compiler supports without polyfills; don't add new projects. Migrate with GitHub Copilot app modernization (the .NET Upgrade Assistant is deprecated; still the fallback without Copilot or for VB projects).
+- **.NET Framework 4.8.x**: maintenance only, follows the Windows lifecycle. No C# beyond what the old compiler supports without polyfills; don't add new projects. Migrate with the GitHub Copilot modernization chat agent (VS 2026 or VS 2022 17.14.16+); the .NET Upgrade Assistant is officially deprecated.
 - Don't upgrade a project's TFM, C# version or major packages unless the task asks; note the EOL risk instead.
 
 ## What changed / stop doing
@@ -186,7 +187,7 @@ Use for hot read paths or reporting where you want hand-written SQL. Always para
 - Never log tokens, passwords, full request bodies or PII; EF10 redacts inlined constants by default; keep `EnableSensitiveDataLogging` off outside dev.
 
 ### Aspire
-Use it for local orchestration of multi-service apps (AppHost declares Postgres/Redis/containers/projects; dashboard shows logs, traces, metrics) and for deploy manifests. Optional: a single API + DB doesn't need it. Aspire 13 needs the .NET 10 SDK; 13.6's multithreaded MSBuild (`-mt`) builds only kick in with SDK 11.0.100-rc.1+ (older SDKs keep the old behavior).
+Use it for local orchestration of multi-service apps (AppHost declares Postgres/Redis/containers/projects; dashboard shows logs, traces, metrics) and for deploy manifests. Optional: a single API + DB doesn't need it. Aspire 17 (2026-11-17) needs .NET 10 as the minimum; its dashboard got a redesign, Kubernetes packages are stable, Go AppHosts are preview. Upgrading from 13.x: replace `AddCSharpApp` with `AddDotnetProject`, check the removed/discontinued package list on the release page.
 
 ### Async and modern C# idioms
 ```csharp
@@ -223,14 +224,14 @@ Console.WriteLine(TimeSpan.FromMinutes(90).Humanize());
 `dotnet run tool.cs`; `dotnet project convert tool.cs` turns it into a project (`--dry-run`, `-o <dir>`). `#:project` references a csproj; .NET 11 adds `#:include`.
 
 ### Desktop, mobile, games
-- **MAUI**: supported, yearly with .NET; a version is supported until 6 months after the next ships. Fine for line-of-business apps on .NET-heavy teams; weigh Avalonia or Uno Platform (both cross-platform incl. Linux), or a native/Flutter/React Native app (see rc-cross-platform). Blazor Hybrid (`BlazorWebView`) to share Razor UI.
+- **MAUI**: supported, yearly with .NET; a version is supported until 6 months after the next ships (MAUI 11: CoreCLR default runtime, Native AOT opt-in/experimental on Android). Fine for line-of-business apps on .NET-heavy teams; weigh Avalonia or Uno Platform (both cross-platform incl. Linux), or a native/Flutter/React Native app (see rc-cross-platform). Blazor Hybrid (`BlazorWebView`) to share Razor UI.
 - **WPF / WinForms**: maintained and shipping with every .NET (WPF Fluent styles in progress, WinForms clipboard + JSON APIs); fine for Windows-only internal apps. **WinUI 3** via Windows App SDK 2.x for new modern Windows UI. UWP: no new work.
-- **Unity**: Unity 6.3 LTS compiles C# 9 on Mono/IL2CPP, with gaps (no `init` setters, records unusable for serialization). Don't use C# 10+ syntax or newer BCL APIs in Unity scripts; a CoreCLR move is announced but not shipped (unverified).
+- **Unity**: Unity 6.3 LTS compiles C# 9 on Mono/IL2CPP, with gaps (no `init` setters, records unusable for serialization). Unity 6.3 docs say .NET 5+ is not supported (Mono/IL2CPP). Don't use C# 10+ syntax or newer BCL APIs in Unity scripts; a CoreCLR move is not mentioned there (unverified elsewhere).
 
 ## Security
 - **Injection**: EF/Dapper parameters only; `FromSqlRaw`/`ExecuteSqlRaw` never with user input. Validate identifiers (column/table names) against an allowlist.
 - **Deserialization**: no `BinaryFormatter` (throws), no `TypeNameHandling.All/Auto` in Newtonsoft, STJ polymorphism only with declared `[JsonDerivedType]`. Set `MaxDepth` and request size limits. .NET 10 STJ can reject duplicate properties: set `AllowDuplicateProperties = false` (or use `JsonSerializerOptions.Strict`) for security-sensitive payloads.
-- **CSRF**: `UseAntiforgery()` + antiforgery tokens for cookie-authenticated form posts (Razor Pages/MVC/Blazor do it automatically); minimal API `[FromForm]` endpoints require tokens unless `DisableAntiforgery()`. Bearer-token APIs are not CSRF targets: don't also accept cookies there. `SameSite=Lax` minimum.
+- **CSRF** (.NET 11: middleware auto-injected for Blazor Web Apps): `UseAntiforgery()` + antiforgery tokens for cookie-authenticated form posts (Razor Pages/MVC/Blazor do it automatically); minimal API `[FromForm]` endpoints require tokens unless `DisableAntiforgery()`. Bearer-token APIs are not CSRF targets: don't also accept cookies there. `SameSite=Lax` minimum.
 - **Data Protection**: in multi-instance or container deploys persist keys (`PersistKeysToDbContext`/blob/Redis) and protect them (`ProtectKeysWith...`); otherwise cookies and antiforgery tokens break on restart and keys sit unencrypted.
 - **Secrets**: user-secrets for dev only, a vault or platform secrets in prod; managed identity over connection-string passwords where available. `NuGetAudit` + `dotnet list package --vulnerable` in CI.
 - **Headers/transport**: `UseHsts()` + `UseHttpsRedirection()` in prod; set CSP in Blazor/Razor apps; CORS with explicit origins, never `AllowAnyOrigin` with credentials.
@@ -248,7 +249,7 @@ Console.WriteLine(TimeSpan.FromMinutes(90).Humanize());
 - Analyzers on (`AnalysisLevel latest-recommended`); CA1873 (expensive logging args) and CA18xx perf rules are worth fixing.
 
 ## Testing & tooling
-- `dotnet new xunit3` (xUnit v3, MTP runner; on SDK 10 first `dotnet new install xunit.v3.templates`, SDK 11 templates include v3) / `nunit` / `mstest`. All three are current; keep what the repo uses. xUnit v3 test projects are executables; `TestContext.Current.CancellationToken` for cancellation.
+- `dotnet new xunit3` (xUnit v3, MTP runner; on SDK 10 first `dotnet new install xunit.v3.templates`, SDK 11 built-in templates support v3 and default to MTP) / `nunit` / `mstest`. All three are current; keep what the repo uses. xUnit v3 test projects are executables; `TestContext.Current.CancellationToken` for cancellation.
 - Integration: `WebApplicationFactory<Program>` (.NET 10 source-generates `public partial class Program`; add it by hand only on .NET 8/9) + Testcontainers (`PostgreSqlBuilder`, `MsSqlBuilder`, `RedisBuilder`) instead of EF InMemory or SQLite stand-ins (different SQL semantics).
 - Time and randomness: `FakeTimeProvider` (Microsoft.Extensions.TimeProvider.Testing). HTTP: a stub `HttpMessageHandler` or WireMock.Net.
 - Assertions: built-in `Assert` is enough; Shouldly/AwesomeAssertions are free alternatives to FluentAssertions (v8+: free for OSS/non-commercial, paid for commercial use).
@@ -277,7 +278,7 @@ Console.WriteLine(TimeSpan.FromMinutes(90).Humanize());
 - Forgetting `UseAuthentication()` before `UseAuthorization()`, or `UseRateLimiter()`/`UseCors()` in the wrong order.
 
 ## Before you ship
-- [ ] TFM is a supported version (net10.0 now; net8/net9 end 2026-11-10); SDK pinned in `global.json`.
+- [ ] TFM is a supported version (net10.0 or net11.0; net8/net9 ended 2026-11-10); latest patch (10.0.15+); SDK pinned in `global.json`.
 - [ ] `dotnet build -c Release` clean with `TreatWarningsAsErrors`, nullable on, analyzers on; `dotnet format --verify-no-changes` passes.
 - [ ] Tests pass: unit + `WebApplicationFactory` integration against real DB via Testcontainers.
 - [ ] No vulnerable or license-changed packages (`NuGetAudit`, `dotnet list package --vulnerable --include-transitive`).
@@ -289,30 +290,33 @@ Console.WriteLine(TimeSpan.FromMinutes(90).Humanize());
 - [ ] Container image built with `PublishContainer` or a pinned base image; runs as non-root.
 
 ## Sources
-All accessed 2026-10-09.
-- https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core : .NET versions, patches, LTS/STS, EOL dates (8 and 9 end 2026-11-10, 10 ends 2028-11-14).
-- https://dotnet.microsoft.com/en-us/platform/support/policy/maui : MAUI 10 support to 2027-05-11, MAUI 9 ended.
-- https://devblogs.microsoft.com/dotnet/dotnet-11-rc-1/ : .NET 11 RC1 (2026-09-08), go-live, component highlights.
-- https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/overview : .NET 11 runtime/libraries/SDK, C# 15 list, GA expected 2026-11.
+Accessed 2026-11-19 unless a line says otherwise (lines marked 2026-10 were not re-fetched).
+- https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core : .NET versions, patches (10.0.15, 9.0.23, 8.0.34), .NET 11 GA 2026-11-10, EOL dates (8 and 9 ended 2026-11-10, 10 and 11 end 2028-11-14).
+- https://dotnet.microsoft.com/en-us/platform/support/policy/maui : MAUI 11 (to 2028-05-09), MAUI 10 (to 2027-05-11), MAUI 9 ended.
+- https://devblogs.microsoft.com/dotnet/?p=61205 : .NET 11 GA announcement (2026-11-10), STS, C# 15 default, MAUI/EF/ASP.NET notes.
+- https://github.com/dotnet/core/blob/main/release-notes/10.0/10.0.15/10.0.15.md : 10.0.15 (2026-11-10), SDKs, CVE list, CVE-2026-118741 needs scaffolding update.
+- https://github.com/dotnet/announcements/issues/498 : CVE-2026-118746, .NET 11 previews only, fixed 11.0.0.
+- https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-11/overview : .NET 11 runtime/libraries/SDK, runtime async without preview flag, C# 15 list.
+- Fact-check pass 2026-11-19: CVE-2026-118741 and the 17-CVE list re-read on the 10.0.15 release notes page; xunit.v3 4.0.3 (2026-11-09) and Aspire.Hosting 17.0.0 / 13.6.5 re-read on NuGet; EF Core 10 end date 2028-11-10 re-read on the EF releases page (EF11 listed as planned for November 2026).
+- https://aspire.dev/whats-new/aspire-17/ : Aspire 17.0 (2026-11-17), .NET 10 minimum, breaking changes.
+- https://learn.microsoft.com/en-us/ef/core/what-is-new/ : EF Core 10 supported until 2028-11-10 (page dated 2025-11).
+- https://www.nuget.org/packages/xunit.v3 , /Aspire.Hosting , /Testcontainers , /Quartz , /MediatR , /AutoMapper , /FluentAssertions , /Microsoft.WindowsAppSDK , /BenchmarkDotNet , /Hangfire.Core , /Dapper : versions and dates cited in the table.
 - https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-10/overview , .../dotnet-10/sdk : .NET 10 highlights, file-based apps, dnx, MTP, CLI noun-first commands.
 - https://learn.microsoft.com/en-us/dotnet/csharp/whats-new/csharp-14 : extension members, field, null-conditional assignment, spans.
-- https://learn.microsoft.com/en-us/dotnet/csharp/whats-new/csharp-15 : unions, closed, extension indexers, labeled break/continue, collection arguments, memory safety (preview).
+- https://learn.microsoft.com/en-us/dotnet/csharp/whats-new/csharp-15 : unions, closed, extension indexers, labeled break/continue, `with(...)` collection arguments, memory safety (preview only).
 - https://learn.microsoft.com/en-us/aspnet/core/release-notes/aspnetcore-10.0 : validation, OpenAPI 3.1, SSE, passkeys, cookie 401/403, obsoletions.
-- https://learn.microsoft.com/en-us/aspnet/core/release-notes/aspnetcore-11 : SignalR auth refresh, OpenAPI 3.2, unions in minimal APIs, antiforgery change (page updated 2026-10-08).
+- https://learn.microsoft.com/en-us/aspnet/core/release-notes/aspnetcore-11 : SignalR auth refresh, OpenAPI 3.2 default, unions in minimal APIs, antiforgery change (page dated 2026-11-17).
 - https://learn.microsoft.com/en-us/aspnet/core/release-notes/aspnetcore-9.0 : MapStaticAssets; HybridCache shipped after .NET 9.
 - https://learn.microsoft.com/en-us/aspnet/core/performance/caching/hybrid : HybridCache API, tags, stampede protection, AOT notes.
 - https://learn.microsoft.com/en-us/ef/core/what-is-new/ef-core-10.0/whatsnew : EF10 LTS dates, complex types, LeftJoin, named filters, ExecuteUpdate lambda, raw SQL analyzer, log redaction.
-- https://learn.microsoft.com/en-us/ef/core/what-is-new/ef-core-11.0/whatsnew : EF11 features (FullJoin, MaxBy, migrations --add, SQL Server compat level 160 default).
+- https://learn.microsoft.com/en-us/ef/core/what-is-new/ef-core-11.0/whatsnew : EF11 features (FullJoin, MaxBy, migrations --add, SQL Server compat level 160 default); page still says "in development" (dated 2026-08), GA status taken from the .NET 11 announcement.
 - https://learn.microsoft.com/en-us/dotnet/core/compatibility/serialization/9.0/binaryformatter-removal : BinaryFormatter always throws from .NET 9.
 - https://learn.microsoft.com/en-us/dotnet/desktop/wpf/whats-new/net100 : WPF in .NET 10 (Fluent styles, clipboard).
-- https://aspire.dev/whats-new/aspire-13-6/ : Aspire 13.6 (2026-09-29), polyglot, SDK 11 requirement.
 - https://www.jimmybogard.com/automapper-and-mediatr-commercial-editions-launch-today/ : AutoMapper 15 / MediatR 13 commercial, RPL-1.5, free tier (2025-07-02).
-- https://www.nuget.org/packages/MediatR , /AutoMapper , /xunit.v3 , /Aspire.Hosting , /Testcontainers , /Dapper , /BenchmarkDotNet , /Hangfire.Core , /Quartz , /Microsoft.WindowsAppSDK : current package versions and licenses.
-- https://xunit.net/releases/ : xUnit v3 release line (3.2.x -> 4.0.x).
-- https://docs.unity3d.com/6000.3/Documentation/Manual/csharp-compiler.html : Unity 6.3 supports C# 9 with listed gaps.
+- https://docs.unity.com/en-us/engine/6000.3/manual/programming-environment/overview-of-dot-net-in-unity/csharp-compiler : Unity 6.3 supports C# 9 (Mono/IL2CPP), listed gaps.
 - Fact-check pass (2026-10-10): https://learn.microsoft.com/en-us/dotnet/core/compatibility/10.0 (`dotnet new sln` -> .slnx);
   https://learn.microsoft.com/en-us/aspnet/core/breaking-changes/10/overview (WebHostBuilder/WithOpenApi/Razor runtime compilation obsolete);
   https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-10/libraries (`AllowDuplicateProperties`, `Strict`, ML-KEM/ML-DSA);
   https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-project-convert ; https://dotnet.microsoft.com/en-us/platform/support/policy/xamarin (ended 2024-05-01);
-  https://learn.microsoft.com/en-us/dotnet/core/porting/upgrade-assistant-overview (deprecated for Copilot app modernization);
-  https://www.nuget.org/packages/FluentAssertions (v8 commercial terms) ; https://aspire.dev/whats-new/aspire-13/ (rename).
+  https://learn.microsoft.com/en-us/dotnet/core/porting/upgrade-assistant-overview (deprecated; Copilot modernization chat agent, re-checked 2026-11-19);
+  https://aspire.dev/whats-new/aspire-13/ (rename from ".NET Aspire", 2026-10).

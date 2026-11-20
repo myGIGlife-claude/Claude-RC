@@ -1,4 +1,7 @@
-# Federal rules that shape app and website policies  (as of 2026-10-10)
+# Federal rules that shape app and website policies  (as of 2026-11)
+
+> Refreshed 2026-11-19: added the FCC TCPA revocation order (effective 2026-11-25, law-firm reports, unverified on primary), FTC
+> penalty-figure caveat, and Oct/Nov FTC actions. Everything else was last read 2026-10-10.
 
 > Drafting aid, not legal advice. "Verified" = read on an official source (eCFR, Federal Register, ftc.gov, ada.gov,
 > copyright.gov, Cornell LII statute text) on 2026-10-10. Everything else is marked.
@@ -14,6 +17,9 @@
   security (Illuminate final order 2026-06-05), fake reviews warning letters (2025-12), TAKE IT DOWN warning letters (2026-05),
   AI claims (proposed policy statement on AI accuracy, Federal Register 2026-07-07). (Case names here are agency matters listed on
   ftc.gov, not court holdings; read the order before citing any term.)
+- 2026-10/11 (ftc.gov press-release listing, complaints not read): Toast action on hidden fees, subscription and cancellation
+  practices (2026-10-29); five states joined the Hims & Hers health-data suit (2026-11-10). 16 CFR 1.98 still lists $53,088 (2025-01-17
+  adjustment, eCFR read 2026-11-19); a 2026 adjustment notice (FR 2026-18853) was not readable, so a 2026 change is unverified.
 - No general federal privacy statute exists as of 2026-10 (no comprehensive bill enacted; unverified beyond searches).
 
 ## COPPA (15 U.S.C. 6501-6506; 16 CFR 312) - verified text
@@ -60,7 +66,11 @@
   need prior express written consent (signed, may be electronic under E-SIGN; disclosure that consent is not a condition of purchase).
   Revocation by any reasonable means honored within 10 business days (64.1200(a)(10)); one confirmation text allowed ((a)(12)). One-to-one
   consent rule vacated (*Insurance Marketing Coalition Ltd. v. FCC*, 127 F.4th 303 (11th Cir. Jan. 24, 2025), CourtListener; current
-  CFR text has no such requirement). State mini-TCPAs (Florida, Oklahoma, others)
+  CFR text has no such requirement). **2026-11:** per law-firm alerts (FCC text not read; adoption 2026-09-30, FCC 26-67, and FR date 2026-10-26 consistent across sources) an FCC order
+  (released 2026-10-01, in the Federal Register 2026-10-26) takes effect **2026-11-25**: it replaces the delayed "revoke all"
+  rule, lets a revocation of informational calls cover only that call category, and lets callers designate opt-out methods (key-press,
+  standard reply words, or a stated site/number) with clear disclosure; telemarketing stays under revoke-all; the 10-business-day
+  window stays while a further notice asks about shortening it (comments 2026-11-25, replies 2026-12-28). State mini-TCPAs (Florida, Oklahoma, others)
   are stricter on timing and consent (unverified details). National and internal do-not-call lists still apply.
 
 ## Reviews, endorsements, ads
@@ -116,7 +126,11 @@
   exceptions such as US link-outs after court rulings and alternative billing programs; check current Apple 3.1.1/3.1.3 and Play
   Payments policy before relying, unverified). Physical goods and services use a normal processor.
 
-## Sources (accessed 2026-10-10)
+## Sources (accessed 2026-10-10; items marked 2026-11-19 re-checked or added)
+- https://www.ftc.gov/news-events/news/press-releases (listing, 2026-11-19: Toast, Hims & Hers; no new COPPA/CAN-SPAM/TAKE IT DOWN release)
+- https://www.ecfr.gov/current/title-16/chapter-I/subchapter-A/part-1/subpart-L/section-1.98 (2026-11-19: $53,088)
+- https://www.bhfs.com/insight/new-tcpa-revocation-of-consent-rules-take-effect-on-november-25 (law-firm lead, 2026-11-19: FCC revocation order)
+- https://www.ada.gov/resources/2024-03-08-web-rule/ (2026-11-19: Title II dates 2027-04-26 / 2028-04-26 unchanged)
 - https://www.ecfr.gov/ (API reads of 16 CFR 312, 318, 425, 465; 28 CFR 35.200; 37 CFR 201.38; 47 CFR 64.1200, all as of 2026-10-01)
 - https://www.federalregister.gov/documents/2026/02/12/2026-02866/ ; https://www.federalregister.gov/documents/2026/03/13/2026-04952/
 - https://www.ftc.gov/business-guidance/resources/can-spam-act-compliance-guide-business
