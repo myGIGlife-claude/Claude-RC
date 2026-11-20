@@ -1,6 +1,8 @@
 package life.mygig.clauderc.data
 
 import java.io.IOException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -119,15 +121,15 @@ class HttpDriveApi : DriveApi {
         } finally { c.disconnect() }
     }
 
-    override suspend fun upload(token: String, name: String, bytes: ByteArray): DriveFile {
+    override suspend fun upload(token: String, name: String, bytes: ByteArray): DriveFile = withContext(Dispatchers.IO) {
         val boundary = "clrc" + java.util.UUID.randomUUID().toString().replace("-", "")
         val out = call("POST", DriveLogic.uploadUrl(), token, DriveLogic.multipartBody(name, bytes, boundary), "multipart/related; boundary=$boundary")
-        return DriveLogic.parseFile(Json.parseToJsonElement(out.toString(Charsets.UTF_8)).jsonObject)
+        DriveLogic.parseFile(Json.parseToJsonElement(out.toString(Charsets.UTF_8)).jsonObject)
     }
 
-    override suspend fun list(token: String) = DriveLogic.parseList(call("GET", DriveLogic.listUrl(), token).toString(Charsets.UTF_8))
-    override suspend fun download(token: String, id: String) = call("GET", DriveLogic.downloadUrl(id), token)
-    override suspend fun delete(token: String, id: String) { call("DELETE", DriveLogic.deleteUrl(id), token) }
+    override suspend fun list(token: String) = withContext(Dispatchers.IO) { DriveLogic.parseList(call("GET", DriveLogic.listUrl(), token).toString(Charsets.UTF_8)) }
+    override suspend fun download(token: String, id: String) = withContext(Dispatchers.IO) { call("GET", DriveLogic.downloadUrl(id), token) }
+    override suspend fun delete(token: String, id: String) = withContext(Dispatchers.IO) { call("DELETE", DriveLogic.deleteUrl(id), token); Unit }
 
     /** Best effort: ends the grant at Google so the next sign-in asks again. */
     fun revoke(token: String) {
