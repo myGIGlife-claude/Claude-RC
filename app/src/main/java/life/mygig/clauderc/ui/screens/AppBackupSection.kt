@@ -84,7 +84,7 @@ fun AppBackupSection(vm: MainViewModel) {
         scope.launch {
             try { work() }
             catch (e: DriveException) { if (e.kind == DriveError.EXPIRED) driveToken = null; driveNote = e.message }
-            catch (e: Exception) { driveNote = "Google Drive failed. Try again." }
+            catch (e: Exception) { driveNote = "Google Drive failed (${e.javaClass.simpleName}). Try again." }
             finally { driveBusy = false }
         }
     }
