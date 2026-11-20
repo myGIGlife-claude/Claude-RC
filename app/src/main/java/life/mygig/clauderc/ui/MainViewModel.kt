@@ -924,6 +924,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** After a backup restore: show the restored phone key and connect to the restored server (a failure shows the usual plain error; the data stays). */
+    fun afterRestore() = viewModelScope.launch {
+        runCatching { _publicKey.value = withContext(Dispatchers.Default) { keys.publicKey() } }
+        if (store.current().isConfigured) refreshStatus()
+    }
+
     fun setAppLock(on: Boolean) = viewModelScope.launch { store.setAppLock(on) }
     fun setTheme(mode: ThemeMode) = viewModelScope.launch { store.setTheme(mode) }
 
