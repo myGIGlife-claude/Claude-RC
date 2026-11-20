@@ -1,4 +1,4 @@
-# Performance and delivery reference  (as of 2026-10)
+# Performance and delivery reference  (as of 2026-11)
 
 ## Core Web Vitals
 | Metric | Good | Poor | Measures | Field API |

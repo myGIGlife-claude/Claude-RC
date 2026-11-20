@@ -1,7 +1,7 @@
-# C# features by version and library notes (as of 2026-10)
+# C# features by version and library notes (as of 2026-11)
 
 Check the project's TFM first: the default C# version follows it (net8.0 -> 12, net9.0 -> 13, net10.0 -> 14, net11.0 -> 15).
-Don't use a feature newer than the project's language version. Sources: SKILL.md "Sources" (accessed 2026-10-09).
+Don't use a feature newer than the project's language version. Sources: SKILL.md "Sources" (accessed 2026-11-19).
 
 ## C# by version
 
@@ -13,7 +13,7 @@ Don't use a feature newer than the project's language version. Sources: SKILL.md
 | 12 | .NET 8 | primary constructors on classes/structs, collection expressions `[..a, b]`, `alias any type`, default lambda params, `[InlineArray]` |
 | 13 | .NET 9 | `params` collections (`params ReadOnlySpan<T>`), `System.Threading.Lock`, `\e` escape, partial properties/indexers, `ref struct` in generics (`allows ref struct`), `OverloadResolutionPriority` |
 | 14 | .NET 10 (2025-11) | `extension` blocks (extension properties, static extensions, operators), `field` keyword, `x?.P = v` / `x?.P += v`, `nameof(List<>)`, implicit `Span`/`ReadOnlySpan` conversions, modifiers on untyped lambda params (`(text, out result) => ...`), partial constructors/events, user-defined compound assignment and `++`/`--`, file-based app directives |
-| 15 | .NET 11 (GA expected 2026-11; RC1 2026-09-08) | `union Pet(Cat, Dog, Bird);` with exhaustive `switch`, `closed` class hierarchies (implicitly abstract, derivation only in the declaring assembly), extension indexers, labeled `break outer;`/`continue outer;`, collection expression arguments `[with(capacity: n), ..xs]`, `[with(StringComparer.OrdinalIgnoreCase), ...]`. Memory-safety rework (`unsafe(expr)`, pointer relaxations, `safe` keyword) is **preview only** (`LangVersion preview`) |
+| 15 | .NET 11 (GA 2026-11-10) | `union Pet(Cat, Dog, Bird);` with exhaustive `switch`, `closed` class hierarchies (implicitly abstract, derivation only in the declaring assembly), extension indexers, labeled `break outer;`/`continue outer;`, collection expression arguments `[with(capacity: n), ..xs]`, `[with(StringComparer.OrdinalIgnoreCase), ...]`. Memory-safety rework (`unsafe(expr)`, pointer relaxations, `safe` keyword) is **preview only** (`LangVersion preview`) |
 
 ### Notes and traps
 - Records: value equality and `with` copies. Good for DTOs, messages, value objects; bad for EF entities (identity semantics) and for Unity serialization.
@@ -42,6 +42,6 @@ Don't use a feature newer than the project's language version. Sources: SKILL.md
 | Caching | `HybridCache` (L1 memory + optional L2 `IDistributedCache`, stampede protection, tags, `RemoveByTagAsync("*")` invalidates all, logically); keys from trusted ids only |
 
 ## Release cadence reminder
-- New major every November. Even numbers are LTS (3 years), odd are STS (24 months since the policy change; .NET 9 ends together with .NET 8 on 2026-11-10).
+- New major every November. Even numbers are LTS (3 years), odd are STS (24 months; .NET 9 ended together with .NET 8 on 2026-11-10; .NET 11 and 10 both end 2028-11-14).
 - Monthly patches on Patch Tuesday; keep the runtime on the latest patch of its major.
-- .NET 12 is the next LTS (expected 2027-11, unverified).
+- .NET 12 as the next LTS (expected 2027-11): implied by the even-number rule on the support page, not announced there (unverified).

@@ -1,8 +1,8 @@
 ---
 name: rc-kotlin
-description: "Kotlin language and non-Android Kotlin as of 2026-10: K2 and 2.x features, coroutines/Flow, kotlinx.serialization, Multiplatform (expect/actual, Compose MP), Ktor/Spring/Exposed servers, Gradle Kotlin DSL, convention plugins, libs.versions.toml, Java interop, Kotest/MockK/Turbine, detekt/ktlint. Use for *.kt, *.kts, build-logic, commonMain, Flow or suspend code. Android specifics are in rc-android."
+description: "Kotlin language and non-Android Kotlin as of 2026-11: K2 and 2.x features, coroutines/Flow, kotlinx.serialization, Multiplatform (expect/actual, Compose MP), Ktor/Spring/Exposed servers, Gradle Kotlin DSL, convention plugins, libs.versions.toml, Java interop, Kotest/MockK/Turbine, detekt/ktlint. Use for *.kt, *.kts, build-logic, commonMain, Flow or suspend code. Android specifics are in rc-android."
 ---
-# Kotlin: language, coroutines, KMP and server (as of 2026-10)
+# Kotlin: language, coroutines, KMP and server (as of 2026-11)
 
 > Facts are dated (see Sources). Confirm on the primary source before pinning a version. (unverified) marks a lead, not a fact.
 > Android (AGP 9, Compose UI, Room, Play policy) lives in **rc-android**. Spring itself lives in **rc-java**. This skill is the language, coroutines, KMP, server and build side.
@@ -10,19 +10,19 @@ description: "Kotlin language and non-Android Kotlin as of 2026-10: K2 and 2.x f
 
 ## Currency check
 
-| Thing | Current (verified 2026-10-09) | Notes |
+| Thing | Current (verified 2026-11-19) | Notes |
 |---|---|---|
-| Kotlin | **2.4.21** (2026-10-08). 2.4.20 tooling 2026-09-07. 2.4.0 language 2026-06-03 | **2.5.0 planned 2026-12** (2.5.0-Beta1 out 2026-09-23). 2.5.20 planned 2027-03 |
+| Kotlin | **2.4.21** (2026-10-08, still marked Latest). 2.4.20 tooling 2026-09-07. 2.4.0 language 2026-06-03 | **2.5.0 planned 2026-12**: Beta1 2026-09-23, Beta2 2026-10-21, **RC 2026-11-11**. 2.5.20 planned 2027-03. 2.5 compiler errors on JDK 8 (min JDK 17; opt-out flag to be removed in 2.5.20 or 2.6.0) |
 | Cadence | Language release 2.x.0 every 6 months, tooling 2.x.20 three months later, bug fixes 2.x.yz | From 2.4, the JVM stdlib of each line is supported 18 months (2.4 until 2027-12-03) |
 | Compiler | K2 only. **K1 removed in 2.4** (`-language-version=1.9` rejected) | K2 stable since 2.0.0 (2024-05-21) |
 | Stable in 2.4 | Context parameters, explicit backing fields, `@all:` target, common `Uuid` (V4/V7 generators still opt-in), `isSorted()`; can emit Java 26 bytecode | Collection literals, explicit context args: experimental |
 | Stable in 2.2/2.3 | Guard conditions in `when`, non-local `break`/`continue`, `$$` interpolation (2.2); nested type aliases, `kotlin.time.Instant`/`Clock` (2.3) | |
-| Coming | Name-based destructuring stable (syntax-only) in 2.5; `val (a, b)` turns name-based in 2.7 (end 2027). Rich errors: KEEP discussion only, no flag | Do not write rich-error syntax |
-| Gradle | KGP 2.4.20 tested with Gradle 7.6.3 to 9.7.0. Minimum AGP 8.5.2 | Gradle 9.8.1 is current (rc-android) |
-| Libraries | coroutines 1.11.0, serialization 1.11.0 (1.12.0-RC), Ktor 3.6.0, Compose MP 1.12.1, SQLDelight 2.4.1, Koin 4.2.2, Exposed 1.5.1, KSP 2.3.12 | Full table in references |
-| Platforms | JVM, Native, JS, KMP: Stable. **Wasm: Beta** (roadmap: promote to Stable). Compose MP: Android/iOS/desktop Stable, web (Wasm) Beta | Swift export: Alpha |
-| Servers | Ktor 3.6 (HTTP/3 experimental, OIDC plugin experimental). Spring Boot 4.1.1 (Kotlin 2.2+ baseline, Jackson 3, kotlinx.serialization starter). Micronaut 5.2.2 | |
-| Test/lint | JUnit 6.1.3 (Java 17, Kotlin 2.2 baseline, `suspend` test methods), Kotest 6.2.5, MockK 1.14.11, Turbine 1.2.1, detekt 1.23.8 (2.0 alpha), ktlint 1.8.0 | |
+| Coming (2.5.0-RC) | Name-based destructuring stable in `only-syntax` mode (`(val x, val y) = o`); unused return value checker on by default; Java 28 bytecode; `@IntroducedAt`. Experimental: companion blocks, full value classes, `.kar` KMP publication. `val (a, b)` turns name-based in 2.7 (end 2027). Rich errors: KEEP discussion only, no flag | Do not write rich-error syntax. Don't adopt RC for production |
+| Gradle | KGP 2.4.20 tested with Gradle 7.6.3 to 9.7.0. Minimum AGP 8.5.2 | Gradle 9.9.2 is current (2026-11-19) |
+| Libraries | coroutines 1.11.0, serialization **1.13.0**, Ktor **3.6.1**, Compose MP **1.12.2** (1.13.0-rc01), SQLDelight 2.4.1, Koin 4.2.2, Exposed **1.6.1**, KSP **2.3.14** | Full table in references. serialization 1.12.0 (2026-10-19) changed exception wrapping, reverted in 1.13.0: skip 1.12.0 |
+| Platforms | JVM, Native, JS, KMP: Stable. **Wasm: Beta** (roadmap: promote to Stable). Compose MP: Android/iOS/desktop Stable, web (Wasm) Beta | Swift export: Alpha in 2.4, **Beta in 2.5.0-RC** |
+| Servers | Ktor 3.6.1 (2026-10-29, 28 bug fixes, none labeled security; HTTP/3 and OIDC plugin experimental in 3.6.0). Spring Boot **4.2.0** on Maven Central 2026-11-19 (spring.io's releases API still listed RC2 that day; release notes not read, so its Kotlin baseline is unverified; 4.0/4.1 baseline Kotlin 2.2+, Jackson 3, kotlinx.serialization starter). Micronaut 5.2.7 | |
+| Test/lint | JUnit 6.1.3 (6.2.0-M1 is a milestone; Java 17, Kotlin 2.2 baseline, `suspend` test methods), Kotest 6.2.7, MockK 1.14.12, Turbine 1.2.1, detekt 1.23.8 (2.0 alpha), ktlint 1.8.0 | |
 
 ### Older versions (what differs on a legacy project)
 - **Kotlin 1.9 / K1 projects**: can't jump straight to 2.4 if they rely on K1-only compiler plugins or `-language-version=1.9`. Go to 2.0-2.3 first. No guard conditions, context parameters or `$$` strings there. Don't use them.
@@ -135,6 +135,7 @@ suspend fun loadBoth(a: Api) = coroutineScope {        // fails fast, cancels th
 [versions]
 kotlin = "2.4.21"
 coroutines = "1.11.0"
+serialization = "1.13.0"
 [libraries]
 coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
@@ -166,7 +167,7 @@ tasks.test { useJUnitPlatform() }
 ## Security
 - **Injection**: Exposed/jOOQ/JDBC with bound parameters only. Never build SQL, shell commands (`ProcessBuilder` with a list, no `sh -c`), LDAP or paths from strings with user input. Normalize and check paths stay under a base dir.
 - **Deserialization**: kotlinx.serialization has no gadget chain, but polymorphic `Any`/open polymorphism with class names from input is a risk. Register subclasses explicitly. Never Java `ObjectInputStream` on untrusted data. Set size limits on request bodies (Ktor: limit in the engine/`receive`).
-- **Error leakage**: kotlinx.serialization error messages can echo user input. Hide them from clients (`StatusPages` generic message). 1.11 added `exceptionsWithDebugInfo` to `Json {}`: set it to `false` to keep input out of messages (hiding becomes the default once it is stable).
+- **Error leakage**: kotlinx.serialization error messages can echo user input. Hide them from clients (`StatusPages` generic message). 1.11 added `exceptionsWithDebugInfo` to `Json {}`: set it to `false` to keep input out of messages (hiding becomes the default once it is stable; whether 1.12/1.13 stabilized it: unverified).
 - **Secrets**: from env/secret store, never in `application.conf`, `gradle.properties` in VCS or logs. `data class` `toString()` prints every field: override it or wrap secrets (`@JvmInline value class Secret(val v: String) { override fun toString() = "***" }`).
 - **Auth (Ktor)**: verify JWT issuer, audience, algorithm and expiry. `CORS` with explicit hosts (`anyHost()` only for public read-only APIs). CSRF protection for cookie sessions. Session cookies `secure`, `httpOnly`, `SameSite`.
 - **Crypto**: `java.security.SecureRandom`/`Uuid.random()` for tokens, never `kotlin.random.Random`. Constant-time compare (`MessageDigest.isEqual`). Password hashing with Argon2/bcrypt libraries, not SHA.
@@ -196,7 +197,7 @@ tasks.test { useJUnitPlatform() }
 
 ## Common mistakes in AI-written code
 - Writing `context(Logger)` (removed receivers) or using 2.4 features in a 1.9/2.1 project. Check `kotlin` in `libs.versions.toml` first.
-- Inventing syntax: rich errors `fun f(): User | NotFound`, `val [a, b]` without the flag, collection literals `[1, 2]` without `-Xcollection-literals`. Name-based destructuring `(val x = y) = obj` needs the flag before 2.5.
+- Inventing syntax: rich errors `fun f(): User | NotFound`, `val [a, b]` without the flag, collection literals `[1, 2]` without `-Xcollection-literals`. Name-based destructuring `(val x = y) = obj` needs the flag before 2.5 (stable in `only-syntax` mode only from 2.5.0, not released yet).
 - Assuming `val (name, email) = user` matches by name. It's positional until 2.7. Mismatched order silently swaps values.
 - `GlobalScope`, `runBlocking` inside a request handler or a coroutine, `CoroutineScope(Dispatchers.IO)` created per call and never cancelled.
 - Swallowing `CancellationException` in `catch (e: Exception)` or `runCatching`, so cancelled work keeps running.
@@ -225,8 +226,14 @@ tasks.test { useJUnitPlatform() }
 - [ ] Deploy: health/readiness endpoints, graceful shutdown cancels scopes, config validated at startup, rollback = previous image/artifact.
 
 ## Sources
-All accessed 2026-10-09.
-- https://kotlinlang.org/docs/releases.html: 2.4.21/2.4.20/2.4.0 dates, cadence, 2.5.0 (2026-12) and 2.5.20 plans, 18-month stdlib support
+Accessed 2026-10-09 unless a date is shown; the lines marked 2026-11-19 were re-checked that day.
+- https://kotlinlang.org/docs/releases.html (2026-11-19): 2.4.21/2.4.20/2.4.0 dates, cadence, 2.5.0 (2026-12) and 2.5.20 plans, 18-month stdlib support
+- https://github.com/JetBrains/kotlin/releases (2026-11-19): 2.5.0-Beta2 on 10-21, 2.5.0-RC on 11-11, 2.4.21 still Latest
+- https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-gradle-plugin/maven-metadata.xml (2026-11-19): 2.5.0-RC listed, last update 2026-11-11
+- https://kotlinlang.org/docs/whatsnew-eap.html (2026-11-19): 2.5.0-RC contents, JDK 8 error, Java 28 bytecode
+- https://github.com/Kotlin/kotlinx.serialization/releases (2026-11-19): 1.12.0 and 1.13.0 (exception change reverted)
+- https://github.com/ktorio/ktor/releases (2026-11-19): Ktor 3.6.1 fixes
+- https://kotlinlang.org/docs/components-stability.html (2026-11-19): Wasm Beta, datetime/io/Lombok Alpha, reflect Beta, power-assert experimental
 - https://kotlinlang.org/docs/whatsnew24.html: 2.4 stable/experimental features, K1 removal, Gradle/AGP minimums, CMS GC, Swift export alpha, Apple minimums iOS 15 (page shows "Released: July 14, 2026", which is the 2.4.10 date; releases page and GitHub tag v2.4.0 say 2026-06-03, rechecked 2026-10-10)
 - https://kotlinlang.org/docs/whatsnew2420.html: 2.4.20 features, Gradle 7.6.3 to 9.7.0
 - https://kotlinlang.org/docs/whatsnew2320.html: name-based destructuring experimental, context receivers removed, `checkKotlinAbi`, Intel Apple targets deprecated, Lombok Alpha
@@ -247,4 +254,6 @@ All accessed 2026-10-09.
 - https://ktor.io/docs/whats-new-360.html: Ktor 3.6.0 (2026-09-17), HTTP/3, OIDC, `receive<T?>`, `respondHtmlPartial`
 - https://github.com/spring-projects/spring-boot/wiki/Spring-Boot-4.0-Release-Notes: Kotlin 2.2.20, Jackson 3, kotlinx.serialization starter
 - https://docs.junit.org/6.0.0/release-notes/: Java 17 and Kotlin 2.2 baseline, suspend test methods, JSpecify
-- repo1.maven.org maven-metadata.xml (2026-10-09): versions of KGP, KSP, coroutines, serialization, Ktor, Compose MP, SQLDelight, Koin, Coil, Exposed, jOOQ, Spring Boot, Micronaut, JUnit, Kotest, MockK, Turbine, detekt, ktlint, Kover, BCV, kotlinx-datetime, collections-immutable
+- https://kotlinlang.org/docs/releases.html , /whatsnew24.html , /whatsnew2420.html , /whatsnew-eap.html (2.5.0-RC: Swift export Beta, JDK 8 error, Java 28 bytecode, unused return value checker default), /components-stability.html (accessed 2026-11-19): re-verified release dates, 2.4 stable features, K1 removal, Gradle range 7.6.3-9.7.0, Wasm Beta
+- https://repo.maven.apache.org/maven2/org/springframework/boot/spring-boot/maven-metadata.xml and .../io/micronaut/platform/micronaut-platform/maven-metadata.xml (2026-11-19): Boot 4.2.0 (updated 2026-11-19), Micronaut 5.2.7 (2026-11-18)
+- repo1.maven.org maven-metadata.xml (2026-11-19): versions of KGP, KSP, coroutines, serialization, Ktor, Compose MP, SQLDelight, Koin, Coil, Exposed, jOOQ, Spring Boot, Micronaut, JUnit, Kotest, MockK, Turbine, detekt, ktlint, Kover, BCV, kotlinx-datetime, collections-immutable

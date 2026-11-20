@@ -1,9 +1,10 @@
-# Engine notes (as of 2026-10; versions verified 2026-10-09, see SKILL.md Sources)
+# Engine notes (as of 2026-11; versions verified 2026-11-19, see SKILL.md Sources)
 
 ## PostgreSQL
 - Default choice. Version feature table (17/18/19) lives in rc-web-backend `references/data-and-auth.md`; do not duplicate here.
 - Config that matters first: `shared_buffers` ~25% RAM, `effective_cache_size` ~50-75%, `work_mem` small (per sort node per connection), `maintenance_work_mem` larger, `random_page_cost` ~1.1 on SSD, `max_connections` low + pooler, `log_min_duration_statement`, `pg_stat_statements`.
 - Extensions worth knowing: `pg_stat_statements`, `pg_trgm`, `citext`, `pgcrypto`, `pgvector`, `postgis`, `pg_partman`, `pg_cron`, `timescaledb`, `citus`. Managed providers limit which ones you can install: check before designing around one.
+- PG 19 GA 2026-11-19: upgrading from <= 18 is dump/restore, `pg_upgrade` or logical replication; `pg_upgrade` rejects `btree_gist` inet/cidr indexes and names with CR/LF; old dumps made with `standard_conforming_strings=off` do not load; reindex FTS/`pg_trgm` indexes after upgrade as the notes advise; JIT is now off.
 - Upgrades: `pg_upgrade --link` (minutes) or logical replication blue/green (seconds). PG 18 keeps planner stats across `pg_upgrade`; older targets need `vacuumdb --analyze-in-stages` after.
 
 ## MySQL / MariaDB
@@ -20,11 +21,11 @@
 - Per connection: `PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;`. Use `BEGIN IMMEDIATE` for write transactions to avoid `SQLITE_BUSY` upgrades mid-transaction. One writer at a time: serialize writes in the app (single writer connection) for predictability.
 - `STRICT` tables (3.37+) for type enforcement; otherwise columns accept anything.
 - Backups: Litestream (continuous WAL shipping to S3), `VACUUM INTO` or the backup API for snapshots; never copy the file while it is being written without the WAL.
-- Upgrade to >= 3.51.3 (2026-03-13) or 3.53.0 (2026-04-09): both fix a WAL-reset corruption bug present since 3.7.0 (rare: WAL mode, two connections writing/checkpointing at the same instant); backports 3.50.7 and 3.44.6; 3.52.0 was withdrawn.
+- Current is 3.54.1 (2026-10-16). Upgrade to >= 3.51.3 (2026-03-13) or 3.53.0 (2026-04-09), ideally 3.54.1 (3.54.0 had a 32-bit heap overflow): both fix a WAL-reset corruption bug present since 3.7.0 (rare: WAL mode, two connections writing/checkpointing at the same instant); backports 3.50.7 and 3.44.6; 3.52.0 was withdrawn.
 - libSQL (fork with server mode, embedded replicas) vs Turso Database (Rust rewrite, MIT, pre-1.0, `BEGIN CONCURRENT` writes, exact vector search; ANN index not yet): Turso says the rewrite replaces libSQL as their direction. For new production use, plain SQLite unless you need their sync/replication features; keep independent backups.
 
 ## Microsoft SQL Server / Azure SQL
-- 2025 (17.x) current; 2022 widely deployed; 2016 out of support 2026-07-14.
+- 2025 (17.x) current; 2022 widely deployed; 2016 regular security updates ended 2026-07-14 (paid ESU to 2029-07-17).
 - Turn on `READ_COMMITTED_SNAPSHOT` (row versioning) to stop readers blocking writers; Query Store on (default in 2022+); ADR (accelerated database recovery).
 - Clustered index = table order: prefer narrow, ever-increasing keys (`bigint IDENTITY`, `NEWSEQUENTIALID()`); `NEWID()` clustered keys fragment.
 - `NVARCHAR` for Unicode or UTF-8 collations (`_UTF8`, 2019+) with `VARCHAR`.
@@ -49,7 +50,7 @@
 
 ## Elasticsearch / OpenSearch
 - Search/log store, not the system of record: rebuildable from the primary DB via CDC/outbox.
-- Elasticsearch 9.x (9.5/9.4 maintained, 8.19 until 2027-07-15); licences ELv2/SSPL/AGPLv3. OpenSearch 3.x (Apache-2.0); 2.19 in maintenance. APIs diverged after the 7.10 fork: clients are not interchangeable at major versions.
+- Elasticsearch 9.x (9.5/9.4 maintained, 8.19 until 2027-07-15); licences ELv2/SSPL/AGPLv3. OpenSearch 3.x (3.10.0, Apache-2.0); 2.19 in maintenance. APIs diverged after the 7.10 fork: clients are not interchangeable at major versions.
 - Explicit mappings (`dynamic: strict` or `false` for user JSON) to avoid mapping explosion; index aliases for zero-downtime reindex; ILM/ISM for time-based indices; security on (TLS + auth) always.
 - Lighter options when you do not need a cluster: Postgres FTS + `pg_trgm`, Meilisearch, Typesense.
 
@@ -61,7 +62,7 @@
 - On-demand capacity unless traffic is steady and you have measured; enable PITR (recovery period 1-35 days) and deletion protection; export to S3 for analytics instead of `Scan`.
 
 ## Firestore
-- Editions: Standard and Enterprise; Enterprise adds Pipeline queries (GA 2026-04-20) and the MongoDB-compatible API (GA 2025-08-26).
+- Editions: Standard and Enterprise; Enterprise adds Pipeline queries (GA 2026-04-20; DML insert/upsert and text/geospatial search GA Oct 2026) and the MongoDB-compatible API (GA 2025-08-26).
 - Clients talk to it directly: Security Rules are your authorization layer. Default deny, validate `request.auth.uid` ownership and field types, limit query shapes in rules, test with the emulator in CI.
 - Model for reads: denormalize into documents per screen, subcollections for unbounded children, avoid hot single documents (write rate per document is limited: shard counters).
 - Composite indexes must be declared (`firestore.indexes.json`); deploy them with the rules.
@@ -81,10 +82,10 @@
 - Dedicated vector DBs (Qdrant, Milvus, Weaviate, Pinecone) or OpenSearch k-NN when vectors outgrow one Postgres node's RAM or you need hybrid search features out of the box. SQL Server 2025 and MySQL 9 have vector types too (SQL Server's ANN index still preview).
 
 ## Graph
-- First try: adjacency table + recursive CTE (bounded depth), closure tables for read-heavy hierarchies, `ltree` for paths. PG 19 adds SQL/PGQ property-graph queries (beta at time of writing).
+- First try: adjacency table + recursive CTE (bounded depth), closure tables for read-heavy hierarchies, `ltree` for paths. SQL/PGQ property-graph queries were reported for the PG 19 beta but the 19 release notes do not list them (unverified: check before relying on `GRAPH_TABLE`).
 - A graph DB (Neo4j, Memgraph, Amazon Neptune) earns its place when most queries are variable-length traversals over many hops on large graphs. Keep it as a derived store if the system of record is relational.
 
 ## Time-series and analytics
-- TimescaleDB 2.30 (PG 16-18): hypertables, compression, continuous aggregates (TSL-licensed features; Apache-only builds lack them; managed clouds may ship the Apache build).
-- ClickHouse (26.x, LTS 26.3 / 26.8): columnar, very fast aggregations over billions of rows; append-mostly; updates/deletes are expensive mutations (lightweight deletes exist); no multi-row transactions in the OLTP sense. Feed it via Kafka/CDC; keep OLTP in Postgres/MySQL.
+- TimescaleDB 2.32.1 (PG 16-18; use it with the 2026-11 PG minors): hypertables, compression, continuous aggregates (TSL-licensed features; Apache-only builds lack them; managed clouds may ship the Apache build).
+- ClickHouse (26.x, LTS 26.8; 26.3 LTS end date unverified): columnar, very fast aggregations over billions of rows; append-mostly; updates/deletes are expensive mutations (lightweight deletes exist); no multi-row transactions in the OLTP sense. Feed it via Kafka/CDC; keep OLTP in Postgres/MySQL.
 - Plain Postgres with BRIN + range partitions by month handles moderate time-series well; drop old partitions for retention.

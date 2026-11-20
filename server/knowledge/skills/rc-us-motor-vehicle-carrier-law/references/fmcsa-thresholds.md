@@ -1,4 +1,4 @@
-# FMCSA thresholds and tables (verified on eCFR, current through 2026-10-07; accessed 2026-10-10)
+# FMCSA thresholds and tables (eCFR Title 49 current through 2026-11-18; no Parts 382-399 change after 2026-10-05; tables verified 2026-10-10)
 
 ## Which definition answers which question
 | Question | Definition | Threshold (rating OR actual weight, whichever is greater) |
@@ -60,11 +60,13 @@ Always compute from the labels and scale tickets; never infer from body style or
 | 2025-09-29 | Non-domiciled CDL interim final rule (90 FR 46509) | Stayed by D.C. Cir. 2025-11-10/13 (Lujan v. FMCSA, No. 25-1215); replaced by final rule |
 | 2026-02-13 | Non-domiciled CDL final rule (91 FR 7044) | Effective 2026-03-16; new petition for review reported (unverified) |
 | 2026-02-19 | eDVIR rule (91 FR 7893); rear impact guard labels; flares; spare fuses (91 FR 7877) | Effective 2026-03-23 (spare fuses 2026-04-20) |
-| 2026-02-27 | DOL IC status NPRM (rescind 2024 rule) | Proposed only |
+| 2026-02-27 | DOL IC status NPRM (rescind 2024 rule); final rule announced 2026-11-19, effective 60 days after FR publication | NPRM; final announced (dol.gov, 2026-11-19) |
 | 2026-04-29 | Motus availability notice (91 FR 23144; docket corrected 91 FR 24643) | Phase II launched 2026-05-19 (FMCSA page) |
 | 2026-06-22 | ELD manual rescinded (91 FR 37050); CDL self-reporting removed (91 FR 37047); completed inspection report disposition (91 FR 37053) | Effective 2026-07-22 |
 | 2026-07-21 | Technical amendments (91 FR 45653), incl. 387.9 | Effective 2026-07-21, no amount change |
 | 2026-10-05 | Emergency exemptions: automatic relief after a regional declaration 14 -> 30 days (91 FR 63156) | Effective 2026-10-05 |
 | 2026-08-10 | English proficiency OOS NPRM (91 FR 51422) | Proposed; comments closed 2026-10-09 |
 | 2026-09-01 | UCR fees 2027 | Effective 2026-10-01 |
-| 2024-11-20 | Broker transparency NPRM | No final rule found |
+| 2024-11-20 | Broker transparency NPRM | No final rule found (2026-11-19) |
+| 2026-11-19 check | No new FMCSA final rule or NPRM published after 2026-10-05 (exemption notices only) | Federal Register API |
+| 2026-09 | Lujan v. FMCSA reportedly argued (D.C. Cir. No. 26-1032; trade press, docket not seen: unverified) | No decision found 2026-11-19 |

@@ -2,10 +2,10 @@
 name: rc-us-motor-vehicle-carrier-law
 description: "US motor-vehicle and motor-carrier law (Ohio/NC detail): FMCSA rules, USDOT number, MC number, operating authority, CDL, GVWR/GCWR, box truck, driveaway, pilot car/escort, oversize permit, truck lease and lease-to-own, Part 376, repossession, vehicle title, liens, registration, DMV, traffic ticket, lemon law, owner-operator and gig driver status. Use for any trucking, vehicle or carrier legal question or contract."
 ---
-# US motor-vehicle, trucking and carrier law  (as of 2026-10)
+# US motor-vehicle, trucking and carrier law  (as of 2026-11)
 
 > Research and drafting aid, not legal advice; Claude is not a lawyer. Every rule here is dated and was checked on the source listed in
-> Sources (eCFR current through 2026-10-07). FMCSA rules changed a lot in 2025-2026: re-check eCFR and federalregister.gov before relying
+> Sources (eCFR Title 49 current through 2026-11-18). FMCSA rules changed a lot in 2025-2026: re-check eCFR and federalregister.gov before relying
 > on any number. "(unverified)" means a lead, not a fact. Follow the directive rules: never invent law, cases, facts or deadlines.
 
 Detail lives in `references/`: `fmcsa-thresholds.md` (CMV/CDL/insurance tables), `driveaway-pilot-car.md`, `leasing-ucc.md`
@@ -13,8 +13,13 @@ Detail lives in `references/`: `fmcsa-thresholds.md` (CMV/CDL/insurance tables),
 (location data handling), rc-american-english-writing (plain-English drafts).
 
 ## Currency check
-Verified 2026-10-10 unless marked.
-- **eCFR Title 49** current through 2026-10-07 (last amended 2026-10-05). **Title 23** (FHWA size/weight) through 2026-10-07.
+Verified 2026-11-19 for the items marked "2026-11"; other items were verified 2026-10-10 and the Federal Register showed no FMCSA
+final rule or NPRM after 2026-10-05 (FR API query, 2026-11-19).
+- **eCFR Title 49** current through 2026-11-18 (title last amended 2026-11-12, but the only Part 390 change since 2026-10-01 is
+  390.23 on 2026-10-05; the 2026-11-12 entries are other agencies' parts). **Title 23** through 2026-11-18 (last amended 2026-09-23).
+- **2026-11 news**: FMCSA published only exemption notices in 2026-10/11 (e.g. 91 FR 74274, 2026-11-18). FMCSA's regulatory agenda
+  lists a Unified Registration System NPRM and entry-level driver training items with November 2026 targets: agenda dates, not
+  published rules (trade-press summary, unverified).
 - **Suspended "T" sections are the operative text.** 49 CFR 390.3 and **390.5 are both suspended** (390.5 since 2017, re-suspended
   2021-07-07); **390.3T** and **390.5T** apply (the 390.5T definitions quoted below are word-for-word the same as 390.5; state rules
   still say "390.5"). 390.201 (URS registration) was suspended indefinitely 2023-11-17; the operative registration rules are **390.19T**
@@ -23,9 +28,11 @@ Verified 2026-10-10 unless marked.
 - **Motus**, FMCSA's registration system (notice 91 FR 23144, 2026-04-29): Phase I 2025-12-08 (BOC-3 filers, insurers, service
   providers); Phase II for all registrants **launched 2026-05-19** (fmcsa.dot.gov "Move to Motus", read via Wayback). Because of
   rollout problems FMCSA **temporarily suspended USDOT inactivation** for biennial updates due since 2026-06-01, "until further notice"
-  (fmcsa.dot.gov page updated 2026-06-22, Wayback 2026-07-15): the update is still owed. FMCSA says it has *proposed* no longer assigning
+  (fmcsa.dot.gov page updated 2026-06-22, Wayback 2026-07-15; trade press reports a page update 2026-09-10, no end date, no
+2026-11 change found; fmcsa.dot.gov blocked fetch 2026-11-19): the update is still owed. Motus reportedly offers no biennial update
+option to intrastate-only carriers (trade press, unverified). FMCSA says it has *proposed* no longer assigning
   MC numbers (USDOT number plus suffixes as sole identifier) and that this needs an NPRM and is not in the first Motus release; no NPRM
-  found on federalregister.gov as of 2026-10-10. MC numbers still exist and are still required on freight documents.
+  found on federalregister.gov as of 2026-11-19 (no FMCSA proposed rule listed after 2026-08-10). MC numbers still exist and are still required on freight documents.
 - **Broker/freight-forwarder security: $75,000** surety bond (BMC-84) or trust fund (BMC-85); the 2023 rule (88 FR 78656, 2023-11-16)
   became fully enforceable **2026-01-16** (compliance date moved by 89 FR 107021): trust assets limited to cash, irrevocable letters of
   credit, Treasury bonds; surety/trustee must notify FMCSA of payments that drop the fund below $75,000; FMCSA suspends broker authority
@@ -33,9 +40,18 @@ Verified 2026-10-10 unless marked.
 - **Non-domiciled CDL final rule** 91 FR 7044 (2026-02-13), effective **2026-03-16**: non-domiciled CLP/CDL limited to holders of specific
   employment-based nonimmigrant status; reaffirms the 2025-09-29 interim final rule (90 FR 46509), which the D.C. Circuit had stayed
   on 2025-11-10/13 (*Lujan v. FMCSA*, No. 25-1215; stated in the final rule preamble). A new petition against the final rule
-  (reported as No. 26-1032, stay denied 2026-05-05, expedited briefing) is trade-press only: **unverified**, check the docket.
+  (*Lujan v. FMCSA*, D.C. Cir. No. 26-1032; petitioners' brief filed 2026-06-15 confirmed; the stay-denied 2026-05-05 order PDF could not be read and the docket was not seen: unverified) was reportedly argued mid-September 2026 before a
+  three-judge panel, with reported skepticism toward the government (FreightWaves 2026-09-23); no merits decision found as of
+  2026-11-19. A separate New York challenge was reported set for argument 2026-09-28 (trade press, unverified). The final rule
+  stays in force unless a court vacates it: check the docket. Ohio BMV stopped issuing non-domiciled CDLs and was notifying about
+  5,000 holders (trade press, unverified); R.C. 4506.11 text effective 2026-03-20 marks such licenses (codes.ohio.gov PDF seen in search, unverified).
 - **English proficiency**: 391.11(b)(2) requires reading/speaking English sufficiently. NPRM 91 FR 51422 (2026-08-10, comments closed
-  2026-10-09) proposes codifying ELP as an out-of-service violation, matching CVSA OOS criteria already enforced. Not final.
+  2026-10-09; docket FMCSA-2026-0826, confirmed on federalregister.gov 2026-11-19) proposes codifying ELP as an out-of-service
+  violation, matching CVSA OOS criteria already enforced. No final rule as of 2026-11-19.
+- **DataQs**: FMCSA's revised state DataQs requirements (3-stage review, 91 FR, 2026-04-16) took effect after 150 days (about
+  mid-September 2026); trade press says all states comply (unverified).
+- **Emergency exemptions** (91 FR 63156, eff. 2026-10-05; 49 CFR 390.23): automatic relief after a regional emergency declaration
+  lasts 30 days, up from 14.
 - **Speed limiters**: FMCSA/NHTSA withdrew the 2016 NPRM and 2022 ANSPRM on 2025-07-24. No federal speed-limiter mandate.
 - **Broker transparency** (Part 371.3 records access): NPRM 2024-11-20, comment reopened to 2025-03-20; no final rule as of 2026-10-10.
 - **2026 deregulatory final rules**: eDVIRs expressly allowed (eff. 2026-03-23); ELD manual no longer required in the cab (eff. 2026-07-22);
@@ -43,8 +59,8 @@ Verified 2026-10-10 unless marked.
   UCR fees up ~20% for registration year 2027 (eff. 2026-10-01).
 - **Minimum insurance unchanged**: $750,000 for-hire interstate property, 10,001+ lb GVWR; $300,000 if the fleet is only vehicles under
   10,001 lb (387.9; 387.303T). 387.9 was technically amended 2026-07-21 (91 FR 45660) without changing amounts.
-- **DOL independent-contractor rule**: NPRM 2026-02-27 proposes rescinding the 2024 rule (29 CFR part 795) and returning to the 2021
-  "core factors" test; comments closed 2026-04-28; no final rule found as of 2026-10-10. The 2024 rule text is still in the CFR.
+- **DOL independent-contractor rule**: NPRM 2026-02-27 (91 FR 9932) proposed rescinding the 2024 rule (29 CFR part 795); comments closed 2026-04-28. **DOL's pages announce a FINAL rule dated 2026-11-19** (two core factors; effective 60 days after Federal Register publication, which was not found yet: dol.gov/agencies/whd/flsa/misclassification/2026rulemaking, 2026-11-19). The 2024 rule text is still in the CFR until then; WHD
+  has not applied it in investigations since Field Assistance Bulletin 2025-1 (May 2025, secondary source).
 - **State changes**: NC minimum auto liability rose to **50/100/50** for policies issued or renewed on/after **2025-07-01** (G.S.
   20-279.21(b)(2); S.L. 2023-133 s. 12, date moved from 2025-01-01 by S.L. 2024-29 s. 8(c)). Ohio stays 25/50/25 (R.C. 4509.51).
   Ohio PUCO incorporates 49 CFR as of **2025-08-01** (OAC 4901:2-5-02(C), eff. 2026-01-01). Ohio HB 195 (136th GA) amended UCC Chapter
@@ -232,7 +248,7 @@ are free. Don't store driver data you don't need.
 - Ignoring "whichever is greater": actual loaded weight can push a lighter-rated truck into CMV status.
 - Applying Part 382 drug testing and the Clearinghouse to non-CDL drivers, or omitting it for CDL drivers in intrastate work.
 - Citing suspended 390.3, 390.5, 390.201 or 387.403 instead of the T sections; citing a 2024 DOL rule as settled.
-- Saying "no MC number needed anymore" as final law (only proposed as of 2026-10-10), or "no authority needed under 10,001 lb"
+- Saying "no MC number needed anymore" as final law (only proposed as of 2026-11-19), or "no authority needed under 10,001 lb"
   (authority turns on for-hire regulated transport, not weight).
 - Calling a $1-buyout "lease" a true lease; forgetting title-notation perfection, so the lessor is unsecured in bankruptcy.
 - Drafting late fees or acceleration that operate as penalties; unlimited indemnity for the lessor's own negligence (state anti-indemnity
@@ -286,4 +302,10 @@ are free. Don't store driver data you don't need.
 - https://connect.ncdot.gov/business/trucking/Pages/overpermits.aspx - Publication E-9 (rev 8/24), Reciprocation Agreement (rev 08/19) (2026-10-10)
 - https://haulingpermits.transportation.ohio.gov/OS1A.pdf - ODOT Form OS-1A escort conditions, rev. 01/18 (2026-10-10)
 - More state sources: `references/state-notes-oh-nc.md`, `references/driveaway-pilot-car.md`.
-- Blocked/unavailable 2026-10-10: fmcsa.dot.gov (HTTP 403 to fetch tools), transportation.gov (403), uscode.house.gov (maintenance).
+- 2026-11 refresh (accessed 2026-11-19): https://www.federalregister.gov/api/v1/documents/2026-16288.json (ELP NPRM, 91 FR 51422,
+  comments closed 2026-10-09); https://www.federalregister.gov/api/v1/documents.json (FMCSA rule/proposed-rule list: last rule
+  2026-10-05, 91 FR 63156, doc 2026-20325); https://www.ecfr.gov/api/versioner/v1/titles.json (Title 49 and 23 currency);
+  https://www.ecfr.gov/api/versioner/v1/versions/title-49.json (Part 390 change history); https://media.cadc.uscourts.gov/orders/docs/2026/05/26-1032LDSN2.pdf
+  (D.C. Cir. order, stay denied); https://www.freightwaves.com/news/some-judicial-skepticism-of-non-domiciled-rule-in-lujan-arguments
+  (argument report, trade press only); https://www.dol.gov/agencies/whd/flsa/misclassification/rulemaking (DOL IC NPRM page, search result only).
+- Blocked/unavailable 2026-11-19: fmcsa.dot.gov (HTTP 403 to fetch tools), transportation.gov, uscode.house.gov.

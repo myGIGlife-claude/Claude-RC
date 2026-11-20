@@ -1,8 +1,8 @@
 ---
 name: rc-architecture-systems
-description: System architecture decisions as of 2026-10 - monolith vs modular monolith vs microservices, domain boundaries, event-driven design (outbox, sagas, CQRS, event sourcing), distributed-systems limits, Kafka/RabbitMQ/NATS/SQS choice, gateway/BFF/mesh, scaling, multi-tenancy, payments (Stripe, webhooks, 3DS, PCI), search, media, real-time, jobs, HA/DR, ADRs, strangler fig. Use when designing a system, writing an ADR or reviewing architecture.
+description: System architecture decisions as of 2026-11 - monolith vs modular monolith vs microservices, domain boundaries, event-driven design (outbox, sagas, CQRS, event sourcing), distributed-systems limits, Kafka/RabbitMQ/NATS/SQS choice, gateway/BFF/mesh, scaling, multi-tenancy, payments (Stripe, webhooks, 3DS, PCI), search, media, real-time, jobs, HA/DR, ADRs, strangler fig. Use when designing a system, writing an ADR or reviewing architecture.
 ---
-# System architecture and distributed systems (as of 2026-10)
+# System architecture and distributed systems (as of 2026-11)
 
 > Facts are dated (see Sources). Versions and licences move: confirm the primary source before pinning one. "(unverified)" marks a lead, not a fact.
 
@@ -12,21 +12,21 @@ Long tables (broker comparison, payments flow, HA/DR tiers, ADR template) are in
 
 ## Currency check
 
-| Thing | Current (verified 2026-10-09) | Notes |
+| Thing | Current (verified 2026-11-19) | Notes |
 |---|---|---|
-| Apache Kafka | **4.3** (4.3.0 2026-05-22, 4.3.1 2026-06-25); 4.2.2 2026-09-29; 4.1.2 2026-03-17 | ZooKeeper gone since 4.0 (KRaft only). **Share groups ("Queues for Kafka", KIP-932) production-ready in 4.2** (2026-02-17): per-record ack, many consumers per partition. |
-| RabbitMQ | **4.3** (4.3.6, 2026-09-16; community support to 2027-01-31); 4.2 community support ended 2026-07-31 | Classic mirrored queues **removed in 4.0**: use quorum queues or streams. AMQP 1.0 is core since 4.0. **Khepri** metadata store: default for new clusters in 4.2, the **only** store in 4.3 (Mnesia gone): enable the `khepri_db` feature flag before upgrading to 4.3. |
-| NATS Server | **2.15.1** / 2.14.8 (both 2026-10-09), Apache-2.0, stays in CNCF | 2025-05 settlement: Synadia assigned trademarks to the LF and dropped the BSL fork plan. 2.12 added atomic batch publish and counter streams. |
-| Redis / Valkey | Redis 8.10.2 (2026-09-17, RSAL/SSPL/AGPL); Valkey 9.0.6 / 9.1.2 (2026-09-01, BSD-3) | Both have Streams (consumer groups, XACK). |
-| Apache Pulsar | 5.0.0 (2026-10-05); 4.0.x LTS line still patched | |
+| Apache Kafka | **4.4.0** (2026-10-22); **4.3.2** (2026-10-23; 4.3.0 was 2026-05-22); the downloads page lists 4.4.0, 4.3.2 and 4.2.2 as supported (4.3.0 is archived) | ZooKeeper gone since 4.0 (KRaft only). **Share groups ("Queues for Kafka", KIP-932) production-ready in 4.2** (2026-02-17): per-record ack, many consumers per partition. 4.4 adds share-group dead-letter queues (KIP-1191, needs `share.version` 2); `broker.id` and `kafka-broker-api-versions.sh` deprecated in 4.4. |
+| RabbitMQ | **4.4** (4.4.1, 2026-11-16; community support to 2027-07-31); 4.3 (4.3.8, 2026-11-16; to 2027-01-31); 4.2 community support ended 2026-07-31 | 4.4 (2026-10-19): classic-queue v2 store files block downgrade to 4.3 or older. Classic mirrored queues **removed in 4.0**: use quorum queues or streams. AMQP 1.0 is core since 4.0. **Khepri** metadata store: default for new clusters in 4.2, the **only** store in 4.3 (Mnesia gone): enable the `khepri_db` feature flag before upgrading to 4.3. |
+| NATS Server | **2.15.3** / 2.14.10 (both 2026-11-11), Apache-2.0, stays in CNCF | 2025-05 settlement: Synadia assigned trademarks to the LF and dropped the BSL fork plan. 2.12 added atomic batch publish and counter streams. |
+| Redis / Valkey | Redis 8.10.3 (2026-10-26; 8.12 only at rc3), RSAL/SSPL/AGPL; Valkey 9.2.0 (2026-11-19), 9.1.4, 9.0.8 (BSD-3) | Both have Streams (consumer groups, XACK). |
+| Apache Pulsar | 5.0.1 (2026-10-26; 5.0.0 was 2026-10-05); 4.0.x LTS line still patched (4.0.14, 2026-10-05) | |
 | AWS SQS / SNS / EventBridge | SQS max payload **1 MiB** (was 256 KiB, 2025-08); **fair queues** for standard queues (2025-07, message group id = tenant); EventBridge can target fair queues (2025-11) | Old SDK wrappers may still cap at 256 KiB; Extended Client Library (S3 offload) for up to 2 GB. |
-| Temporal (durable workflows) | server 1.32.1 (2026-10-08) | |
-| Debezium (CDC for outbox) | 3.7.0.Final (latest tag) | |
-| Search | Elasticsearch 9.5.5 / 8.19.23 (2026-10-06), licences ELv2/SSPL/**AGPLv3** (AGPL option since 2024-08); OpenSearch 3.9.0 (2026-09-29, Apache-2.0, OpenSearch Software Foundation/LF since 2024-09); Meilisearch 1.54.x; Typesense 30.2 | |
-| Object storage | **MinIO community edition: no binaries/images since 2025-10, maintenance mode 2025-12, repo archived 2026-04-25** | Pick a maintained S3 store (cloud S3/R2/GCS, Ceph RGW, Garage, SeaweedFS) for new self-hosting. |
+| Temporal (durable workflows) | server 1.32.2 (2026-11-02) | |
+| Debezium (CDC for outbox) | 3.7.1.Final (latest final tag; 3.8.0 only Alpha) | |
+| Search | Elasticsearch 9.5.6 (2026-11-02) / 8.19.25 (2026-11-10), licences ELv2/SSPL/**AGPLv3** (AGPL option since 2024-08); OpenSearch 3.10.0 (2026-11-18, Apache-2.0, OpenSearch Software Foundation/LF since 2024-09); Meilisearch 1.57.0; Typesense 30.2 | |
+| Object storage | **MinIO community edition: no binaries/images since 2025-10, maintenance mode 2025-12, repo archived (last push 2026-04-24)** | Pick a maintained S3 store (cloud S3/R2/GCS, Ceph RGW, Garage, SeaweedFS) for new self-hosting. |
 | Service mesh | Istio **ambient mode GA in 1.24** (2024-11): ztunnel per node (L4 mTLS) + optional waypoints (L7), no sidecars | |
 | Real-time | **WebTransport Baseline**: Safari 26.4 (2026-03-24) completed support | WebSocket/SSE remain defaults; WebTransport for unreliable/multiplexed streams. |
-| Stripe | API version **2026-09-30.endive** (new major); 2026-03-25.dahlia before it; monthly non-breaking versions, two breaking majors a year since 2024-09 (acacia) | Stripe now recommends **Checkout Sessions** (+ Payment Element) over raw PaymentIntents for most integrations. |
+| Stripe | API version **2026-10-28.endive** (changelog's latest; same codename as the 2026-09-30.endive release, so likely a monthly update, inferred); dahlia line before it; monthly non-breaking versions, two breaking majors a year since 2024-09 (acacia) | Stripe now recommends **Checkout Sessions** (+ Payment Element) over raw PaymentIntents for most integrations. |
 | PCI DSS | v4.0.1; future-dated reqs mandatory after 2025-03-31. SAQ A (2025-01 revision) dropped 6.4.3/11.6.1 but merchants embedding a payment iframe must confirm their site is not susceptible to script attacks | Redirect/hosted page = smallest scope. |
 
 ### Older versions
@@ -305,13 +305,13 @@ Detail matrix in `references/decisions.md`.
 - [ ] Privacy: data minimised, PII not spread into events/logs/indexes without retention and erasure rules.
 
 ## Sources
-All accessed 2026-10-09; re-checked 2026-10-10.
-- https://kafka.apache.org/community/downloads/ - Kafka 4.3.1/4.3.0/4.2.2/4.1.2 versions and dates.
+All accessed 2026-11-19 (version/date lookups for GitHub-hosted projects via the GitHub releases API). Independent re-check 2026-11-19: Kafka downloads page and 4.4/4.2 blogs, rabbitmq.com/release-information, docs.stripe.com/changelog (2026-10-28.endive is the latest; Stripe does not label major vs monthly on that page), SQS quotas page (1 MiB, 2 GB extended), GitHub API for NATS, Redis, Valkey, Pulsar, Temporal, Debezium, Elasticsearch, OpenSearch, MinIO.
+- https://kafka.apache.org/community/downloads/ - Kafka 4.4.0/4.3.2 versions, dates, supported list. https://kafka.apache.org/blog/2026/10/22/apache-kafka-4.4.0-release-announcement/ - 4.4 share-group DLQ, deprecations.
 - https://kafka.apache.org/blog/2026/02/17/apache-kafka-4.2.0-release-announcement/ - 4.2.0 date, share groups production-ready (corroborated by confluent.io release blog).
 - https://www.rabbitmq.com/release-information - RabbitMQ series, patches, community support dates.
-- https://github.com/rabbitmq/rabbitmq-server/releases (v4.0.1, v4.2.0, v4.3.0 notes) - mirrored queue removal, AMQP 1.0 core, Khepri default in 4.2 and only store in 4.3; LICENSE file: MPL-2.0.
+- https://github.com/rabbitmq/rabbitmq-server/releases (v4.0.1, v4.2.0, v4.3.0 notes) - mirrored queue removal, AMQP 1.0 core, Khepri only store in 4.3 (v4.3.0 notes), 4.4.0 notes (2026-10-19); LICENSE file: MPL-2.0.
 - https://kafka.apache.org/blog/2025/03/18/apache-kafka-4.0.0-release-announcement/ - KRaft only, share groups early access in 4.0; https://kafka.apache.org/blog/2025/09/04/apache-kafka-4.1.0-release-announcement/ - Queues for Kafka preview in 4.1.
-- https://github.com/nats-io/nats-server/releases (GitHub API) - NATS 2.15.1/2.14.8 dates; https://docs.nats.io/release-notes/whats_new/whats_new_212 - 2.12 atomic batch, counters.
+- https://github.com/nats-io/nats-server/releases (GitHub API) - NATS 2.15.3/2.14.10 dates; https://docs.nats.io/release-notes/whats_new/whats_new_212 - 2.12 atomic batch, counters.
 - https://www.cncf.io/blog/2025/05/01/protecting-nats-and-the-integrity-of-open-source-cncfs-commitment-to-the-community/ and https://thenewstack.io/cncf-and-synadia-reach-an-agreement-on-nats/ - NATS settlement.
 - GitHub releases API: redis/redis, valkey-io/valkey, apache/pulsar, temporalio/temporal, debezium tags, elastic/elasticsearch, opensearch-project/OpenSearch, meilisearch, typesense - versions and dates.
 - https://aws.amazon.com/about-aws/whats-new/2025/07/amazon-sqs-introduces-fair/ - SQS fair queues; https://aws.amazon.com/about-aws/whats-new/2025/11/amazon-eventbridge-sqs-fair-queue-targets - EventBridge targets.
@@ -322,6 +322,6 @@ All accessed 2026-10-09; re-checked 2026-10-10.
 - GitHub API `repos/minio/minio` (archived=true, last push 2026-04-24) and its README commit history (source-only 2025-10-15, maintenance mode 2025-12-03) - MinIO timeline.
 - https://istio.io/latest/blog/2024/ambient-reaches-ga/ - Istio ambient GA in 1.24.
 - https://webkit.org/blog/17862/webkit-features-for-safari-26-4/ - Safari 26.4 WebTransport (2026-03-24).
-- https://docs.stripe.com/api/versioning and https://docs.stripe.com/changelog - Stripe release model (monthly + two majors a year since 2024-09-30.acacia); current version 2026-09-30.endive.
+- https://docs.stripe.com/api/versioning and https://docs.stripe.com/changelog - Stripe release model (monthly + two majors a year since 2024-09-30.acacia); latest version 2026-10-28.endive.
 - https://docs.stripe.com/payments/checkout-sessions-and-payment-intents-comparison - Checkout Sessions recommended.
 - https://blog.pcisecuritystandards.org/important-updates-announced-for-merchants-validating-to-self-assessment-questionnaire-a and https://blog.pcisecuritystandards.org/faq-clarifies-new-saq-a-eligibility-criteria-for-e-commerce-merchants - SAQ A 2025-01: 6.4.3/11.6.1 removed; script-attack eligibility criterion applies to embedded payment forms, not redirects.

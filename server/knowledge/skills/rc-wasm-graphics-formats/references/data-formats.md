@@ -1,8 +1,8 @@
-# Data and config formats: pitfalls (as of 2026-10)
+# Data and config formats: pitfalls (as of 2026-11)
 
-Versions: JSON Schema 2020-12 (current), YAML 1.2.2 (2021-10), TOML 1.1.0 (2025-12-18), js-yaml 5.4.3, `yaml` 2.9.1,
-smol-toml 1.9.1, Ajv 8.20.0, `@bufbuild/protobuf` 2.16.0, msgpackr 2.1.0, cbor-x 1.6.6, papaparse 5.7.0, fast-xml-parser 5.11.2
-(npm/GitHub, checked 2026-10-09). Items marked (unverified) were not checked on a primary source.
+Versions: JSON Schema 2020-12 (current), YAML 1.2.2 (2021-10), TOML 1.1.0 (2025-12-18, rechecked 2026-11-19), js-yaml 5.5.0,
+`yaml` 2.9.1, `@bufbuild/protobuf` 2.17.0 (npm, 2026-11-19); smol-toml 1.9.1, Ajv 8.20.0, msgpackr 2.1.0, cbor-x 1.6.6,
+papaparse 5.7.0, fast-xml-parser 5.11.2 (npm, 2026-10-09, not rechecked). Items marked (unverified) were not checked on a primary source.
 
 ## Choosing
 | Need | Pick | Avoid |

@@ -1,6 +1,6 @@
-# Formation and upkeep: North Carolina, Ohio, Delaware, and any other state (as of 2026-10-10)
+# Formation and upkeep: North Carolina, Ohio, Delaware, and any other state (as of 2026-11-19)
 
-Fees are statutory or from the official fee schedule, read on 2026-10-10. Online portals may add card/processing fees. Expedite fees
+Fees are statutory or from the official fee schedule, read on 2026-10-10 (NC 57D-1-22 and Ohio 111.16 rechecked 2026-11-19: unchanged). Online portals may add card/processing fees. Expedite fees
 extra. Re-check before filing: fees and forms change.
 
 ## North Carolina (Secretary of State, Business Registration Division; sosnc.gov)
@@ -35,6 +35,9 @@ assumed business names **Chapter 66, Art. 14A**.
   extended). Corporations and LLPs: annual report timely if filed within 90 days after deployment ends; **LLCs: by April 15 of the year
   after** deployment ends; fees waived; no dissolution/revocation until 180+ days past the deployment end. The SOS page shortens this to
   "90 days": follow the statute for LLCs.
+- S.L. 2026-52 (H 517, signed 2026-07-07): from 2027-01-01 Chapter 55A nonprofits (domestic and foreign) file an annual report by
+  November 15 (G.S. 55A-16-22.1; $25 paper / $18 electronic; first due 2027-11-15); domestication articles $25 / abandonment $10
+  eff. 2026-10-01 (ncleg text, 2026-11-19).
 - Turnaround shown on SOS page: entity creation 5-10 business days online (2026-10-10).
 - After formation: NC Department of Revenue registration (withholding, sales and use tax), NC Division of Employment Security
   (unemployment, G.S. Ch. 96; "employee" follows IRC §3306), workers' comp insurance at 3+ regular employees (G.S. 97-2, 97-13(b)),
@@ -88,7 +91,7 @@ Chapter 1** (General Corporation Law, DGCL); LPs **6 Del. C. Ch. 17**; partnersh
 | LP certificate | $200 |
 | Name reservation | $75 for 120 days (§18-1105(a)(1); How to Form page) |
 | Good standing (short form) | $50 (unverified: not found in the 2026-08-01 schedule text read this session) |
-| LLC / LP / GP annual tax | **$400**, due **June 1** for the prior year; no annual report; penalty $200 + 1.5%/month; certificate cancelled on the 3rd anniversary of an unpaid due date (§§18-1107, 18-1108); $100 per registered series (penalty $50) |
+| LLC / LP / GP annual tax | **$400** (Division page, 2026-11-19), due **June 1** for the prior year; HB 400 (signed 2026-05-21) raised it from $300 for the 2026 tax year, so the first $400 payment is due 2027-06-01 (secondary summary: unverified; the Division page doesn't give the start year); no annual report; penalty $200 + 1.5%/month; certificate cancelled on the 3rd anniversary of an unpaid due date (§§18-1107, 18-1108); $100 per registered series (penalty $50) |
 | Domestic corporation annual report + franchise tax | Due **March 1**, online; report fee $50 (non-exempt) / $25 (exempt); franchise tax min $175 (authorized shares method) or $400 (assumed par value capital method), max $200,000 ($250,000 large corporate filers); penalty $200 + 1.5%/month |
 | Foreign corporation annual report | $250 due June 30; $250 penalty if late |
 | Registered agent | Required; physical Delaware street address; entity may act as own agent only if physically in DE |

@@ -1,6 +1,6 @@
-# Framework profiles (as of 2026-10)
+# Framework profiles (as of 2026-11)
 
-Versions and dates are in SKILL.md "Currency check" (verified 2026-10-09). This file compares how each stack works. Items marked (unverified)
+Versions and dates are in SKILL.md "Currency check" (verified 2026-11-19). This file compares how each stack works. Items marked (unverified)
 are leads to check before relying on them.
 
 ## Comparison table
@@ -22,15 +22,17 @@ are leads to check before relying on them.
 
 ### Flutter / Dart
 - Strengths: one rendering engine = identical pixels; fastest dev loop; strong desktop; good tooling (DevTools, Widget Previews, analyzer).
-- Weaknesses: platform-look lag (no Liquid Glass or M3 Expressive in the SDK as of 2026-10; community packages imitate or embed native views); larger binaries; Dart skills don't transfer; web output is canvas/Wasm (poor SEO, heavier).
+- Weaknesses: platform-look lag (no Liquid Glass or M3 Expressive in the SDK as of 2026-11; community packages imitate or embed native views); larger binaries; Dart skills don't transfer; web output is canvas/Wasm (poor SEO, heavier).
 - Plugins: platform channels; use **Pigeon** for typed channels; `dart:ffi` for C; federated plugins for multi-platform.
-- Design packages: `material_ui` / `cupertino_ui` 1.x need Flutter >= 3.47; the SDK libraries remain for now. Don't migrate a legacy app unless asked.
+- Design packages: `material_ui` / `cupertino_ui` 1.x need Flutter >= 3.47; since 3.50 the SDK libraries are deprecated and `flutter create` uses the packages (`dart fix --apply --code=migrate_design_widgets`). Don't migrate a legacy app unless asked.
+- Native interop: FFIgen (Obj-C, C) and JNIgen (Java/Kotlin) stable in 3.50; Pigeon native interop mode in preview.
 - Viability: Google-backed, quarterly releases, breaking changes documented per release with `dart fix` migrations. Watch Google's investment signals; layoffs on the team in 2024 were reported (unverified details).
 - Accessibility: `Semantics` widget; custom painters need explicit semantics; test with screen readers.
 
 ### React Native + Expo
 - New Architecture only (0.82+): JSI (sync calls), TurboModules (lazy native modules), Fabric (concurrent renderer), Codegen from TS specs. Hermes V1 default (0.84+).
 - Expo is the recommended way to start (react.dev / reactnative.dev point to frameworks; unverified wording 2026). CNG: `app.json`/`app.config.ts` + config plugins generate `android/` and `ios/`; commit them only if you hand-edit (then you own upgrades).
+- Expo SDK 58 (2026-10-15): RN 0.88, iOS 27 scene lifecycle (hand-edited AppDelegate needs migration), R8 on in Android release builds, no macOS.
 - Expo UI (SDK 56+) exposes SwiftUI and Jetpack Compose primitives, so Liquid Glass / M3 controls can be real native components.
 - EAS: Build (cloud builds, signing credentials managed), Submit (stores), Update (OTA, code-signing, channels/rollouts), Workflows (CI). Paid tiers; local builds stay possible (`npx expo run:*`, `eas build --local`).
 - Upgrades: one minor at a time (React Native Upgrade Helper; `npx expo install --fix`). Support: latest + previous two minors.
@@ -46,12 +48,12 @@ are leads to check before relying on them.
 
 ### .NET MAUI
 - Handlers architecture over native controls; Blazor Hybrid option for web UI inside MAUI.
-- Annual major with .NET; each supported until 6 months after the next (MAUI 10 EOS 2027-05-11). .NET 11 (RC 1 in 2026-09; GA expected 2026-11, unverified date): CoreCLR default on mobile (Mono still available), NativeAOT opt-in.
+- Annual major with .NET; each supported until 6 months after the next (MAUI 10 EOS 2027-05-11, MAUI 11 EOS 2028-05-09). .NET 11 / MAUI 11 GA 2026-11-10 (STS): CoreCLR default for Android Release builds (Mono still available), NativeAOT experimental opt-in.
 - Risks: smaller ecosystem than Flutter/RN, historical stability complaints, Microsoft focus shifts; many teams pick Avalonia or Uno Platform instead (unverified current versions). Choose it for C#-heavy teams and Windows desktop + mobile.
 
 ### Capacitor
 - Web app (any framework) in WKWebView/Android WebView, native projects committed and owned by you, plugins in Swift/Kotlin with a TS API. Cordova plugins mostly work.
-- Cap 8: SwiftPM by default for new iOS projects, System Bars plugin, iOS 15+, minSdk 24. 9.0 is alpha (2026-10): don't adopt in production.
+- Cap 8: SwiftPM by default for new iOS projects, System Bars plugin, iOS 15+, minSdk 24. 9.0 is at rc.0 (2026-11-12), not stable: don't adopt in production yet.
 - Fit: existing web product, forms/content apps, B2B. Must add app-like value to pass App Review 4.2.
 
 ### PWA

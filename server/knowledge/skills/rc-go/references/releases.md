@@ -1,8 +1,8 @@
-# Go releases 1.22 to 1.27: what each shipped (as of 2026-10)
+# Go releases 1.22 to 1.27: what each shipped (as of 2026-11)
 
-Source for every line: the go.dev/doc/go1.NN release notes (accessed 2026-10-09). Minor details trimmed; read the notes for the rest.
+Source for every line: the go.dev/doc/go1.NN release notes (accessed 2026-10-09; patch levels re-checked 2026-11-19). Minor details trimmed; read the notes for the rest.
 
-## Go 1.27 (2026-08-19), latest go1.27.2 (2026-10-08)
+## Go 1.27 (2026-08-19), latest go1.27.4 (2026-11-10, security fixes: cgo, go command, compiler, linker, net/http)
 - Language: **generic methods** (a method may declare its own type parameters; interface methods may not, and a generic
   method cannot satisfy an interface method). Struct literal keys may be any field selector (promoted fields).
   Function type inference now works wherever a generic func is assigned/converted to a matching func type.
@@ -22,7 +22,7 @@ Source for every line: the go.dev/doc/go1.NN release notes (accessed 2026-10-09)
 - Removed GODEBUGs: `gotypesalias`, `tlsrsakex`, `tls10server`, `tls3des`, `tlsunsafeekm`, `x509keypairleaf`, `asynctimerchan`.
 - Ports: macOS 13+ required; big-endian ppc64 Linux now ELFv2.
 
-## Go 1.26 (2026-02-10), latest go1.26.9 (2026-10-08)
+## Go 1.26 (2026-02-10), latest go1.26.11 (2026-11-10; go1.26.10 on 2026-10-19 fixed crypto/x509)
 - Language: `new(expr)` (e.g. `new(42)`, handy for optional pointer fields); generic types may refer to themselves in their
   type parameter list.
 - Runtime: **Green Tea GC on by default** (10-40% less GC overhead; opt out `GOEXPERIMENT=nogreenteagc`, slated for removal in 1.27);

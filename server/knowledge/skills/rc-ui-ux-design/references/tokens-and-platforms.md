@@ -1,4 +1,4 @@
-# Design tokens, handoff and platform mapping (as of 2026-10)
+# Design tokens, handoff and platform mapping (as of 2026-11)
 
 ## Token tiers
 1. **Primitive** (reference): `color.blue.500`, `space.4`, `radius.md`. Never used directly in components.
@@ -26,8 +26,8 @@
 
 ## Pipeline
 - Source of truth: tokens JSON in the repo (or Figma Variables exported to DTCG). Code review token changes like code.
-- Build: Style Dictionary v5 (DTCG 2025.10 support partial and growing: structured colors since 5.3.0, object dimensions since 5.4.0; check release notes per type) or Terrazzo. Outputs: CSS custom properties, Tailwind v4 `@theme` CSS, Kotlin/Compose objects, Swift.
-- Figma: Variables (collections + modes for light/dark/brand/density), Dev Mode for inspection and annotations, Code Connect to map Figma components to real code, the Figma MCP server lets agents read frames/variables. Native DTCG variable import/export was announced Nov 2025 (rollout date unverified); plugins cover it otherwise.
+- Build: Style Dictionary v5 (DTCG 2025.10 support partial and growing: structured colors 5.3.0 and object dimensions 5.4.0 per earlier notes, not re-confirmed; duration 5.7.0; use 5.7.1+ for a security fix; check release notes per type) or Terrazzo. Outputs: CSS custom properties, Tailwind v4 `@theme` CSS, Kotlin/Compose objects, Swift.
+- Figma: Variables (collections + modes for light/dark/brand/density), Dev Mode for inspection and annotations, Code Connect to map Figma components to real code, the Figma MCP server lets agents read frames/variables. Native DTCG variable import/export was announced Nov 2025 and reportedly rolled out from Dec 2025 without composite tokens (typography) or descriptions (forum reports, unverified); plugins cover the gaps.
 - Agent rule: if a design file or tokens exist, read them first; never eyeball hex values from screenshots when tokens exist.
 
 ## Translating tokens
@@ -64,5 +64,5 @@ Extra semantic roles (success, warning) via a `CompositionLocal` data class; spa
 | Back | System/predictive back gesture | Edge swipe, back button in nav bar |
 | Sheets | Bottom sheets, side sheets | Sheets with detents; glass sheet backgrounds |
 - Liquid Glass adoption: rebuilding with the iOS 26+ SDK gives system bars/controls the material automatically; custom floating controls use `.glassEffect()` / `.buttonStyle(.glass)`. Remove custom backgrounds on toolbars/tab bars that block it. Test with Reduce Transparency, Increase Contrast and the user's clear/tinted Liquid Glass setting.
-- Expressive adoption: wrap in the expressive theme/motion scheme where available (material3 1.5 line), use new components (button groups, split buttons, FAB menu, loading indicator, floating toolbars) only where they fit; keep hierarchy rules.
+- Expressive adoption: wrap in the expressive theme/motion scheme where available (material3 1.5.0 stable since 2026-11-18), use new components (button groups, split buttons, floating toolbars; `LoadingIndicator` and `MaterialShapes` are still experimental in 1.5.0) only where they fit; keep hierarchy rules.
 - Cross-platform decision rule: share brand tokens (color, type ramp intent, spacing, voice) and flows; let each platform own chrome, navigation, controls, motion feel and haptics.

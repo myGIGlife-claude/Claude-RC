@@ -1,4 +1,7 @@
-# US state privacy laws  (as of 2026-10-10)
+# US state privacy laws  (as of 2026-11)
+
+> Refreshed 2026-11-19: added Delaware HB 380/381, California SB 923, SB 690, AB 2246 and CPPA actions (see "2026-11 additions" below).
+> Table rows and checks were last read 2026-10-10.
 
 > **Verify before relying.** State laws are amended every session and thresholds change. This table is a starting point for
 > triage, not a compliance answer. Column "Checked" says how each row was confirmed on 2026-10-10:
@@ -41,7 +44,19 @@ Thresholds are per calendar year and count residents of that state only (not emp
 **Count**: 20 in force (CA + 19) as of 2026-10; 24 enacted counting the 2026 laws (trackers say 21-24 depending on whether they
 count Florida). Check the IAPP state tracker and the legislature site for anything signed after 2026-10-10.
 
-## States without a comprehensive law (as of 2026-10)
+## 2026-11 additions (checked 2026-11-19)
+- **Delaware HB 380 and HB 381**: signed 2026-09-02, effective 2027-01-01 (governor's release, bill text not read): 10,000-consumer
+  coverage, opt-out of automated decisions, narrower employee-data exclusion, more opt-in sensitive categories (national origin,
+  immigration status, pregnancy, transgender/nonbinary status, neural data, account credentials, government IDs), sensitive inferences.
+- **California SB 923** (CPPA-sponsored): signed 2026-09-27 (agency newsroom); effective 2027-01-01 and content per law firms (secondary):
+  deletion covers data collected "from or about" the consumer; online-only businesses must offer an online request method.
+  **SB 690** (no private CIPA pen-register suits over website/app tracking, 2027-01-01) and **AB 2246** (replaces the Age-Appropriate
+  Design Code, 2027-01-01, may be challenged) per Holland & Knight 2026-10-23 (secondary). AB 1542 (sensitive-data sales) was vetoed (same source).
+- **CPPA ("CalPrivacy") enforcement and rules**: FedEx about $3M (2026-11-10), Hertz $1.55M (2026-11-17), joint action with the Minnesota
+  AG against Polaris (2026-11-19), proposed rules on audits of delete-request and opt-out platforms (2026-11-13) (privacy.ca.gov newsroom).
+- No other new comprehensive state law found signed 2026-10-01 to 2026-11-19 (search only, unverified); Maine was named as pending (unverified).
+
+## States without a comprehensive law (as of 2026-11)
 - **Ohio**: no comprehensive consumer privacy law. Earlier Ohio Personal Privacy Act bills (HB 376 in the 134th GA, HB 345 in the
   135th) died in committee; the 136th GA has no consumer-rights bill (HB 801 "Ohio Privacy Act" concerns giving personal data to
   out-of-state entities; HB 798 "Privacy Protection Act" is unrelated) (legislature.ohio.gov listings via search, secondary).
@@ -102,7 +117,10 @@ NCSL keeps a list of statutes (lead only). Don't promise a fixed notice time in 
 - Shine the Light (Civ. Code 1798.83) if you share for third parties' direct marketing (secondary).
 - Auto-renewal law (Bus. & Prof. 17600+, as amended by AB 2863 for contracts from 2025-07-01; secondary, leginfo blocked) for subscriptions; Delete Act/DROP only for registered data brokers.
 
-## Sources (accessed 2026-10-10)
+## Sources (accessed 2026-10-10; items marked 2026-11-19 added in the refresh)
+- https://news.delaware.gov/?p=245951 (2026-11-19: HB 380/381)
+- https://privacy.ca.gov/about-us/newsroom/ (2026-11-19: SB 923, fines, proposed rules)
+- https://www.hklaw.com/en/insights/publications/2026/10/the-privacy-bills-that-are-becoming-law-in-california (2026-11-19, secondary)
 - https://cppa.ca.gov/regulations/ ; https://www.cppa.ca.gov/regulations/cpi_adjustment.html ; https://cppa.ca.gov/regulations/ccpa_updates.html (effective 2026-01-01)
 - https://legislature.vermont.gov/bill/status/2026/S.71 ; Act 145 "As Enacted" and "Act Summary" PDFs on the same site (effective 2028-01-01; sec. 2415b thresholds)
 - https://legis.la.gov/legis/BillInfo.aspx?s=26RS&b=SB386&sbi=y ; enrolled text https://www.legis.la.gov/Legis/ViewDocument.aspx?d=1459766

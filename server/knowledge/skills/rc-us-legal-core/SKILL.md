@@ -3,7 +3,7 @@ name: rc-us-legal-core
 kind: process
 description: Entry skill for any US legal task - legal research, statute or court rule lookup, case citation checks, drafting a motion, brief, complaint or contract, deadline math, "is this law", "can I sue", court filing or legal document review. Sets the role limits, verification rules, source hierarchy, citation audit, deadline protocol, output shapes and which rc-us-* legal skill to load next.
 ---
-# US legal work: core method (process, as of 2026-10)
+# US legal work: core method (process, as of 2026-11)
 
 > Load this before any legal task, then the specialty skill from the routing table (section 12). This skill is about method. Facts in it
 > are dated (see Sources and Currency check); law changes, so verify on the official source on the day you rely on it.
@@ -194,18 +194,24 @@ No specialty skill fits: say so, use section 3 on the official sources for that 
 ## Currency check
 - Federal rules effective 2025-12-01: Appellate Rules 6 and 39; Bankruptcy Rules 3002.1 and 8006 (and Official Forms 410S1, 410C13 set);
   Civil Rules 16 and 26 and new Rule 16.1. No Criminal or Evidence amendments that day (uscourts.gov, checked 2026-10-10).
-- Scheduled for 2026-12-01 (transmitted to Congress April 2026, take effect unless Congress acts): Appellate Form 4; Bankruptcy Rules
-  1007, 3018, 5009, 9006, 9014, 9017 and new 7043; Evidence Rule 801 (prior inconsistent statements). Proposals for 2027-12-01 (including
-  Civil Rules 7.1, 26, 41, 45, 81) and 2028-12-01 (including Civil Rules 5, 5.2, 6, 55) are NOT law yet.
-- uscode.house.gov was up on 2026-10-10 (current through Public Law 119-118 of 2026-09-30) after a short maintenance notice earlier that
-  day; if it is down, use govinfo.gov (US Code 1994 onward) and note it.
-- eCFR is not an official legal edition (Office of the Federal Register); titles were "up to date as of 2026-10-07" on 2026-10-10.
+- Scheduled for 2026-12-01 (Supreme Court order of 2026-04-08 sent to Congress; takes effect unless Congress acts; no Congress action
+  found; uscourts.gov pending-rules page, checked 2026-11-19): Appellate Form 4; Bankruptcy Rules 1007, 3018, 5009, 9006, 9014, 9017 and
+  new 7043, plus Bankruptcy Rules 2007.1 and 3001 (unverified: in the 2026-04-08 order per a search summary only; not on the uscourts list),
+  and Official Forms 101 and 106C (listed under 2027 on the page, but its footnote says they take effect 2026-12-01); Evidence Rule 801
+  (prior inconsistent statements, 801(d)(1)(A)). No Civil or Criminal amendments on that date. Proposals
+  for 2027-12-01 (Appellate 15, 29, 32; Bankruptcy 2002; Civil 7.1, 26, 41, 45, 81; Criminal 17; transmitted to the Supreme Court
+  2026-10-20, not yet adopted) and 2028-12-01 (Appellate 25; Bankruptcy 2003, 5005, 8011, 9006, 9036, 9037; Civil 5, 5.2, 6, 55;
+  Criminal 11, 32, 45, 49, 49.1; Evidence 104, 902; published 2026-08-14, comments to 2027-02-15) are NOT law yet.
+  The Evidence Rule 609 proposal was withdrawn before the 2026-09 Judicial Conference session (uscourts footnote, 2026-11-19).
+- uscode.house.gov: current through Public Law 119-118 on 2026-10-10; it did not load for the fetch tool on 2026-11-19, so the present
+  release point is (unverified). If it is down, use govinfo.gov (US Code 1994 onward) and note it.
+- eCFR is not an official legal edition (Office of the Federal Register); titles were "up to date as of 2026-11-18" on 2026-11-19.
 - CourtListener citation lookup API v4 needs a free account token; 60 valid citations per minute, 250 per request; it checks existence,
   not whether the case supports the proposition (checked 2026-10-10).
 - Ohio Rep.Op.R. 3.4 (text as amended effective 2012-07-01, read 2026-10-10): court of appeals opinions issued after 2002-05-01 may be
   cited regardless of publication. N.C. R. App. P. 30(e)(3) (official codification of 2023-03-01, read 2026-10-10): unpublished Court of
   Appeals decisions are not controlling; citation disfavored except preclusion or law of the case; allowed with a served copy when no
-  published opinion serves as well. NC Gen. Stat. on ncleg.gov showed "changes through S.L. 2026-30" on 2026-10-10.
+  published opinion serves as well. NC Gen. Stat. on ncleg.gov showed "changes through S.L. 2026-40" on 2026-11-19.
 
 ## Common mistakes
 - Citing a case from memory, or "verifying" it by finding a blog post that mentions it.
@@ -237,8 +243,8 @@ No specialty skill fits: say so, use section 3 on the official sources for that 
 - [ ] Attorney referral given when stakes or deadlines call for it, with what kind of lawyer and what to bring.
 
 ## Sources
-- https://www.uscourts.gov/forms-rules/current-rules-practice-procedure - amendments effective 2025-12-01 by rule set - 2026-10-10
-- https://www.uscourts.gov/forms-rules/pending-rules-and-forms-amendments - rules scheduled for 2026-12-01, 2027-12-01, 2028-12-01 and their package stage - 2026-10-10
+- https://www.uscourts.gov/forms-rules/current-rules-practice-procedure - amendments effective 2025-12-01 by rule set - 2026-11-19
+- https://www.uscourts.gov/forms-rules/pending-rules-and-forms-amendments - rules scheduled for 2026-12-01, 2027-12-01, 2028-12-01 and their package stage - 2026-11-19
 - https://www.law.cornell.edu/rules/frcp/rule_6 - FRCP 6(a) computation, 6(b) non-extendable deadlines, 6(d) 3-day add-on excluding e-service - 2026-10-10
 - https://www.law.cornell.edu/rules/frcp/rule_5.2 - federal redaction minimums - 2026-10-10
 - https://www.law.cornell.edu/rules/frcp/rule_11 - signature and Rule 11(b) certifications - 2026-10-10
@@ -251,7 +257,10 @@ No specialty skill fits: say so, use section 3 on the official sources for that 
 - https://www.law.cornell.edu/supremecourt/text/16-658 - Hamer, No. 16-658, decided 2017-11-08, rule-only limit is claim-processing - 2026-10-10
 - https://www.supremecourt.ohio.gov/docs/LegalResources/Rules/reporting/Report.pdf - Ohio Rep.Op.R. as amended effective 2012-07-01: 3.2, 3.4, 4.1, 4.2 - 2026-10-10
 - https://codes.ohio.gov/ohio-revised-code/section-3119.02 - Ohio code pages show effective date, latest legislation, prior versions, authenticated PDF - 2026-10-10
-- https://www.ncleg.gov/Laws/GeneralStatutes - NC statutes current through S.L. 2026-30, Statutes Archive, not-official caveat - 2026-10-10
+- https://www.ncleg.gov/Laws/GeneralStatutes - NC statutes current through S.L. 2026-40, Statutes Archive, not-official caveat - 2026-11-19
+- https://www.supremecourt.gov/orders/courtorders/frev26_da3i.pdf and https://www.supremecourt.gov/orders/courtorders/frbk26_o7jp.pdf - 2026 Evidence and Bankruptcy orders (PDF text not readable by the fetch tool; contents from the uscourts page and a search summary, which lists Bankruptcy Rules 2007.1 and 3001 in the 2026-04-08 order) - 2026-11-19
+- https://www.govinfo.gov/content/pkg/CDOC-119hdoc151/html/CDOC-119hdoc151.htm - Chief Justice transmittal to Congress dated 2026-04-08 (House Doc. 119-151) - 2026-11-19
+- https://www.uscourts.gov/sites/default/files/document/2026_scotus_package.pdf - 2027 package transmitted 2026-10-20 (found by search, dated per transmittal summary) - 2026-11-19
 - https://www.archives.gov/federal-register/cfr/about-ecfr - eCFR unofficial, current within two business days - 2026-10-10
 - https://www.ecfr.gov/api/versioner/v1/titles.json - eCFR "up to date as of" date per title - 2026-10-10
 - https://www.govinfo.gov/help/uscode - US Code 1994 to present on govinfo; positive-law titles vs prima facie evidence - 2026-10-10

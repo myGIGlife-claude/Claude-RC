@@ -1,4 +1,7 @@
-# Historical-order protocol and law timeline (as of 2026-10-10)
+# Historical-order protocol and law timeline (as of 2026-11)
+
+Added 2026-11-19: 2025-10-01 NC S.L. 2025-16 (G.S. 50-13.10(d)); 2026-04-01 OAC 5101:12-1-99 prior dates also include 2025-04-01, 2024-11-01,
+2024-01-15; 2026-07-01 Superintendence restructuring adopted 2026-05-19; 2026-11-30 federal 45 CFR chapter III rescissions (91 FR 68045, see SKILL.md).
 
 Use for any order entered years or decades ago. The law that decides whether the ORIGINAL service and judgment were valid is the law on
 those dates. The law that decides what can be done TODAY is current law. Keep two columns in every analysis.

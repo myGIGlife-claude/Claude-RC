@@ -1,6 +1,6 @@
-# Service map and limits (as of 2026-10)
+# Service map and limits (as of 2026-11)
 
-Names change often: check the console/docs before writing IaC. Rows marked (unverified) were not re-checked on a primary source on 2026-10-09.
+Names change often: check the console/docs before writing IaC. Rows marked (unverified) were not re-checked on a primary source on 2026-11-19.
 
 ## Service mapping across the six clouds
 
@@ -23,17 +23,17 @@ Names change often: check the console/docs before writing IaC. Rows marked (unve
 | Observability | CloudWatch, X-Ray, CloudTrail | Azure Monitor, App Insights, Log Analytics | Cloud Logging/Monitoring/Trace, Audit Logs | Workers Logs, Logpush, Analytics | Logs Data Platform | Cloud Logs, Monitoring, Activity Tracker |
 | Budget alerts | AWS Budgets, Cost Anomaly Detection | Cost Management budgets | Billing budgets (+ Pub/Sub for automation) | Billing notifications (usage-based) | Budget alerts in Control Panel (unverified) | Spending notifications |
 
-## Serverless and edge limits (verified 2026-10-09 unless marked)
+## Serverless and edge limits (verified 2026-11-19 unless marked)
 
 | Platform | Max run time | Memory / CPU | Payload / size | Notes |
 |---|---|---|---|---|
-| AWS Lambda | 15 min (90 min for Lambda Managed Instances async/event-source) | 128 MB-10,240 MB; 1 vCPU at 1,769 MB | 6 MB sync req/resp, 200 MB streamed, 1 MB async; zip 50 MB / 250 MB unzipped; image 10 GB | Default 1,000 concurrent per Region; new accounts lower, raised automatically. `/tmp` 512 MB-10 GB. Env vars 4 KB total. |
-| Lambda durable functions | executions checkpoint/resume (long-running) | - | 100 MB persisted per execution, 3,000 operations | For multi-step workflows instead of chaining Lambdas. |
-| Google Cloud Run | 60 min per request; jobs 7 days (1 h with GPU) | up to 8 vCPU, 32 GiB per instance | 32 MiB HTTP/1 request/response (use HTTP/2 or streaming for more) | Concurrency up to 1,000 per instance (default 80). Min instances = no cold start, billed while idle. |
+| AWS Lambda | 30 min per quotas page (was 15; 90 min for Lambda Managed Instances async/event-source) | 128 MB-10,240 MB; 1 vCPU at 1,769 MB | 6 MB sync req/resp, 200 MB streamed, 1 MB async; zip 50 MB / 250 MB unzipped; image 10 GB | Default 1,000 concurrent per Region; new accounts lower, raised automatically. `/tmp` 512 MB-10 GB. Env vars 4 KB total. |
+| Lambda durable functions | executions checkpoint/resume (long-running) | - | 100 MB persisted per execution, 30,000 operations (was 3,000), 1 MB per operation payload | For multi-step workflows instead of chaining Lambdas. |
+| Google Cloud Run | 60 min per request; jobs 7 days (12 h with GPU) | up to 8 vCPU, 32 GiB per instance | 32 MiB HTTP/1 request/response (use HTTP/2 or streaming for more) | Concurrency up to 1,000 per instance (default 80). Min instances = no cold start, billed while idle. |
 | Azure Functions Flex Consumption | default 30 min, no enforced max (60 min grace on scale-in) | 512 MB / 2 GB / 4 GB instances | 210 MB request | **HTTP response must start within 230 s** (load balancer). Linux only. Up to 1,000 instances. Always-ready instances remove cold start. |
 | Azure Functions Consumption (legacy) | 5 min default, 10 min max | 1.5 GB | - | Linux Consumption retires **2028-09-30**, v3 runtime on Linux Consumption stops **2026-09-30**. Use Flex. |
 | Cloudflare Workers | HTTP: no wall limit while client connected; Cron/Queue consumers 15 min | 128 MB per isolate; CPU 10 ms (Free) / 30 s default, 5 min max (Paid) | script 64 MiB; 50 (Free) / 10,000 (Paid) subrequests | Free: 100,000 req/day. Paid $5/month min, 10 M req + 30 M CPU-ms included. V8 isolates: no native binaries, no raw TCP server, Node APIs via `nodejs_compat`. |
-| Durable Objects | CPU 30 s default, 5 min max per request | SQLite storage 10 GB per object (Paid), 1 GB (Free) | 2 MB key+value | One object = single-threaded, strongly consistent; SQLite backend on Free; KV backend legacy. |
+| Durable Objects | CPU 30 s default, 5 min max per request | SQLite storage 10 GB per object (Paid); Free: 1 GB per object in one FAQ, 5 GB per account (docs inconsistent) | 8 MB key+value (was 2 MB) | One object = single-threaded, strongly consistent; SQLite backend on Free; KV backend legacy. |
 | D1 | 30 s per query | single-threaded per DB | 10 GB per DB (Paid), 500 MB (Free); 1 TB per account | Throughput = 1/query time. Shard per tenant for scale. |
 | Workers KV | - | - | value 25 MiB, key 512 B | **1 write/s per key**; eventually consistent (reads elsewhere can be stale ~60 s+). Free: 100k reads, 1k writes/day. Not a database. |
 | Queues | consumer 15 min wall | CPU 30 s default, 5 min max | 128 KB message, 5,000 msg/s per queue | Retention up to 14 days (24 h on Free). At-least-once: make consumers idempotent. |

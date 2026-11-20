@@ -63,6 +63,11 @@ Browser releases in the dataset at snapshot time: Chrome 155 (2026-10-06), Firef
 | `field-sizing: content` | 2026-06 |
 | `sibling-count()` / `sibling-index()` | 2026-08 |
 | `progress()` | 2026-09 |
+| Scroll-driven animations (`animation-timeline`), Firefox 159 | 2026-10 (web.dev Oct roundup, 2026-11-19) |
+| Scoped custom element registries, Firefox 159 | 2026-10 (same source) |
+| CSS typed arithmetic in `calc()`, Firefox 158 | 2026-10 (same source) |
+
+Note: `light-dark()` and `text-wrap: balance` reach Widely in 2026-11 by the 30-month rule (dates derived, not re-read from the dataset).
 
 ## Limited availability (progressive enhancement only)
 
@@ -71,7 +76,6 @@ Browser releases in the dataset at snapshot time: Chrome 155 (2026-10-06), Firef
 | Anchor positioning (`anchor-name`, `position-anchor`, `position-area`, `@position-try`) | Core: Chrome 125, Firefox 147, Safari 26 | Only `position-visibility: anchor-valid/anchor-visible` blocks Baseline (Safari 27 only). Core is usable everywhere current. |
 | Customizable select (`appearance: base-select`, `::picker(select)`, `<selectedcontent>`) | Chrome 135, Safari 27 | Firefox |
 | Cross-document View Transitions (`@view-transition { navigation: auto }`) | Chrome 126, Safari 18.2 | Firefox |
-| Scroll-driven animations (`animation-timeline: scroll()/view()`) | Chrome 115, Safari 26 | Firefox |
 | `text-wrap: pretty` | Chrome 117, Safari 26 | Firefox |
 | Speculation rules (`<script type="speculationrules">`) | Chromium only | Firefox, Safari |
 | `dialog closedby` | Chrome 134, Firefox 141 | Safari |
@@ -81,7 +85,6 @@ Browser releases in the dataset at snapshot time: Chrome 155 (2026-10-06), Firef
 | `sizes="auto"` for lazy images | Chrome 126, Firefox 150 | Safari |
 | `hidden="until-found"` | Chrome 102, Firefox 148 | Safari |
 | `moveBefore()` | Chrome 133, Firefox 144 | Safari |
-| Scoped custom element registries | Chrome 146, Safari 26 | Firefox |
 | CSS `if()` | Chrome 137 | Firefox, Safari |
 | CSS `@function` custom functions | Chrome 139 | Firefox, Safari |
 | `interpolate-size` / `calc-size()` | Chromium 129 | Firefox, Safari |

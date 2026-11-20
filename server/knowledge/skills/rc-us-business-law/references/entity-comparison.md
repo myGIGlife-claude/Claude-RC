@@ -1,4 +1,4 @@
-# Entity comparison (as of 2026-10)
+# Entity comparison (as of 2026-11)
 
 High level only. Tax lines are orientation, not tax advice: a CPA confirms elections, payroll and state tax. State law varies; the
 NC/OH/DE specifics are in `nc-oh-de-formation.md`.
@@ -8,7 +8,7 @@ NC/OH/DE specifics are in `nc-oh-de-formation.md`.
 |---|---|---|---|---|---|---|
 | Sole proprietorship | Doing business (plus assumed-name filing if not using own name) | Unlimited | Owner's Schedule C; self-employment tax | Owner decides | Lowest; licenses, assumed name | Very low risk, testing an idea; insurance carries the risk |
 | General partnership | Two+ co-owners carrying on business for profit, even without paperwork | Unlimited, joint and several | Partnership (Form 1065, K-1s) | Partnership agreement or statute default (equal say) | Low; but accidental GPs are common | Rarely chosen on purpose today; use an LLC |
-| Limited partnership (LP) | State filing | GP unlimited (unless LLLP); LPs limited if passive | Partnership | GP manages | Filing + annual fees (DE $400/yr) | Investment funds, real estate with a sponsor GP |
+| Limited partnership (LP) | State filing | GP unlimited (unless LLLP); LPs limited if passive | Partnership | GP manages | Filing + annual fees (DE $400/yr tax; $300 before the 2026 tax year, unverified) | Investment funds, real estate with a sponsor GP |
 | LLP / LLLP | Registration by a partnership | Shield for partners' vicarious liability (scope per state) | Partnership | Partnership agreement | Registration + annual (NC) or biennial (OH) report | Professional firms where state law allows (law, accounting) |
 | LLC, single-member | Articles/certificate filed with SOS | Limited (subject to veil piercing) | Disregarded (Schedule C or parent's return); may elect C or S | Operating agreement; member-managed default in most states | Filing + annual report/tax per state | Default for a one-owner business with liability exposure |
 | LLC, multi-member | Same | Limited | Partnership; may elect C or S | Member-managed (all members agents/decide) or manager-managed (named managers run it, members vote on big items) | Same + more complex agreement and K-1s | Small co-owned businesses, real estate, joint ventures |

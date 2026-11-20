@@ -2,7 +2,7 @@
 name: rc-shell-scripting
 description: Writing and reviewing scripts in Bash, POSIX sh (dash, busybox ash), zsh, PowerShell 7 / Windows PowerShell 5.1 and modern Perl. Quoting, set -euo pipefail pitfalls, traps, mktemp, flock, getopts, find -print0, GNU vs BSD/macOS sed/date/stat, jq/yq, curl, cron/systemd timers, Docker entrypoints, Makefile/just/Task, ShellCheck, shfmt, bats, Pester, PSScriptAnalyzer. Use for *.sh, *.bash, *.zsh, *.ps1, *.psm1, *.pl, Makefile, justfile.
 ---
-# Shell scripting: Bash, POSIX sh, zsh, PowerShell, Perl  (as of 2026-10)
+# Shell scripting: Bash, POSIX sh, zsh, PowerShell, Perl  (as of 2026-11)
 
 > Facts are dated (see Sources). Anything marked (unverified) is a lead, not a fact. GNU vs BSD utility table and
 > PowerShell 5.1 vs 7 differences: `references/portability.md`. Server ops (systemd units, Docker, SSH hardening) live in
@@ -10,17 +10,17 @@ description: Writing and reviewing scripts in Bash, POSIX sh (dash, busybox ash)
 
 ## Currency check
 
-| Thing | Current (verified 2026-10-09) | Notes |
+| Thing | Current (verified 2026-11-19) | Notes |
 |---|---|---|
 | Bash | **5.3** (2025-07-30), official patches up to `bash53-020` = 5.3.20 (2026-09-14) | 5.2 (2022-09-26, last tarball 5.2.37) is what Debian 13 ships (5.2.37); Ubuntu 26.04 ships 5.3 |
 | Bash 5.3 new | `${ cmd; }` (command substitution in the current shell, no fork), `${\| cmd; }` (result in `REPLY`), `GLOBSORT`, `source -p PATH`, `read -E`, `array_expand_once` (replaces `assoc_expand_once`), `BASH_MONOSECONDS`, `BASH_TRAPSIG`, `compgen -V` | `${ ...; }` and `GLOBSORT` are 5.3-only: guard or avoid in scripts that run elsewhere |
 | Bash 5.2 changes | `patsub_replacement` **on by default** (`&` in `${v//pat/rep}` means "the match"), `globskipdots` on by default, `${v@k}`, `varredir_close` | `${path//x/&}` silently changed meaning in 5.2: quote the replacement (`"&"`) or escape `\&` |
 | Bash 5.1 / 5.0 | 5.1: `wait -p VAR`, `SRANDOM`, `${v@U}`/`@L`; 5.0: `EPOCHSECONDS`, `EPOCHREALTIME` | |
 | macOS | `/bin/bash` has long been **3.2.57** (GPLv2 era; not re-checked on macOS 26, run `/bin/bash --version`); zsh is the login shell since 10.15 | No assoc arrays, `mapfile`, `${v,,}`, `wait -n`, `${v@Q}` in 3.2. Use Homebrew bash + `#!/usr/bin/env bash` if you need 4+/5 |
-| zsh | **5.9.2** latest tag (zsh-users/zsh) | |
+| zsh | **5.9.2** latest tag (zsh-users/zsh, tagged 2026-07-12) | |
 | POSIX | **POSIX.1-2024 (Issue 8)**: adds `$'...'`, `read -d`, `find -print0`, `readlink`, `realpath`, `timeout`, `set -o pipefail`, `xargs -0` and `xargs -r` (all verified on spec pages) | dash / busybox ash support of Issue 8 features varies: test on the target shell |
-| dash / busybox | Debian/Ubuntu `/bin/sh` = dash; Alpine `/bin/sh` = busybox ash | dash has no arrays, no `[[`, no `local -n`; `pipefail` landed upstream 2024-04 (first release believed 0.5.13, unverified): older dash lacks it |
-| PowerShell | **7.6 LTS** (2026-03-18, .NET 10, EOS 2028-11-14; current 7.6.6); 7.5 stable (7.5.11, EOS **2026-11-10**); 7.4 LTS (EOS **2026-11-10**); 7.7 preview (7.7.0-preview.5, 2026-09-23, .NET 11) | 7.6: `Microsoft.PowerShell.ThreadJob` replaces `ThreadJob`, `Join-Path -ChildPath` takes `string[]`, `PSRedirectToVariable` / `PSNativeWindowsTildeExpansion` now mainstream, ships PSResourceGet 1.2.0 |
+| dash / busybox | Debian/Ubuntu `/bin/sh` = dash; Alpine `/bin/sh` = busybox ash | dash has no arrays, no `[[`, no `local -n`; `pipefail` landed upstream 2024-04 (first release believed 0.5.13, unverified): older dash lacks it. Lead (unverified, secondary tracker only): a heap overflow in dash's `printf` with `\u`/`\U` escapes (Red Hat page for CVE-2026-102474, Moderate); BusyBox ash heap overflows CVE-2026-38754/38755 listed by Red Hat/Bell-SW. Patch the OS package, do not feed untrusted text to `printf` format strings |
+| PowerShell | **7.6 LTS** (2026-03-18, .NET 10, EOS 2028-11-14; GitHub shows 7.6.10 on 2026-11-10); **7.7.0** tagged on GitHub 2026-11-10 (built on .NET SDK 11; the lifecycle page still listed 7.7 as preview with no EOS date on 2026-11-19, so its support dates are unverified); 7.5 and 7.4 LTS **reached EOS 2026-11-10** (last builds 7.5.13, 7.4.22 on GitHub) | 7.7 (per the preview notes): `New-Guid` now makes UUID v7 (use `[guid]::NewGuid()` for random), `New-TemporaryDirectory`, `Join-Path -Extension`, `$PSApplicationOutputEncoding`. 7.6: `Microsoft.PowerShell.ThreadJob` replaces `ThreadJob`, `Join-Path -ChildPath` takes `string[]`, `PSRedirectToVariable` / `PSNativeWindowsTildeExpansion` now mainstream, ships PSResourceGet 1.2.0 |
 | Windows PowerShell | **5.1** (2016) only; in-box on Windows, follows the Windows lifecycle, no new features | PowerShell 2.0 engine removed from Windows 11 24H2 (2025-08 update) and Windows Server 2025 (2025-09); scripts asking for 2.0 get 5.1 |
 | Pester | **6.2.0** (2026-09-09); 6.0.0 (2026-07-07) | Runs on 5.1 and 7.4+. New `Should-*` assertions (`Should-Be`); old `Should -Be` still works |
 | PSScriptAnalyzer | **1.25.0** (2026-03-20) | |
@@ -29,8 +29,8 @@ description: Writing and reviewing scripts in Bash, POSIX sh (dash, busybox ash)
 | shfmt | **3.14.1** (2026-09-06) | Parses zsh since 3.13 |
 | bats-core | **1.14.0** (2026-07-21) | **Breaking:** `run` now honours `set -e` inside your functions; fails when no tests found unless `--allow-empty-suite` |
 | ShellSpec | 0.28.1 (2021-01-11), no release since | Works, but prefer bats-core for new suites |
-| jq / yq | jq **1.8.2** (2026-06-20, 22 security fixes incl. 16 CVEs: upgrade); yq (mikefarah) **4.54.1** (2026-09-29, adds jq-style `if-then-elif-else-end`) | Two different "yq" exist (Python wrapper vs Go mikefarah): check `yq --version` |
-| just / Task | just **1.58.0** (2026-08-03); Task **3.54.0** (2026-10-01) | |
+| jq / yq | jq **1.8.2** (2026-06-20, 22 security fixes incl. 16 CVEs: upgrade); yq (mikefarah) **4.54.3** (2026-11-09; 4.54.2 on 2026-11-06 fixed shell-escape command injection with `-o=shell -r`, advisory GHSA-h2cv-65fq-jgrp, High, CVSS 4 7.1, affected 4.54.1 as listed: upgrade if you use shell output; 4.54.1 added `if-then-elif-else-end`) | Two different "yq" exist (Python wrapper vs Go mikefarah): check `yq --version` |
+| just / Task | just **1.59.0** (2026-10-15); Task **3.54.0** (2026-10-01) | |
 
 ### Older versions (what differs on legacy hosts)
 - **Bash 4.x** (RHEL 8 = 4.4, CentOS 7 = 4.2): no `wait -p` (5.1), `EPOCHSECONDS` (5.0), `@U/@L` (5.1). Bash < 4.4: `set -u` + empty array
@@ -38,7 +38,7 @@ description: Writing and reviewing scripts in Bash, POSIX sh (dash, busybox ash)
 - **Bash 3.2 (macOS)**: no `declare -A`, `mapfile`/`readarray`, `|&`, `&>>`, `${v,,}`/`${v^^}`, `coproc`, `globstar`, `wait -n`, negative array
   indexes. If a script must run with stock macOS, write POSIX sh or bash-3.2 code and test it there (CI `macos-latest` runner).
 - **Bash 5.0/5.1 vs 5.2**: replacement `&` in `${v//p/r}` is literal before 5.2 and "the match" from 5.2 (unless `shopt -u patsub_replacement`).
-- **PowerShell 7.4 / 7.5**: both reach end of support **2026-11-10**: new work targets 7.6 LTS. Do not push an upgrade the task did not ask for, but
+- **PowerShell 7.4 / 7.5**: both reached end of support **2026-11-10** (no more security fixes): new work targets 7.6 LTS. Do not push an upgrade the task did not ask for, but
   flag it. Windows PowerShell 5.1 scripts: see `references/portability.md` (encoding, `&&`/`||`, `-Parallel`, ternary, `??` all 7.x only).
 - **Perl 5.36-5.40**: `use v5.36` already gives strict, warnings, signatures, `say`, `isa`; `try/catch` is stable from 5.40 (the `try` bundle); 5.42+
   bundles drop `smartmatch` and the `'` package separator. Perl on RHEL 8 is 5.26 (no signatures without `use feature`, experimental there).
@@ -338,24 +338,27 @@ exec "$@"        # replace the shell: the app becomes PID 1 and receives SIGTERM
 - https://tiswww.case.edu/php/chet/bash/NEWS - bash 5.3 feature list (2026-10-09)
 - https://cgit.git.savannah.gnu.org/cgit/bash.git/plain/NEWS?h=bash-5.3 - 5.3 and 5.2 features (`patsub_replacement`, `globskipdots`, `source -p`) (2026-10-09)
 - https://ftp.gnu.org/gnu/bash/ - release dates 5.2 (2022-09-26), 5.3 (2025-07-30), 5.3 patches dir (2026-10-09)
-- https://learn.microsoft.com/en-us/powershell/scripting/install/powershell-support-lifecycle - PS versions, LTS, EOS dates (2026-10-09)
+- https://learn.microsoft.com/en-us/powershell/scripting/install/powershell-support-lifecycle - PS versions, LTS, EOS dates; 7.7 not yet dated (2026-11-19)
 - https://learn.microsoft.com/en-us/powershell/scripting/whats-new/what-s-new-in-powershell-76 - 7.6 changes (2026-10-09)
-- https://github.com/PowerShell/PowerShell/releases - v7.6.6 2026-09-08, v7.7.0-preview.5 2026-09-23 (2026-10-10)
-- https://github.com/pester/Pester/releases - 6.0.0 (2026-07-07) notes, 6.2.0 (2026-09-09) (2026-10-09)
-- https://github.com/PowerShell/PSScriptAnalyzer/releases - 1.25.0 (2026-10-09)
+- https://github.com/PowerShell/PowerShell/releases and .../releases/tag/v7.7.0 - 7.7.0 and 7.6.10 (2026-11-10), 7.5.13 / 7.4.22 (2026-10-25) (2026-11-19)
+- https://learn.microsoft.com/en-us/powershell/scripting/whats-new/what-s-new-in-powershell-77 - 7.7 preview changes (page was still at preview.5) (2026-11-19)
+- https://github.com/pester/Pester/releases - 6.0.0 (2026-07-07) notes, 6.2.0 (2026-09-09), still latest (2026-11-19)
+- https://github.com/PowerShell/PSScriptAnalyzer/releases - 1.25.0 still latest (2026-11-19)
+- https://github.com/mikefarah/yq/releases/tag/v4.54.2 - shell-output command injection fix, GHSA-h2cv-65fq-jgrp (2026-11-19)
+- https://access.redhat.com/security/cve/CVE-2026-102474 - dash printf heap overflow (secondary tracker; fixed version not stated) (2026-11-19)
 - https://metacpan.org/dist/perl and https://perldoc.perl.org/perldelta - Perl 5.44.0 date and changes, 5.42.3/5.40.5 (2026-10-09)
 - https://perldoc.perl.org/feature - feature bundles 5.36-5.44 (2026-10-09)
-- https://github.com/koalaman/shellcheck/releases - 0.11.0 checks (2026-10-09)
-- https://github.com/mvdan/sh/releases - shfmt 3.14.1 (2026-10-09)
-- https://github.com/bats-core/bats-core/releases - 1.14.0 breaking change (2026-10-09)
+- https://github.com/koalaman/shellcheck/releases - 0.11.0 still latest (2026-11-19)
+- https://github.com/mvdan/sh/releases - shfmt 3.14.1 still latest (2026-11-19)
+- https://github.com/bats-core/bats-core/releases - 1.14.0 still latest (2026-11-19)
 - https://github.com/shellspec/shellspec/releases - 0.28.1 last release (2026-10-09)
 - https://github.com/jqlang/jq/releases - jq 1.8.2 security fixes (2026-10-09)
-- https://github.com/mikefarah/yq/releases - yq 4.54.1 (2026-10-09)
-- https://github.com/casey/just/releases and https://github.com/go-task/task/releases - just 1.58.0, Task 3.54.0 (2026-10-09)
-- https://github.com/zsh-users/zsh/tags - zsh-5.9.2 (2026-10-09)
+- https://github.com/mikefarah/yq/releases - yq 4.54.3 (2026-11-19)
+- https://github.com/casey/just/releases and https://github.com/go-task/task/releases - just 1.59.0 (2026-10-15), Task 3.54.0 (2026-10-01) (2026-11-19)
+- https://github.com/zsh-users/zsh/tags - zsh-5.9.2 tagged 2026-07-12 (2026-11-19)
 - https://pubs.opengroup.org/onlinepubs/9799919799/xrat/V4_xcu_chap01.html - Issue 8: `$'...'`, readlink/realpath/timeout (2026-10-09)
 - https://pubs.opengroup.org/onlinepubs/9799919799/utilities/read.html and .../find.html - `read -d`, `-print0` added in Issue 8 (2026-10-09)
-- https://ftp.gnu.org/gnu/bash/bash-5.3-patches/ - patches 001-020, newest 2026-09-14 (2026-10-10)
+- https://ftp.gnu.org/gnu/bash/bash-5.3-patches/ - patches 001-020, newest 2026-09-14, no 5.4 tarball yet (2026-11-19)
 - https://www.gnu.org/software/bash/manual/html_node/The-Shopt-Builtin.html - `patsub_replacement`, `globskipdots` on by default (2026-10-10)
 - https://packages.debian.org/trixie/bash and https://packages.ubuntu.com/resolute/bash - Debian 13 bash 5.2.37, Ubuntu 26.04 bash 5.3 (2026-10-10)
 - https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html and .../utilities/xargs.html - `set -o pipefail`, `xargs -0`/`-r` in Issue 8 (2026-10-10)

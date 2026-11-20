@@ -2,11 +2,12 @@
 name: rc-ohio-child-support
 description: Ohio child support and Ohio-North Carolina interstate cases - R.C. 3111/3115/3119/3121/3123/3125, OAC 5101:12, CSEA administrative orders, arrears, income withholding, UIFSA, N.C. Gen. Stat. 52C, 28 U.S.C. 1738B, Civ.R. 60(B), void judgment and defective service, motion to vacate a support order, historical-order research. Use for any Ohio support order, arrears dispute or NC collection of an Ohio order.
 ---
-# Ohio child support, old orders and Ohio-NC interstate cases  (as of 2026-10)
+# Ohio child support, old orders and Ohio-NC interstate cases  (as of 2026-11)
 
 > Research and drafting support, NOT legal advice; Claude is not a lawyer and creates no attorney-client relationship. Every fact below is
 > dated; statutes and rules move. Re-check the official text for the date that matters before relying on anything. "(unverified)" = a lead.
 > Cases are named only when their text or an official record was retrieved; label `(verified 2026-10-10)` means read on that date.
+> Statute and rule items marked "re-verified 2026-11-19" were re-read on the primary page that day.
 
 Detail lives in references: `references/historical-law-timeline.md` (what law applied when, how to pull old versions),
 `references/post-judgment-relief.md` (60(B), void-judgment motions, objections, appeals, stays, arrears audit),
@@ -37,12 +38,28 @@ Detail lives in references: `references/historical-law-timeline.md` (what law ap
   JFS 07767 Basic Schedule rev. 6/2023, worksheets JFS 07768/07769 rev. 3/2019. What the 4/2026 manual changed: (unverified; ODJFS eManuals
   refused connection). The schedule must be updated every four years (3119.021); the 6/2023 schedule is the current one listed.
 - **Supreme Court of Ohio rules, eff. 2026-07-01**: Superintendence Rules restructured. **Sup.R. 44-47 are now Sup.R. 11.09-11.16** (redaction
-  of personal identifiers = 11.13; restricting access = 11.14). Civ.R. 6 and 58 absorbed former Sup.R. 41 and 7. Cite the new numbers for
+  of personal identifiers = 11.13; restricting access = 11.14; adopted 2026-05-19, effective 2026-07-01 per the Court's notice, and 11.13
+  title confirmed on a secondary rules site 2026-11-19; the Court's own PDF was unreachable then, so re-read 11.13 before citing a subdivision). Civ.R. 6 and 58 absorbed former Sup.R. 41 and 7. Cite the new numbers for
   filings after 2026-07-01; cite the old ones when describing what applied earlier.
-- **Ayers v. Ayers, 178 Ohio St.3d 101, 2024-Ohio-1833** (verified 2026-10-10): imputing income requires an express finding of voluntary
+- **Ayers v. Ayers, 178 Ohio St.3d 101, 2024-Ohio-1833** (decided 2024-05-15; cite confirmed 2026-11-19): imputing income requires an express finding of voluntary
   unemployment or underemployment (R.C. 3119.01(C)(17)).
-- No 2025-2026 Ohio enactment changing arrears interest, the schedule or Chapter 3123 remedies was found beyond the above (searched 2026-10-10;
-  absence of evidence, re-check the 136th GA bill list).
+- **Re-verified 2026-11-19** (codes.ohio.gov): 3119.86 and 3119.861 (only version: 2025-03-20, HB 338); 3123.54 (versions 2001-03-22 and
+  2025-04-09 only); 3123.21 (single version, 2002-01-25); 3119.021 (single version, 2019-03-28; four-year update duty); OAC 5101:12-1-17
+  (eff. 2026-04-01, prior 2019-03-28, five-year review 2028-02-23); OAC 5101:12-1-99 (eff. 2026-04-01; prior dates include 2025-04-01;
+  five-year review 2028-06-01; forms as listed above, schedule JFS 07767 still rev. 6/2023); OAC 5101:12-1-15 (eff. 2024-01-01, review 2029-01-01).
+  No new schedule revision was found as of 2026-11-19.
+- **Pending, not law (136th GA)**: HB 686 ("Parker Kahle Act", guardianship of an adult child with a disability and allocation of parental
+  rights; enacts R.C. 3109.044 and amends 2101.16, 2111.03 and other probate sections) was in House Judiciary, "As Introduced", hearings Mar-Jun 2026 (ohiohouse.gov, read
+  2026-11-19). Whether it touches support is (unverified); no passage found. HB 472 (passed both houses 2026-06-10) shows a veto receipt
+  2026-06-25; its subject was not retrieved, so its relevance is (unverified).
+- **Federal, 91 FR 68045 (published 2026-10-29, eff. 2026-11-30)**: HHS/ACF final rule "Reducing Bureaucracy and Burden for Child Support
+  Enforcement Programs" (FR Doc. 2026-22116) removes about 25 sections of 45 CFR chapter III (scope statements, obsolete formulas, and
+  303.32 National Medical Support Notice procedure, which moves to forms/guidance) and says it changes no support amount or the state
+  guidelines rule 302.56. Citation, date, effective date and agency confirmed on the govinfo HTML header 2026-11-19 (amends 45 CFR
+  parts 301-310; keeps 302.32, 302.33, 302.38, 304.20). The "about 25 sections", 303.32 and 302.56 statements are from a secondary
+  summary: (unverified) against the primary text. Re-check 45 CFR 303.32 and 302.56 in the eCFR before citing.
+- No other 2025-2026 Ohio enactment changing arrears interest, the schedule or Chapter 3123 remedies was found (searched 2026-10-10 and
+  2026-11-19; absence of evidence, re-check the 136th GA bill list).
 
 **Agencies**: ODJFS Office of Child Support sets policy and runs payment processing and SETS (statewide system, OAC 5101:12-1-15). 88 county
 CSEAs run cases. Statewide portal: childsupport.ohio.gov (reached 2026-10-10). The jfs.ohio.gov child support pages returned 404 on 2026-10-10:
@@ -191,10 +208,16 @@ North Carolina (https://legalaidnc.org/), NC Child Support Services (https://www
 - https://ohiohouse.gov/legislation/135/hb29 - HB 29 license-suspension bill, eff. 2025-04-09 (2026-10-10)
 - https://codes.ohio.gov/ohio-revised-code/section-3123.54 - 30-day wait before registrar notice; 2001 text compared (2026-10-10)
 - https://codes.ohio.gov/ohio-revised-code/section-3115.201 - HB 96 eff. 2025-09-30, DCY registry change (2016 vs 2025 PDFs compared) (2026-10-10)
-- https://codes.ohio.gov/ohio-revised-code/section-3119.021 - schedule, four-year update, HB 366 eff. 2019-03-28 (2026-10-10)
-- https://codes.ohio.gov/ohio-administrative-code/rule-5101:12-1-17 - guideline rule eff. 2026-04-01 (2026-10-10)
-- https://codes.ohio.gov/ohio-administrative-code/rule-5101:12-1-99 - JFS 07766 rev. 4/2026, 07767 rev. 6/2023, 07768/07769 rev. 3/2019 (2026-10-10)
-- https://codes.ohio.gov/ohio-administrative-code/rule-5101:12-1-15 - SETS, eff. 2024-01-01 (2026-10-10)
+- https://codes.ohio.gov/ohio-revised-code/section-3119.021 - schedule, four-year update, HB 366 eff. 2019-03-28 (2026-11-19)
+- https://codes.ohio.gov/ohio-administrative-code/rule-5101:12-1-17 - guideline rule eff. 2026-04-01 (2026-11-19)
+- https://codes.ohio.gov/ohio-administrative-code/rule-5101:12-1-99 - JFS 07766 rev. 4/2026, 07767 rev. 6/2023, 07768/07769 rev. 3/2019 (2026-11-19)
+- https://codes.ohio.gov/ohio-administrative-code/rule-5101:12-1-15 - SETS, eff. 2024-01-01 (2026-11-19)
+- https://codes.ohio.gov/ohio-revised-code/section-3123.21 - 20% arrears presumption, HB 208 eff. 2002-01-25 (2026-11-19)
+- https://ohiohouse.gov/legislation/136/hb686 and https://www.ohiohouse.gov/legislation/136/hb472/status - pending/vetoed 136th GA bills (2026-11-19)
+- https://www.supremecourt.ohio.gov/courts/courts-rules/rules-of-superintendence-restructuring/ and https://courtnewsohio.gov/happening/2026/SuperintendenceRules_070126.asp - 2026-07-01 Superintendence restructuring (2026-11-19; new numbers via https://www.courtrules.net/ohio/ohio-superintendence/section/section-11-access-to-court-proceedings-and-court-records, secondary)
+- https://www.law.cornell.edu/uscode/text/42/652 - 652(k) passport denial threshold $2,500 (Pub. L. 109-171, eff. 2006-10-01) (2026-11-19; LII mirror of the Code)
+- https://www.recordinglaw.com/news/hhs-child-support-regulations-rescinded-final-rule/ and https://www.govinfo.gov/content/pkg/FR-2026-10-29/pdf/2026-22116.pdf - 91 FR 68045 final rule (secondary summary; header confirmed at https://www.govinfo.gov/content/pkg/FR-2026-10-29/html/2026-22116.htm 2026-11-19; PDF text unreadable) (2026-11-19)
+- https://www.ncleg.gov/EnactedLegislation/Statutes/HTML/BySection/Chapter_50/GS_50-13.10.html and /SessionLaws/HTML/2025-2026/SL2025-16.html - NC arrears-accrual exclusions, S.L. 2025-16 s. 1.21(a), eff. 2025-10-01 (2026-11-19)
 - https://codes.ohio.gov/ohio-revised-code/chapter-3115 - UIFSA 2008 sections eff. 2016-01-01 (HB 64) (2026-10-10)
 - https://codes.ohio.gov/ohio-revised-code/section-3121.36 , /section-3123.14 , /section-3123.17 , /section-3121.44 , /section-3121.45 , /section-3119.83 , /section-3119.84 , /section-3111.84 , /section-3123.04 , /section-3123.05 , /section-3125.50 - arrears, interest, payments, retroactivity, objections, hearings, confidentiality (2026-10-10)
 - https://www.supremecourt.ohio.gov/docs/LegalResources/Rules/civil/CivilProcedure.pdf - Civ.R. 4-4.7, 53, 58, 60, 62 with history and staff notes (2026-10-10)
@@ -205,7 +228,8 @@ North Carolina (https://legalaidnc.org/), NC Child Support Services (https://www
 - https://www.supremecourt.ohio.gov/rod/docs/pdf/0/2020/2020-ohio-2913.pdf - State v. Harper (2026-10-10)
 - https://www.supremecourt.ohio.gov/rod/docs/pdf/0/2021/2021-Ohio-1533.pdf and /0/2022/2022-Ohio-1709.pdf - Lundeen v. Turner I and II (2026-10-10)
 - https://www.govinfo.gov/content/pkg/USCODE-2023-title28/html/USCODE-2023-title28-partV-chap115-sec1738B.htm - 28 U.S.C. 1738B text and amendment notes (2026-10-10)
-- https://www.ncleg.gov/EnactedLegislation/Statutes/HTML/ByChapter/Chapter_52C.html - N.C. Gen. Stat. Chapter 52C (2026-10-10)
+- https://www.ncleg.gov/EnactedLegislation/Statutes/HTML/ByChapter/Chapter_52C.html - N.C. Gen. Stat. Chapter 52C; 52C-6-604, -605(b)(2), -607 re-read, no change since 2015-117 (2026-11-19)
+- https://www.govinfo.gov/content/pkg/USCODE-2023-title28/html/USCODE-2023-title28-partV-chap115-sec1738B.htm re-read (2026-11-19; 2023 edition, later amendments not checked)
 - https://www.supremecourt.ohio.gov/rod/docs/pdf/0/2014/2014-Ohio-4275.pdf and /0/2021/2021-Ohio-2319.pdf - Kuchta; Ostanek (2026-10-10)
 - https://www.supremecourt.ohio.gov/rod/docs/pdf/8/2025/2025-Ohio-377.pdf and /8/2026/2026-Ohio-1660.pdf - Margiman v. Dowdell; One Main Fin. Group v. Knight (8th Dist.) (2026-10-10)
 - https://codes.ohio.gov/ohio-revised-code/section-3111.13 - (F)(2)-(3) support for the period before a parentage support order (2026-10-10)

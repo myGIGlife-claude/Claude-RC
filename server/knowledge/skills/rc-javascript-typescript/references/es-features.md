@@ -1,7 +1,7 @@
-# ECMAScript features: edition and browser support (as of 2026-10)
+# ECMAScript features: edition and browser support (as of 2026-11)
 
 Edition = year in TC39 `finished-proposals.md`. Baseline = web-features 3.42.0 (`low` = newly available in all core browsers,
-`high` = widely available, 30 months later). Versions are the first shipping release. Node column is derived from the V8 version each Node line ships (Chrome N ~ V8 N/10); treat as a guide and check `node -p` if it matters. Accessed 2026-10-09.
+`high` = widely available, 30 months later). Versions are the first shipping release. Node column is derived from the V8 version each Node line ships (Chrome N ~ V8 N/10); treat as a guide and check `node -p` if it matters. Table last fully verified 2026-10-09; on 2026-11-19 re-checked the TC39 finished list (unchanged), MDN Temporal/`using` (still not Baseline) and Safari 27 notes (no Temporal/`using` support announced). Baseline column not re-pulled: web-features 3.42.0.
 
 | Feature | Edition | Baseline | Chrome / Firefox / Safari | Node |
 |---|---|---|---|---|
@@ -25,10 +25,10 @@ Edition = year in TC39 `finished-proposals.md`. Baseline = web-features 3.42.0 (
 | `Map/WeakMap.prototype.getOrInsert(Computed)` (upsert) | ES2026 | low (2026-02) | 145 / 144 / 26.2 | 26+ |
 | `Iterator.concat` (sequencing) | ES2026 | low (2026-03) | 146 / 147 / 26.4 | 26+ |
 | `Math.sumPrecise` | ES2026 | low (2026-04) | 147 / 137 / 26.2 | not in Node 26 (V8 14.6) |
-| `Error.isError` | ES2026 | not Baseline | 134 / 138 / - | 24+ (unverified) |
+| `Error.isError` | ES2026 | not Baseline | 134 / 138 / unverified (Apple notes conflict) | 24+ (unverified) |
 | `using` / `await using`, `DisposableStack`, `Symbol.dispose` | ES2027 (Stage 4, 2026) | not Baseline | 134 / 141 / - | 24+ |
 | Temporal | ES2027 (Stage 4, 2026-03) | not Baseline | 144 / 139 / - | 26+ (default on) |
-| Iterator chunking, `Iterator.zip` (joint iteration), iterator includes/join | ES2027 | not yet | check MDN | check |
+| Iterator chunking, `Iterator.zip` (joint iteration), iterator includes/join, `Atomics.pause` | ES2027 | not yet | check MDN | check; TS 7.1 `lib esnext` types `Iterator.zip` |
 | Import maps (HTML) | n/a | high (2023-03) | 89 / 108 / 16.4 | n/a |
 
 ## Not standard yet (do not present as standard)
@@ -38,6 +38,7 @@ Edition = year in TC39 `finished-proposals.md`. Baseline = web-features 3.42.0 (
 - Pipeline operator, pattern matching: not in the active list; do not use (Babel-only).
 
 ## TypeScript lib targeting
+- TS 7.1 Beta (2026-10-20) makes `--target es2026` / `--lib es2026` stable (not yet in a stable TS release).
 - TS 6.0 adds `target`/`lib` `es2025`; Temporal types via `esnext` or `esnext.temporal`.
 - `lib: ["dom"]` now includes `dom.iterable` and `dom.asynciterable` (TS 6.0).
 - Type support existing does not mean runtime support: gate on your real browser/Node targets.

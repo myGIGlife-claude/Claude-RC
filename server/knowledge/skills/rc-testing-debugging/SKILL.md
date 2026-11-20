@@ -1,45 +1,56 @@
 ---
 name: rc-testing-debugging
-description: Cross-language test strategy and debugging method (Oct 2026). Use when writing or reviewing tests, fixing flaky tests, adding e2e (Playwright, Cypress), a11y (axe), load (k6, Gatling), contract (Pact), Testcontainers, mutation/property tests, SAST/DAST in CI, mobile UI tests (Espresso, Maestro, XCUITest), coverage gates, or when hunting a bug, leak, race or slowdown with debuggers, profilers, strace or tracing.
+description: Cross-language test strategy and debugging method (Nov 2026). Use when writing or reviewing tests, fixing flaky tests, adding e2e (Playwright, Cypress), a11y (axe), load (k6, Gatling), contract (Pact), Testcontainers, mutation/property tests, SAST/DAST in CI, mobile UI tests (Espresso, Maestro, XCUITest), coverage gates, or when hunting a bug, leak, race or slowdown with debuggers, profilers, strace or tracing.
 ---
-# Testing and debugging  (as of 2026-10)
+# Testing and debugging  (as of 2026-11)
 
 > Cross-cutting strategy and the current tool landscape. Per-language test runners live in rc-javascript-typescript, rc-python,
 > rc-go, rc-java, rc-android, rc-ios, rc-php: read those for runner config. Versions are dated; confirm before pinning.
 > Full version table: `references/tool-versions.md`. Per-ecosystem debugger/profiler commands: `references/debugging-toolbox.md`.
 
 ## Currency check
-- **Web e2e**: Playwright 1.64.0 (2026-10-07; ships monthly-ish). Since 1.57 it runs Chrome for Testing builds instead of Chromium;
-  1.56 added test agents (planner/generator/healer); 1.62 `retryStrategy: 'isolated'`; 1.63 named test locks + `locator.visible()`;
-  1.64 `--shuffle` and `locator.within()`. Cypress 16.0 (2026-09-01): Node 22/24/26 only, `cy.exec()` removed (use `cy.task()`), `Cypress.env()`
-  removed (use `cy.env()` for secrets, `Cypress.expose()` for browser values), Electron browser deprecated. Cypress 15.0 was 2025-08-20.
+- **Web e2e**: Playwright 1.65.1 (npm latest 2026-11-19; 1.65.0 date unverified; ships monthly-ish). Since 1.57 it runs Chrome for Testing
+  builds instead of Chromium; 1.56 added test agents (planner/generator/healer); 1.62 `retryStrategy: 'isolated'`; 1.63 named test locks +
+  `locator.visible()`; 1.64 `--shuffle`, `locator.within()`, `page.webmcp`, and `--update-snapshots=missing` now passes the run;
+  1.65 runs under Bun (`--bun`), adds a `failures` reporter, `-exclusive-` lock, and breaks: sharded run with no matching tests fails
+  unless `--pass-with-no-tests`, actions wait for non-inert elements, Node 20 no longer tested.
+  Cypress 16.0 (2026-09-01): Node 22/24/26 only, `cy.exec()` removed (use `cy.task()`), `Cypress.env()`
+  removed (use `cy.env()` for secrets, `Cypress.expose()` for browser values), Electron browser deprecated. Latest 16.3.0 (2026-11-10):
+  `cy.getByRole()` arrived in 16.2.0 (2026-10-13), `.scrollIntoView()` types drop `ensureScrollable`, all `setupNodeEvents` handlers for one
+  event now run; 16.2.1 `cy.fixture()` fails outside `fixturesFolder`. Cypress 15.0 was 2025-08-20 (15.21.2 on 2026-11-12 is a security-fix backport).
 - **WebDriver BiDi**: Firefox removed CDP (Firefox 141, 2025-07-22); Cypress drives Firefox 135+ over BiDi since 14.1 (2025-02-25);
-  Puppeteer 23+ (2024-08) uses BiDi for Firefox by default (Chrome still CDP by default); Selenium is moving from CDP to BiDi. Selenium 4.51 (2026-10-09),
-  WebdriverIO 10.0 (2026-10-05). The BiDi spec is still a W3C draft (exact maturity unverified).
+  Puppeteer 23+ (2024-08) uses BiDi for Firefox by default (Chrome still CDP by default); Selenium is moving from CDP to BiDi. Selenium
+  (JS) 4.53.0, WebdriverIO 10.2.0 (10.0 was 2026-10-05; npm latest 2026-11-19). The BiDi spec is still a W3C draft (exact maturity unverified).
 - **Component/browser tests**: Vitest browser mode is stable since 4.0 (2025-10-22): providers are separate packages
   (`@vitest/browser-playwright`, `-webdriverio`, `-preview`), import from `vitest/browser`, `toMatchScreenshot` for visual diffs.
   Vitest 5.0 (2026-09-03): Node >= 22.12, `clearMocks` on by default, strict locators, unawaited assertions fail, trace view for
-  browser mode, `vi.when()`, Temporal mocking. Jest 30 (30.5.2) still maintained. MSW 3.0 (2026-09-28).
-- **A11y**: axe-core 4.14.0 (2026-10-05), `@axe-core/playwright` 4.13.0, Pa11y 10.0.0 (2026-08-28, Node 22.13+), Lighthouse 13.5.0
-  (2026-09-18). Lighthouse CI last released 0.15.1 (2025-06-25): slow cadence, bundles Lighthouse 12.6.1, not 13.
-- **Load**: k6 2.3.0 (2026-09-21); k6 1.0 was 2025-05-06, 2.0 (2026-05-11) removed `externally-controlled`, `k6 pause/scale`,
-  FID from web vitals, Go module now `go.k6.io/k6/v2`. Gatling 3.16.0 (2026-09-29; Java/Kotlin/Scala and a JavaScript/TypeScript SDK).
-  Locust 2.46.7 (2026-10-04). JMeter 5.6.3 is still the latest release (2024-01).
+  browser mode, `vi.when()`, Temporal mocking; 5.1.0 (Nov 2026) adds `--last-failed`/`--since-last-run`; latest 5.1.1 (Nov 17; v4 line
+  still gets backports, 4.1.12 in Oct). Jest 30 (30.5.2) still maintained. MSW 3.0 (2026-09-28; latest 3.0.7).
+- **A11y**: axe-core 4.14.1 (npm latest 2026-11-19; 4.14.0 was 2026-10-05), `@axe-core/playwright` 4.14.0, Pa11y 10.0.0 (2026-08-28,
+  Node 22.13+), Lighthouse 13.6.0. Lighthouse CI 0.16.1 (2026-11-11, after a 0.15.1 gap since 2025-06-25; bundled Lighthouse version unverified).
+- **Load**: k6 2.4.0 (2026-11-12; experimental tracing; deprecates built-in InfluxDB and Prometheus remote-write outputs ahead of k6 v3;
+  1.8.3 patch line continues); k6 1.0 was 2025-05-06, 2.0 (2026-05-11) removed `externally-controlled`, `k6 pause/scale`,
+  FID from web vitals, Go module now `go.k6.io/k6/v2`; 2.3.0 (2026-09-21) added `--scenario` and `--once`. Gatling 3.16.1 (2026-11-16;
+  Java/Kotlin/Scala and a JavaScript/TypeScript SDK). Locust 2.47.0 (2026-10-21). JMeter 5.6.3 is still the latest release (2024-01).
 - **Contract/DB**: Pact JS 17 (17.0.0 2026-06-25, latest 17.1.4). Testcontainers Java 2.0 (2025-10-14; JUnit 4 removed, artifacts
-  renamed `testcontainers-<module>`, classes moved to `org.testcontainers.<module>`; latest 2.0.5), Node 12.2.0, Python 4.15.0.
-- **Mutation/property**: Stryker 10.0 (2026-08-14), PIT 1.30.0 (2026-08-27), mutmut 3.8.0; Hypothesis 6.168, fast-check 4.10.
-- **Security in CI**: Semgrep 1.180 (2026-10-07; Opengrep 1.30 is the LGPL community fork), CodeQL bundle 2.27.2 (2026-10-07),
-  ZAP 2.17.0 (2025-12-15, plus weekly builds), gitleaks 8.30.1, TruffleHog 3.99, OSV-Scanner 2.6.0.
-- **Mobile**: Espresso 3.7.0, Maestro CLI 2.11.0 (2026-09-29, Apache-2.0), Appium 3 (3.0.0 2025-08-18, W3C protocol only,
-  latest 3.8.0), Roborazzi 1.76, Paparazzi 2.0 alphas, swift-snapshot-testing 1.19.6. Swift Testing/XCUITest: see rc-ios.
+  renamed `testcontainers-<module>`, classes moved to `org.testcontainers.<module>`; latest 2.0.5), Node `@testcontainers/*` 12.2.2, Python 4.15.0.
+- **Mutation/property**: Stryker 10.1.1, PIT 1.30.2 (2026-11-05), mutmut 3.8.1; Hypothesis 6.170 (tag v6.170.16), fast-check 4.10.3.
+- **Security in CI**: Semgrep 1.186.0 (2026-11-18; Opengrep 2.0.0 (2026-11-13) is the LGPL community fork: Python removed, `install-ci` removed,
+  interfile taint only with `--enable-interfile`), CodeQL bundle 2.27.5 (2026-11-19),
+  ZAP 2.17.0 (2025-12-15, plus weekly builds), gitleaks 8.30.1 (2026-03-21), TruffleHog 3.100.0, OSV-Scanner 2.7.1 (2026-11-09).
+- **Mobile**: Espresso 3.7.0, Maestro CLI 2.12.1 (2026-11-02, Apache-2.0), Appium 4.0.0 (2026-11-15: legacy JSONWP removed, W3C only,
+  Selenium Grid 3 support removed, `--allow-cors` replaced by `--allow-insecure=*:cors`, ESM-only imports, Node ^22.22.2 / ^24.15.0 / >=26;
+  3.0.0 was 2025-08-18, last 3.x seen 3.8.0), Roborazzi 1.79.0, Paparazzi 2.0 alphas, swift-snapshot-testing 1.19.7. Swift Testing/XCUITest: see rc-ios.
 - **Debugging/profiling news**: Python 3.14 `python -m pdb -p PID` remote attach + `python -m asyncio ps|pstree PID`; Python 3.15
   (2026-10-09) adds the `profiling.sampling` sampling profiler (`python -m profiling.sampling attach PID`) and frame pointers by
-  default. Go 1.25 `runtime/trace.FlightRecorder` + `testing/synctest` GA; Go 1.27 `goroutineleak` pprof profile. async-profiler 4.5,
-  Delve 1.27.2, py-spy 0.4.2, memray 1.20, Perfetto v58, mitmproxy 12.2. Agent-facing: `chrome-devtools-mcp` 1.10, `@playwright/mcp`.
+  default; `profiling.sampling` also has `dump` (one-shot stacks of a hung process, `--async-aware`). Go 1.25 `runtime/trace.FlightRecorder` +
+  `testing/synctest` GA; Go 1.27 (current stable line is 1.27.x) makes the `goroutineleak` pprof profile GA (`/debug/pprof/goroutineleak`),
+  adds `synctest.Sleep` and `httptest.NewTestServer`; `go tool trace -http` now binds localhost only. async-profiler 4.6, Delve 1.27.2,
+  py-spy 0.4.4, memray 1.20, Perfetto v59.1, mitmproxy 12.3.1. Agent-facing: `chrome-devtools-mcp` 1.13, `@playwright/mcp` 0.0.86.
 - **Older versions** (legacy projects): Playwright < 1.57 uses Chromium builds (screenshot baselines can shift on upgrade); Vitest 3
   has browser mode as experimental with `@vitest/browser/context`; Cypress 13/14 on Node 18/20 still runs CDP for Chrome and BiDi
   only for Firefox 135+; Testcontainers Java 1.x uses old artifact names and supports JUnit 4; k6 0.x/1.x scripts using
-  `externally-controlled` break on 2.x; Python <= 3.13 has no `pdb -p` (use py-spy/`gdb` + `py-bt`). Match the project's version
+  `externally-controlled` break on 2.x; Appium 3 setups (JSONWP-era clients, Node < 22.22) break on 4.x; Python <= 3.13 has no `pdb -p` (use py-spy/`gdb` + `py-bt`). Match the project's version
   in examples; do not upgrade unless asked.
 
 ## What changed / stop doing
@@ -56,7 +67,7 @@ description: Cross-language test strategy and debugging method (Oct 2026). Use w
 | 100% coverage targets | Coverage as a gap finder + mutation score on core logic | - |
 | Snapshot of whole component trees | Small explicit assertions; aria snapshots or targeted visual diffs | - |
 | H2/SQLite as stand-in for Postgres/MySQL | Testcontainers with the production engine and version | - |
-| Appium JSON Wire Protocol caps | W3C capabilities with `appium:` prefix | Appium 2/3 |
+| Appium JSON Wire Protocol caps | W3C capabilities with `appium:` prefix | Appium 2/3 (JSONWP removed in 4.0, 2026-11-15) |
 | `console.log`/`print` as the only debugger | Debugger breakpoints, logpoints, profilers, structured logs + traces | - |
 | clinic.js (Doctor/Flame) as Node default | `node --cpu-prof`/`--heap-prof`, DevTools via `--inspect`, 0x; clinic last release 2023, repo idle since 2024-09 | - |
 | Retrying flaky tests forever | Quarantine with an owner and a deadline, fix the cause | - |
@@ -295,18 +306,20 @@ export const options = {
 - [ ] Debug code, verbose logs, test-only routes and debug ports removed or disabled in production.
 
 ## Sources
-- https://playwright.dev/docs/release-notes - Playwright 1.56-1.64 features (agents, Chrome for Testing, isolated retries, locks, shuffle) - 2026-10-09
-- https://registry.npmjs.org (`npm view <pkg> version time`) - Playwright, Cypress, Vitest, Jest, MSW, axe-core, Pa11y, LHCI, Pact, Testcontainers Node, Stryker, fast-check, clinic, 0x, Appium, WebdriverIO, Selenium versions and dates - 2026-10-09
-- https://docs.cypress.io/app/references/changelog - Cypress 16.0 breaking changes and Node support - 2026-10-09
-- https://vitest.dev/blog/vitest-4 and https://vitest.dev/blog/vitest-5 - browser mode stable, providers, toMatchScreenshot, 5.0 changes - 2026-10-09
+- https://playwright.dev/docs/release-notes - Playwright 1.56-1.65 features and breaking changes (agents, Chrome for Testing, locks, shuffle, Bun) - 2026-11-19
+- https://registry.npmjs.org/-/package/<pkg>/dist-tags - latest versions of Playwright, axe-core, MSW, Jest, Pact, WebdriverIO, Selenium, Appium, Stryker, fast-check, Lighthouse, chrome-devtools-mcp, @playwright/mcp, Pa11y, Testcontainers Node - 2026-11-19
+- https://registry.npmjs.org/appium/latest - Appium 4.0.0 Node engines - 2026-11-19
+- https://api.github.com/repos/appium/appium/releases - Appium 4.0.0 (2026-11-15) breaking changes - 2026-11-19
+- https://docs.cypress.io/app/references/changelog - Cypress 16.0-16.3 changes, 15.21.2 - 2026-11-19
+- https://github.com/vitest-dev/vitest/releases - Vitest 5.0.x/5.1.x features - 2026-11-19
+- https://vitest.dev/blog/vitest-4 and https://vitest.dev/blog/vitest-5 - browser mode stable, providers, toMatchScreenshot, 5.0 changes - 2026-10-09 (not re-fetched)
 - https://fxdx.dev/cdp-retirement-in-firefox/ - Firefox 141 removes CDP, BiDi replacement - 2026-10-09
 - https://www.selenium.dev/blog/ - Selenium release cadence and BiDi direction - 2026-10-09
-- https://github.com/grafana/k6/releases - k6 1.0 (2025-05-06), 2.0 (2026-05-11) breaking changes, 2.3.0 - 2026-10-09
+- https://github.com/grafana/k6/releases - k6 1.0 (2025-05-06), 2.0 (2026-05-11) breaking changes, 2.3.0, 2.4.0 (2026-11-12), 1.8.3 - 2026-11-19
 - https://docs.gatling.io/reference/script/ - Gatling Java and JavaScript SDKs - 2026-10-09
 - https://github.com/testcontainers/testcontainers-java/releases/tag/2.0.0 - Testcontainers 2.0 changes - 2026-10-09
 - https://appium.io/docs/en/latest/guides/migrating-2-to-3/ - Appium 3 W3C-only, Node requirement - 2026-10-09
-- https://docs.python.org/3/whatsnew/3.14.html and https://docs.python.org/3.15/whatsnew/3.15.html - pdb -p, asyncio ps, profiling.sampling, frame pointers - 2026-10-09
-- https://go.dev/doc/go1.25 - FlightRecorder, synctest GA - 2026-10-09
-- GitHub releases API (`gh api repos/<owner>/<repo>/releases/latest`) - Semgrep, Opengrep, CodeQL bundle, ZAP, gitleaks, TruffleHog, OSV-Scanner, Maestro, Delve, async-profiler, py-spy, memray, LeakCanary, mitmproxy, Perfetto, PIT, Hypothesis, Schemathesis, Gatling, Locust, JMeter, Lighthouse, Roborazzi, Paparazzi, swift-snapshot-testing - 2026-10-09
-- https://repo1.maven.org and https://dl.google.com/android/maven2 - LeakCanary 2.14, Espresso 3.7.0, Testcontainers Java 2.0.5 - 2026-10-09
-- https://pypi.org - Locust, Testcontainers Python, mutmut versions - 2026-10-09
+- https://docs.python.org/3/whatsnew/3.14.html - pdb -p, asyncio ps - 2026-10-09 (not re-fetched); https://docs.python.org/3.15/whatsnew/3.15.html - 3.15 released 2026-10-09, profiling.sampling incl. dump, frame pointers (PEP 831) - 2026-11-19
+- https://go.dev/doc/go1.25 - FlightRecorder, synctest GA - 2026-10-09 (not re-fetched); https://go.dev/doc/go1.27 - goroutineleak GA, synctest.Sleep, trace localhost - 2026-11-19; https://go.dev/dl/?mode=json - stable 1.27.x - 2026-11-19
+- GitHub releases API (`api.github.com/repos/<owner>/<repo>/releases/latest`) - Semgrep, Opengrep, CodeQL bundle, ZAP, gitleaks, TruffleHog, OSV-Scanner, Maestro, Delve, async-profiler, py-spy, memray, LeakCanary, mitmproxy, Perfetto, PIT, Hypothesis, Gatling, Locust, JMeter, Lighthouse CI, Roborazzi, Paparazzi, swift-snapshot-testing, Testcontainers Java, chrome-devtools-mcp - 2026-11-19
+- https://pypi.org/pypi/<pkg>/json - Locust, Testcontainers Python, mutmut, Schemathesis versions - 2026-11-19

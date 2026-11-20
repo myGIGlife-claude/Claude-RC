@@ -1,4 +1,7 @@
-# Ohio post-judgment relief and arrears (as of 2026-10-10)
+# Ohio post-judgment relief and arrears (as of 2026-11)
+
+Re-verified 2026-11-19: 42 U.S.C. 652(k) passport threshold is $2,500 (set by Pub. L. 109-171, eff. 2006-10-01); R.C. 3123.21 (20%),
+3123.54 and 3119.86/.861 texts and dates as stated below. Cases and Civil Rules text below were read 2026-10-10 and not re-read.
 
 Research aid, not legal advice. Rule text from the Supreme Court of Ohio rules PDFs read 2026-10-10. Cases: Supreme Court of Ohio opinions
 retrieved from supremecourt.ohio.gov (folder 0) unless noted.

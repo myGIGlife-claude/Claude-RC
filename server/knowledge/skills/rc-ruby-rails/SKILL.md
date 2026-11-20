@@ -2,33 +2,35 @@
 name: rc-ruby-rails
 description: Current Ruby (3.3-4.0) and Rails (8.0/8.1, 8.2 on main) standards, Bundler 4, mise/rbenv, Solid Queue/Cache/Cable, Kamal 2, Propshaft, Hotwire, auth generator, Minitest/RSpec, RuboCop/Standard, Brakeman, Puma, Sidekiq, Sinatra/Roda/Hanami. Use when writing, reviewing or upgrading .rb/.erb files, Gemfile, Gemfile.lock, config/routes.rb, config/deploy.yml, .ruby-version, or choosing a Ruby version, framework or host.
 ---
-# Ruby and Rails (as of 2026-10)
+# Ruby and Rails (as of 2026-11)
 
 > Facts are dated (see Sources). Confirm on the primary source before pinning a version or promising a date. Anything marked (unverified) is a lead, not a fact.
 
 ## Currency check
-Verified 2026-10-09 on ruby-lang.org, rubyonrails.org and rubygems.org.
+Verified 2026-11-19 on ruby-lang.org, rubyonrails.org and rubygems.org.
+
+**Security, act now (2026-11-18):** Ruby 4.0.10, 3.4.13 and 3.3.14 fix seven memory-safety bugs in Regexp and String case conversion (possible RCE; no CVE ids assigned yet, tracked as GHSA ids such as GHSA-34m4-m9fh-gqp5; affected: <= 4.0.9, <= 3.4.12, <= 3.3.13; verified on the ruby-lang.org advisory 2026-11-19). Ruby 3.2 and older get no fix. Earlier, 4.0.9/3.4.12/3.3.13 (2026-10-23) fixed Regexp compilation bugs exploitable when a pattern comes from attacker text (`Regexp.new(user_input)`; `Regexp.timeout` does not help). Rails 8.0.5.2 and 8.1.4.1 (2026-11-04) fix 21 security issues: upgrade.
 
 **Ruby** (new major every Dec 25; ~2y normal + ~1y security maintenance):
 
 | Branch | Released | Status now | EOL |
 |---|---|---|---|
 | 3.2 and older | | EOL | 3.2 ended 2026-04-01: do not deploy |
-| 3.3 | 2023-12-25 | security-only since 2026-04-01 (latest 3.3.12, 2026-07-16) | 2027-03-31 (expected) |
-| 3.4 | 2024-12-25 | normal maintenance (3.4.11, 2026-09-23) | TBD |
-| 4.0 | 2025-12-25 | normal maintenance (4.0.7, 2026-09-15), **default for new projects** | TBD |
-| 4.1 | expected 2026-12-25 (unverified) | not released | |
+| 3.3 | 2023-12-25 | security/legacy maintenance since 2026-04-01 (latest 3.3.14, 2026-11-18) | 2027-03-31 (expected) |
+| 3.4 | 2024-12-25 | normal maintenance (3.4.13, 2026-11-18) | TBD |
+| 4.0 | 2025-12-25 | normal maintenance (4.0.10, 2026-11-18), **default for new projects** | TBD |
+| 4.1 | 4.1.0-preview1 on 2026-10-12; final expected 2026-12-25 (unverified, no date announced) | preview | |
 
 **Rails** (feature release ~every 6 months; bug fixes 1 year, security 2 years from release):
 
 | Series | Released | Bug fixes until | Security until | Ruby |
 |---|---|---|---|---|
 | 7.2 and older | | ended | 7.2.4 (2026-09-24) was the **last** 7.2 release | |
-| 8.0 | 2024-11 | ended 2026-05-07 | **2026-11-07** | >= 3.2 |
-| 8.1 | 2025-10-22 | 2026-10-10 | 2027-10-10 | >= 3.2; latest 8.1.4 (2026-09-24) |
+| 8.0 | 2024-11 | ended 2026-05-07 | **2026-11-07 (passed 12 days ago; latest 8.0.5.2, 2026-11-04)** | >= 3.2 |
+| 8.1 | 2025-10-22 | ended 2026-10-10 | 2027-10-10 | >= 3.2; latest 8.1.4.1 (2026-11-04) |
 | 8.2 | not released; `main` = 8.2.0.alpha | | | main requires >= 3.3.5 |
 
-Tooling, latest stable on rubygems.org (2026-10-09): RubyGems/Bundler 4.0.22 (4.0 on 2025-12-03), Puma 8.0.2, Kamal 2.12, Thruster 0.1.27, Solid Queue 1.7, Solid Cache 1.0.10, Solid Cable 4.1, Propshaft 1.3.2, importmap-rails 2.2, turbo-rails 2.0, stimulus-rails 1.3, Minitest 6.0 (2025-12-17), rspec-rails 8.0, Capybara 3.40, RuboCop 1.91, Standard 1.57, rubocop-rails-omakase 1.1, Brakeman 8.1, bundler-audit 0.9.3, Sidekiq 8.1, GoodJob 4.22, Devise 5.0, Rack 3.2, Sinatra 4.2, Roda 3.109, Grape 4.0 (Ruby >= 3.3), Hanami 3.0 (2026-07, Ruby >= 3.3), RBS 4.2, Steep 2.1, Sorbet 0.6, Prism 1.9.
+Tooling, latest stable on rubygems.org (2026-11-19): RubyGems/Bundler 4.1.0 (2026-11-16; 4.0.x still patched, 4.0.24 on 2026-11-05), Puma 8.1.2, Kamal 2.12.0, Thruster 0.1.28, Solid Queue 1.7.2, Solid Cache 1.0.10, Solid Cable 4.1.0, Propshaft 1.3.2, Minitest 6.1.0, rspec-rails 8.1.0, RuboCop 1.92.3, Standard 1.57.0, Brakeman 8.1.0, Sidekiq 8.1.7, Devise 5.0.4, Rack 3.2.8, Sinatra 4.2.2, Roda 3.110.0, Hanami 3.0.2, RBS 4.2.0. Not rechecked on 2026-11-19, values from 2026-10-09 (unverified now): importmap-rails 2.2, turbo-rails 2.0, stimulus-rails 1.3, Capybara 3.40, rubocop-rails-omakase 1.1, bundler-audit 0.9.3, GoodJob 4.22, Grape 4.0, Steep 2.1, Sorbet 0.6, Prism 1.9.
 
 Shipped recently (details in `references/versions.md`):
 - **Ruby 3.4**: `it` block param, Prism is the default parser, chilled-string warnings (mutating a literal without the magic comment warns with `-W:deprecated`), new `Hash#inspect` (`{user: 1}`), error messages use `'Foo#bar'` not backticks, modular GC, base64/csv/bigdecimal/mutex_m/drb etc. are bundled gems now.
@@ -36,11 +38,14 @@ Shipped recently (details in `references/versions.md`):
 - **Rails 8.0**: Solid Queue/Cache/Cable by default (no Redis), Kamal 2 + kamal-proxy, Thruster in front of Puma, Propshaft default (Sprockets out), `bin/rails generate authentication`, SQLite fit for production, `params.expect`, `Regexp.timeout = 1s`.
 - **Rails 8.1**: Active Job Continuations (`ActiveJob::Continuable`), `Rails.event` structured events, `bin/ci` + `config/ci.rb`, `bin/bundler-audit`, `format.md { render markdown: }`, `bin/rails credentials:fetch`, `deprecated: true` on associations, registry-free Kamal deploys (Kamal >= 2.8), scaffolds skip system tests, YJIT not enabled in dev/test, Sidekiq adapter moved into the sidekiq gem.
 - **Bundler 4**: lockfile checksums and `cache_all` on by default; `bundle viz/inject`, `--binstubs`, multiple global sources removed. **Cooldown** (Bundler >= 4.0.13): `source "https://rubygems.org", cooldown: 7`.
+- **Bundler/RubyGems 4.1 (2026-11-16)**: PubGrub replaces Molinillo as resolver, Gemfile `override` DSL (`in:`/`with:` keys, `OVERRIDES` lockfile section), `gem install --cooldown`, git `sparse_checkout`, ML-DSA gem signing, opt-in OS credential store; `no_prune` setting renamed `keep_outdated_cache`; `bundle add` uses optimistic constraints. Test CI on 4.1 before bumping.
+- **Rails 8.2 (main, unreleased)**: `config.zjit = true` (ZJIT wins over YJIT when both available); `load_defaults 8.2` makes JSON the message serializer with no Marshal fallback (watch `message_serializer_fallback.active_support` first); `ssl_default_redirect_status:` deprecated; min MySQL 5.7.9.
+- **Ruby 4.1.0-preview1 (2026-10-12)**: Ractor-local GC, YJIT on Windows (mswin x64), `autoload_relative`, `Integer#bit_count`, `Range#clamp`, `Module#descendants`. Preview only: do not deploy.
 
 ### Older versions (legacy projects)
 - Rails 7.1/7.2 on Ruby 3.1-3.3 is common: no Solid trio or auth generator by default; Sprockets or jsbundling; `params.require(:x).permit(...)` instead of `params.expect`; `rate_limit` exists from 7.2. Upgrade only when asked; then one minor at a time (7.1 -> 7.2 -> 8.0 -> 8.1) with `bin/rails app:update` and `config.load_defaults` bumped last.
 - Ruby 3.2/3.3 apps: no `it` (use `_1` or a named param), YJIT via `--yjit` or Rails' `config.yjit`. On Ruby 4.0 upgrades, add now-bundled gems (`ostruct`, `logger`, `benchmark`, `csv`, `base64`, ...) to the Gemfile or boot fails under Bundler.
-- Rails 8.0 security support ends 2026-11-07: flag it, do not upgrade unasked.
+- Rails 8.0 security support ended 2026-11-07 (last known release 8.0.5.2): flag it to the owner; upgrade to 8.1 only if asked.
 
 ## What changed / stop doing
 | Old / outdated | Do instead | Since |
@@ -70,7 +75,7 @@ Shipped recently (details in `references/versions.md`):
 ## Do this
 Toolchain:
 ```bash
-mise use ruby@4.0          # writes mise.toml; or: echo 4.0.7 > .ruby-version
+mise use ruby@4.0          # writes mise.toml; or: echo 4.0.10 > .ruby-version
 gem install rails && rails new app --database=postgresql   # sqlite3 default is fine for small apps
 bin/setup && bin/dev
 ```
@@ -112,7 +117,9 @@ end
 - Redirects: `redirect_to params[:url]` raises in Rails 7+ unless `allow_other_host: true`; keep it that way.
 - File uploads: Active Storage with content-type + size validation; serve via proxy/signed URLs; image processing (libvips) on trusted variants only.
 - Secrets: credentials or ENV, `config.filter_parameters` covers tokens/passwords; never log `params` raw.
-- Supply chain: Bundler cooldown, lockfile checksums, review new gems' maintainers; rubygems.org had spam-publishing campaigns in 2026.
+- Supply chain: Bundler cooldown, lockfile checksums, review new gems' maintainers; rubygems.org had spam-publishing campaigns in 2026 and began showing security warnings on gem pages (2026-10-15).
+- Regexp from user input: never `Regexp.new(params[:q])` unescaped; use `Regexp.escape`. Keep Ruby on the 2026-11-18 patch releases.
+- Rails 8.0.5.2/8.1.4.1 (2026-11-04) fixed 21 issues; also note `ActiveRecord::NullByteError` now replaces the pg `ArgumentError` for null bytes.
 - Auth generator: rate-limits login/reset; add account lockout/2FA only when required. Use `has_secure_password` (bcrypt), `authenticate_by` (timing-safe).
 
 ## Performance & quality
@@ -159,12 +166,20 @@ end
 - [ ] Deploy: `/up` healthy, `db:prepare` on boot, backup for DB (SQLite volume!), `kamal rollback` path known.
 
 ## Sources
-- https://www.ruby-lang.org/en/downloads/branches/ - Ruby branch status and EOL dates - 2026-10-09
-- https://www.ruby-lang.org/en/news/ - latest patches (4.0.7, 3.4.11, 3.3.12), 2026 CVEs - 2026-10-09
+- https://www.ruby-lang.org/en/downloads/branches/ - Ruby branch status and EOL dates, 4.1 preview - 2026-11-19
+- https://www.ruby-lang.org/en/news/ - latest patches (4.0.10, 3.4.13, 3.3.14), preview1 - 2026-11-19
+- https://www.ruby-lang.org/en/security/ - advisory list (2026-11-18 Regexp/String, 2026-10-23 Regexp) - 2026-11-19
+- https://www.ruby-lang.org/en/news/2026/11/18/multiple-vulnerabilities-in-regexp-and-string/ - seven GHSA issues, affected/fixed versions - 2026-11-19
+- https://www.ruby-lang.org/en/news/2026/10/12/ruby-4-1-0-preview1-released/ - 4.1 preview features - 2026-11-19
+- https://rubyonrails.org/blog - 8.0.5.2 / 8.1.4.1 security releases (2026-11-04) - 2026-11-19
+- https://rubyonrails.org/2026/11/6/this-week-in-rails - NullByteError, security release note - 2026-11-19
+- https://rubyonrails.org/2026/10/23/this-week-in-rails - 8.2 config.zjit, JSON serializer default, deprecations - 2026-11-19
+- https://github.com/ruby/rubygems/releases/tag/v4.1.0 - RubyGems/Bundler 4.1 changes - 2026-11-19
+- https://blog.rubygems.org/ - 4.1.0 (2026-11-16) and 4.0.24 dates - 2026-11-19
 - https://www.ruby-lang.org/en/news/2025/12/25/ruby-4-0-0-released/ - Ruby 4.0 features/removals - 2026-10-09
 - https://docs.ruby-lang.org/en/master/NEWS/NEWS-4_0_0_md.html - 4.0 bundled gems, Ractor::Port, error highlight - 2026-10-09
 - https://www.ruby-lang.org/en/news/2024/12/25/ruby-3-4-0-released/ - Ruby 3.4 features - 2026-10-09
-- https://rubyonrails.org/maintenance - 8.0/8.1 support dates - 2026-10-09
+- https://rubyonrails.org/maintenance - 8.0/8.1 support dates - 2026-11-19
 - https://guides.rubyonrails.org/maintenance_policy.html - support policy, release cadence - 2026-10-09
 - https://rubyonrails.org/blog/ - 8.1.4 and final 7.2.4 (2026-09-24), Rails World 2026 - 2026-10-09
 - https://rubyonrails.org/2026/10/2/this-week-in-rails - main requires Ruby 3.3.5 - 2026-10-09
@@ -172,7 +187,7 @@ end
 - https://guides.rubyonrails.org/8_1_release_notes.html - Rails 8.1 features/deprecations - 2026-10-09
 - https://guides.rubyonrails.org/8_0_release_notes.html - Rails 8.0 features - 2026-10-09
 - https://github.com/rails/rails/blob/8-1-stable/railties/CHANGELOG.md - no system tests by default, bin/ci, bundler-audit, YJIT dev/test - 2026-10-09
-- https://rubygems.org/api/v1/versions/<gem>.json - all gem versions, dates and Ruby requirements in this file - 2026-10-09
+- https://rubygems.org/api/v1/gems/<gem>.json - gem versions and dates in this file (rechecked: rails, bundler, puma, kamal, solid_*, propshaft, thruster, sidekiq, rubocop, brakeman, standard, hanami, minitest, rspec-rails, devise, rack, sinatra, roda, rbs) - 2026-11-19
 - https://blog.rubygems.org/2025/12/03/4.0.0-released.html - RubyGems/Bundler 4 changes - 2026-10-09
 - https://blog.rubygems.org/2026/06/03/cooldown-let-new-gems-be-vetted.html - Bundler cooldown - 2026-10-09
 - https://github.com/minitest/minitest/blob/master/History.rdoc - Minitest 6 changes - 2026-10-09

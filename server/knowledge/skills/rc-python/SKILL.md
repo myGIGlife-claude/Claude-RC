@@ -1,8 +1,8 @@
 ---
 name: rc-python
-description: Current Python practice (Oct 2026) for writing, reviewing or upgrading Python code - versions 3.11-3.15, typing, uv/pyproject.toml packaging, ruff, pytest, FastAPI/Django/Flask/SQLAlchemy, pandas/Polars/NumPy, asyncio, free-threading, security. Use for any .py, pyproject.toml, requirements*.txt, uv.lock, pylock.toml, setup.py, Dockerfile with Python, or "python"/"pip"/"venv" task.
+description: Current Python practice (Nov 2026) for writing, reviewing or upgrading Python code - versions 3.11-3.15, typing, uv/pyproject.toml packaging, ruff, pytest, FastAPI/Django/Flask/SQLAlchemy, pandas/Polars/NumPy, asyncio, free-threading, security. Use for any .py, pyproject.toml, requirements*.txt, uv.lock, pylock.toml, setup.py, Dockerfile with Python, or "python"/"pip"/"venv" task.
 ---
-# Python  (as of 2026-10)
+# Python  (as of 2026-11)
 
 > Facts here are dated (see Sources). Versions, deadlines and policies move: confirm the primary source before pinning a version or promising a date. Anything marked (unverified) is a lead, not a fact.
 
@@ -10,8 +10,10 @@ Detailed version tables and framework release notes: `references/versions.md`.
 
 ## Currency check
 
-- **CPython** (devguide, checked 2026-10-09): 3.15.0 released 2026-10-09 and 3.14 (3.14.8) are bugfix;
-  3.13, 3.12, 3.11 are security-only; **3.10 went EOL 2026-10-01**; 3.9 EOL 2025-10-31.
+- **CPython** (devguide + downloads page, checked 2026-11-19): 3.15 (first release 2026-10-09; latest 3.15.2) and
+  3.14 (3.14.10) are bugfix; 3.13 (3.13.18), 3.12 (3.12.16), 3.11 (3.11.18) are security-only (downloads page dates
+  these patches 2026-10-25); **3.10 went EOL 2026-10-01** (final 3.10.22); 3.9 EOL 2025-10-31. 3.16 is due 2027-10-06.
+  The 3.15 changelog lists many security fixes (tarfile/zipfile/http.cookiejar/expat); patch promptly.
   EOLs: 3.11 2027-10, 3.12 2028-10, 3.13 2029-10, 3.14 2030-10, 3.15 2031-10.
 - **New projects:** target 3.14 (or 3.15 once your deps ship wheels). Libraries: `requires-python = ">=3.11"` at most
   one year from now; many core libs already need 3.11+ (pandas 3, SQLAlchemy 2.1) or 3.12+ (NumPy 2.5, Django 6.x).
@@ -26,11 +28,15 @@ Detailed version tables and framework release notes: `references/versions.md`.
   (PEP 803), `TaskGroup.cancel()`, TypedDict extra items (PEP 728), `TypeForm` (PEP 747).
 - **3.13 (2024-10-07)** shipped: new REPL, experimental free-threading (`python3.13t`), TypeVar defaults, `ReadOnly`,
   `TypeIs`, `warnings.deprecated`; removed the 19 PEP 594 "dead batteries" (cgi, crypt, telnetlib, imghdr, pipes...) and lib2to3.
-- **Tooling now:** uv 0.13.0, ruff 0.17.0, ty 0.0.85 (beta), pyrefly 1.3.2, mypy 2.4.0, pip 26.2.1, pytest 9.1.1.
-  Astral (uv/ruff/ty) acquisition by OpenAI announced 2026-03-19; tools remain open source.
-- **Frameworks now:** FastAPI 0.143.0, Pydantic 2.14.0, Django 6.1.2 (5.2 LTS to 2028-04; 6.2 LTS 2027-04, then
-  "Django 2028" calendar versions), Flask 3.1.3, Litestar 2.24.0, SQLAlchemy 2.1.4, Alembic 1.20.0,
-  pandas 3.0.6, Polars 2.0.0, NumPy 2.5.3, PyTorch 2.14.1.
+- **Tooling now (PyPI/GitHub, 2026-11-19):** uv 0.13.9, ruff 0.17.6, ty 0.0.107 (beta), pyrefly 1.5.0, mypy 2.4.1,
+  pip 26.3, pytest 9.2.0 (2026-10-27). Astral (uv/ruff/ty) acquisition by OpenAI announced 2026-03-19; tools remain open source.
+  uv notes: 0.13.4 security release (removed an affected root cert); 0.13.5 stopped publishing Docker images based on Python 3.9/3.10;
+  `uv audit` is still preview.
+- **Frameworks now:** FastAPI 0.165.0 (needs Python >=3.11 per PyPI; ships near-daily with frequent "breaking" entries
+  0.143-0.162: pin and read release notes before bumping), Pydantic 2.14.x (changelog shows 2.14.4 on 2026-11-19, unverified
+  against `info.version`), Django 6.1.3 / 6.0.10 / 5.2.19 (5.2 LTS extended support to 2028-04; 6.2 LTS April 2027; then
+  "Django 2028" calendar versions), Flask 3.1.3, SQLAlchemy 2.1.9, pandas 3.1.1, NumPy 2.5.5, Polars 2.1.0,
+  PyTorch 2.15.0 (all from PyPI JSON; Polars/PyTorch need Python >=3.11). Litestar 2.24.0 and Alembic 1.20.0 not re-checked (unverified).
 
 ## What changed / stop doing
 
@@ -45,6 +51,7 @@ Detailed version tables and framework release notes: `references/versions.md`.
 | `pipx install` for tools | `uvx tool` / `uv tool install` (pipx still fine) | |
 | black + isort + flake8 (+ pyupgrade, autoflake) | `ruff check --fix` + `ruff format` | |
 | nose, `unittest`-only suites, `setup.py test` | pytest 9 (`[tool.pytest]` native TOML) | pytest 9.0 2025-11 |
+| `parametrize(argvalues, ids, ...)` positional extras, `yield_fixture` | `indirect=`, `ids=`, `scope=` keyword-only (9.2); `yield_fixture` removal planned pytest 10/11 | pytest 9.2 2026-10-27 |
 | `typing.List/Dict/Tuple/Set/Optional/Union` | `list[int]`, `dict[str, X]`, `X \| None` | 3.9/3.10 |
 | `typing.Callable/Iterable/Mapping/Sequence` | import from `collections.abc` | 3.9 |
 | `TypeVar("T")` + `Generic[T]`, `TypeAlias` | `def f[T](x: T) -> T`, `class Box[T]:`, `type Alias = ...` (PEP 695) | 3.12 |
@@ -95,7 +102,7 @@ myproj = "myproj.cli:app"
 dev = ["pytest>=9", "ruff>=0.17", "mypy>=2"]
 
 [build-system]
-requires = ["uv_build>=0.13,<0.14"]   # or hatchling / setuptools>=77
+requires = ["uv_build>=0.13,<0.14"]   # uv 0.13.9 is current   # or hatchling / setuptools>=77
 build-backend = "uv_build"
 ```
 - Commands: `uv init --package`, `uv add httpx`, `uv add --dev pytest`, `uv sync --locked` (CI),
@@ -186,11 +193,11 @@ asyncio.run(main(urls))
 - **FastAPI**: declare the return type (it becomes the response model and is serialized by Pydantic in Rust);
   `Annotated[..., Depends(...)]` dependencies; `lifespan=` context manager, not `@app.on_event`;
   `pip install "fastapi[standard]"`, `fastapi dev` / `fastapi run`. JSON bodies need a JSON `Content-Type`
-  (strict by default since 0.132.0). Python 3.10+, Pydantic v2 only.
+  (strict by default since 0.132.0). Pydantic v2 only; 0.165.0 lists Python >=3.11 (version that dropped 3.10: unverified).
 - **Pydantic v2**: `model_config = ConfigDict(extra="forbid", frozen=True)`, `model_validate`, `model_dump(mode="json")`,
   `TypeAdapter` for non-model types. Settings: `pydantic-settings` `BaseSettings` with
   `SettingsConfigDict(env_prefix="APP_", env_file=".env")`; use `SecretStr` for secrets.
-- **Django**: new apps on 6.1 (or 5.2 LTS if you need support past 2027-12). 6.0 added `django.tasks`
+- **Django**: new apps on 6.1 (security support to 2027-12; 6.0 ends 2027-04) or 5.2 LTS (to 2028-04); 6.2 LTS arrives 2027-04. 6.0 added `django.tasks`
   (needs a backend/worker), built-in CSP (`SECURE_CSP`), template partials, `BigAutoField` default.
   6.1 adds fetch modes (`FETCH_PEERS` kills N+1), DB-level `on_delete=models.DB_CASCADE`, `MAILERS`.
   Use async views/ORM (`aget`, `acount`, async iteration) only with ASGI.
@@ -310,8 +317,14 @@ asyncio.run(main(urls))
 
 ## Sources
 
-- https://devguide.python.org/versions/ - branch status and EOL dates (accessed 2026-10-09)
-- https://www.python.org/downloads/ - latest patch releases (2026-10-09)
+Accessed 2026-11-19 (re-verified this pass): devguide versions page (branch status/EOL), python.org/downloads (3.15.2, 3.14.10, 3.13.18,
+3.12.16, 3.11.18), docs.python.org/3.15 changelog (security entries), djangoproject.com/download (support table, 6.2 LTS/2028),
+github.com/astral-sh/uv/releases (0.13.2-0.13.9), github.com/astral-sh/ruff/releases (0.17.0-0.17.6), docs.pytest.org changelog (9.1, 9.2),
+fastapi.tiangolo.com/release-notes (version list only), pypi.org/pypi/<name>/json for uv, ruff, fastapi, django, pydantic, pytest, mypy, ty, pip,
+sqlalchemy, pandas, numpy, polars, torch, flask, pyrefly. Older entries below keep their original access date.
+
+- https://devguide.python.org/versions/ - branch status and EOL dates (accessed 2026-11-19)
+- https://www.python.org/downloads/ - latest patch releases (2026-11-19)
 - https://docs.python.org/3/whatsnew/3.13.html - 3.13 features, PEP 594 removals (2026-10-09)
 - https://docs.python.org/3/whatsnew/3.14.html and cpython `Doc/whatsnew/3.14.rst` - 3.14 features, PEP 779 phase II, JIT, removals, `__future__` deprecation (2026-10-09)
 - https://docs.python.org/3.15/whatsnew/3.15.html and cpython `Doc/whatsnew/3.15.rst` - 3.15 features, removals, re.prefixmatch, profile deprecation (2026-10-09)

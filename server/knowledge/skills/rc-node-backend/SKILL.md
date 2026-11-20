@@ -1,36 +1,38 @@
 ---
 name: rc-node-backend
-description: Current (Oct 2026) Node.js backend practice - release lines and EOL, built-ins that replace old packages (node:test, fetch, --env-file, --watch, TypeScript type stripping, node:sqlite, permission model, require(esm)), Express 5 / Fastify 5 / Hono / NestJS 12, Bun and Deno, shutdown, logging, DB access, queues, OpenTelemetry, npm supply-chain security. Use when writing or reviewing server-side JavaScript/TypeScript, package.json, Dockerfiles for Node, or choosing Node libraries.
+description: Current (Nov 2026) Node.js backend practice - release lines and EOL, built-ins that replace old packages (node:test, fetch, --env-file, --watch, TypeScript type stripping, node:sqlite, permission model, require(esm)), Express 5 / Fastify 5 / Hono / NestJS 12, Bun and Deno, shutdown, logging, DB access, queues, OpenTelemetry, npm supply-chain security. Use when writing or reviewing server-side JavaScript/TypeScript, package.json, Dockerfiles for Node, or choosing Node libraries.
 ---
-# Node.js backend (as of 2026-10)
+# Node.js backend (as of 2026-11)
 
 > Facts here are dated (see Sources). Versions, deadlines and policies move: confirm the primary source before pinning a version or promising a date. Anything marked (unverified) is a lead, not a fact.
 
 ## Currency check
 
-Release lines (nodejs.org schedule.json and previous-releases, read 2026-10-09):
+Release lines (nodejs.org schedule.json and previous-releases, read 2026-11-19):
 
-| Line | Status on 2026-10-09 | Next step | End of life |
+| Line | Status on 2026-11-19 | Next step | End of life |
 |---|---|---|---|
-| **26** | Current (26.11.x) | Active LTS on 2026-10-28 | 2029-04-30 |
-| **24** "Krypton" | Active LTS (24.21.x) | Maintenance on 2026-10-20 | 2028-04-30 |
-| **22** "Jod" | Maintenance LTS (22.23.x) | security fixes only | 2027-04-30 |
+| 27 | Alpha since 2026-10-29 (27.0.0-alpha.0.1.1, 2026-11-16) | Current 2027-04-22, LTS 2027-10-20 | 2030-04-30 |
+| **26** "Lithium" | **Active LTS** (26.13.1) since 2026-10-28 | Maintenance 2027-10-20 | 2029-04-30 |
+| **24** "Krypton" | **Maintenance LTS** (24.22.3) since 2026-10-20 | security fixes only | 2028-04-30 |
+| **22** "Jod" | Maintenance LTS (22.23.5) | security fixes only | 2027-04-30 |
 | 20 "Iron" | **EOL** since 2026-04-30 | - | gone |
 | 25, 23, 21, 19, 18 and older | **EOL** | - | gone |
 
-- **Default for new services: Node 24 LTS now; move to 26 after 2026-10-28.** Node 22 only for existing apps, plan the jump before April 2027.
+- **Default for new services: Node 26 LTS (Active LTS since 2026-10-28); Node 24 is fine for existing apps.** Node 22 only for existing apps, plan the jump before April 2027.
+- **Patch now (2026-11-11 security release, 22.23.5 / 24.22.3 / 26.13.1):** 16 CVEs (7 High, 6 Medium, 3 Low), mostly HTTP/2 and TLS (HTTP/2 server crash, use-after-free and memory/fd leaks, a TLS write-path use-after-free disclosing heap memory, TLS 1.2 renegotiation changing the SNI and bypassing per-host client-cert policy), plus Low permission-model fixes. Release of 2026-10-21 (22.23.4 / 24.22.1 / 26.12.1): High CVEs in `dns.resolve*` NUL truncation, `tls.checkServerIdentity()` IP-literal handling, and a Brotli decoder out-of-bounds write (possible RCE on malformed input). EOL lines are affected too: run at least these patch versions.
 - **Schedule changed (announced 2026-03):** from Node 27 on, one major per year (April), every major becomes LTS, a 6-month Alpha channel (`27.0.0-alpha.N`) runs from October, and the major number matches the year (27 in 2027). No more "odd = short-lived". Node 26 is the last line on the old model.
 - Shipped in the last ~12 months:
   - 26.0.0 (2026-05-05): `Temporal` on by default, V8 14.6 (`Map.prototype.getOrInsert`, `Iterator.concat`), undici 8, `--experimental-transform-types` removed, `module.register()` runtime-deprecated, `http.Server.prototype.writeHeader()` and the `_stream_*` internal modules removed.
   - TypeScript type stripping stable in 25.2.0 / 24.12.0 (default-on since 23.6.0 / 22.18.0).
   - `require(esm)` stable in 25.4.0 (unflagged since 22.12.0 / 20.19.0).
   - `--env-file` / `--env-file-if-exists` no longer experimental in 24.10.0 / 22.21.0.
-  - `node:sqlite` release candidate (1.2) since 25.7.0; classes renamed `DatabaseSync` -> `Database`, `StatementSync` -> `Statement` in **26.11.0 only** (old names stay as deprecated aliases; on 22/24 use the `*Sync` names).
+  - `node:sqlite` is a release candidate (stability 1.2; the exact release that reached RC, 25.7.0 / 24.15.0, is unverified); in 26.x the classes are named `Database` / `Statement` and `DatabaseSync` is a deprecated alias (DEP0210; the first version with the rename, 26.11.0, is unverified; on 22/24 use the `*Sync` names).
   - `--build-sea` (25.5.0) builds single executable apps without postject; ESM main via `"mainFormat": "module"`.
   - `--allow-net` added to the permission model (25.0.0, active development).
   - Config file `--experimental-config-file` release candidate (26.7.0); `node --run` with no name lists scripts (26.9.0).
-  - npm **12.0.0 (2026-07-08)**: dependency install scripts blocked unless allowed, git/URL deps off by default. See Security.
-- Library versions on npm (2026-10-09): express 5.3.0 (4.22.x still maintained), fastify 5.12 (v6 in alpha), hono 4.13 (v5 rc), @nestjs/core 12.1, elysia 1.4, pino 10.4, @prisma/client 7.10 (**prisma 8 is RC, and the `latest` dist-tag points at 8.0.0-rc.22: pin `^7`**), drizzle-orm 0.45 (1.0 in RC), kysely 0.29, pg 8.23, bullmq 6.3, zod 4.6, vitest 5.0, undici 8.11, OpenTelemetry API 1.9 / SDK 2.x (`sdk-trace-base` 2.12; `@opentelemetry/sdk-node` is still 0.223), TypeScript 7.0 (native compiler). Bun 1.4.2, Deno 2.9.x.
+  - npm **12.0.0 (2026-07-08)**: dependency install scripts blocked unless allowed, git/URL deps off by default; latest 12.2.3 (2026-11-11; 12.1 added granular tokens and `npm stage`, 12.2 OIDC for `npm dist-tag`). See Security.
+- Library versions on npm (2026-11-19): express 5.3.0 (4.22.3 still maintained; 5.3.0 bumps `qs`/`proxy-addr` for CVEs and makes an invalid body-parser `limit` throw instead of disabling the limit), fastify 5.12.8 (security releases 5.12.6 on 10-13 and 5.12.8 on 11-02; v6 in alpha), hono 4.13.19 (security fixes in 4.13.16 and 4.13.18; v5 at rc.1, not stable), @nestjs/core 12.5.1, elysia 1.4.32, pino 10.4, prisma / @prisma/client (**stable 7.10.1; the `latest` dist-tag points at 8.0.0-rc.34, still an RC: pin `^7`**), drizzle-orm 0.45.4 (1.0 in RC), kysely 0.29.9, pg 8.23.1, bullmq 6.7.8, zod 4.6.7, vitest 5.1.1, undici 8.12.4, OpenTelemetry API 1.10 / `sdk-trace-base` 2.12 / `@opentelemetry/sdk-node` 0.301.2 (the old 0.223 line is now tagged `latest-2`), TypeScript 7.0.2 (native compiler), ESLint 10.15, npm 12.2.3 (2026-11-11), pnpm 12.21. Bun 1.4.5 (2026-11-19), Deno 2.9.8 (2026-10-21).
 
 ## What changed / stop doing
 
@@ -136,7 +138,7 @@ Validate every request body/query/params at the edge (Zod 4, Valibot, ArkType, T
 **Database access:**
 - `pg` 8 (Pool, parameterized `$1`) or `postgres` (porsager) for raw SQL; Kysely for typed SQL builder; Drizzle 0.45 for schema-in-TS + migrations (1.0 is RC: pin); Prisma 7 for schema-first ORM (new `prisma-client` generator, driver adapters, `prisma.config.ts`).
 - Always: one pool per process, sized `max` = DB connections / replicas; statement timeout; transactions passed explicitly; migrations run as a separate deploy step, never at app boot in N replicas.
-- `node:sqlite` for embedded/local data: `const db = new DatabaseSync('app.db')` on 22/24 (`Database` on 26.11+); use `db.prepare(...).run(...)` or `createTagStore()` tagged templates, never string concatenation. It is synchronous: keep queries small or run in a worker.
+- `node:sqlite` for embedded/local data: `const db = new DatabaseSync('app.db')` on 22/24 (`Database` on 26.x); use `db.prepare(...).run(...)` or `createTagStore()` tagged templates, never string concatenation. It is synchronous: keep queries small or run in a worker.
 
 **Queues:** BullMQ 6 on Redis/Valkey (`maxRetriesPerRequest: null` on the worker connection, idempotent jobs, `removeOnComplete`, explicit `attempts` + backoff, `await worker.close()` on SIGTERM). For Postgres-only stacks, pg-boss avoids a Redis dependency.
 
@@ -147,7 +149,7 @@ Validate every request body/query/params at the edge (Zod 4, Valibot, ArkType, T
 ## Security
 
 - **Supply chain is the #1 Node risk in 2026.** Worm campaigns hit axios (2026-03-31, 1.14.1 / 0.30.4 shipped a RAT via a postinstall dep), 42 `@tanstack/*` packages (2026-05-11, **with valid provenance** from a hijacked CI), and hundreds of packages in later worm waves. Defenses:
-  - npm 12: keep dependency install scripts blocked; approve the few that need them (`allowScripts` in package.json, `npm install-scripts approve`). On older npm: `ignore-scripts=true` in `.npmrc` + explicit `npm rebuild <pkg>`. pnpm 10.0+ also blocks dependency build scripts by default; allow-list them with `allowBuilds` in `pnpm-workspace.yaml` (pnpm 11 replaced `onlyBuiltDependencies`).
+  - npm 12: keep dependency install scripts blocked; approve the few that need them (`allowScripts` in package.json, `npm install-scripts approve`). On older npm: `ignore-scripts=true` in `.npmrc` + explicit `npm rebuild <pkg>`. pnpm 10.0+ also blocks dependency build scripts by default; allow-list them with `allowBuilds` in `pnpm-workspace.yaml` (pnpm 11 replaced `onlyBuiltDependencies`). pnpm is on 12.x now; its 2026-11 releases re-check `minimumReleaseAge`/`trustPolicy` after a registry change and make `pnpm dlx` ignore workspace overrides.
   - Delay new versions: `min-release-age=7` in `.npmrc` (npm) or `minimumReleaseAge` (pnpm, minutes; default 1440 since pnpm 11). Most malicious versions are pulled within hours.
   - Commit the lockfile; CI uses `npm ci`; keep `allow-git=none` / `allow-remote=none` (npm 12 defaults).
   - Run `npm audit signatures` in CI (verifies registry signatures and provenance attestations). Provenance proves which pipeline built it, not that the pipeline was honest.
@@ -185,7 +187,7 @@ Validate every request body/query/params at the edge (Zod 4, Valibot, ArkType, T
 
 ## Common mistakes in AI-written code
 
-- Targeting Node 18/20 or writing `node:16-alpine` in Dockerfiles. Use `node:24-slim` (or 26 after 2026-10-28) pinned by digest.
+- Targeting Node 18/20 or writing `node:16-alpine` in Dockerfiles. Use `node:26-slim` (or `node:24-slim`) pinned by digest.
 - `require('node-fetch')`, `import axios` for one GET, `request(...)`: use `fetch`.
 - `import 'dotenv/config'` in new code; `nodemon`/`ts-node` in scripts.
 - `import x from './x'` without extension in ESM/TS-stripping code (fails); `tsconfig` `paths` aliases at runtime (ignored).
@@ -197,13 +199,13 @@ Validate every request body/query/params at the edge (Zod 4, Valibot, ArkType, T
 - `JSON.parse(req.body)` without size limits; `Object.assign({}, userInput)` deep merges; `new RegExp(userInput)`.
 - `exec(\`git clone ${url}\`)`: shell injection.
 - `fetch` without timeout (default is no overall timeout; pass `signal: AbortSignal.timeout(ms)`).
-- Prisma 7: still using `prisma-client-js`, no `output`, no driver adapter, `url` in `schema.prisma` (moved to `prisma.config.ts`), expecting `.env` to auto-load (it no longer does: use `node --env-file` or `process.loadEnvFile()`), client middleware (removed: use extensions). And `npm i prisma@latest` installs the 8.0 RC today.
+- Prisma 7: still using `prisma-client-js`, no `output`, no driver adapter, `url` in `schema.prisma` (moved to `prisma.config.ts`), expecting `.env` to auto-load (it no longer does: use `node --env-file` or `process.loadEnvFile()`), client middleware (removed: use extensions). And `npm i prisma@latest` installs the 8.0 RC (still RC on 2026-11-19).
 - Using `module.register()` / `--loader` for hooks (deprecated) instead of `module.registerHooks()`.
 - `npm install --unsafe-perm`, `--ignore-scripts=false` advice, or `--dangerously-allow-all-scripts` to "fix" npm 12 install warnings.
 
 ## Before you ship
 
-- [ ] Node 24 LTS (or 26 after 2026-10-28) in Docker, CI and `engines`; no EOL line anywhere.
+- [ ] Node 26 or 24 LTS at the 2026-11-11 security patch level or newer in Docker, CI and `engines`; no EOL line anywhere.
 - [ ] ESM, extensions on imports, `tsc --noEmit` clean, no non-erasable TS when run with type stripping.
 - [ ] Env validated at boot; no secrets in image/logs; pino redaction set.
 - [ ] Input validation on every route; body size limits; helmet + rate limiting; CORS allowlist.
@@ -215,26 +217,31 @@ Validate every request body/query/params at the edge (Zod 4, Valibot, ArkType, T
 
 ## Sources
 
-All accessed 2026-10-09.
-- https://nodejs.org/en/about/previous-releases - release lines, latest versions, new annual schedule summary
+Accessed 2026-11-19 where marked; unmarked older lines were last checked 2026-10-09 and not re-read (treat as less fresh).
+- https://nodejs.org/en/about/previous-releases - (2026-11-19) release lines, latest versions (26.13.1 / 24.22.3 / 22.23.5), 26 = Lithium LTS, 27 alpha, annual schedule
+- https://nodejs.org/en/blog/vulnerability/november-2026-security-releases and https://nodejs.org/en/blog/vulnerability/october-2026-security-releases - (2026-11-19) CVE lists and fixed versions (Nov: 16 CVEs, 7/6/3 High/Medium/Low, dated 2026-11-11; Oct: 2026-10-21)
+- https://nodejs.org/dist/index.json - (2026-11-19) latest per line: 26.13.1, 24.22.3, 22.23.5, 25.9.0 (last), 20.20.2, 27.0.0-alpha.0.1.1 (2026-11-16)
+- https://github.com/nodejs/corepack#readme - Corepack distributed with Node 14.19.0 up to but not including 25.0.0 (2026-11-19)
+- https://nodejs.org/en/blog/release/v26.13.1 - (2026-11-19) security release of 2026-11-11
 - https://raw.githubusercontent.com/nodejs/Release/main/schedule.json - LTS/maintenance/EOL dates for 20-27
 - https://nodejs.org/en/blog/announcements/evolving-the-nodejs-release-schedule - annual majors from 27, Alpha channel, all-LTS
 - https://nodejs.org/en/blog/release/v26.0.0 - Temporal default, V8 14.6, undici 8, removals/deprecations
 - https://nodejs.org/api/typescript.html - type stripping stable 25.2/24.12, transform-types removed 26.0, tsconfig, limits
 - https://github.com/nodejs/node/tree/v26.x/doc/api (modules.md, sqlite.md, deprecations.md, cli.md, globals.md, test.md, permissions.md, single-executable-applications.md, async_context.md, module.md) - require(esm) history, node:sqlite RC + DEP0210/0211 rename in 26.11, --env-file stable 24.10/22.21, --watch stable 22.0, --allow-net, --build-sea, config file RC, --max-old-space-size-percentage, WebSocket stable 22.4, EventSource experimental, test runner features, AsyncContextFrame default 24.0, registerHooks RC; corepack.md absent on v26.x, present on v24.x
-- https://registry.npmjs.org/<package> - every library version and dist-tag listed above (incl. prisma `latest` = 8.0.0-rc.22, drizzle 1.0 RC)
-- https://raw.githubusercontent.com/npm/cli/latest/CHANGELOG.md - npm 12.0.0 (2026-07-08) breaking changes: install scripts blocked, allow-git/allow-remote none, Node ^22.22.2/^24.15/>=26
+- https://registry.npmjs.org/-/package/<package>/dist-tags - (2026-11-19) every library version and dist-tag listed above (prisma `latest` = 8.0.0-rc.34, drizzle 1.0 RC, hono v5 rc, fastify v6 alpha)
+- https://raw.githubusercontent.com/npm/cli/latest/CHANGELOG.md - (2026-11-19) npm 12.0.0 (2026-07-08) breaking changes and 12.2.3 (2026-11-11) as latest
+- https://github.com/honojs/hono/releases, https://github.com/fastify/fastify/releases, https://github.com/pnpm/pnpm/releases, https://github.com/prisma/prisma/releases, https://github.com/oven-sh/bun/releases - (2026-11-19) Hono/Fastify security releases, pnpm 12 changes, Prisma 7.10.1 stable vs 8 RC, Bun 1.4.5
 - https://github.com/npm/cli (workspaces/config definitions) - `min-release-age`, `allowScripts`, `--dangerously-allow-all-scripts`
 - https://github.blog/changelog/2025-09-29-strengthening-npm-security-important-changes-to-authentication-and-token-management/ and https://github.com/orgs/community/discussions/179562 - classic tokens revoked 2025-12-09, trusted publishing, 90-day granular tokens
 - https://github.com/advisories/GHSA-fw8c-xr5c-95f9 (via advisories.gitlab.com mirror) - axios 1.14.1/0.30.4 malicious (2026-03-31)
 - https://tanstack.com/blog/npm-supply-chain-compromise-postmortem - TanStack compromise 2026-05-11, valid provenance on malicious versions
 - https://expressjs.com/en/guide/migrating-5.html - Express 5 breaking changes, codemod
 - https://expressjs.com/en/support/ - Express 4 and 5 both supported
-- https://github.com/expressjs/express/releases - Express 5.3.0 (2026-10-09), 5.2.1 revert note
+- https://github.com/expressjs/express/releases - (2026-11-19) Express 5.3.0 (2026-10-09) CVE dependency bumps, body-parser limit validation
 - https://fastify.dev/docs/latest/Reference/LTS/ - Fastify 5 supports Node 20/22
-- https://docs.nestjs.com/migration-guide - NestJS 12: ESM packages, Node requirements, Vitest, Rspack, Standard Schema
+- https://docs.nestjs.com/migration-guide - (2026-11-19) NestJS 12: ESM packages, Node requirements, Vitest, Rspack, Standard Schema
 - https://www.prisma.io/docs/orm/more/upgrade-guides/upgrading-versions/upgrading-to-prisma-7 - Prisma 7 generator, adapters, prisma.config.ts, no env auto-load
 - https://pnpm.io/blog/releases/11.0 - pnpm 11 defaults (minimumReleaseAge 1440, allowBuilds)
 - https://bun.com/blog - Bun 1.4 (2026-08-20), 1.4.2 (2026-09-05), acquisition by Anthropic (2025-12-02)
-- https://github.com/denoland/deno/releases - Deno 2.9.7 (2026-09-17)
+- https://github.com/denoland/deno/releases - (2026-11-19) Deno 2.9.8 (2026-10-21)
 - https://eslint.org/blog/2026/02/eslint-v10.0.0-released/ - eslintrc removed in ESLint 10

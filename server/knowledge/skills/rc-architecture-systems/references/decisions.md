@@ -1,4 +1,4 @@
-# Architecture decision tables (as of 2026-10)
+# Architecture decision tables (as of 2026-11)
 
 Companion to `../SKILL.md`. Versions are in the SKILL.md Currency check.
 

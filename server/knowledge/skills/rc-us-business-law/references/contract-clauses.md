@@ -1,4 +1,4 @@
-# Contract law points and clause checklists (as of 2026-10)
+# Contract law points and clause checklists (as of 2026-11)
 
 General US contract principles; the governing state's statutes and cases decide. Statute cites checked 2026-10-10 unless marked.
 No case law is stated here as authority: research the governing state's cases fresh for each matter.
@@ -45,7 +45,7 @@ No case law is stated here as authority: research the governing state's cases fr
   auto-renewal laws for subscriptions (FTC click-to-cancel amendments vacated by the 8th Circuit 2025-07-08, *Custom Communications v.
   FTC*, No. 24-3137, law-firm reports; FTC recodified the pre-2024 rule 2026-02-12), Magnuson-Moss for consumer product warranties.
 - **Non-competes**: no federal ban (FTC rule set aside; removal notice 2026-02-12, 91 FR 6507). FTC still pursues overbroad ones under §5
-  (Gateway Services: consent order finalized 2025-11-26). **NC**: written and signed by the restrained party (G.S. 75-4); courts require
+  (Gateway Services: final order approved 2025-11-25; Rollins: final order approved 2026-06-22, ftc.gov 2026-11-19). **NC**: written and signed by the restrained party (G.S. 75-4); courts require
   reasonable time/territory, valuable consideration (new employment or new consideration for existing employees), legitimate business
   interest; strict blue-pencil (courts strike severable terms, don't rewrite; case law not retrieved this session). H 973 (Uniform
   Restrictive Employment Agreement Act) has sat in House Rules since 2025-04-14 (ncleg.gov, 2026-10-10). **Ohio**: common-law
