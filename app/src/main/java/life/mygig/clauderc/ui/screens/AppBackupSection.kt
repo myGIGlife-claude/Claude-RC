@@ -25,7 +25,8 @@ import life.mygig.clauderc.ui.LocalAppLock
 import life.mygig.clauderc.ui.MainViewModel
 
 @Composable
-fun AppBackupSection(vm: MainViewModel) {
+/** [restoreOnly]: the first-run setup screen, where only the two restore choices make sense. */
+fun AppBackupSection(vm: MainViewModel, restoreOnly: Boolean = false) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val appLock = LocalAppLock.current
@@ -90,6 +91,15 @@ fun AppBackupSection(vm: MainViewModel) {
     }
     CardBox {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          if (restoreOnly) {
+            Text("Restore from backup", style = MaterialTheme.typography.titleSmall)
+            Text("New phone? Bring back your servers, settings and phone key from an encrypted app backup. The passphrase never leaves the phone.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            FilledTonalButton(enabled = !driveBusy, modifier = Modifier.fillMaxWidth(), onClick = { driveRun {
+                val list = drive.list(driveSignIn())
+                if (list.isEmpty()) driveNote = "No backups found in Google Drive." else { driveFiles = list; dialog = "drive_pick" }
+            } }) { Text("Restore from Google Drive") }
+            FilledTonalButton(modifier = Modifier.fillMaxWidth(), onClick = { importPicker.launch(arrayOf("application/octet-stream", "application/*", "*/*")) }) { Text("Restore from a file") }
+          } else {
             Text("Back up this app", style = MaterialTheme.typography.titleMedium)
             Text("Encrypted copy of your servers, app settings and phone key. Chat PIN is excluded.", style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -109,6 +119,7 @@ fun AppBackupSection(vm: MainViewModel) {
                 scope.launch { if (t != null) withContext(Dispatchers.IO) { drive.revoke(t) } }
                 driveNote = "Signed out of Google."
             }) { Text("Sign out of Google") }
+          }
             if (driveBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             driveNote?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             backupError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -195,7 +206,7 @@ fun AppBackupSection(vm: MainViewModel) {
                     try { require(seed.size == 32) { "The backup's key is damaged." }; vm.keys.importSeed(seed) }
                     finally { seed.fill(0) }
                     vm.store.restoreBackup(payload.servers, payload.activeId, payload.appLock, payload.notify, runCatching { ThemeMode.valueOf(payload.theme) }.getOrDefault(ThemeMode.SYSTEM))
-                }.onFailure { backupError = it.message ?: "Unable to restore backup." }
+                }.onSuccess { vm.afterRestore() }.onFailure { backupError = it.message ?: "Unable to restore backup." }
             }
         }) { Text("Replace") } },
         dismissButton = { TextButton(onClick = { importPayload = null; dialog = "" }) { Text("Cancel") } },

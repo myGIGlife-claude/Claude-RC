@@ -159,6 +159,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                     ) { Text("Connect with a password") }
                 }
             }
+            AppBackupSection(vm, restoreOnly = true)
             SectionLabel("Or by hand")
             Step(1, "On your Linux server, open a terminal as the user Claude should run as.")
             Step(2, "Run this one command. It installs the cLaudeRC scripts and session auto-restore (asks for sudo once) and lets this phone in.")
