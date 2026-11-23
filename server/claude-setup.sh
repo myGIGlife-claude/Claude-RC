@@ -5200,6 +5200,7 @@ do_chat_file() {
   check_pin "$pin"
   dir="$(session_dir "$sess")"
   [[ -d "$dir" ]] || api_err internal "Couldn't find the session's folder."
+  [[ "$path" == /* ]] || path="$dir/$path"   # Claude sends relative paths: they mean the project folder, not this script's cwd
   real="$(realpath -e -- "$path" 2>/dev/null)" && [[ -f "$real" ]] || api_err invalid_name "That file isn't on the server any more."
   case "$real" in
     "$(realpath "$dir")"/* | "/tmp/claude-$(id -u)/$(claude_proj_slug "$dir")"/*) ok=true ;;
