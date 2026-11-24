@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id), 50 = grok worker kind, 51 = grok account sign-in (device code; worker-login-cancel), 52 = gemini account sign-in, fail-fast quota errors, 53 = starred-chat queue (queue-status/-on/-off/-star/-log, sessions.starred), 54 = worker-rename, 54 = worker-rename
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id), 50 = grok worker kind, 51 = grok account sign-in (device code; worker-login-cancel), 52 = gemini account sign-in, fail-fast quota errors, 53 = starred-chat queue (queue-status/-on/-off/-star/-log, sessions.starred), 54 = worker-rename, 55 = inbox (inbox, inbox-dismiss)
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=54
+SCRIPT_API=55
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 CLAUDERC_API="${CLAUDERC_API:-https://api.github.com}"
@@ -917,14 +917,20 @@ do_repos() {
         })}' <<<"$raw")"
 }
 
+# claude_panes: one line per Claude session, fields joined by @@: name, pane folder, start command, current command,
+# created, attached, session_path. Same detection as claude-autostart: any session whose pane started claude (login
+# and sign-in helpers left out).
+claude_panes() {
+  { tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}@@#{session_created}@@#{session_attached}@@#{session_path}' 2>/dev/null || true; } |
+    awk -F'@@' -v l1="$CLAUDE_LOGIN_SESSION" -v l2="$AWS_LOGIN_SESSION" \
+      '($3 ~ /claude/ || $4 == "claude") && $1 != l1 && $1 != l2 && $1 != "mcp-auth" && $1 !~ /^worker-login-/ && !seen[$1]++'
+}
+
 # The running Claude sessions as a JSON array (what `sessions` and `migrate-plan` report).
 sessions_list_json() {
   local s
-  # Same detection as claude-autostart: any session whose pane started claude.
   # A General chat is a session named chat-<id> started in <chat dir>/<id> (session_path, which doesn't move with cd).
-  s="$({ tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}@@#{session_created}@@#{session_attached}@@#{session_path}' 2>/dev/null || true; } |
-    awk -F'@@' -v l1="$CLAUDE_LOGIN_SESSION" -v l2="$AWS_LOGIN_SESSION" \
-      '($3 ~ /claude/ || $4 == "claude") && $1 != l1 && $1 != l2 && $1 != "mcp-auth" && $1 !~ /^worker-login-/ && !seen[$1]++' |
+  s="$(claude_panes |
     jq -Rc --arg cd "$CHAT_DIR" --arg cr "$(realpath -m -- "$CHAT_DIR")" --arg re "$GENERAL_SESS_RE" 'split("@@")
       | ((.[0] | select(test($re)) | ltrimstr("chat-")) // null) as $id
       | ($id != null and (.[6] == ($cd + "/" + $id) or .[6] == ($cr + "/" + $id))) as $g
@@ -5020,6 +5026,298 @@ queue_tick() {
   printf '%s\n' "$QST" >"$QUEUE_DIR/state.json.new" && chmod 600 "$QUEUE_DIR/state.json.new" && mv "$QUEUE_DIR/state.json.new" "$QUEUE_DIR/state.json"
 }
 
+# ---------------- Inbox: what needs the owner right now (SCRIPT_API 55, docs/ultimate-design.md section 1) ----------------
+# Read-only: panes are only captured (never typed into); the queue state, transcripts and the gh cache are only read.
+# Items carry names, states, tool names, PR numbers/titles and workflow names; never pane text, reply text, the
+# QUESTION line, commands or file paths. State in $INBOX_DIR (700, files 600, written tmp + mv):
+#   gh.json   {ts, repos:{"o/r":{dir, branch, ts, stale, prs:[…], builds:[…]}}, logins:{claude, github, workers:{…}}}
+#   seen      TSV id fp ts: when a prompt / login item was first seen (its `since`)
+#   dismissed TSV id fp ts: hidden while the pair still matches; pruned after 7 days
+INBOX_DIR="$LAUNCHER_CONFIG_DIR/inbox"
+INBOX_TTL=300                                        # the gh cache: 5 minutes
+INBOX_GH_TIMEOUT="${CLAUDERC_INBOX_GH_TIMEOUT:-8}"   # per gh call (the tests make it short)
+INBOX_GH_BUDGET=25                                   # every gh call of one refresh together, in seconds
+INBOX_MAX_REPOS=30
+INBOX_KEEP=604800                                    # dismissals: 7 days
+# unverified: the wording of Claude Code's permission prompts (from current Claude Code, not seen on a real pane here).
+# Check it on a real pane before `act` (P3) relies on it; a miss only drops approve/deny (the item stays, open only).
+PERM_RE='Do you want to (proceed|make this edit|create|run)|Allow .* to'
+INBOX_ID_RE='^[a-z]{2,10}-[0-9a-f]{12}$'
+INBOX_FP_RE='^[0-9a-f]{12}$'
+GITHUB_URL_RE='^(https://([^/@]+@)?|ssh://([^/@]+@)?|[A-Za-z0-9._-]+@)github\.com[:/]'
+
+inbox_init() { mkdir -p "$INBOX_DIR" && chmod 700 "$INBOX_DIR"; }
+inbox_sha() { printf '%s' "$1" | sha1sum | cut -c1-12; }
+
+# inbox_put <file> <content>: atomic, mode 600.
+inbox_put() {
+  local tmp; tmp="$(mktemp "$1.XXXXXX")" || return 1
+  { printf '%s\n' "$2" >"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$1"; } || { rm -f "$tmp"; return 1; }
+}
+
+# inbox_tsv_map <file>: {"<id> <fp>": ts} from an "id fp ts" TSV file ({} when there is none).
+inbox_tsv_map() {
+  [[ -f "$1" ]] || { echo '{}'; return; }   # (jq -Rs on a missing file still prints a value, then fails)
+  jq -Rsc 'split("\n") | map(split("\t") | select(length == 3 and (.[2] | test("^[0-9]+$"))) | {key:(.[0] + " " + .[1]), value:(.[2] | tonumber)}) | from_entries' "$1" 2>/dev/null || echo '{}'
+}
+
+# inbox_cache: the gh cache, {} when there is none or it is broken.
+inbox_cache() { jq -c 'if type == "object" then . else {} end' "$INBOX_DIR/gh.json" 2>/dev/null || echo '{}'; }
+inbox_fresh() {
+  local ts; ts="$(jq -r '.ts // 0 | numbers | floor' <<<"$1" 2>/dev/null)"
+  [[ "$ts" =~ ^[0-9]+$ ]] && ((ts > 0 && ts <= INOW && INOW - ts < INBOX_TTL))   # stamped in the future = the clock moved: refresh
+}
+
+# inbox_prompt_lines <session>: the pane's last lines minus Claude's status bar: what a prompt's fp is made of.
+inbox_prompt_lines() {
+  qpane "$1" | grep -vE '^[[:space:]]*$|^[─━╭╰│ ]+$|⏵⏵|shift\+tab|for shortcuts|esc to interrupt|full +\$[0-9]|last +\$[0-9]|tokens\)$' | sed -e 's/[[:space:]]*$//' || true
+}
+
+# inbox_pending_tool <transcript>: "<tool_use id> <tool name>" of the newest tool_use with no tool_result (last 200
+# lines), or nothing. Only these two fields leave here; the tool's input (commands, paths) never does.
+# unverified: that a waiting permission prompt's tool_use is already in the transcript (P3 checks it on a real server).
+inbox_pending_tool() {
+  [[ -n "$1" && -f "$1" ]] || return 0
+  tail -n 200 "$1" 2>/dev/null | jq -Rc 'fromjson? // empty' 2>/dev/null | jq -rs '
+    [.[] | objects | .message.content? | arrays | .[] | objects] as $b
+    | [$b[] | select(.type == "tool_result") | .tool_use_id] as $done
+    | [$b[] | select(.type == "tool_use" and ((.id // "") | type == "string" and length > 0)) | select(.id as $i | $done | index($i) | not)]
+    | last // empty | "\(.id) \(.name // "")"' 2>/dev/null || true
+}
+
+# inbox_prompt_rows: a row per Claude session whose pane waits on a question (WAIT_RE, the same test `sessions` makes).
+# Approve/deny only for a permission prompt (PERM_RE) whose pending tool_use was found. fp = session + tool_use id +
+# the prompt's lines, so a new prompt in the same chat is a new item.
+inbox_prompt_rows() {
+  local s screen pend tid tool act
+  while IFS= read -r s; do
+    [[ -n "$s" ]] || continue
+    screen="$(qpane "$s")"
+    grep -qE "$WAIT_RE" <<<"$screen" || continue
+    tid=""; tool=""
+    pend="$(inbox_pending_tool "$(chat_transcript "$s")")"
+    [[ -n "$pend" ]] && read -r tid tool <<<"$pend"
+    [[ "$tid" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || tid=""
+    [[ "$tool" =~ ^[A-Za-z0-9_.:-]{1,64}$ ]] || tool=""
+    act=false
+    grep -qE "$PERM_RE" <<<"$screen" && [[ -n "$tid" && -n "$tool" ]] && act=true
+    jq -cn --arg s "$s" --arg tool "$tool" --argjson act "$act" \
+      --arg fp "$(inbox_sha "$s"$'\n'"$tid"$'\n'"$(inbox_prompt_lines "$s")")" \
+      '{kind:"prompt", key:"prompt|\($s)", fp:$fp, scope:$s, session:$s,
+        text:(if $act then "wants to use \($tool)" else "is waiting for an answer" end), title:null, since:null,
+        actions:(if $act then ["open","approve","deny","dismiss"] else ["open","dismiss"] end), number:null, run:null}'
+  done < <(claude_panes | awk -F'@@' '{print $1}')
+}
+
+# inbox_queue_rows <live sessions json>: starred chats the queue parked. question -> "asked you a question"; needs_you,
+# error, stopped -> `parked` with the queue's note (fixed strings set by the tick, never reply text). fp = the state's since.
+inbox_queue_rows() {
+  [[ -f "$QUEUE_DIR/queue.json" ]] || return 0
+  queue_status_json | jq -c --argjson live "$1" '.chats[]
+    | select(.state == "question" or .state == "needs_you" or .state == "error" or .state == "stopped")
+    | (if .state == "question" then "question" else "parked" end) as $k
+    | ((.note // "") | tostring | gsub("[[:cntrl:]]"; "") | .[0:60]) as $n
+    | .session as $s
+    | {kind:$k, key:"\($k)|\($s)", fpsrc:"\(.since // 0)", scope:$s,
+       session:(if .state != "stopped" and ($live | index($s)) != null then $s else null end),
+       text:(if $k == "question" then "asked you a question" elif .state == "stopped" then "session not running" elif $n != "" then $n else "needs you" end),
+       title:null, since:(.since // 0), actions:["open","dismiss"], number:null, run:null}' 2>/dev/null || true
+}
+
+# inbox_gh_rows <cache> <live sessions json>: pr and build rows from the gh cache (session = the project's tmux session if it runs).
+inbox_gh_rows() {
+  jq -c --argjson live "$2" '(.repos // {}) | to_entries[] | .key as $slug | .value as $e
+    | (($e.dir // "") | gsub("[.:]"; "-")) as $s
+    | (if $s != "" and ($live | index($s)) != null then $s else null end) as $sess
+    | (($e.prs // [])[] | {kind:"pr", key:"pr|\($slug)|\(.number)", fpsrc:"\(.head)|\(.concl)", scope:$slug, session:$sess,
+         text:"#\(.number) ready to merge · \(.checks) checks green", title, since, actions:["merge","open","dismiss"], number, run:null}),
+      (($e.builds // [])[] | {kind:"build", key:"build|\($slug)|\(.workflow)", fpsrc:"\(.run)", scope:$slug, session:$sess,
+         text:"\(.workflow) failed on \($e.branch)", title:null, since, actions:["open","dismiss"], number:null, run})' <<<"$1" 2>/dev/null || true
+}
+
+# inbox_login_rows <cache>: Claude / GitHub signed out, workers without a login (from the cached checks).
+# Workers are keyed login|worker:<name> so a worker named like a service can't share its id.
+inbox_login_rows() {
+  jq -c 'def row($k; $scope; $t; $st): {kind:"login", key:"login|\($k)", fpsrc:$st, scope:$scope, session:null, text:$t,
+           title:null, since:null, actions:["open","dismiss"], number:null, run:null};
+    (.logins // {}) as $l
+    | (if $l.claude == false then row("claude"; "claude"; "Claude sign-in failed"; "claude:signed_out") else empty end),
+      (if $l.github == false then row("github"; "github"; "GitHub sign-in failed"; "github:signed_out") else empty end),
+      (($l.workers // {}) | to_entries[] | select(.value == false) | row("worker:\(.key)"; .key; "worker sign-in failed"; "worker:\(.key):signed_out"))' <<<"$1" 2>/dev/null || true
+}
+
+# inbox_finish: rows (stdin, one JSON object per line) get id = <kind>- + 12 hex of sha1(key) and fp = 12 hex of sha1 of
+# the state an action would act on (prompt rows bring their own fp).
+inbox_finish() {
+  local row k key fp fps
+  while IFS= read -r row; do
+    [[ -n "$row" ]] || continue
+    IFS=$'\x1f' read -r k key fp fps < <(jq -r '[.kind, .key, (.fp // ""), (.fpsrc // "")] | map(tostring) | join("\u001f")' <<<"$row")
+    [[ -n "$fp" ]] || fp="$(inbox_sha "$fps")"
+    jq -c --arg id "$k-$(inbox_sha "$key")" --arg fp "$fp" '{id:$id, fp:$fp} + del(.key, .fpsrc, .fp)' <<<"$row"
+  done
+}
+
+# inbox_dismissed: {"<id> <fp>": ts} of dismissals younger than 7 days. Takes inbox/dismiss.lock (fd 4) unless
+# INBOX_DLOCK is set (the caller holds it), and drops older or broken lines from the file.
+inbox_dismissed() {
+  local f="$INBOX_DIR/dismissed" m locked=1
+  if [[ -z "${INBOX_DLOCK:-}" ]]; then
+    exec 4>>"$INBOX_DIR/dismiss.lock"
+    flock -w 10 4 || locked=0   # busy: read only, prune next time
+  fi
+  m="$(inbox_tsv_map "$f" | jq -c --argjson min "$((INOW - INBOX_KEEP))" 'with_entries(select(.value >= $min))')"
+  if ((locked)) && [[ -f "$f" && "$(jq -r length <<<"$m")" != "$(grep -c . "$f" 2>/dev/null)" ]]; then
+    inbox_put "$f" "$(jq -r 'to_entries | map("\(.key | sub(" "; "\t"))\t\(.value)") | join("\n")' <<<"$m")" || true
+  fi
+  printf '%s' "$m"
+}
+
+# inbox_repos <gh user>: "<o/r> <folder> <default branch>" for each project folder whose origin is a github.com repo of
+# the owner (gh user or DEFAULT_OWNER), each repo once, at most INBOX_MAX_REPOS.
+inbox_repos() {
+  local d name url slug br owner seen=" " n=0 u="${1,,}" o="${DEFAULT_OWNER,,}"
+  for d in "$PROJECTS_DIR"/*/; do
+    d="${d%/}"; name="${d##*/}"
+    [[ -e "$d/.git" && "$name" =~ $PROJECT_RE ]] || continue
+    url="$(git -C "$d" remote get-url origin 2>/dev/null </dev/null)" || continue
+    [[ "$url" =~ $GITHUB_URL_RE ]] || continue
+    slug="$(origin_slug "$d")"
+    [[ "$slug" =~ $REPO_RE && "$seen" != *" $slug "* ]] || continue
+    owner="${slug%%/*}"
+    [[ ( -n "$u" && "$owner" == "$u" ) || ( -n "$o" && "$owner" == "$o" ) ]] || continue
+    br="$(git -C "$d" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null </dev/null)"; br="${br#origin/}"
+    [[ "$br" =~ ^[A-Za-z0-9._][A-Za-z0-9._/-]{0,99}$ ]] || br=main
+    seen+="$slug "
+    printf '%s %s %s\n' "$slug" "$name" "$br"
+    n=$((n + 1)); ((n >= INBOX_MAX_REPOS)) && break
+  done
+  return 0
+}
+
+# inbox_gh <deadline epoch> <gh args…>: one gh call, at most INBOX_GH_TIMEOUT seconds and never past the deadline.
+inbox_gh() {
+  local left now
+  now="$(date +%s)"; left=$(($1 - now)); shift
+  ((left > INBOX_GH_TIMEOUT)) && left=$INBOX_GH_TIMEOUT
+  ((left >= 1)) || return 1
+  timeout --kill-after=2 "$left" gh "$@" </dev/null 2>/dev/null
+}
+
+# inbox_fetch_repo <o/r> <default branch> <deadline>: {prs, builds} of one repo, only what qualifies; fails on any error.
+# PR: open, not draft, not from a fork, base = default branch, mergeable, every check green (non-empty rollup).
+# Build: per workflow the newest completed run on the default branch; failure/timed_out/startup_failure = an item.
+# unverified: the shapes of gh's JSON (statusCheckRollup entries with __typename CheckRun {conclusion} / StatusContext
+# {state} in upper case, run conclusions in lower case) are from gh's docs, not from a real call on this server.
+inbox_fetch_repo() {
+  local prs runs
+  prs="$(inbox_gh "$3" pr list -R "$1" --state open -L 20 --json number,title,headRefOid,isDraft,mergeable,isCrossRepository,baseRefName,statusCheckRollup,updatedAt)" || return 1
+  runs="$(inbox_gh "$3" run list -R "$1" -b "$2" -L 10 --json databaseId,workflowName,status,conclusion,headSha,createdAt)" || return 1
+  jq -cn --argjson p "$prs" --argjson r "$runs" --arg b "$2" '
+    def clean($n): tostring | gsub("[[:cntrl:]]"; "") | .[0:$n];
+    def epoch: (try (sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) catch 0) // 0;
+    def ok_check: if .__typename == "StatusContext" then .state == "SUCCESS"
+      else ((.conclusion // "") | tostring | ascii_upcase) as $c | $c == "SUCCESS" or $c == "NEUTRAL" or $c == "SKIPPED" end;
+    def green: (.statusCheckRollup | type) == "array" and (.statusCheckRollup | length) > 0 and all(.statusCheckRollup[]; ok_check);
+    {prs: [$p[]? | select((.number | type) == "number" and .isDraft == false and .isCrossRepository == false
+                          and .mergeable == "MERGEABLE" and .baseRefName == $b and green)
+           | {number, title:((.title // "") | clean(80)), head:((.headRefOid // "") | clean(64)), checks:(.statusCheckRollup | length),
+              concl:([.statusCheckRollup[] | (.conclusion // .state // "") | tostring] | join(",")), since:((.updatedAt // "") | epoch)}],
+     builds: [[$r[]? | select(.status == "completed" and (.databaseId | type) == "number" and (.workflowName | type) == "string")]
+              | group_by(.workflowName)[] | max_by(.createdAt // "")
+              | select(((.conclusion // "") | tostring | ascii_downcase) as $c | $c == "failure" or $c == "timed_out" or $c == "startup_failure")
+              | {workflow:(.workflowName | clean(60)), run:.databaseId, since:((.createdAt // "") | epoch)}]}' 2>/dev/null
+}
+
+# inbox_refresh: rebuild gh.json (the caller holds inbox/lock). A repo whose calls fail or time out keeps its old entry,
+# marked stale. Logins: the same local checks `status` and `worker-list` make, no new probes.
+inbox_refresh() {
+  local old user="" gh_in=false gh_ok=false repos='{}' deadline slug dir br e w='{}' d n s
+  old="$(inbox_cache)"
+  deadline=$(($(date +%s) + INBOX_GH_BUDGET))
+  if command -v gh >/dev/null 2>&1; then
+    gh_in=true
+    github_logged_in && user="$(t 10 gh api user --jq .login </dev/null 2>/dev/null)"
+    if [[ "$user" =~ $OWNER_RE ]]; then gh_ok=true; else user=""; fi
+  fi
+  if [[ "$gh_ok" == true ]]; then
+    while read -r slug dir br; do
+      [[ -n "$slug" ]] || continue
+      if e="$(inbox_fetch_repo "$slug" "$br" "$deadline")" && [[ -n "$e" ]]; then
+        e="$(jq -c --arg d "$dir" --arg b "$br" --argjson now "$INOW" '. + {dir:$d, branch:$b, ts:$now, stale:false}' <<<"$e")"
+      else
+        e="$(jq -c --arg k "$slug" --arg d "$dir" --arg b "$br" '({prs:[], builds:[]} + (.repos[$k] // {})) + {dir:$d, branch:$b, stale:true}' <<<"$old")"
+      fi
+      repos="$(jq -c --arg k "$slug" --argjson e "$e" '.[$k] = $e' <<<"$repos")"
+    done < <(inbox_repos "$user")
+  fi
+  for d in "$WORKERS_DIR"/*/; do
+    [[ -f "$d/meta.json" ]] || continue
+    n="$(basename "$d")"; [[ "$n" =~ $WORKER_RE ]] || continue
+    s=false; worker_signed "${d%/}" && s=true
+    w="$(jq -c --arg n "$n" --argjson s "$s" '.[$n] = $s' <<<"$w")"
+  done
+  inbox_put "$INBOX_DIR/gh.json" "$(jq -cn --argjson now "$INOW" --argjson r "$repos" --argjson w "$w" \
+    --argjson c "$(creds_ok "${LOGIN_CONFIG_DIR:-$HOME/.claude}/.credentials.json" && echo true || echo false)" \
+    --argjson g "$(if [[ "$gh_in" == true ]]; then echo "$gh_ok"; else echo null; fi)" \
+    '{ts:$now, repos:$r, logins:{claude:$c, github:$g, workers:$w}}')" || true
+}
+
+# inbox_build <cache> <stale true|false>: the answer {now, gh_age, stale, count, items}. Keeps inbox/seen (first-seen
+# times of prompt and login items still there) and leaves out dismissed id+fp pairs.
+inbox_build() {
+  local live rows items dis age stale="$2"
+  live="$({ tmux list-sessions -F '#{session_name}' 2>/dev/null || true; } | jq -Rsc 'split("\n") | map(select(. != ""))')"
+  rows="$({ inbox_prompt_rows; inbox_queue_rows "$live"; inbox_gh_rows "$1" "$live"; inbox_login_rows "$1"; } | inbox_finish)"
+  items="$(jq -sc --argjson seen "$(inbox_tsv_map "$INBOX_DIR/seen")" --argjson now "$INOW" \
+    'map(.since = (.since // $seen[.id + " " + .fp] // $now))' <<<"$rows")" || return 1
+  inbox_put "$INBOX_DIR/seen" "$(jq -r 'map(select(.kind == "prompt" or .kind == "login") | "\(.id)\t\(.fp)\t\(.since)") | join("\n")' <<<"$items")" || true
+  dis="$(inbox_dismissed)"
+  age="$(jq -r --argjson now "$INOW" '(.ts // null | numbers | $now - . | if . < 0 then 0 else . end) // "null"' <<<"$1")"
+  [[ "$(jq -r '[(.repos // {})[] | .stale == true] | any' <<<"$1")" == true ]] && stale=true
+  jq -cn --argjson items "$items" --argjson dis "${dis:-{\}}" --argjson now "$INOW" --argjson age "${age:-null}" --argjson stale "$stale" '
+    {"prompt":0, "question":1, "parked":2, "pr":3, "build":4, "login":5} as $rank
+    | [$items[] | select($dis[.id + " " + .fp] == null)] | sort_by([($rank[.kind] // 9), .since])
+    | {now:$now, gh_age:$age, stale:$stale, count:length,
+       items:map({id, fp, kind, scope, session, text, title, since, actions, number, run})}'
+}
+
+# inbox: what needs the owner now. Uses the gh cache; when it is older than 5 minutes it is refreshed here under
+# inbox/lock (fd 5). A refresh already running is waited for up to 30 s, then the old cache is answered, marked stale.
+do_inbox() {
+  [[ $# -eq 0 ]] || bad_args "inbox takes no arguments"
+  inbox_init || api_err internal "Couldn't create the inbox folder."
+  INOW="${CLAUDERC_NOW:-$(date +%s)}"
+  local cache stale=false
+  cache="$(inbox_cache)"
+  if ! inbox_fresh "$cache"; then
+    exec 5>>"$INBOX_DIR/lock"
+    if flock -w 30 5; then
+      cache="$(inbox_cache)"   # another call may have refreshed it while we waited
+      inbox_fresh "$cache" || { inbox_refresh; cache="$(inbox_cache)"; }
+    else
+      stale=true
+    fi
+    exec 5>&-
+  fi
+  api_ok "$(inbox_build "$cache" "$stale")"
+}
+
+# inbox-dismiss <id> <fp>: hide that item until its fp changes. No PIN: hiding can't do harm, and it comes back as
+# soon as anything about it changes. Answers {count} (from the cache; never refreshes).
+do_inbox_dismiss() {
+  [[ $# -eq 2 && "$1" =~ $INBOX_ID_RE && "$2" =~ $INBOX_FP_RE ]] || bad_args "usage: inbox-dismiss <id> <fp>"
+  inbox_init || api_err internal "Couldn't create the inbox folder."
+  INOW="${CLAUDERC_NOW:-$(date +%s)}"
+  exec 4>>"$INBOX_DIR/dismiss.lock"
+  flock -w 10 4 || api_err busy "The inbox is busy. Try again in a moment."
+  INBOX_DLOCK=1 inbox_dismissed >/dev/null   # prune first
+  grep -q "^$1"$'\t'"$2"$'\t' "$INBOX_DIR/dismissed" 2>/dev/null ||
+    (umask 077; printf '%s\t%s\t%s\n' "$1" "$2" "$INOW" >>"$INBOX_DIR/dismissed") || api_err internal "Couldn't save the dismissal."
+  exec 4>&-
+  api_ok "$(inbox_build "$(inbox_cache)" false | jq -c '{count}')"
+}
+
 # chat-commands <session>: stdin = PIN. The slash commands Claude can run there beyond the built-ins:
 # your skills and commands, the project's, and those of enabled plugins (as plugin:name).
 do_chat_commands() {
@@ -6076,6 +6374,8 @@ api_main() {
     queue-off)           do_queue_off "$@" ;;
     queue-star)          do_queue_star "$@" ;;
     queue-log)           do_queue_log "$@" ;;
+    inbox)               do_inbox "$@" ;;
+    inbox-dismiss)       do_inbox_dismiss "$@" ;;
     sessions)            [[ $# -eq 0 ]] || bad_args "sessions takes no arguments"; do_sessions ;;
     general-list)        do_general_list "$@" ;;
     general-new)         do_general_new "$@" ;;

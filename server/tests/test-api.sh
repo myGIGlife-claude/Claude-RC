@@ -1123,6 +1123,156 @@ rm -f "$HOME/.claude/.credentials.json" "$STUB_STATE/usage-config" "$STUB_STATE/
 tmux kill-session -t =qa1 2>/dev/null; tmux kill-session -t =qa2 2>/dev/null; tmux kill-session -t =qb 2>/dev/null
 rm -f "$QD/queue.json" "$QSTATE" "$QUC"
 
+# ---- Inbox (tests 1-5 of docs/ultimate-design.md): fake panes (`cat`, started as "cat # claude" so they count as Claude
+# sessions), hand-written transcripts, a hand-written queue state, gh stub fixtures, a fake clock (CLAUDERC_NOW). ----
+echo "inbox: runner (test 1)"
+for bad in "inbox x" "inbox --refresh" "inbox-dismiss" "inbox-dismiss pr-zz 123" "inbox-dismiss pr-3f9a0c1d2e4b" \
+  "inbox-dismiss PR-3f9a0c1d2e4b a1b2c3d4e5f6" "inbox-dismiss pr-3f9a0c1d2e4b A1B2C3D4E5F6" "inbox-dismiss pr-3f9a0c1d2e4b a1b2c3d4e5f6 x" \
+  "inbox-dismiss pr-3f9a0c1d2e4b a1b2c3d4e5f;" "inbox-dismiss -pr-3f9a0c1d2e4b a1b2c3d4e5f6" "inbox-dismiss toolongkindx-3f9a0c1d2e4b a1b2c3d4e5f6" \
+  "act pr-3f9a0c1d2e4b approve a1b2c3d4e5f6;id" "briefing-schedule 7:05 X" "briefing-schedule 07:10 America/Chicago"; do
+  api "$bad"; check "runner refuses '$bad'" "$(jqt '.ok == false and .error.code == "forbidden"')"
+done
+ID="$HOME/.config/claude-launcher/inbox"; P="$HOME/projects"; IBX="$WORK/ibx"
+export CLAUDERC_NOW; CLAUDERC_NOW=$(date +%s)
+ibx() { jq -c --arg k "$1" --arg s "$2" '[.data.items[] | select(.kind == $k and .scope == $s)]' <<<"$OUT"; }   # items of a kind and scope
+ibq() { jq -e --arg k "$1" --arg s "$2" "[.data.items[] | select(.kind == \$k and .scope == \$s)] | $3" >/dev/null 2>&1 <<<"$OUT"; echo $?; }
+ibperm() { # ibperm <session>: a fake permission prompt in the pane (cat echoes each line twice, which WAIT_RE doesn't mind)
+  local l
+  for l in "Bash command" "  echo SECRETINBOXWORD" "Do you want to proceed?" "❯ 1. Yes" "  2. Yes, and don't ask again" "  3. No"; do
+    tmux send-keys -t "=$1:" -l "$l"; tmux send-keys -t "=$1:" Enter
+  done
+  sleep 0.3
+}
+mkdir -p "$IBX/p1" "$IBX/p2" "$IBX/p3"
+for x in ibp1:p1 ibp2:p2 ibp3:p3; do tmux new-session -d -s "${x%%:*}" -x 200 -y 40 -c "$IBX/${x#*:}" "cat # claude"; done
+sleep 0.5
+for x in ibp1 ibp2 ibp3; do mkdir -p "$(dirname "$(qtr $x)")"; done
+# ibp1: one tool call answered, then a pending Bash call. ibp2: only the answered one. ibp3: not waiting.
+{ jq -nc '{type:"assistant",message:{content:[{type:"tool_use",id:"toolu_old",name:"Read",input:{file_path:"/x/SECRETINBOXWORD"}}]}}'
+  jq -nc '{type:"user",message:{content:[{type:"tool_result",tool_use_id:"toolu_old",content:"SECRETINBOXWORD"}]}}'
+  jq -nc '{type:"assistant",message:{content:[{type:"text",text:"SECRETINBOXWORD"},{type:"tool_use",id:"toolu_01pending",name:"Bash",input:{command:"echo SECRETINBOXWORD"}}]}}'
+} >"$(qtr ibp1)"
+head -n 2 "$(qtr ibp1)" >"$(qtr ibp2)"
+ibperm ibp1; ibperm ibp2; tmux send-keys -t "=ibp3:" -l "hello SECRETINBOXWORD"; tmux send-keys -t "=ibp3:" Enter; sleep 0.3
+api "inbox"
+check "inbox answers {now, gh_age, stale, count, items}" "$(jqt '.ok and (.data | keys) == ["count","gh_age","items","now","stale"] and .data.count == (.data.items | length) and .data.now == '"$CLAUDERC_NOW"'')"
+check "every item has exactly the doc's fields" "$(jqt '.data.items | all(keys == ["actions","fp","id","kind","number","run","scope","session","since","text","title"])')"
+echo "inbox: prompts (test 2)"
+check "a permission prompt with a pending tool_use: one prompt item, 'wants to use Bash', approve/deny offered" \
+  "$(ibq prompt ibp1 'length == 1 and .[0].text == "wants to use Bash" and .[0].actions == ["open","approve","deny","dismiss"] and .[0].session == "ibp1" and (.[0].id | test("^prompt-[0-9a-f]{12}$")) and (.[0].fp | test("^[0-9a-f]{12}$")) and .[0].since == '"$CLAUDERC_NOW"' and .[0].number == null and .[0].run == null and .[0].title == null')"
+check "...without a pending tool_use: open only" "$(ibq prompt ibp2 'length == 1 and .[0].text == "is waiting for an answer" and .[0].actions == ["open","dismiss"]')"
+check "...a pane that isn't waiting: no item" "$(ibq prompt ibp3 'length == 0')"
+[[ "$OUT" != *SECRETINBOXWORD* && "$OUT" != *echo* && "$OUT" != */x/* ]] && ! grep -rq SECRETINBOXWORD "$ID"; check "no pane text, tool input or reply text in the answer or the inbox files" $?
+P1="$(ibx prompt ibp1)"; T0=$CLAUDERC_NOW
+CLAUDERC_NOW=$((T0 + 60)); api "inbox"
+[[ "$(ibx prompt ibp1)" == "$P1" ]]; check "the same prompt a minute later: same id, fp and since (first seen)" $?
+jq -nc '{type:"assistant",message:{content:[{type:"tool_use",id:"toolu_02next",name:"Edit",input:{file_path:"/x/y"}}]}}' >>"$(qtr ibp1)"
+api "inbox"
+check "a new pending tool_use: same id, new fp, the new tool, since starts again" \
+  "$(ibq prompt ibp1 '.[0].id == '"$(jq '.[0].id' <<<"$P1")"' and .[0].fp != '"$(jq '.[0].fp' <<<"$P1")"' and .[0].text == "wants to use Edit" and .[0].since == '"$CLAUDERC_NOW"'')"
+cp "$(qtr ibp1)" "$(qtr ibp3)"; tmux send-keys -t "=ibp3:" -l "Continue? (y/n)"; tmux send-keys -t "=ibp3:" Enter; sleep 0.3
+api "inbox"
+check "a y/n question that isn't a permission prompt: open only, even with a pending tool_use" "$(ibq prompt ibp3 'length == 1 and .[0].actions == ["open","dismiss"] and .[0].text == "is waiting for an answer"')"
+[[ "$(stat -c %a "$ID")" == 700 && "$(stat -c %a "$ID/seen")" == 600 && "$(stat -c %a "$ID/gh.json")" == 600 ]]; check "inbox dir 700, files 600" $?
+
+echo "inbox: queue states (test 3)"
+jq -nc '{enabled:true, stars:["iqq","iqn","iqe","iqs","iqi"]}' >"$QD/queue.json"
+jq -nc '{iqq:{state:"question",since:1000,note:"asked you"}, iqn:{state:"needs_you",since:1001,note:"interrupted"},
+  iqe:{state:"error",since:1002,note:"paste failed"}, iqs:{state:"question",since:1003,note:"asked you",gone:true}, iqi:{state:"idle",since:1004}}' >"$QSTATE"
+tmux new-session -d -s iqn sleep 600
+api "inbox"
+check "queue question -> question item 'asked you a question', no session to open" "$(ibq question iqq 'length == 1 and .[0].text == "asked you a question" and .[0].session == null and .[0].since == 1000 and .[0].actions == ["open","dismiss"] and (.[0].id | test("^question-[0-9a-f]{12}$"))')"
+check "needs_you -> parked with the queue note, session when it runs" "$(ibq parked iqn 'length == 1 and .[0].text == "interrupted" and .[0].session == "iqn" and (.[0].id | test("^parked-[0-9a-f]{12}$"))')"
+check "error -> parked with the note" "$(ibq parked iqe 'length == 1 and .[0].text == "paste failed"')"
+check "a gone session -> parked 'session not running'" "$(ibq parked iqs 'length == 1 and .[0].text == "session not running" and .[0].session == null')"
+check "an idle chat -> nothing" "$(jqt '[.data.items[] | select(.scope == "iqi")] | length == 0')"
+check "sorted: prompt, question, parked, then oldest first" "$(jqt '[.data.items[] | {k:({"prompt":0,"question":1,"parked":2,"pr":3,"build":4,"login":5}[.kind]), s:.since}] | . == sort_by([.k, .s])')"
+check "...parked in since order" "$(jqt '[.data.items[] | select(.kind == "parked") | .scope] == ["iqn","iqe","iqs"]')"
+tmux kill-session -t =iqn
+
+echo "inbox: PRs, builds, cache, logins (test 4)"
+while read -r n u; do mkdir -p "$P/$n"; git -C "$P/$n" init -q; git -C "$P/$n" remote add origin "$u"; done <<'EOF'
+ia https://github.com/demo-user/inbox-a.git
+ib git@github.com:demo-user/inbox-b.git
+ic https://github.com/other-owner/inbox-c.git
+id https://gitlab.com/demo-user/inbox-d.git
+EOF
+git -C "$P/ib" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+GS="$STUB_STATE"
+jq -nc '{number:0, title:"t", headRefOid:"h", isDraft:false, mergeable:"MERGEABLE", isCrossRepository:false, baseRefName:"main", updatedAt:"2026-11-20T10:00:00Z",
+  statusCheckRollup:[{__typename:"CheckRun",name:"build",status:"COMPLETED",conclusion:"SUCCESS"},{__typename:"StatusContext",context:"ci",state:"SUCCESS"}]} as $b
+  | [$b + {number:1, title:"Green one", headRefOid:"aaa1"}, $b + {number:2, isDraft:true}, $b + {number:3, isCrossRepository:true},
+     $b + {number:4, mergeable:"UNKNOWN"}, $b + {number:5, statusCheckRollup:[{__typename:"CheckRun",conclusion:"SUCCESS"},{__typename:"CheckRun",conclusion:"FAILURE"}]},
+     $b + {number:6, statusCheckRollup:[]}, $b + {number:7, baseRefName:"dev"}, $b + {number:8, statusCheckRollup:[{__typename:"CheckRun",status:"IN_PROGRESS",conclusion:""}]},
+     $b + {number:10, updatedAt:"2026-11-21T10:00:00Z", statusCheckRollup:[{__typename:"CheckRun",conclusion:"SKIPPED"},{__typename:"CheckRun",conclusion:"NEUTRAL"},{__typename:"CheckRun",conclusion:"SUCCESS"}]}]' >"$GS/gh-prs-demo-user_inbox-a.json"
+ibruns() { jq -nc '[{databaseId:101,workflowName:"build",status:"completed",conclusion:"failure",headSha:"x",createdAt:"2026-11-20T12:00:00Z"},
+  {databaseId:100,workflowName:"build",status:"completed",conclusion:"success",headSha:"x",createdAt:"2026-11-20T11:00:00Z"},
+  {databaseId:201,workflowName:"lint",status:"completed",conclusion:"success",headSha:"x",createdAt:"2026-11-20T12:00:00Z"},
+  {databaseId:200,workflowName:"lint",status:"completed",conclusion:"failure",headSha:"x",createdAt:"2026-11-20T11:00:00Z"},
+  {databaseId:301,workflowName:"deploy",status:"in_progress",conclusion:"",headSha:"x",createdAt:"2026-11-20T13:00:00Z"},
+  {databaseId:300,workflowName:"deploy",status:"completed",conclusion:"timed_out",headSha:"x",createdAt:"2026-11-20T10:00:00Z"}]' | jq -c "$1"; }
+ibruns . >"$GS/gh-runs-demo-user_inbox-a.json"
+jq -nc '[{number:9, title:"On trunk", headRefOid:"bbb9", isDraft:false, mergeable:"MERGEABLE", isCrossRepository:false, baseRefName:"trunk",
+  updatedAt:"2026-11-20T09:00:00Z", statusCheckRollup:[{__typename:"CheckRun",conclusion:"SUCCESS"}]}]' >"$GS/gh-prs-demo-user_inbox-b.json"
+cp "$GS/gh-prs-demo-user_inbox-b.json" "$GS/gh-prs-other-owner_inbox-c.json"
+mkdir -p "$HOME/.config/claude-launcher/workers/iw/home"; echo '{"kind":"claude"}' >"$HOME/.config/claude-launcher/workers/iw/meta.json"
+tmux new-session -d -s ia sleep 600
+rm -f "$GS/gh-calls"; CLAUDERC_NOW=$((CLAUDERC_NOW + 301)); api "inbox"
+check "a green own PR -> pr item with the doc's text, title, since, session and actions" \
+  "$(ibq pr demo-user/inbox-a '(map(.number) | sort) == [1,10] and ((.[] | select(.number == 1)) as $p | $p.text == "#1 ready to merge · 2 checks green" and $p.title == "Green one" and $p.since == '"$(date -u -d 2026-11-20T10:00:00Z +%s)"' and $p.session == "ia" and $p.actions == ["merge","open","dismiss"] and $p.run == null and ($p.id | test("^pr-[0-9a-f]{12}$")))')"
+check "...draft, fork, UNKNOWN mergeable, a FAILURE check, empty rollup, other base, a pending check -> none" "$(ibq pr demo-user/inbox-a 'map(.number) | (index(2), index(3), index(4), index(5), index(6), index(7), index(8)) == null')"
+check "SKIPPED and NEUTRAL checks count as green" "$(ibq pr demo-user/inbox-a 'map(select(.number == 10)) | .[0].text == "#10 ready to merge · 3 checks green"')"
+check "another owner's repo -> nothing, not even a gh call" "$([[ "$(ibx pr other-owner/inbox-c)" == "[]" ]] && ! grep -q 'other-owner\|gitlab\|inbox-d' "$GS/gh-calls"; echo $?)"
+grep -q -- 'run list -R demo-user/inbox-b -b trunk ' "$GS/gh-calls" && grep -q -- 'run list -R demo-user/inbox-a -b main ' "$GS/gh-calls" && [[ "$(ibq pr demo-user/inbox-b 'length == 1 and .[0].session == null')" == 0 ]]
+check "the default branch comes from origin/HEAD (trunk), else main" $?
+check "newest completed run failed -> build item; an older failure under a newer green -> none" \
+  "$(ibq build demo-user/inbox-a '(map(.text) | sort) == ["build failed on main","deploy failed on main"] and (map(select(.text | startswith("build"))) | .[0].run == 101 and .[0].number == null and .[0].actions == ["open","dismiss"] and (.[0].id | test("^build-[0-9a-f]{12}$")))')"
+check "Claude signed out and a worker without a login -> login items" \
+  "$(ibq login claude 'length == 1 and .[0].text == "Claude sign-in failed" and .[0].session == null')"
+check "...the worker" "$(ibq login iw 'length == 1 and .[0].text == "worker sign-in failed" and (.[0].id | test("^login-[0-9a-f]{12}$"))')"
+check "...GitHub signed in: no GitHub item, gh_age 0, not stale" "$(jqt '([.data.items[] | select(.kind == "login" and .scope == "github")] | length == 0) and .data.gh_age == 0 and .data.stale == false')"
+check "items sorted by kind, then oldest first" "$(jqt '[.data.items[] | {k:({"prompt":0,"question":1,"parked":2,"pr":3,"build":4,"login":5}[.kind]), s:.since}] | . == sort_by([.k, .s])')"
+NC="$(wc -l <"$GS/gh-calls")"
+CLAUDERC_NOW=$((CLAUDERC_NOW + 200)); api "inbox"
+[[ "$(wc -l <"$GS/gh-calls")" == "$NC" ]] && [[ "$(jqt '.data.gh_age == 200')" == 0 ]]; check "a second call within 5 minutes makes no gh call (gh_age 200)" $?
+ibruns '[{databaseId:102,workflowName:"build",status:"completed",conclusion:"success",headSha:"y",createdAt:"2026-11-20T14:00:00Z"}] + .' >"$GS/gh-runs-demo-user_inbox-a.json"
+CLAUDERC_NOW=$((CLAUDERC_NOW + 101)); api "inbox"
+[[ "$(wc -l <"$GS/gh-calls")" -gt "$NC" ]]; check "after 5 minutes it calls gh again" $?
+check "a newer green run of the workflow clears its build item" "$(ibq build demo-user/inbox-a 'map(.text) == ["deploy failed on main"]')"
+echo 3 >"$GS/gh-sleep-demo-user_inbox-b"; CLAUDERC_NOW=$((CLAUDERC_NOW + 301))
+CLAUDERC_INBOX_GH_TIMEOUT=1 api "inbox"
+[[ "$(ibq pr demo-user/inbox-b 'length == 1 and .[0].number == 9')" == 0 && "$(jqt '.data.stale == true')" == 0 ]]
+check "a repo that times out keeps its old entry and marks the answer stale" $?
+jq -e '.repos["demo-user/inbox-b"].stale == true and .repos["demo-user/inbox-a"].stale == false' "$ID/gh.json" >/dev/null; check "...only that repo is stale in gh.json" $?
+rm -f "$GS/gh-sleep-demo-user_inbox-b"
+mv "$GS/gh_token" "$WORK/gh_token.inbox"; CLAUDERC_NOW=$((CLAUDERC_NOW + 301)); api "inbox"
+[[ "$(ibq login github 'length == 1 and .[0].text == "GitHub sign-in failed"')" == 0 && "$(jqt '[.data.items[] | select(.kind == "pr" or .kind == "build")] | length == 0')" == 0 ]]
+check "GitHub signed out -> 'GitHub sign-in failed', and no PR items from old data" $?
+mv "$WORK/gh_token.inbox" "$GS/gh_token"; CLAUDERC_NOW=$((CLAUDERC_NOW + 301)); api "inbox"
+
+echo "inbox: dismiss (test 5)"
+PR1="$(jq -c '[.data.items[] | select(.kind == "pr" and .number == 1)][0]' <<<"$OUT")"
+I1="$(jq -r .id <<<"$PR1")"; F1="$(jq -r .fp <<<"$PR1")"; C0="$(jq .data.count <<<"$OUT")"
+api "inbox-dismiss $I1 $F1"
+check "inbox-dismiss answers {count}, one less" "$(jqt '.ok and (.data | keys) == ["count"] and .data.count == '"$((C0 - 1))"'')"
+api "inbox"; check "...and the item is hidden" "$(ibq pr demo-user/inbox-a 'map(.number) == [10]')"
+api "inbox-dismiss $I1 $F1"; [[ "$(grep -c "^$I1" "$ID/dismissed")" == 1 && "$(stat -c %a "$ID/dismissed")" == 600 ]]; check "dismissing twice keeps one line (file 600)" $?
+api "inbox-dismiss prompt-000000000000 000000000000"; check "an unknown id can be dismissed (harmless)" "$(jqt '.ok and .data.count == '"$((C0 - 1))"'')"
+jq -c 'map(if .number == 1 then .headRefOid = "aaa2" else . end)' "$GS/gh-prs-demo-user_inbox-a.json" >"$GS/x.json" && mv "$GS/x.json" "$GS/gh-prs-demo-user_inbox-a.json"
+CLAUDERC_NOW=$((CLAUDERC_NOW + 301)); api "inbox"
+check "a new head commit (new fp) shows it again, same id" "$(ibq pr demo-user/inbox-a 'map(select(.number == 1)) | length == 1 and .[0].id == "'"$I1"'" and .[0].fp != "'"$F1"'"')"
+P3I="$(jq -r '[.data.items[] | select(.kind == "prompt" and .scope == "ibp1")][0] | "\(.id) \(.fp)"' <<<"$OUT")"
+api "inbox-dismiss $P3I"; api "inbox"; check "a dismissed prompt is hidden" "$(ibq prompt ibp1 'length == 0')"
+jq -nc '{type:"assistant",message:{content:[{type:"tool_use",id:"toolu_03",name:"Write",input:{}}]}}' >>"$(qtr ibp1)"
+api "inbox"; check "...a new prompt in that chat shows again" "$(ibq prompt ibp1 'length == 1 and .[0].text == "wants to use Write"')"
+CLAUDERC_NOW=$((CLAUDERC_NOW + 8 * 86400)); api "inbox"
+! grep -q "^$I1" "$ID/dismissed" && ! grep -q "^prompt-000000000000" "$ID/dismissed"; check "dismissals are pruned after 7 days" $?
+
+for x in ibp1 ibp2 ibp3 ia; do tmux kill-session -t "=$x" 2>/dev/null; done
+rm -rf "$P/ia" "$P/ib" "$P/ic" "$P/id" "$IBX" "$HOME/.config/claude-launcher/workers/iw" "$ID" "$GS"/gh-prs-* "$GS"/gh-runs-* "$GS/gh-calls"
+rm -f "$QD/queue.json" "$QSTATE"
+unset CLAUDERC_NOW
+
 api "chat-send demo-app2" $'000000\nhi'; check "chat send with a wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
 for _ in 1 2 3 4; do api "chat-open demo-app2" "000000"; done
 check "5 wrong PINs lock chat" "$(jqt '.error.code=="chat_locked"')"
