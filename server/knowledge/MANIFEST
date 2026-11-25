@@ -1,5 +1,5 @@
 9192b64740751a8f242ffc1fab7cbe1e3f2715acaea4b92feedfa7e8d68d2250  VERSION
-9ec15dd8b74230159178caea29447c93925f61ea67791c7b91b5f85954931fa9  rules/rc-knowledge.md
+6bf40f2ac9c9c0e8eb968594ceb4b6574f0cabd0065abb66509ea5453d9b28f7  rules/rc-knowledge.md
 f4b48b3d49a7cf625b2999e1d0d6a627a26404a06a94e40e907211cbc77184f0  skills/rc-american-english-writing/SKILL.md
 6bff650b0f84c2221f66eb448d25d7f6f2593b13135a18e21e93e02ffb8fbe75  skills/rc-american-english-writing/references/sources.md
 139631bfeb7fa369adf67198e7d26db35c70857c05e4d3f61efff3937497f808  skills/rc-american-english-writing/references/ui-copy.md
@@ -59,6 +59,7 @@ d4606d97e8fa1b75bdbb6f772895282e8611017ede6ce710384b11a6927511c0  skills/rc-secu
 f0b13d3cb570de0d82eed3f6ce21963cb7997d395207c5d5b079649704c34e92  skills/rc-testing-debugging/SKILL.md
 d4a789a35185f4754e8ac5a0bd392a9605ed621a1a5a066659d27dbc10131351  skills/rc-testing-debugging/references/debugging-toolbox.md
 c876dc641ee942b6c93f7fb88c60103648308f15d82207cfa5e54af034cff403  skills/rc-testing-debugging/references/tool-versions.md
+38e8013409418f2b4b4e63f4bc79c4d687c7f832dbc52368920d2fe1a995afc5  skills/rc-ui-craft/SKILL.md
 229b1aee2072a88277a9ac6bf76fe50ac394b417c05bc2bf242904f6afa632c5  skills/rc-ui-ux-design/SKILL.md
 7e602025e9bf4d8f2d6c582408d4edca3a4aec028bf1329fc722e1aa84da1c61  skills/rc-ui-ux-design/references/a11y-and-law.md
 e8b0048156d0491a9b5e0b49603871e90b334537aa4e6f5da0efea16bc12191a  skills/rc-ui-ux-design/references/components-and-states.md

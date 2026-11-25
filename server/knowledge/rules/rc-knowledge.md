@@ -8,7 +8,7 @@ practice (dated 2026-10), checked against primary sources.
   to approach any task (understand first, read the existing code, privacy-first, minimal dependencies, root-cause debugging, honest verification).
 - Covered: web front end, JavaScript/TypeScript, Node, web back end, databases, PHP, Python, Go, Java, Kotlin, Scala, C#/.NET, Rust, C/C++,
   Ruby/Rails, Dart/Flutter, Elixir, shell, Android, iOS, cross-platform, UI/UX, security, DevOps/Linux, cloud, testing/debugging, architecture,
-  WebAssembly/graphics/data formats.
+  WebAssembly/graphics/data formats. For any screen, animation, color, 3D or video work also load `rc-ui-craft`.
 - Where a skill says "(unverified)", or the project is on an older version than the skill describes, check the primary source before relying on it.
   If no skill covers the topic, say so and read the official documentation for the exact version in use. Never invent an API, flag or version.
 
