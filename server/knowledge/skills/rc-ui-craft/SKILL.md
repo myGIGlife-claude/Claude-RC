@@ -7,6 +7,8 @@ description: "Craft playbook for polished app and web UI: audit loop, color role
 
 > Distilled in November 2026 from a read of the public UI Skills directory (ui-skills.com, 843 entries) and the repos behind its most useful entries. Written in our own words; numbers are starting points, not laws. `rc-ui-ux-design` holds the base rules (layout, forms, WCAG, platforms); this skill is how to apply them well and verify the result. Where a rule says "measure", measure.
 
+Detail files (load only the one you need): `references/motion-and-gestures.md` (curves, numbers, gestures, GSAP, libraries), `references/ui-states-forms-overlays.md` (forms, states, overlays, keyboard, type, layout, audit scoring), `references/three-and-video.md` (Three.js and WebGL, Remotion, scene seams).
+
 ## How to use this skill
 
 1. Pick the section for the job (audit, color, motion, performance, 3D, video, debug, taste). Do not read them all.
@@ -111,6 +113,7 @@ description: "Craft playbook for polished app and web UI: audit loop, color role
 ## Sources
 
 Read 2026-11-25; facts reduced to starting numbers and rewritten. Individual skills are the work of their authors; use their own repos for the full text.
+- Full texts read from public GitHub repos, all MIT unless noted: jakubkrehel/skills, emilkowalski/skills, raphaelsalaja/skills, ibelick/ui-skills, addyosmani/web-quality-skills, cloudai-x/threejs-skills, greensock/gsap-skills, mattpocock/skills, vercel-labs/agent-skills, millionco/react-doctor, MengTo/Skills; Apache-2.0: pbakaus/impeccable, heygen-com/hyperframes; remotion-dev/skills (no license file seen: reference only). Their skills are the authors' work; install them from their repos for the full text.
 - https://www.ui-skills.com/ - directory of 843 skills for design engineers (listing pages for color, motion, performance, 3D, Three.js, video, Remotion, debugging, testing, accessibility, taste).
 - Entries read most closely: jakubkrehel (better-motion, better-colors, better-ui, interface-review), emilkowalski (animate, animation-performance, gestures, choreograph), raphaelsalaja (color, alignment), pbakaus (colorize, optimize), addyosmani (core-web-vitals, performance), mattpocock (diagnosing-bugs, tdd), iart-ai (accessible-animation, 60fps-animation), cloudai-x (threejs-performance), vercel-labs (react-best-practices, react-native-skills), callstackincubator (react-native-best-practices), elithrar (web-perf, anti-slop), millionco (performance), remotion-dev (Remotion skills).
 - https://web.dev/articles/vitals - Core Web Vitals thresholds.
