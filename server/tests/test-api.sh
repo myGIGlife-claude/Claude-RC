@@ -766,13 +766,9 @@ api "login-token youtube" "x"; check "youtube can't be set with login-token" "$(
 rm -f "$HOME/.config/claude-launcher/env" "$HOME/.claude.json"
 
 echo "in-app chat"
-api "chat-pin-status"; check "chat PIN not set yet" "$(jqt '.ok and (.data.set|not)')"
-api "chat-open demo-app2" "123456"; check "chat needs a PIN first" "$(jqt '.error.code=="pin_not_set"')"
-api "chat-pin-set" "12ab"; check "PIN must be 6-12 digits" "$(jqt '.error.code=="invalid_name"')"
-api "chat-pin-set" "482913"; check "PIN set" "$(jqt '.ok and .data.set')"
-[[ "$(stat -c %a "$HOME/.config/claude-launcher/chat-pin")" == 600 ]] && grep -q '^PIN=482913$' "$HOME/.config/claude-launcher/chat-pin"; check "PIN file readable only on the server (600)" $?
-api "chat-pin-set" $'111111\n000000'; check "changing the PIN needs the current one" "$(jqt '.error.code=="wrong_pin"')"
-rm -f "$HOME/.local/state/claude-launcher/chat-pin-fails"
+api "chat-pin-status"; check "chat PIN gone: older apps see one set, not required" "$(jqt '.ok and .data.set and .data.required==false')"
+api "chat-pin-set" "12ab"; check "chat-pin-set is a harmless no-op for older apps" "$(jqt '.ok')"
+[[ ! -e "$HOME/.config/claude-launcher/chat-pin" ]]; check "...and stores nothing" $?
 D2="$(tmux display-message -p -t "=demo-app2:" '#{pane_current_path}')"; TD="$HOME/.claude/projects/${D2//[\/.]/-}"; mkdir -p "$TD"
 cat >"$TD/99999999-0000-0000-0000-000000000000.jsonl" <<'JL'
 {"type":"user","uuid":"u1","timestamp":"2026-09-29T10:00:00Z","message":{"role":"user","content":"Add a forecast screen"}}
@@ -792,7 +788,6 @@ PD="$(tmux display-message -p -t "=demo-app2:" '#{pane_current_path}')"; mkdir -
 printf '{"env":{"KEEP":"1"},"hooks":{"Stop":[]},"permissions":{"allow":["Read"]}}\n' >"$HOME/.claude/settings.json"; chmod 600 "$HOME/.claude/settings.json"
 rm -f "$PD/.claude/settings.local.json" "$PD/.claude/settings.json"
 api "permissions-get demo-app2" "482913"; check "permissions-get reads each scope; a missing file is empty" "$(jqt '.ok and .data.scopes.user.allow==["Read"] and .data.scopes.local.exists==false and .data.scopes.project.deny==[]')"
-api "permissions-get demo-app2" "000000"; check "permissions-get needs the PIN" "$(jqt '.ok==false')"
 perm() { api "permissions-set demo-app2" "$(printf '482913\n%s' "$1")"; }
 perm '{"scope":"local","op":"add","list":"allow","rule":"Bash(git status:*)"}'; check "permissions-set add creates the local file" "$(jqt '.ok')"
 perm '{"scope":"local","op":"add","list":"allow","rule":"Bash(git status:*)"}'
@@ -830,6 +825,48 @@ check "a pending AskUserQuestion comes back as data" "$(jqt '.data.waiting and (
 echo '{"type":"user","uuid":"q10","timestamp":"2026-09-29T10:02:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ask","content":"ok"}]}}' >>"$TF"
 api "chat-history demo-app2" "482913"; check "an answered question is gone" "$(jqt '.data.ask == null')"
 tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "clear"; tmux send-keys -t "=demo-app2:" Enter; sleep 0.3
+# chat-watch: long-poll on a token. wapi <session> <token> [seconds]; sets OUT and WSECS (elapsed).
+wapi() { local t0=$SECONDS; OUT="$(CLAUDERC_WATCH_SECS="${3:-2}" SSH_ORIGINAL_COMMAND="chat-watch $1" "$HOME/bin/claude-launcher-api" <<<"$(printf '0\n%s' "$2")")"; RC=$?; WSECS=$((SECONDS - t0)); }
+api "chat-history demo-app2" "0"; WH="$OUT"; WTOK="$(jq -r '.data.token' <<<"$WH")"
+check "chat-history carries a token" "$([[ "$WTOK" =~ ^v1\.[0-9.]+\.[01]{2}[0-4]\.[0-9]+$ ]]; echo $?)"
+wapi demo-app2 ""
+check "chat-watch with no token answers at once like chat-history, with changed:true and the same token" "$(jqt '.ok and .data.changed==true and .data.token=="'"$WTOK"'"')"
+check "...and the same messages as chat-history" "$([[ "$(jq -c '.data.messages' <<<"$OUT")" == "$(jq -c '.data.messages' <<<"$WH")" ]]; echo $?)"
+wapi demo-app2 "$WTOK" 2
+check "chat-watch with the current token waits, then answers changed:false" "$(jqt '.ok and .data.changed==false and .data.token=="'"$WTOK"'" and (.data|has("messages")|not)')"
+check "...after the wait time (2-4 s)" "$([[ $WSECS -ge 2 && $WSECS -le 4 ]]; echo $?)"
+( sleep 1; echo '{"type":"assistant","uuid":"w1","timestamp":"2026-09-29T10:03:00Z","message":{"role":"assistant","content":[{"type":"text","text":"watched reply"}]}}' >>"$TF" ) &
+wapi demo-app2 "$WTOK" 10; wait
+check "a new transcript line ends the wait with the new message within 4 s" "$(jqt '.data.changed==true and .data.messages[-1].text=="watched reply" and .data.token!="'"$WTOK"'"')"
+check "...the wait was short" "$([[ $WSECS -le 4 ]]; echo $?)"
+WTOK="$(jq -r '.data.token' <<<"$OUT")"
+( sleep 1; tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "❯ 1. Red" ) &
+wapi demo-app2 "$WTOK" 10; wait
+check "the pane turning into a numbered menu ends the wait with waiting:true" "$(jqt '.data.changed==true and .data.waiting==true')"
+tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "clear"; tmux send-keys -t "=demo-app2:" Enter; sleep 0.3
+wapi demo-app2 'bad token; $(id)' 2
+check "a token with odd characters is treated as empty" "$(jqt '.ok and .data.changed==true')"
+api "chat-history demo-app2" "0"; WTOK="$(jq -r '.data.token' <<<"$OUT")"
+for i in 1 2; do ( CLAUDERC_WATCH_SECS=6 SSH_ORIGINAL_COMMAND="chat-watch demo-app2" "$HOME/bin/claude-launcher-api" <<<"$(printf '0\n%s' "$WTOK")" >"$WORK/watch$i.out" ) & done
+sleep 2; wapi demo-app2 "$WTOK" 6
+check "a third watcher on one session gets retry:true at once" "$(jqt '.ok and .data.retry==true and .data.changed==false and .data.token==""')"
+check "...without waiting" "$([[ $WSECS -le 2 ]]; echo $?)"
+wait
+check "the two watchers in the slots finish normally" "$(jq -s -e 'all(.[]; .ok and .data.changed==false)' "$WORK/watch1.out" "$WORK/watch2.out" >/dev/null 2>&1; echo $?)"
+wapi demo-app2 "$WTOK" 2
+check "a slot is free again afterwards" "$(jqt '.ok and (.data.retry|not)')"
+api "chat-watch demo-app2 extra" "0"; check "chat-watch takes one session" "$(jqt '.error.code=="forbidden"')"
+api "chat-watch ../x" "0"; check "chat-watch refuses ../x" "$(jqt '.error.code=="forbidden"')"
+# A reader that has gone away: the heartbeat write fails and the watcher leaves, freeing its slot.
+( CLAUDERC_WATCH_SECS=30 CLAUDERC_WATCH_BEAT=1 SSH_ORIGINAL_COMMAND="chat-watch demo-app2" "$HOME/bin/claude-launcher-api" <<<"$(printf '0\n%s' "$WTOK")" | true )
+sleep 3
+pgrep -f -- '--api chat-watch demo-app2' >/dev/null; [[ $? -ne 0 ]]; check "a watcher whose reader closed the pipe is gone within 3 s" $?
+tmux new-session -d -s wkill -x 100 -y 30 cat; sleep 0.5
+wapi wkill ""; KT="$(jq -r '.data.token' <<<"$OUT")"
+( sleep 1; tmux kill-session -t =wkill ) &
+wapi wkill "$KT" 20; wait
+check "a killed session ends the watch with an error" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+check "...within 3 s" "$([[ $WSECS -le 3 ]]; echo $?)"
 # Over 20,000 bytes is refused, never cut short and sent.
 CLOG="$HOME/.local/state/claude-launcher/chat.log"; csent() { grep -c $'\tsend$' "$CLOG" 2>/dev/null || true; }
 n0="$(csent)"
@@ -848,8 +885,6 @@ for bad in "queue-star" "queue-star demo-app2" "queue-star demo-app2 maybe" "que
   api "$bad"; check "runner refuses '$bad'" "$(jqt '.ok == false')"
 done
 api "queue-status"; check "queue-status: off by default, no chats" "$(jqt '.ok and .data.enabled==false and .data.parallel==1 and .data.max_5h==90 and .data.max_7d==95 and .data.chats==[]')"
-api "queue-star demo-app2 on" "000000"; check "queue-star on: wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
-api "queue-status"; check "...and nothing starred" "$(jqt '.data.chats==[]')"
 api "queue-star demo-app2 on" "482913"; check "queue-star on with the PIN" "$(jqt '.ok and .data.starred==true and .data.session=="demo-app2"')"
 api "sessions"; check "sessions carries the star" "$(jqt '(.data.sessions | map(select(.name=="demo-app2" and .starred==true)) | length)==1 and (.data.sessions | map(select(.name!="demo-app2" and .starred==true)) | length)==0')"
 grep -q "^\* \* \* \* \* '$HOME/.local/bin/claude-queue' >/dev/null 2>&1 # clauderc-queue$" "$STUB_STATE/crontab"
@@ -863,8 +898,6 @@ api "queue-star no-such-proj on" "482913"; check "queue-star: no such session re
 tmux new-session -d -s qbypass -x 100 -y 30 cat; sleep 0.3; tmux send-keys -t "=qbypass:" -l "⏵⏵ bypass permissions on (shift+tab to cycle)"; sleep 0.3
 api "queue-star qbypass on" "482913"; check "queue-star: bypass permissions mode refused" "$(jqt '.error.code=="unsafe_mode"')"
 tmux kill-session -t "=qbypass"
-api "queue-on" "000000"; check "queue-on: wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
-api "queue-status"; check "...still off" "$(jqt '.data.enabled==false')"
 api "queue-on" "482913"; check "queue-on with the PIN" "$(jqt '.ok and .data.enabled==true and (.data.chats | map(.session)==["demo-app2"]) and .data.chats[0].state=="idle"')"
 api "queue-off"; check "queue-off needs no PIN" "$(jqt '.ok and .data.enabled==false')"
 api "queue-star demo-app2 off"; check "un-star needs no PIN" "$(jqt '.ok and .data.starred==false')"
@@ -1273,20 +1306,13 @@ rm -rf "$P/ia" "$P/ib" "$P/ic" "$P/id" "$IBX" "$HOME/.config/claude-launcher/wor
 rm -f "$QD/queue.json" "$QSTATE"
 unset CLAUDERC_NOW
 
-api "chat-send demo-app2" $'000000\nhi'; check "chat send with a wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
-for _ in 1 2 3 4; do api "chat-open demo-app2" "000000"; done
-check "5 wrong PINs lock chat" "$(jqt '.error.code=="chat_locked"')"
-api "chat-open demo-app2" "482913"; check "locked even with the right PIN" "$(jqt '.error.code=="chat_locked"')"
-rm -f "$HOME/.config/claude-launcher/chat-locked"
-api "chat-open demo-app2" "482913"; check "deleting the lock file on the server unlocks" "$(jqt '.ok')"
+api "chat-open demo-app2" "000000"; check "any PIN line is accepted (PIN removed)" "$(jqt '.ok')"
 grep -q "482913\|line one" "$HOME/.local/state/claude-launcher/api.log" "$HOME/.local/state/claude-launcher/chat.log"; [[ $? -ne 0 ]]; check "PIN and message text never logged" $?
 grep -q "send" "$HOME/.local/state/claude-launcher/chat.log"; check "chat access log records opens and sends" $?
 api "chat-history demo-app2 extra"; check "chat-history takes one session" "$(jqt '.error.code=="forbidden"')"
 api "upload demo-app2" "$(printf '482913\n../../etc/pass wd.png\n'; printf 'hello image' | base64 -w0)"
 check "upload lands in <project>/uploads with a safe name" "$(jqt '.ok and .data.path=="uploads/pass_wd.png" and .data.bytes==11')"
 [[ "$(cat "$D2/uploads/pass_wd.png")" == "hello image" ]]; check "uploaded bytes intact" $?
-api "upload demo-app2" "$(printf '000000\nx.png\n'; printf 'x' | base64 -w0)"; check "upload needs the PIN" "$(jqt '.error.code=="wrong_pin"')"
-rm -f "$HOME/.local/state/claude-launcher/chat-pin-fails"
 api "chat-log"; check "chat log lists opens/sends/uploads, newest first" "$(jqt '.ok and .data[0].action=="upload" and any(.data[]; .action=="send")')"
 printf '%s\n' '{"type":"assistant","uuid":"a9","timestamp":"2026-09-29T10:01:00Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t9","name":"SendUserFile","input":{"files":["'"$D2"'/uploads/pass_wd.png"],"caption":"the shot"}}]}}' >>"$TD/99999999-0000-0000-0000-000000000000.jsonl"
 api "chat-history demo-app2" "482913"
@@ -1313,10 +1339,6 @@ api "chat-file demo-app2" "$(printf '482913\n%s' "$HOME/sent-by-claude.txt")"; c
 echo '{"type":"assistant","uuid":"a10","timestamp":"2026-09-29T10:03:00Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t10","name":"SendUserFile","input":{"files":["'"$HOME"'/sent-by-claude.txt"],"caption":"x"}}]}}' >>"$TD/99999999-0000-0000-0000-000000000000.jsonl"
 api "chat-file demo-app2" "$(printf '482913\n%s' "$HOME/sent-by-claude.txt")"; check "chat-file serves an outside file Claude sent in this conversation" "$(jqt '.ok and .data.name=="sent-by-claude.txt"')"
 rm -f "$HOME/sent-by-claude.txt"
-api "chat-file demo-app2" "$(printf '000000\n%s' "$D2/uploads/pass_wd.png")"
-check "chat-file needs the PIN" "$(jqt '.error.code=="wrong_pin"')"
-rm -f "$HOME/.local/state/claude-launcher/chat-pin-fails"
-rm -f "$HOME/.config/claude-launcher/chat-pin"
 
 echo "token services"
 api "status"
@@ -2173,8 +2195,8 @@ bash -n "$RS"; check "harden: the remote script parses (bash -n)" $?
 if command -v shellcheck >/dev/null; then shellcheck -s bash -S warning - <"$RS"; check "harden: the remote script is shellcheck clean" $?; fi
 # Safety-audit fixes (the script only runs as root on a host, so these check its text).
 ! grep -q 'ufw_do limit' "$RS"; check "harden: ssh ports are allowed, never rate-limited (would drop this server)" $?
-grep -q '^ignoreip = 127.0.0.1/8 ::1${client_ip:+ $client_ip}$' "$RS" && grep -q 'client_ip="${client_ip%% \*}"' "$RS"
-check "harden: fail2ban ignores this server's address" $?
+grep -q '^ignoreip = 127.0.0.1/8 ::1 100.64.0.0/10 fd7a:115c:a1e0::/48${client_ip:+ $client_ip}$' "$RS" && grep -q 'client_ip="${client_ip%% \*}"' "$RS"
+check "harden: fail2ban ignores this server's address and the tailnet" $?
 grep -q "ufw status 2>/dev/null | grep -q '^Status: active' && ufw_was=active" "$RS" &&
   grep -q "\[\[ \"\$ufw_was\" == inactive \]\] && revert+=' ufw disable;'" "$RS" && ! grep -q "^revert=.*ufw disable" "$RS"
 check "harden: the undo turns ufw off only when it was off before" $?
@@ -2886,6 +2908,434 @@ sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
 unset CLAUDERC_REBOOT_DELAY TMPDIR
 rm -f "$MS/sudo-mode" "$HOME/claude-setup.sh"
 if [[ -f "$WORK/authorized_keys.orig2" ]]; then cp "$WORK/authorized_keys.orig2" "$AK"; else rm -f "$AK"; fi
+
+# ---- Copy between servers (docs/copy-design.md): A is this test HOME, B is a second HOME ($HB) with its own scripts and the REAL
+# claude-backup. A stub ssh plays B's sshd: it honours the clauderc-copy line (key, from=, expiry-time, forced command).
+echo "copy between servers"
+export HB="$WORK/homeB"; SB="$WORK/stubB"
+mkdir -p "$HB/bin" "$HB/.local/bin" "$HB/.ssh" "$SB"
+cp "$HERE"/stubs/* "$HB/.local/bin/"
+cp "$SERVER/claude-backup" "$HB/.local/bin/claude-backup"
+cp "$SERVER/claude-setup.sh" "$SERVER/claude-launcher-api" "$HB/bin/"
+chmod +x "$HB/bin/"* "$HB/.local/bin/"*
+apiB() { OUT="$(HOME="$HB" STUB_STATE="$SB" PATH="$HB/.local/bin:$PATH" SSH_ORIGINAL_COMMAND="$1" "$HB/bin/claude-launcher-api" <<<"${2:-}")"; RC=$?; }
+apiB status
+echo 'ALLOW_RUN=1' >>"$HB/.config/claude-launcher/config"
+CA="$HOME/.config/claude-launcher"; CB="$HB/.config/claude-launcher"; AKB="$HB/.ssh/authorized_keys"
+HOST_SRC="$(hostname -s 2>/dev/null | tr -cd 'A-Za-z0-9-' | cut -c1-40)"; [[ -n "$HOST_SRC" ]] || HOST_SRC=other
+# the stub ssh: a probe (user clauderc-probe) or a send into B's receive --copy
+cat >"$HOME/.local/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+S="$STUB_STATE"
+echo "$*" >"$S/ssh-argv"
+key="" kh="" user=""
+while (($#)); do
+  case "$1" in
+    -i) key="$2"; shift 2 ;;
+    -o) case "$2" in UserKnownHostsFile=*) kh="${2#*=}" ;; esac; shift 2 ;;
+    -p | -F) shift 2 ;;
+    -T) shift ;;
+    *@*) user="${1%@*}"; shift; break ;;
+    *) shift ;;
+  esac
+done
+[[ -n "$kh" && -f "$kh" ]] && cp "$kh" "$S/ssh-known-hosts"
+if [[ -e "$S/ssh-down" ]]; then echo "ssh: connect to host x port 22: Connection timed out" >&2; exit 255; fi
+if [[ -e "$S/ssh-wrongkey" ]]; then echo "Host key verification failed." >&2; exit 255; fi
+if [[ "$user" == clauderc-probe ]]; then echo "clauderc-probe@x: Permission denied (publickey)." >&2; exit 255; fi
+[[ -e "$S/ssh-fail" ]] && { echo "Host key verification failed." >&2; exit 255; }
+# play sshd on B: find the clauderc-copy line for this key
+pub="$(ssh-keygen -y -P '' -f "$key" 2>/dev/null | awk '{print $2}')"
+line="$(grep -F " $pub " "$HB/.ssh/authorized_keys" 2>/dev/null | grep ' clauderc-copy$' | head -n 1)"
+[[ -n "$line" ]] || { echo "Permission denied (publickey)." >&2; exit 255; }
+exp="$(sed -n 's/.*expiry-time="\([0-9]*\)Z".*/\1/p' <<<"$line")"
+[[ -z "$exp" || "$exp" -ge "$(date -u +%Y%m%d%H%M)" ]] || { echo "Permission denied (publickey)." >&2; exit 255; }
+from="$(sed -n 's/.*from="\([^"]*\)".*/\1/p' <<<"$line")"
+[[ -z "$from" || "$from" == "$(cat "$S/client-ip" 2>/dev/null)" ]] || { echo "Permission denied (publickey)." >&2; exit 255; }
+cmd="$(sed -n 's/^restrict,command="\([^"]*\)".*/\1/p' <<<"$line")"
+[[ -n "$cmd" ]] || { echo "no forced command" >&2; exit 255; }
+[[ -e "$S/ssh-sleep" ]] && sleep "$(cat "$S/ssh-sleep")"
+cd "$HB" && HOME="$HB" PATH="$HB/.local/bin:$PATH" SSH_ORIGINAL_COMMAND="${*:-}" exec $cmd
+EOF
+chmod +x "$HOME/.local/bin/ssh"
+echo 203.0.113.9 >"$STUB_STATE/client-ip"
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
+mkdir -p "$HOME/projects" "$HB/projects"
+cstat() { # cstat A|B <jq condition> [tries]
+  local i
+  for ((i = 0; i < ${3:-100}; i++)); do
+    if [[ "$1" == A ]]; then api "copy-status"; else apiB "copy-status"; fi
+    [[ "$(jqt "$2")" == 0 ]] && return 0
+    sleep 0.3
+  done
+  return 1
+}
+DONE='.data.phase=="done" or .data.phase=="failed"'
+cpub() { api "copy-keygen"; jq -r .data.public_key <<<"$OUT"; }
+# copy_flow <kind> <project|-> <A's chosen lines> <policy> <B's overwrite lines>: keygen, authorize, send, apply; leaves B's final status in OUT
+copy_flow() {
+  local pub args=() chosen="$3"
+  pub="$(cpub)"
+  apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$pub" 203.0.113.9 30)"
+  [[ "$(jqt '.ok')" == 0 ]] || return 1
+  [[ "$1" == secrets ]] && args=(secrets) || args=("$1" "$2")
+  api "copy-send ${args[*]}" "$(printf '%s\n%s\n%s\n%s\n%s%s' 192.0.2.20 2222 bob ssh-ed25519 "$KB" "${chosen:+$'\n'$chosen}")"
+  [[ "$(jqt '.ok and .data.started')" == 0 ]] || return 2
+  cstat A "$DONE" 150 || return 3
+  [[ "$(jqt '.data.phase=="done"')" == 0 ]] || return 4
+  CFILE="$(jq -r .data.file <<<"$OUT")"
+  apiB "copy-apply $CFILE" "$(printf '%s%s' "$4" "${5:+$'\n'$5}")"
+  [[ "$(jqt '.ok and .data.started')" == 0 ]] || return 5
+  cstat B "$DONE" 150 || return 6
+}
+
+echo "copy: runner allowlist"
+for bad in "copy-list" "copy-list x" "copy-list secrets x" "copy-list project" "copy-list project ../x" "copy-list project .hidden;id" "copy-list project a b" \
+  "copy-list bundle" "copy-list other demo" "copy-keygen x" "copy-authorize x" "copy-probe x" "copy-status x" "copy-cancel x" "copy-send" "copy-send secrets x" \
+  "copy-send project" "copy-send project a/b" "copy-send bundle a b" "copy-send everything x" "copy-apply" "copy-apply x" "copy-apply ../copy-20260101-000001.tgz" \
+  "copy-apply copy-20260101-000001.tgz x" "copy-apply copy-20260101-000001.tgzx" "copy-apply copy-1.tgz" "copy-apply -copy-20260101-000001.tgz" \
+  "copy-apply copy-20260101-000001.tgz;id" "copy-apply /etc/passwd"; do
+  api "$bad"
+  check "copy: runner refuses '${bad:0:40}'" "$(jqt '.ok==false and (.error.code=="forbidden" or .error.code=="bad_args")')"
+done
+for bad in "copy-list project a b" "copy-send project a b c"; do
+  api "$bad"; [[ "$(jqt '.ok==false')" == 0 ]]; check "copy: '$bad' is not run" $?
+done
+
+echo "copy: gating and keygen"
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
+api "copy-authorize" "$(printf '%s\n%s' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGatedGatedGatedGatedGatedGatedGatedGatedGatedGa gated' 203.0.113.5)"
+check "copy-authorize: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+api "copy-send secrets" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")"
+check "copy-send: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+api "copy-apply copy-20260101-000001.tgz" "new-only"
+check "copy-apply: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
+api "copy-keygen"
+check "copy-keygen: a clauderc-copy ed25519 key and a tailnet_ip string" "$(jqt '.ok and (.data.public_key | test("^ssh-ed25519 [A-Za-z0-9+/]+=* clauderc-copy$")) and (.data.tailnet_ip | type == "string")')"
+P1="$(jq -r .data.public_key <<<"$OUT")"
+[[ "$(stat -c %a "$CA/copy/key")" == 600 && "$(stat -c %a "$CA/copy")" == 700 ]]; check "copy-keygen: key 600, folder 700" $?
+api "copy-keygen"
+[[ "$(jq -r .data.public_key <<<"$OUT")" != "$P1" ]]; check "copy-keygen: a NEW key every time" $?
+printf '#!/bin/sh\necho 100.101.102.103\n' >"$HOME/.local/bin/tailscale"; chmod +x "$HOME/.local/bin/tailscale"
+api "copy-keygen"; check "copy-keygen: reports tailscale ip -4" "$(jqt '.data.tailnet_ip=="100.101.102.103"')"
+printf '#!/bin/sh\necho not-an-ip\n' >"$HOME/.local/bin/tailscale"
+api "copy-keygen"; check "copy-keygen: junk from tailscale becomes empty" "$(jqt '.data.tailnet_ip==""')"
+rm -f "$HOME/.local/bin/tailscale"
+
+echo "copy: authorize"
+PUBA="$(cpub)"; BLOBA="$(awk '{print $2}' <<<"$PUBA")"
+printf '%s\n' 'ssh-ed25519 AAAAOTHERKEY phone' >"$AKB"
+apiB "migrate-authorize" "$(printf '%s\n%s' "$PUB2" 198.51.100.7)"
+check "B: a migrate line first" "$(jqt '.ok')"
+apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBA" 203.0.113.9 5)"
+check "copy-authorize ok" "$(jqt '.ok and .data.authorized')"
+EXP_GLOB="restrict,command=\"$HB/.local/bin/claude-backup receive --copy\",from=\"203.0.113.9\",expiry-time=\"????????????Z\" ssh-ed25519 $BLOBA clauderc-copy"
+OUT="$(cat "$AKB")"
+# EXP_GLOB is a glob on purpose.
+# shellcheck disable=SC2053
+[[ "$(grep -c ' clauderc-copy$' "$AKB")" == 1 && "$(grep ' clauderc-copy$' "$AKB")" == $EXP_GLOB ]]; check "copy-authorize writes exactly one restrict/command/from/expiry-time line" $?
+EXPV="$(sed -nE 's/.*expiry-time="([0-9]{12})Z".*/\1/p' "$AKB")"
+[[ "$EXPV" -ge "$(date -u -d '+4 minutes' +%Y%m%d%H%M)" && "$EXPV" -le "$(date -u -d '+6 minutes' +%Y%m%d%H%M)" ]]; check "...the expiry is 5 minutes ahead" $?
+[[ "$(grep -c ' clauderc-migrate$' "$AKB")" == 1 && "$(head -n 1 "$AKB")" == 'ssh-ed25519 AAAAOTHERKEY phone' && "$(stat -c %a "$AKB")" == 600 ]]; check "...the migrate line and the phone key are left alone" $?
+PUBA2="$(cpub)"; BLOBA2="$(awk '{print $2}' <<<"$PUBA2")"
+apiB "copy-authorize" "$PUBA2"
+[[ "$(grep -c ' clauderc-copy$' "$AKB")" == 1 && "$(grep -c "$BLOBA2" "$AKB")" == 1 && -z "$(grep "$BLOBA " "$AKB")" ]]; check "an older clauderc-copy line is replaced (no address: no from=, default minutes)" $?
+[[ "$(grep ' clauderc-copy$' "$AKB")" != *from=* ]]; check "...a missing address gives no from=" $?
+EXPV="$(sed -nE 's/.*expiry-time="([0-9]{12})Z".*/\1/p' "$AKB")"
+[[ "$EXPV" -ge "$(date -u -d '+119 minutes' +%Y%m%d%H%M)" && "$EXPV" -le "$(date -u -d '+121 minutes' +%Y%m%d%H%M)" ]]; check "...default 120 minutes" $?
+apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBA2" backup.example.com 720)"
+[[ "$(grep ' clauderc-copy$' "$AKB")" != *from=* && "$(jqt '.ok')" == 0 ]]; check "a host name gets no from=; 720 minutes is allowed" $?
+SUMK="$(cksum <"$AKB")"
+for bad in "ssh-rsa AAAAB3NzaC1yc2E x" "ssh-ed25519 AAAA;id" 'ssh-ed25519 AAAA"x' "" "ssh-ed25519 AAAA x
+ssh-ed25519 BBBB"; do
+  apiB "copy-authorize" "$bad"; check "copy-authorize refuses key '${bad:0:20}'" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+for m in 0 721 abc -5 99999 "5 5"; do
+  apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBA2" 203.0.113.9 "$m")"; check "copy-authorize refuses $m minutes" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBA2" 'a"b' 5)"; check "copy-authorize refuses a bad address" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+[[ "$(cksum <"$AKB")" == "$SUMK" ]]; check "refused authorizations changed nothing" $?
+# the two kinds never touch each other's lines
+apiB "migrate-authorize" "$(printf '%s\n%s' "$PUB2" 198.51.100.7)"
+[[ "$(grep -c ' clauderc-copy$' "$AKB")" == 1 && "$(grep -c ' clauderc-migrate$' "$AKB")" == 1 ]]; check "migrate-authorize leaves the copy line" $?
+apiB "copy-cancel"
+check "copy-cancel ok" "$(jqt '.ok and .data.cancelled')"
+[[ "$(grep -c ' clauderc-copy$' "$AKB")" == 0 && "$(grep -c ' clauderc-migrate$' "$AKB")" == 1 && "$(head -n 1 "$AKB")" == 'ssh-ed25519 AAAAOTHERKEY phone' ]]; check "copy-cancel removes the copy line only" $?
+# expiry pruning in status: an expired line and day-old copy files go, a live line stays
+apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBA2" 203.0.113.9 30)"
+sed 's/expiry-time="[0-9]*Z"/expiry-time="200001010000Z"/; s/ssh-ed25519 [A-Za-z0-9+\/]* clauderc-copy/ssh-ed25519 AAAAEXPIRED clauderc-copy/' <(grep ' clauderc-copy$' "$AKB") >>"$AKB"
+mkdir -p "$CB/copy"; echo old >"$CB/copy/copy-20200101-000001.tgz"; echo new >"$CB/copy/copy-20260101-000002.tgz"; touch -d '3 days ago' "$CB/copy/copy-20200101-000001.tgz"
+apiB "status"
+[[ "$(grep -c ' clauderc-copy$' "$AKB")" == 1 && -z "$(grep AAAAEXPIRED "$AKB")" && "$(grep -c "$BLOBA2" "$AKB")" == 1 ]]; check "status prunes an expired copy line and keeps the live one" $?
+[[ ! -e "$CB/copy/copy-20200101-000001.tgz" && -e "$CB/copy/copy-20260101-000002.tgz" ]]; check "status removes copy files older than a day" $?
+[[ "$(grep -c ' clauderc-migrate$' "$AKB")" == 1 ]]; check "pruning leaves the migrate line" $?
+apiB "copy-cancel"; rm -f "$CB/copy/"*
+
+echo "copy: probe"
+probe_in() { printf '%s\n%s\n%s\n%s' "$1" "$2" "$3" "$4"; }
+api "copy-probe" "$(probe_in 192.0.2.20 2222 ssh-ed25519 "$KB")"
+check "probe: Permission denied = reachable and key ok" "$(jqt '.ok and .data == {reachable:true, hostkey_ok:true}')"
+[[ "$(cat "$STUB_STATE/ssh-argv")" == *"-o BatchMode=yes"* && "$(cat "$STUB_STATE/ssh-argv")" == *"-o IdentitiesOnly=yes"* && "$(cat "$STUB_STATE/ssh-argv")" == *"-o StrictHostKeyChecking=yes"* && "$(cat "$STUB_STATE/ssh-argv")" == *"-p 2222 clauderc-probe@192.0.2.20 true" ]]; check "probe: batch, pinned host key, no agent, dummy user" $?
+[[ "$(cat "$STUB_STATE/ssh-known-hosts")" == "[192.0.2.20]:2222 ssh-ed25519 $KB" ]]; check "probe: known_hosts holds exactly the pinned key" $?
+[[ "$(cat "$STUB_STATE/ssh-argv")" != *"-i $HOME/.ssh"* && "$(cat "$STUB_STATE/ssh-argv")" == *"-i /"*"/none "* ]]; check "probe: an explicit missing identity (default keys off)" $?
+touch "$STUB_STATE/ssh-wrongkey"
+api "copy-probe" "$(probe_in 192.0.2.20 22 ssh-ed25519 "$KB")"
+check "probe: a wrong host key is reachable but not ok" "$(jqt '.ok and .data == {reachable:true, hostkey_ok:false}')"
+rm -f "$STUB_STATE/ssh-wrongkey"; touch "$STUB_STATE/ssh-down"
+api "copy-probe" "$(probe_in 192.0.2.20 22 ssh-ed25519 "$KB")"
+check "probe: a dead address is unreachable" "$(jqt '.ok and .data == {reachable:false, hostkey_ok:false}')"
+rm -f "$STUB_STATE/ssh-down"
+for bad in "bad host|22|ssh-ed25519|$KB" "h.example.com|0|ssh-ed25519|$KB" "h.example.com|22|ssh-dss|$KB" "h.example.com|22|ssh-ed25519|AAAA" "-oProxyCommand=x|22|ssh-ed25519|$KB"; do
+  IFS='|' read -r h p ty bl <<<"$bad"
+  api "copy-probe" "$(probe_in "$h" "$p" "$ty" "$bl")"; check "probe refuses '${bad:0:30}'" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+
+echo "copy: list"
+# A: a git project with a tracked, an untracked, an ignored and a junk file
+rm -rf "$HOME/projects/demo"; mkdir -p "$HOME/projects/demo"
+(cd "$HOME/projects/demo" && git init -q && printf 'tracked\n' >tracked.txt && printf '.env.local\nnode_modules/\n' >.gitignore &&
+  git add . && git commit -qm one && printf 'notes A\n' >notes.txt && printf 'SECRET=1\n' >.env.local && mkdir -p node_modules/x sub && echo j >node_modules/x/j.js && echo s >sub/deep.txt && echo u >"sub/my file é.txt")
+touch -d '2026-01-02 10:00' "$HOME/projects/demo/notes.txt"
+api "copy-list project demo"
+check "list project (git): untracked and ignored files only, junk excluded" "$(jqt '.ok and .data.exists==true and .data.truncated==false and ([.data.entries[].path] | sort) == [".env.local","notes.txt","sub/deep.txt","sub/my file é.txt"]')"
+check "list project: entries have path, size, mtime, mode" "$(jqt '(.data.entries | all((keys | sort) == ["mode","mtime","path","size"])) and (.data.entries[] | select(.path=="notes.txt") | .size==8 and .mtime>0)')"
+api "copy-list project nonesuch"
+check "list project: a missing folder is an empty list, exists false" "$(jqt '.ok and .data == {entries:[], truncated:false, exists:false}')"
+apiB "copy-list project demo"; check "list project on B: exists false" "$(jqt '.ok and .data.exists==false')"
+api "copy-list project ..hidden"; check "list project: a bad name is refused" "$(jqt '.ok==false')"
+mkdir -p "$HOME/projects/plain/a"; echo x >"$HOME/projects/plain/a/f.txt"; mkdir -p "$HOME/projects/plain/build"; echo y >"$HOME/projects/plain/build/o"
+api "copy-list project plain"; check "list project (no git): every file, junk excluded" "$(jqt '[.data.entries[].path] == ["a/f.txt"]')"
+ln -sfn "$WORK" "$HOME/projects/linked"
+api "copy-list project linked"; check "list project: a project folder that is a symlink out is refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+rm -f "$HOME/projects/linked"
+# secrets: A's env, files and the optional ones
+mkdir -p "$WORK/a-save"; for d in secret-files keystores apple; do [[ -e "$CA/$d" ]] && mv "$CA/$d" "$WORK/a-save/$d"; done
+[[ -e "$CA/env" ]] && cp -p "$CA/env" "$WORK/a-save/env"
+printf "export AAA_TOKEN='a1-secret-value'\nexport BBB_KEY='b1-secret-value'\nexport SAME_KEY='s'\nexport PATH='/evil'\nexport ANTHROPIC_BASE_URL='x'\nexport HTTPS_PROXY='x'\nexport NODE_OPTIONS='x'\nexport GIT_CONFIG_COUNT='x'\nexport SUDO_ASKPASS='x'\nexport PYTHONPATH='x'\nexport JAVA_TOOL_OPTIONS='x'\nexport GOOGLE_APPLICATION_CREDENTIALS='x'\nexport FOO_API_KEY='foo1'\n" >"$CA/env"; chmod 600 "$CA/env"
+mkdir -p "$CA/secret-files" "$CA/keystores" "$CA/apple"; echo 'file-secret-content' >"$CA/secret-files/X_FILE"; echo ks >"$CA/keystores/up.jks"; echo p8 >"$CA/apple/AuthKey.p8"
+api "copy-list secrets"
+check "list secrets: env names, secret files, optional keystore and apple key" "$(jqt '.ok and ([.data.entries[] | select(.optional != true) | .path] | sort) == ["env/AAA_TOKEN","env/ANTHROPIC_BASE_URL","env/BBB_KEY","env/FOO_API_KEY","env/GIT_CONFIG_COUNT","env/GOOGLE_APPLICATION_CREDENTIALS","env/HTTPS_PROXY","env/JAVA_TOOL_OPTIONS","env/NODE_OPTIONS","env/PATH","env/PYTHONPATH","env/SAME_KEY","env/SUDO_ASKPASS","secret-files/X_FILE"] and ([.data.entries[] | select(.optional == true) | .path] | sort) == ["apple/AuthKey.p8","keystores/up.jks"]')"
+[[ "$OUT" != *a1-secret-value* && "$OUT" != *file-secret-content* && "$OUT" != *b1-secret-value* ]]; check "list secrets: never a value" $?
+# bundle list: A has a repo with no remote
+rm -rf "$HOME/projects/demo2"; mkdir -p "$HOME/projects/demo2"
+(cd "$HOME/projects/demo2" && git init -q -b main && echo 1 >f && git add f && git commit -qm c1 && git branch base && echo 2 >f && git commit -qam c2 && git checkout -qb feat && echo 3 >f && git commit -qam c3 && git checkout -q main)
+api "copy-list bundle demo2"
+check "list bundle (source): the local branches, with commit counts and shas" "$(jqt '.ok and ([.data.entries[].path] | sort) == ["base","feat","main"] and (.data.entries[] | select(.path=="main") | .size==2 and (.mode | test("^[0-9a-f]{40}$")))')"
+SHA1="$(git -C "$HOME/projects/demo2" rev-parse base)"; SHAMAIN="$(git -C "$HOME/projects/demo2" rev-parse main)"
+# B has only the first commit (a repository of its own, fetched from A's branch base)
+git init -q -b main "$HB/projects/demo2" && git -C "$HB/projects/demo2" fetch -q "$HOME/projects/demo2" base && git -C "$HB/projects/demo2" update-ref refs/heads/main FETCH_HEAD && git -C "$HB/projects/demo2" reset -q --hard main
+apiB "copy-list bundle demo2" "$(printf 'main %s\nbase %s' "$SHAMAIN" "$SHA1")"
+check "list bundle (target, with name sha lines): only the commits it already has" "$(jqt '.ok and ([.data.entries[].path]) == ["base"]')"
+
+echo "copy: send and apply a project (missing on B = the whole folder)"
+copy_flow project demo "." new-only ""; echo "  (flow rc=$?)" >/dev/null
+check "copy flow: send then apply reach done" "$(jqt '.data.phase=="done"')"
+check "result: copied the files, no refusals" "$(jqt '(.data.result.copied | index("tracked.txt")) != null and (.data.result.copied | index(".git/HEAD")) != null and (.data.result.copied | index("notes.txt")) != null and .data.result.refused == [] and .data.result.key_removed==true')"
+[[ "$(cat "$HB/projects/demo/notes.txt")" == "notes A" && "$(cat "$HB/projects/demo/tracked.txt")" == tracked && "$(cat "$HB/projects/demo/sub/my file é.txt")" == u && -d "$HB/projects/demo/.git" && ! -e "$HB/projects/demo/node_modules" ]]; check "B has the project with .git, without junk" $?
+git -C "$HB/projects/demo" log --oneline | grep -q one; check "B's repo has the history" $?
+[[ "$(stat -c %Y "$HB/projects/demo/notes.txt")" == "$(stat -c %Y "$HOME/projects/demo/notes.txt")" ]]; check "mtimes are kept" $?
+[[ ! -e "$CA/copy/key" && ! -e "$CA/copy/key.pub" && ! -e "$CA/copy/known_hosts" && ! -e "$CA/copy/chosen" && -z "$(ls -d "$CA"/copy/send.* 2>/dev/null)" ]]; check "A: the private key, known_hosts and temp tarball are gone after a good send" $?
+[[ "$(cat "$STUB_STATE/ssh-known-hosts")" == "[192.0.2.20]:2222 ssh-ed25519 $KB" ]]; check "send: pinned host key in known_hosts" $?
+[[ "$(cat "$STUB_STATE/ssh-argv")" == *"-o BatchMode=yes"* && "$(cat "$STUB_STATE/ssh-argv")" == *"-o StrictHostKeyChecking=yes"* && "$(cat "$STUB_STATE/ssh-argv")" == *"-p 2222 bob@192.0.2.20 receive" ]]; check "send: same ssh options as migrate" $?
+[[ -z "$(grep ' clauderc-copy$' "$AKB")" && ! -e "$CB/copy/$CFILE" ]]; check "B: the key line and the copy file are gone after apply" $?
+[[ -z "$(ls -d "$CB"/copy/stage.* 2>/dev/null)" ]]; check "B: no staging folder is left" $?
+[[ -e "$HOME/projects/demo/tracked.txt" && -e "$HOME/projects/demo/notes.txt" ]]; check "A: nothing deleted" $?
+
+echo "copy: an existing project (untracked files only), policies and backups"
+printf 'notes B older\n' >"$HB/projects/demo/notes.txt"; touch -d '2026-01-01 10:00' "$HB/projects/demo/notes.txt"
+printf 'SECRET=B\n' >"$HB/projects/demo/.env.local"; touch -d '2026-03-01 10:00' "$HB/projects/demo/.env.local"
+touch -d '2026-02-01 10:00' "$HOME/projects/demo/.env.local"
+printf 'SECRET=1\n' >"$HOME/projects/demo/.env.local"; touch -d '2026-02-01 10:00' "$HOME/projects/demo/.env.local"
+copy_flow project demo "" new-only ""
+check "new-only: nothing existing is overwritten" "$(jqt '.data.phase=="done" and (.data.result.copied | index("sub/deep.txt")) == null and ([.data.result.skipped[].path] | index("notes.txt")) != null and ([.data.result.skipped[].path] | index(".env.local")) != null')"
+[[ "$(cat "$HB/projects/demo/notes.txt")" == "notes B older" && "$(cat "$HB/projects/demo/.env.local")" == "SECRET=B" ]]; check "new-only: B's files are as they were" $?
+[[ -z "$(ls -d "$HB"/backups/pre-copy-* 2>/dev/null)" ]]; check "new-only: nothing to back up" $?
+copy_flow project demo "" newer ""
+check "newer: A's newer file replaces B's older one; B's newer one stays" "$(jqt '.data.phase=="done" and (.data.result.copied | index("notes.txt")) != null and ([.data.result.skipped[] | select(.path==".env.local") | .reason] == ["exists"])')"
+[[ "$(cat "$HB/projects/demo/notes.txt")" == "notes A" && "$(cat "$HB/projects/demo/.env.local")" == "SECRET=B" ]]; check "newer: contents" $?
+BK="$(ls -d "$HB"/backups/pre-copy-* | head -n 1)"
+[[ "$(cat "$BK/notes.txt")" == "notes B older" && "$(stat -c %a "$BK")" == 700 ]]; check "B's version was kept in ~/backups/pre-copy-<time>/ (folder 700)" $?
+copy_flow project demo "" newer ".env.local"
+check "newer + a named path: B's newer file is overwritten when named" "$(jqt '.data.phase=="done" and (.data.result.copied | index(".env.local")) != null')"
+[[ "$(cat "$HB/projects/demo/.env.local")" == "SECRET=1" && "$(cat "$(ls -d "$HB"/backups/pre-copy-* | tail -n 1)/.env.local")" == "SECRET=B" ]]; check "...and backed up first" $?
+[[ -d "$HB/projects/demo/.git" && "$(git -C "$HB/projects/demo" log --oneline | wc -l)" == 1 ]]; check "an existing project's .git is never touched" $?
+printf 'notes B3\n' >"$HB/projects/demo/notes.txt"; touch -d '2026-01-02 10:00' "$HB/projects/demo/notes.txt"
+copy_flow project demo "notes.txt" newer ""
+check "same mtime but different content: skipped unless named" "$(jqt '.data.phase=="done" and ([.data.result.skipped[] | select(.path=="notes.txt") | .reason] == ["exists"])')"
+[[ "$(cat "$HB/projects/demo/notes.txt")" == "notes B3" ]]; check "...B's file kept" $?
+
+echo "copy: refused archives (crafted tar files put straight into B's copy folder)"
+mkcopy() { # mkcopy <name> <project> <spec json: [{name,type,target?,data?}]>: a copy file with a matching manifest
+  python3 -I - "$CB/copy/$1" "$2" "$3" <<'PY'
+import io, json, sys, tarfile
+out, proj, spec = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
+files = [{"path": m["name"], "size": 1, "mtime": 1, "mode": "644"} for m in spec if m["type"] in ("file", "sym")]
+man = json.dumps({"version": 1, "kind": "project", "project": proj, "source": "a", "files": files, "branches": []}).encode()
+with tarfile.open(out, "w:gz") as t:
+    ti = tarfile.TarInfo(".clauderc-copy.json"); ti.size = len(man); t.addfile(ti, io.BytesIO(man))
+    for m in spec:
+        ti = tarfile.TarInfo(m["name"])
+        if m["type"] == "file":
+            d = m.get("data", "x").encode(); ti.size = len(d); t.addfile(ti, io.BytesIO(d))
+        elif m["type"] == "sym":
+            ti.type = tarfile.SYMTYPE; ti.linkname = m["target"]; t.addfile(ti)
+        elif m["type"] == "hard":
+            ti.type = tarfile.LNKTYPE; ti.linkname = m["target"]; t.addfile(ti)
+        elif m["type"] == "dir":
+            ti.type = tarfile.DIRTYPE; t.addfile(ti)
+PY
+}
+bad_apply() { # bad_apply <label> <project> <spec> <jq condition on the final status>
+  mkdir -p "$CB/copy"; chmod 700 "$CB/copy"
+  mkcopy copy-20260202-000001.tgz "$2" "$3"
+  apiB "copy-apply copy-20260202-000001.tgz" "new-only"
+  cstat B "$DONE" 100
+  check "$1" "$(jqt "$4")"
+  rm -f "$CB/copy/copy-20260202-000001.tgz"
+}
+rm -rf "$WORK/outside"; mkdir -p "$WORK/outside"
+bad_apply "tar: a ../ member is refused, nothing written" evil '[{"name":"../escape.txt","type":"file"}]' '.data.phase=="failed" and (.data.error | test("unsafe member"))'
+[[ ! -e "$HB/projects/escape.txt" && ! -e "$HB/escape.txt" && ! -e "$HB/projects/evil" ]]; check "...(no file outside, no project folder made)" $?
+bad_apply "tar: a ./../ member is refused" evil '[{"name":"a/../../escape.txt","type":"file"}]' '.data.phase=="failed"'
+bad_apply "tar: an absolute member is refused" evil '[{"name":"/tmp/copy-abs-test.txt","type":"file"}]' '.data.phase=="failed" and (.data.error | test("unsafe member"))'
+[[ ! -e /tmp/copy-abs-test.txt ]]; check "...(nothing written to /tmp)" $?
+bad_apply "tar: a file below a symlink is refused" evil "[{\"name\":\"lnk\",\"type\":\"sym\",\"target\":\"$WORK/outside\"},{\"name\":\"lnk/pwned.txt\",\"type\":\"file\"}]" '.data.phase=="failed" and (.data.error | test("below a symlink"))'
+[[ -z "$(ls "$WORK/outside")" ]]; check "...(nothing reached the folder the link points to)" $?
+bad_apply "tar: a symlink then a file through it with ../ target is refused" evil '[{"name":"d","type":"sym","target":"../../.."},{"name":"d/pwned2.txt","type":"file"}]' '.data.phase=="failed"'
+bad_apply "tar: a hardlink member is refused" evil '[{"name":"h1","type":"file"},{"name":"h2","type":"hard","target":"h1"}]' '.data.phase=="failed" and (.data.error | test("plain file"))'
+bad_apply "tar: the same name twice is refused" evil '[{"name":"dup","type":"file"},{"name":"dup","type":"sym","target":"/etc"}]' '.data.phase=="failed" and (.data.error | test("twice"))'
+python3 -I - "$CB/copy/copy-20260202-000001.tgz" <<'PY'
+import io, json, sys, tarfile
+man = json.dumps({"version": 1, "kind": "project", "project": "evil", "source": "a", "files": [], "branches": []}).encode()
+with tarfile.open(sys.argv[1], "w:gz") as t:
+    ti = tarfile.TarInfo(".clauderc-copy.json"); ti.size = len(man); t.addfile(ti, io.BytesIO(man))
+    ti = tarfile.TarInfo("unlisted.txt"); ti.size = 1; t.addfile(ti, io.BytesIO(b"x"))
+PY
+apiB "copy-apply copy-20260202-000001.tgz" "new-only"; cstat B "$DONE" 100
+check "tar: a file the manifest doesn't list is refused" "$(jqt '.data.phase=="failed" and (.data.error | test("manifest doesn.t list"))')"
+rm -f "$CB/copy/copy-20260202-000001.tgz"; rm -rf "$HB/projects/evil"
+bad_apply "tar: a symlink that points outside is listed as refused, never placed" evil '[{"name":"ok.txt","type":"file"},{"name":"out","type":"sym","target":"../../../etc"},{"name":"abs","type":"sym","target":"/etc/passwd"},{"name":"fine","type":"sym","target":"ok.txt"}]' \
+  '.data.phase=="done" and ([.data.result.refused[].path] | sort) == ["abs","out"] and (.data.result.copied | sort) == ["fine","ok.txt"]'
+[[ ! -e "$HB/projects/evil/out" && ! -L "$HB/projects/evil/out" && ! -L "$HB/projects/evil/abs" && -L "$HB/projects/evil/fine" ]]; check "...only the safe symlink is in place" $?
+# a link that is only inside the archive's own tree because of another link: B's real folder d makes it climb out
+rm -rf "$HB/projects/evil"; mkdir -p "$HB/projects/evil/d"
+bad_apply "tar: a link that climbs out through B's real folder is refused" evil '[{"name":"d","type":"sym","target":"a/b/c/d"},{"name":"esc","type":"sym","target":"d/../../../../.ssh/authorized_keys"}]' \
+  '.data.phase=="done" and ([.data.result.refused[].path] | index("esc")) != null'
+[[ ! -L "$HB/projects/evil/esc" ]]; check "...(no such link was placed)" $?
+rm -rf "$HB/projects/evil"
+# a link already in B's tree: a file may not be written through it
+rm -rf "$HB/projects/evil"; mkdir -p "$HB/projects/evil"; ln -s "$WORK/outside" "$HB/projects/evil/viaB"
+bad_apply "a symlink already on B in the way: the file is refused, not written through it" evil '[{"name":"viaB/x.txt","type":"file"},{"name":"y.txt","type":"file"}]' \
+  '.data.phase=="done" and ([.data.result.refused[].path] == ["viaB/x.txt"]) and (.data.result.copied == ["y.txt"])'
+[[ -z "$(ls "$WORK/outside")" ]]; check "...(nothing in the folder the link points to)" $?
+rm -rf "$HB/projects/evil"
+mkdir -p "$CB/copy"; echo notatar >"$CB/copy/copy-20260202-000003.tgz"
+apiB "copy-apply copy-20260202-000003.tgz" "new-only"; cstat B "$DONE" 100
+check "a file that isn't an archive fails cleanly and stays for a retry" "$(jqt '.data.phase=="failed"')"
+[[ -e "$CB/copy/copy-20260202-000003.tgz" && -z "$(ls -d "$CB"/copy/stage.* 2>/dev/null)" ]]; check "...the copy file is kept, the staging folder is gone" $?
+apiB "copy-apply copy-20260202-000009.tgz" "new-only"; check "copy-apply: a file that isn't there" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+apiB "copy-apply copy-20260202-000003.tgz" "overwrite-all"; check "copy-apply: an unknown policy" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+apiB "copy-apply copy-20260202-000003.tgz" "$(printf 'new-only\n../x')"; check "copy-apply: an unsafe overwrite path" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+rm -f "$CB/copy/"*
+
+echo "copy: secrets (env merged by name, files 600/700, optional ones separate)"
+printf "export BBB_KEY='different-on-B'\nexport SAME_KEY='s'\n" >"$CB/env"; chmod 600 "$CB/env"
+copy_flow secrets - "" new-only ""
+check "secrets: done; AAA_TOKEN added, BBB_KEY a conflict, PATH refused" "$(jqt '.data.phase=="done" and (.data.result.env_added | sort) == ["AAA_TOKEN","FOO_API_KEY"] and .data.result.env_conflicts == ["BBB_KEY"] and ([.data.result.refused[].path] | sort) == ["env/ANTHROPIC_BASE_URL","env/GIT_CONFIG_COUNT","env/GOOGLE_APPLICATION_CREDENTIALS","env/HTTPS_PROXY","env/JAVA_TOOL_OPTIONS","env/NODE_OPTIONS","env/PATH","env/PYTHONPATH","env/SUDO_ASKPASS"] and (.data.result.copied == ["secret-files/X_FILE"])')"
+[[ "$(grep -c "^export AAA_TOKEN='a1-secret-value'$" "$CB/env")" == 1 && "$(grep -c "^export BBB_KEY='different-on-B'$" "$CB/env")" == 1 && "$(grep -c '^export SAME_KEY' "$CB/env")" == 1 && -z "$(grep -E '^export (PATH|ANTHROPIC_BASE_URL|HTTPS_PROXY|NODE_OPTIONS|GIT_CONFIG_COUNT|SUDO_ASKPASS|PYTHONPATH|JAVA_TOOL_OPTIONS|GOOGLE_APPLICATION_CREDENTIALS)=' "$CB/env")" && "$(grep -c "^export FOO_API_KEY='foo1'$" "$CB/env")" == 1 ]]; check "env: a missing name is added, an existing value is never changed, behaviour-changing names are never written" $?
+grep -qx FOO_API_KEY "$CB/custom-names"; check "env: a copied custom name is listed in custom-names" $?
+[[ "$(stat -c %a "$CB/env")" == 600 && "$(stat -c %a "$CB/secret-files")" == 700 && "$(stat -c %a "$CB/secret-files/X_FILE")" == 600 && "$(cat "$CB/secret-files/X_FILE")" == file-secret-content ]]; check "modes: env 600, secret-files 700, the file 600" $?
+[[ ! -e "$CB/keystores/up.jks" && ! -e "$CB/apple/AuthKey.p8" ]]; check "the optional keystore and Apple key are not copied unless ticked" $?
+jq -e '.env.AAA_TOKEN == "a1-secret-value" and .env.BBB_KEY == "different-on-B"' "$HB/.claude/settings.json" >/dev/null 2>&1; check "ensure_env_hook ran: Claude's settings have the new name" $?
+[[ -e "$(ls -d "$HB"/backups/pre-copy-* | tail -n 1)/env" ]]; check "B's env file was backed up before the merge" $?
+grep -rq "a1-secret-value" "$STUB_STATE/ssh-argv" "$CA/../claude-launcher/copy" "$HOME/.local/state/claude-launcher/api.log" "$HB/.local/state/claude-launcher/api.log" 2>/dev/null; [[ $? -ne 0 ]]; check "no secret value in argv, the api logs or a leftover file" $?
+copy_flow secrets - "keystores/up.jks
+apple/AuthKey.p8" new-only ""
+check "ticked optional files are copied" "$(jqt '.data.phase=="done" and (.data.result.copied | sort) == ["apple/AuthKey.p8","keystores/up.jks"]')"
+[[ "$(stat -c %a "$CB/keystores/up.jks")" == 600 && "$(stat -c %a "$CB/keystores")" == 700 && "$(stat -c %a "$CB/apple")" == 700 ]]; check "keystore 600 in a 700 folder" $?
+api "copy-send secrets" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+config"
+check "send: a path outside the secrets kinds is refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "copy-send secrets" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+secret-files/../../x"
+check "send: a ../ path is refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "copy-send secrets" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+migrate/key"
+check "send: migrate/ is never copyable" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "copy-send secrets" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+copy/key"
+check "send: copy/ is never copyable" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+rm -rf "$CA/secret-files" "$CA/keystores" "$CA/apple" "$CA/env"; for d in secret-files keystores apple env; do [[ -e "$WORK/a-save/$d" ]] && cp -a "$WORK/a-save/$d" "$CA/$d"; done
+
+echo "copy: bundle (B's local branches never move)"
+api "copy-send bundle demo2" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")"
+check "send before keygen: not_ready" "$(jqt '.ok==false and .error.code=="not_ready"')"
+MAINB="$(git -C "$HB/projects/demo2" rev-parse main)"
+copy_flow bundle demo2 "" new-only ""
+check "bundle: done, every branch fetched into from-<source>" "$(jqt '.data.phase=="done" and (.data.result.fetched | sort) == ["base","feat","main"]')"
+[[ "$(git -C "$HB/projects/demo2" rev-parse main)" == "$MAINB" && "$MAINB" == "$SHA1" ]]; check "B's local main did not move" $?
+[[ "$(git -C "$HB/projects/demo2" rev-parse "refs/remotes/from-$HOST_SRC/main")" == "$SHAMAIN" && "$(git -C "$HB/projects/demo2" rev-parse "refs/remotes/from-$HOST_SRC/feat")" == "$(git -C "$HOME/projects/demo2" rev-parse feat)" ]]; check "the branches are in refs/remotes/from-<source>/" $?
+copy_flow bundle demo2 "feat" new-only ""
+check "bundle with a chosen branch: only that one" "$(jqt '.data.result.fetched == ["feat"]')"
+rm -rf "$HB/projects/demo2"
+copy_flow bundle demo2 "main" new-only ""
+check "bundle into a missing repository: made, branch checked out" "$(jqt '.data.phase=="done" and .data.result.fetched == ["main"]')"
+[[ "$(git -C "$HB/projects/demo2" rev-parse HEAD)" == "$SHAMAIN" && "$(git -C "$HB/projects/demo2" rev-parse --abbrev-ref HEAD)" == main ]]; check "...with the commits" $?
+api "copy-send bundle demo2" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+bad;branch"
+check "send bundle: a bad branch name is refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+
+echo "copy: failures, key cleanup and busy"
+PUBF="$(cpub)"
+apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBF" 203.0.113.9 30)"
+touch "$STUB_STATE/ssh-fail"
+api "copy-send project demo" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+."
+check "send starts" "$(jqt '.ok and .data.started')"
+cstat A "$DONE" 100; check "a refused host key ends in failed" "$(jqt '.data.phase=="failed" and (.data.error | contains("Host key verification failed"))')"
+[[ ! -e "$CA/copy/key" && ! -e "$CA/copy/known_hosts" && -z "$(ls -d "$CA"/copy/send.* 2>/dev/null)" ]]; check "A: the private key, known_hosts and the temp tarball are gone after a FAILED send too" $?
+rm -f "$STUB_STATE/ssh-fail"
+apiB "copy-cancel"
+# an expired key: the stub plays sshd, which refuses it
+PUBE="$(cpub)"
+apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBE" 203.0.113.9 30)"
+sed -i 's/expiry-time="[0-9]*Z"/expiry-time="200001010000Z"/' "$AKB"
+api "copy-send project demo" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+."
+cstat A "$DONE" 100; check "an expired key line is not honoured (sshd's expiry-time)" "$(jqt '.data.phase=="failed" and (.data.error | contains("Permission denied"))')"
+apiB "copy-cancel"
+# wrong source address
+PUBW="$(cpub)"
+apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBW" 203.0.113.77 30)"
+api "copy-send project demo" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+."
+cstat A "$DONE" 100; check "from= pins the source address" "$(jqt '.data.phase=="failed"')"
+apiB "copy-cancel"
+# busy
+PUBB="$(cpub)"
+apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBB" 203.0.113.9 30)"
+echo 3 >"$STUB_STATE/ssh-sleep"
+api "copy-send project demo" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+."
+api "copy-send project demo" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+."
+check "a second send while one runs is busy" "$(jqt '.ok==false and .error.code=="busy"')"
+api "copy-keygen"; check "copy-keygen while a send runs is busy" "$(jqt '.ok==false and .error.code=="busy"')"
+api "copy-status"; check "copy-status while running: contract fields" "$(jqt '.ok and .data.job=="send" and (.data.phase=="pack" or .data.phase=="transfer") and (.data | keys) == ["bytes","error","file","job","message","pct","phase","started","updated"]')"
+cstat A "$DONE" 100; check "...and it finishes" "$(jqt '.data.phase=="done"')"
+rm -f "$STUB_STATE/ssh-sleep"
+api "migrate-status"; check "the copy job is invisible to migrate-status" "$(jqt '.data.phase != "pack" and .data.phase != "apply"')"
+apiB "copy-cancel"
+CF2="$(ls "$CB/copy" 2>/dev/null)"
+[[ -z "$CF2" ]]; check "copy-cancel removed the received copy file and all leftovers" $?
+apiB "copy-status"; check "copy-status on B after cancel still answers" "$(jqt '.ok')"
+
+echo "copy: migrate is unchanged next to copy"
+[[ "$(grep -c ' clauderc-migrate$' "$AKB")" == 1 ]]; check "B still has exactly the migrate line" $?
+api "migrate-keygen"; check "migrate-keygen still works with the shared helpers" "$(jqt '.ok and (.data.public_key | test(" clauderc-migrate$"))')"
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
+rm -f "$HOME/.local/bin/ssh" "$STUB_STATE/client-ip"
 
 echo "team MCP server"
 OUT="$(python3 "$HERE/test-team.py" 2>&1)"; check "clauderc-team MCP self-check" $?
