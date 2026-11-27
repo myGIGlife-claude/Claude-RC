@@ -421,6 +421,11 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean, onPh
                 }
             }
         }
+        var askOpen by remember { mutableStateOf(false) }
+        Row(Modifier.padding(horizontal = 10.dp)) {
+            androidx.compose.material3.AssistChip(onClick = { askOpen = true }, label = { Text("Ask…") }, modifier = Modifier.semantics { contentDescription = "Ask another session a question" })
+        }
+        if (askOpen) AskSessionSheet(vm, onClose = { askOpen = false })
         AttachmentStrip(attachments, onRemove = { vm.chats.removeAttachment(it) }, onRetry = { vm.chats.retryAttachment(it) })
         Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
             Row(Modifier.padding(start = 4.dp, end = 5.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
