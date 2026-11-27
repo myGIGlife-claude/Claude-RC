@@ -2,6 +2,8 @@ package life.mygig.clauderc.widget
 
 import org.junit.Test
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 
 class WidgetLayoutTest {
     @Test fun sizeClasses() {
@@ -79,5 +81,21 @@ class WidgetLayoutTest {
             usageLayout(250f, 100f, 3, showWeekly = true),
         )
         assertEquals(0, usageLayout(250f, 60f, 3, showWeekly = true).bars)
+    }
+}
+
+class WidgetSizeThresholdTest {
+    @Test fun widthThresholds() {
+        val h = 200f
+        assertEquals(WidthClass.COMPACT, sizeClass(0f, h).width)
+        assertEquals(WidthClass.COMPACT, sizeClass(179.9f, h).width)
+        assertEquals(WidthClass.MEDIUM, sizeClass(180f, h).width)
+        assertEquals(WidthClass.MEDIUM, sizeClass(319.9f, h).width)
+        assertEquals(WidthClass.EXPANDED, sizeClass(320f, h).width)
+    }
+
+    @Test fun shortBelow110dp() {
+        assertTrue(sizeClass(250f, 109.9f).short)
+        assertFalse(sizeClass(250f, 110f).short)
     }
 }
