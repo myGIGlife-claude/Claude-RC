@@ -26,7 +26,20 @@ data class ServerConfig(
     /** Pinned host key: algorithm name and base64 wire blob. */
     val hostKeyType: String,
     val hostKeyBlob: String,
+    /** Optional second address of the same server (its Tailscale address), tried first; "" = none. */
+    val tailnetHost: String = "",
 )
+
+/**
+ * Which addresses [SshRunner] dials for [cfg], in order. With a Tailscale address it goes first and [ServerConfig.host]
+ * is the fallback, unless [remembered] (the address that worked last, for a few minutes) is the normal host: then
+ * straight there. The same host key is pinned for every address.
+ */
+internal fun addressesToTry(cfg: ServerConfig, remembered: String?): List<String> {
+    val alt = cfg.tailnetHost.trim()
+    if (alt.isEmpty() || alt.equals(cfg.host, ignoreCase = true)) return listOf(cfg.host)
+    return if (remembered == cfg.host) listOf(cfg.host) else listOf(alt, cfg.host)
+}
 
 data class HostKeyInfo(val type: String, val blob: String) {
     val fingerprint: String get() = fingerprintOf(Base64.getDecoder().decode(blob))
@@ -68,11 +81,13 @@ internal data class SshConnectionKey(
     val hostKeyBlob: String,
     /** Base64 of the phone's public key blob (a ByteArray would compare by identity). */
     val identityBlob: String,
+    /** Part of the server's settings: editing it starts a fresh connection (and forgets which address worked). */
+    val tailnetHost: String = "",
 ) {
     companion object {
         fun of(config: ServerConfig, identity: Ed25519Identity) = SshConnectionKey(
             config.host, config.port, config.user, config.hostKeyType, config.hostKeyBlob,
-            Base64.getEncoder().encodeToString(identity.publicBlob),
+            Base64.getEncoder().encodeToString(identity.publicBlob), config.tailnetHost.trim(),
         )
     }
 }
@@ -190,6 +205,7 @@ object SshRunner {
     fun retireAll() {
         val idle = synchronized(poolLock) {
             generation++   // a connect in progress may be on the old network too: use it for its own call only
+            workedAt.clear()   // on another network the other address may be the quick one
             pool.entries.toList().filter { (k, p) -> retireLocked(k, p) }.map { it.value }
         }
         if (idle.isEmpty()) return
@@ -200,6 +216,7 @@ object SshRunner {
     fun closeAll() {
         val all = synchronized(poolLock) {
             generation++
+            workedAt.clear()
             val list = pool.values.toList()
             pool.clear()
             list.forEach { it.retired = true; it.closed = true }
@@ -238,6 +255,16 @@ object SshRunner {
     // One connect at a time per key, so parallel callers share it instead of each opening one.
     private val connectLocks = ConcurrentHashMap<SshConnectionKey, Any>()
 
+    private const val TAILNET_CONNECT_TIMEOUT_MS = 4_000
+    private const val REMEMBER_ADDRESS_MS = 5 * 60_000L
+    private data class Worked(val address: String, val at: Long)
+    // Guarded by poolLock: which address of a server connected last, so the next connect goes straight there.
+    private val workedAt = HashMap<SshConnectionKey, Worked>()
+
+    private fun rememberedAddress(key: SshConnectionKey): String? = synchronized(poolLock) {
+        workedAt[key]?.takeIf { System.currentTimeMillis() - it.at < REMEMBER_ADDRESS_MS }?.address
+    }
+
     private fun lease(key: SshConnectionKey, config: ServerConfig, identity: Ed25519Identity): Lease {
         synchronized(connectLocks.computeIfAbsent(key) { Any() }) {
             var gen = 0
@@ -255,11 +282,17 @@ object SshRunner {
                 gen = generation
             }
             stale?.let { runCatching { it.session.disconnect() } }
-            val fresh = Pooled(connect(config, identity))
+            val remembered = rememberedAddress(key)
+            val (session, address) = connect(config, identity, remembered)
+            val fresh = Pooled(session)
             synchronized(poolLock) {
                 fresh.users++
-                // closeAll ran during the connect: use it for this call only.
-                if (gen == generation) { pool[key] = fresh; startSweeper() } else fresh.retired = true
+                // closeAll ran during the connect: use it for this call only (and don't remember its address).
+                if (gen == generation) {
+                    pool[key] = fresh; startSweeper()
+                    // Only a change restarts the clock, so a skipped Tailscale address is tried again after a while.
+                    if (address != remembered) workedAt[key] = Worked(address, System.currentTimeMillis())
+                } else fresh.retired = true
             }
             return Lease(fresh, reused = false)
         }
@@ -309,14 +342,37 @@ object SshRunner {
         idle.forEach { runCatching { it.session.disconnect() } }
     }
 
-    /** A connected, authenticated session to [config] with the pinned host key; same checks and wording as ever. */
-    private fun connect(config: ServerConfig, identity: Ed25519Identity): Session {
+    /**
+     * A connected, authenticated session to [config] and the address it used. Each address in [addressesToTry]
+     * is dialled in turn (a Tailscale address with a short timeout, the last one with the normal one); any failure
+     * moves on to the next EXCEPT a host-key mismatch, which stops at once. Every address must show the same
+     * pinned key. When all fail, the normal host's error is the one thrown.
+     */
+    private fun connect(config: ServerConfig, identity: Ed25519Identity, remembered: String?): Pair<Session, String> {
+        val addresses = addressesToTry(config, remembered)
+        var last: SshFailure? = null
+        for ((i, address) in addresses.withIndex()) {
+            val isLast = i == addresses.lastIndex
+            try {
+                return connectTo(config, address, identity, if (isLast) CONNECT_TIMEOUT_MS else TAILNET_CONNECT_TIMEOUT_MS) to address
+            } catch (e: SshFailure) {
+                if (e.kind == SshFailure.Kind.HOST_KEY_CHANGED || isLast) throw e
+                last = e
+            }
+        }
+        throw last ?: SshFailure(SshFailure.Kind.NOT_CONFIGURED, "Server settings are incomplete")
+    }
+
+    /** One connect to [address] (the server's host or its Tailscale address) with the pinned host key; same checks and wording as ever. */
+    private fun connectTo(config: ServerConfig, address: String, identity: Ed25519Identity, connectTimeoutMs: Int): Session {
         val jsch = JSch()
         jsch.addIdentity("clauderc", identity.privatePem(), identity.publicBlob, null)
-        val pinned = PinnedRepository(config.host, config.port, config.hostKeyType, config.hostKeyBlob)
+        // Same pinned key whichever address is dialled: check() compares the key bytes only.
+        val pinned = PinnedRepository(address, config.port, config.hostKeyType, config.hostKeyBlob)
         jsch.hostKeyRepository = pinned
+        val viaTailnet = address != config.host
 
-        val session = jsch.getSession(config.user, config.host, config.port)
+        val session = jsch.getSession(config.user, address, config.port)
         session.setConfig("StrictHostKeyChecking", "yes")
         session.setConfig("PreferredAuthentications", "publickey")
         // Only accept the pinned key type, so the server can't pick another one.
@@ -335,7 +391,7 @@ object SshRunner {
         session.setDaemonThread(true)
 
         try {
-            session.connect(CONNECT_TIMEOUT_MS)
+            session.connect(connectTimeoutMs)
             return session
         } catch (e: JSchException) {
             session.disconnect()
@@ -343,7 +399,8 @@ object SshRunner {
             when {
                 pinned.mismatch -> throw SshFailure(
                     SshFailure.Kind.HOST_KEY_CHANGED,
-                    "The server's host key has changed. Refusing to connect.",
+                    if (viaTailnet) "The host key at the Tailscale address $address is not the pinned one. Refusing to connect."
+                    else "The server's host key has changed. Refusing to connect.",
                     e,
                 )
                 msg.contains("Auth fail", true) || msg.contains("auth cancel", true) ->
@@ -359,10 +416,10 @@ object SshRunner {
                         e,
                     )
                 msg.contains("timeout", true) ->
-                    throw SshFailure(SshFailure.Kind.TIMEOUT, "Timed out connecting to ${config.host}", e)
+                    throw SshFailure(SshFailure.Kind.TIMEOUT, "Timed out connecting to $address", e)
                 else -> throw SshFailure(
                     SshFailure.Kind.NETWORK,
-                    "Could not connect to ${config.host}:${config.port} ($msg)",
+                    "Could not connect to $address:${config.port} ($msg)",
                     e,
                 )
             }

@@ -21,11 +21,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import life.mygig.clauderc.data.PURPOSE_MAX
 import life.mygig.clauderc.data.PURPOSE_PRESETS
 import life.mygig.clauderc.data.Server
+import life.mygig.clauderc.data.TAILNET_HOST_MAX
 import life.mygig.clauderc.data.cleanPurpose
+import life.mygig.clauderc.data.cleanTailnetHost
+import life.mygig.clauderc.data.isValidTailnetHost
 
 /** "What is this server for?": free text plus preset chips. A chip fills the field; tapping the chosen chip again clears it. */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
@@ -57,14 +61,33 @@ fun PurposeField(value: String, onChange: (String) -> Unit, enabled: Boolean = t
     }
 }
 
-/** Edits one server's purpose; [onSave] gets the cleaned text ("" clears it). */
+/** The server's optional Tailscale address; shows an error (and the caller disables Save) while it isn't valid. */
 @Composable
-fun PurposeDialog(server: Server, onSave: (String) -> Unit, onDismiss: () -> Unit) {
+fun TailnetField(value: String, onChange: (String) -> Unit, enabled: Boolean = true) {
+    val valid = isValidTailnetHost(value)
+    OutlinedTextField(
+        value = value,
+        onValueChange = { onChange(it.filterNot { c -> c.isWhitespace() || c.isISOControl() }.take(TAILNET_HOST_MAX)) },
+        enabled = enabled,
+        label = { Text("Tailscale address (optional)") },
+        placeholder = { Text("e.g. 100.64.0.1") },
+        supportingText = { Text(if (valid) "Tried first; the normal address is the fallback." else "Enter an IP address or host name.") },
+        isError = !valid,
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
+    )
+}
+
+/** Edits one server's phone-only details; [onSave] gets the cleaned purpose and Tailscale address ("" clears either). */
+@Composable
+fun PurposeDialog(server: Server, onSave: (purpose: String, tailnetHost: String) -> Unit, onDismiss: () -> Unit) {
     var text by rememberSaveable(server.id) { mutableStateOf(server.purpose) }
+    var tailnet by rememberSaveable(server.id + ":tailnet") { mutableStateOf(server.tailnetHost) }
     AlertDialog(
         onDismissRequest = onDismiss,
         modifier = Modifier.widthIn(max = 420.dp),
-        title = { Text("What is this server for?") },
+        title = { Text("Edit server") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
@@ -73,14 +96,17 @@ fun PurposeDialog(server: Server, onSave: (String) -> Unit, onDismiss: () -> Uni
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 PurposeField(text, { text = it })
+                TailnetField(tailnet, { tailnet = it })
                 Text(
-                    "Saved in the app, not on the server. It shows next to the server wherever servers are listed.",
+                    "Saved in the app, not on the server. The purpose shows next to the server wherever servers are listed.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
-        confirmButton = { TextButton(onClick = { onSave(cleanPurpose(text)) }) { Text("Save") } },
+        confirmButton = {
+            TextButton(onClick = { onSave(cleanPurpose(text), cleanTailnetHost(tailnet)) }, enabled = isValidTailnetHost(tailnet)) { Text("Save") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
