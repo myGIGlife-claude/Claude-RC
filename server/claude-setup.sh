@@ -19,7 +19,7 @@ set -uo pipefail
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
 # 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id), 50 = grok worker kind, 51 = grok account sign-in (device code; worker-login-cancel), 52 = gemini account sign-in, fail-fast quota errors, 53 = starred-chat queue (queue-status/-on/-off/-star/-log, sessions.starred), 54 = worker-rename, 55 = inbox (inbox, inbox-dismiss)
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=55
+SCRIPT_API=56
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 CLAUDERC_API="${CLAUDERC_API:-https://api.github.com}"
@@ -4419,70 +4419,20 @@ do_disconnect() {
 }
 
 # ---- In-app chat ----------------------------------------------------------------
-# Chat needs a PIN on top of the phone's key. It lives only in this file on the
-# server (mode 600), so you can read it here if you forget it; no action ever
-# returns it. 5 wrong PINs lock chat for 30 minutes (or until you delete
-# chat-locked on the server).
-CHAT_PIN_FILE="$LAUNCHER_CONFIG_DIR/chat-pin"
-CHAT_LOCK="$LAUNCHER_CONFIG_DIR/chat-locked"
-CHAT_FAILS="$API_STATE_DIR/chat-pin-fails"
 CHAT_LOG="$API_STATE_DIR/chat.log"
-
-chat_pin() { sed -n 's/^PIN=\([0-9]\{6,12\}\)$/\1/p' "$CHAT_PIN_FILE" 2>/dev/null | head -n 1; }
-
-chat_locked_until() {
-  local t
-  [[ -f "$CHAT_LOCK" ]] || return 1
-  t=$(($(stat -c %Y "$CHAT_LOCK") + 1800))
-  if (($(date +%s) >= t)); then rm -f "$CHAT_LOCK"; return 1; fi
-  echo "$t"
-}
-
-# check_pin <pin>: returns, or ends the call with an error (counting failures).
-check_pin() {
-  local want n until
-  want="$(chat_pin)"
-  [[ -n "$want" ]] || api_err pin_not_set "Set a chat PIN in the app first."
-  # One guess at a time: parallel calls would each read the same fail count.
-  exec 8>>"$CHAT_FAILS.lock"; flock -w 10 8 || api_err busy "Try again in a moment."
-  if until="$(chat_locked_until)"; then
-    api_err chat_locked "Too many wrong PINs. Chat is locked until $(date -d "@$until" +%H:%M), or delete ~/.config/claude-launcher/chat-locked on the server."
-  fi
-  # Right PIN: let go of the lock now, or every chat call queues behind this one's work (busy after 10 s).
-  if [[ "$1" == "$want" ]]; then rm -f "$CHAT_FAILS"; exec 8>&-; return 0; fi
-  n=$(($(cat "$CHAT_FAILS" 2>/dev/null || echo 0) + 1))
-  echo "$n" >"$CHAT_FAILS"
-  if ((n >= 5)); then
-    rm -f "$CHAT_FAILS"; touch "$CHAT_LOCK"
-    api_err chat_locked "Too many wrong PINs. Chat is locked for 30 minutes (or delete ~/.config/claude-launcher/chat-locked on the server)."
-  fi
-  api_err wrong_pin "Wrong PIN ($((5 - n)) tries left). Forgot it? It's in ~/.config/claude-launcher/chat-pin on the server."
-}
-
 chat_log() { printf '%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" >>"$CHAT_LOG" 2>/dev/null; }
 
-# chat-pin-status: whether a PIN is set and whether chat is locked.
+# The chat PIN was removed (SCRIPT_API 56): the app lock guards the app. Apps still send a PIN line first; it is read and ignored.
+check_pin() { :; }
+
+# chat-pin-status / chat-pin-set: kept for older apps, which ask for a PIN they think is set; any PIN works.
 do_chat_pin_status() {
   [[ $# -eq 0 ]] || bad_args "chat-pin-status takes no arguments"
-  local set=false until
-  [[ -n "$(chat_pin)" ]] && set=true
-  until="$(chat_locked_until)" || until=""
-  api_ok "$(jq -cn --argjson s "$set" --arg u "$until" '{set:$s, locked_until:(if $u == "" then null else ($u|tonumber) end)}')"
+  api_ok '{"set":true,"required":false,"locked_until":null}'
 }
-
-# chat-pin-set: stdin = new PIN, then the current PIN when one is set.
 do_chat_pin_set() {
   [[ $# -eq 0 ]] || bad_args "chat-pin-set takes no arguments"
-  local new old tmp
-  new="$(read_secret_line)"; old="$(read_secret_line)"
   exec 0</dev/null
-  [[ "$new" =~ ^[0-9]{6,12}$ ]] || api_err invalid_name "The PIN must be 6 to 12 digits."
-  [[ -z "$(chat_pin)" ]] || check_pin "$old"
-  mkdir -p "$LAUNCHER_CONFIG_DIR"
-  tmp="$(mktemp "$CHAT_PIN_FILE.XXXXXX")"; chmod 600 "$tmp"
-  printf '# cLaudeRC chat PIN. The app never shows it; this file is how you get it back.\n# Delete this file to remove the PIN (then set a new one in the app).\nPIN=%s\n' "$new" >"$tmp"
-  mv "$tmp" "$CHAT_PIN_FILE"
-  chat_log - pin-set
   api_ok '{"set":true}'
 }
 

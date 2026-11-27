@@ -766,13 +766,9 @@ api "login-token youtube" "x"; check "youtube can't be set with login-token" "$(
 rm -f "$HOME/.config/claude-launcher/env" "$HOME/.claude.json"
 
 echo "in-app chat"
-api "chat-pin-status"; check "chat PIN not set yet" "$(jqt '.ok and (.data.set|not)')"
-api "chat-open demo-app2" "123456"; check "chat needs a PIN first" "$(jqt '.error.code=="pin_not_set"')"
-api "chat-pin-set" "12ab"; check "PIN must be 6-12 digits" "$(jqt '.error.code=="invalid_name"')"
-api "chat-pin-set" "482913"; check "PIN set" "$(jqt '.ok and .data.set')"
-[[ "$(stat -c %a "$HOME/.config/claude-launcher/chat-pin")" == 600 ]] && grep -q '^PIN=482913$' "$HOME/.config/claude-launcher/chat-pin"; check "PIN file readable only on the server (600)" $?
-api "chat-pin-set" $'111111\n000000'; check "changing the PIN needs the current one" "$(jqt '.error.code=="wrong_pin"')"
-rm -f "$HOME/.local/state/claude-launcher/chat-pin-fails"
+api "chat-pin-status"; check "chat PIN gone: older apps see one set, not required" "$(jqt '.ok and .data.set and .data.required==false')"
+api "chat-pin-set" "12ab"; check "chat-pin-set is a harmless no-op for older apps" "$(jqt '.ok')"
+[[ ! -e "$HOME/.config/claude-launcher/chat-pin" ]]; check "...and stores nothing" $?
 D2="$(tmux display-message -p -t "=demo-app2:" '#{pane_current_path}')"; TD="$HOME/.claude/projects/${D2//[\/.]/-}"; mkdir -p "$TD"
 cat >"$TD/99999999-0000-0000-0000-000000000000.jsonl" <<'JL'
 {"type":"user","uuid":"u1","timestamp":"2026-09-29T10:00:00Z","message":{"role":"user","content":"Add a forecast screen"}}
@@ -792,7 +788,6 @@ PD="$(tmux display-message -p -t "=demo-app2:" '#{pane_current_path}')"; mkdir -
 printf '{"env":{"KEEP":"1"},"hooks":{"Stop":[]},"permissions":{"allow":["Read"]}}\n' >"$HOME/.claude/settings.json"; chmod 600 "$HOME/.claude/settings.json"
 rm -f "$PD/.claude/settings.local.json" "$PD/.claude/settings.json"
 api "permissions-get demo-app2" "482913"; check "permissions-get reads each scope; a missing file is empty" "$(jqt '.ok and .data.scopes.user.allow==["Read"] and .data.scopes.local.exists==false and .data.scopes.project.deny==[]')"
-api "permissions-get demo-app2" "000000"; check "permissions-get needs the PIN" "$(jqt '.ok==false')"
 perm() { api "permissions-set demo-app2" "$(printf '482913\n%s' "$1")"; }
 perm '{"scope":"local","op":"add","list":"allow","rule":"Bash(git status:*)"}'; check "permissions-set add creates the local file" "$(jqt '.ok')"
 perm '{"scope":"local","op":"add","list":"allow","rule":"Bash(git status:*)"}'
@@ -848,8 +843,6 @@ for bad in "queue-star" "queue-star demo-app2" "queue-star demo-app2 maybe" "que
   api "$bad"; check "runner refuses '$bad'" "$(jqt '.ok == false')"
 done
 api "queue-status"; check "queue-status: off by default, no chats" "$(jqt '.ok and .data.enabled==false and .data.parallel==1 and .data.max_5h==90 and .data.max_7d==95 and .data.chats==[]')"
-api "queue-star demo-app2 on" "000000"; check "queue-star on: wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
-api "queue-status"; check "...and nothing starred" "$(jqt '.data.chats==[]')"
 api "queue-star demo-app2 on" "482913"; check "queue-star on with the PIN" "$(jqt '.ok and .data.starred==true and .data.session=="demo-app2"')"
 api "sessions"; check "sessions carries the star" "$(jqt '(.data.sessions | map(select(.name=="demo-app2" and .starred==true)) | length)==1 and (.data.sessions | map(select(.name!="demo-app2" and .starred==true)) | length)==0')"
 grep -q "^\* \* \* \* \* '$HOME/.local/bin/claude-queue' >/dev/null 2>&1 # clauderc-queue$" "$STUB_STATE/crontab"
@@ -863,8 +856,6 @@ api "queue-star no-such-proj on" "482913"; check "queue-star: no such session re
 tmux new-session -d -s qbypass -x 100 -y 30 cat; sleep 0.3; tmux send-keys -t "=qbypass:" -l "⏵⏵ bypass permissions on (shift+tab to cycle)"; sleep 0.3
 api "queue-star qbypass on" "482913"; check "queue-star: bypass permissions mode refused" "$(jqt '.error.code=="unsafe_mode"')"
 tmux kill-session -t "=qbypass"
-api "queue-on" "000000"; check "queue-on: wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
-api "queue-status"; check "...still off" "$(jqt '.data.enabled==false')"
 api "queue-on" "482913"; check "queue-on with the PIN" "$(jqt '.ok and .data.enabled==true and (.data.chats | map(.session)==["demo-app2"]) and .data.chats[0].state=="idle"')"
 api "queue-off"; check "queue-off needs no PIN" "$(jqt '.ok and .data.enabled==false')"
 api "queue-star demo-app2 off"; check "un-star needs no PIN" "$(jqt '.ok and .data.starred==false')"
@@ -1273,20 +1264,13 @@ rm -rf "$P/ia" "$P/ib" "$P/ic" "$P/id" "$IBX" "$HOME/.config/claude-launcher/wor
 rm -f "$QD/queue.json" "$QSTATE"
 unset CLAUDERC_NOW
 
-api "chat-send demo-app2" $'000000\nhi'; check "chat send with a wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
-for _ in 1 2 3 4; do api "chat-open demo-app2" "000000"; done
-check "5 wrong PINs lock chat" "$(jqt '.error.code=="chat_locked"')"
-api "chat-open demo-app2" "482913"; check "locked even with the right PIN" "$(jqt '.error.code=="chat_locked"')"
-rm -f "$HOME/.config/claude-launcher/chat-locked"
-api "chat-open demo-app2" "482913"; check "deleting the lock file on the server unlocks" "$(jqt '.ok')"
+api "chat-open demo-app2" "000000"; check "any PIN line is accepted (PIN removed)" "$(jqt '.ok')"
 grep -q "482913\|line one" "$HOME/.local/state/claude-launcher/api.log" "$HOME/.local/state/claude-launcher/chat.log"; [[ $? -ne 0 ]]; check "PIN and message text never logged" $?
 grep -q "send" "$HOME/.local/state/claude-launcher/chat.log"; check "chat access log records opens and sends" $?
 api "chat-history demo-app2 extra"; check "chat-history takes one session" "$(jqt '.error.code=="forbidden"')"
 api "upload demo-app2" "$(printf '482913\n../../etc/pass wd.png\n'; printf 'hello image' | base64 -w0)"
 check "upload lands in <project>/uploads with a safe name" "$(jqt '.ok and .data.path=="uploads/pass_wd.png" and .data.bytes==11')"
 [[ "$(cat "$D2/uploads/pass_wd.png")" == "hello image" ]]; check "uploaded bytes intact" $?
-api "upload demo-app2" "$(printf '000000\nx.png\n'; printf 'x' | base64 -w0)"; check "upload needs the PIN" "$(jqt '.error.code=="wrong_pin"')"
-rm -f "$HOME/.local/state/claude-launcher/chat-pin-fails"
 api "chat-log"; check "chat log lists opens/sends/uploads, newest first" "$(jqt '.ok and .data[0].action=="upload" and any(.data[]; .action=="send")')"
 printf '%s\n' '{"type":"assistant","uuid":"a9","timestamp":"2026-09-29T10:01:00Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t9","name":"SendUserFile","input":{"files":["'"$D2"'/uploads/pass_wd.png"],"caption":"the shot"}}]}}' >>"$TD/99999999-0000-0000-0000-000000000000.jsonl"
 api "chat-history demo-app2" "482913"
@@ -1313,10 +1297,6 @@ api "chat-file demo-app2" "$(printf '482913\n%s' "$HOME/sent-by-claude.txt")"; c
 echo '{"type":"assistant","uuid":"a10","timestamp":"2026-09-29T10:03:00Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t10","name":"SendUserFile","input":{"files":["'"$HOME"'/sent-by-claude.txt"],"caption":"x"}}]}}' >>"$TD/99999999-0000-0000-0000-000000000000.jsonl"
 api "chat-file demo-app2" "$(printf '482913\n%s' "$HOME/sent-by-claude.txt")"; check "chat-file serves an outside file Claude sent in this conversation" "$(jqt '.ok and .data.name=="sent-by-claude.txt"')"
 rm -f "$HOME/sent-by-claude.txt"
-api "chat-file demo-app2" "$(printf '000000\n%s' "$D2/uploads/pass_wd.png")"
-check "chat-file needs the PIN" "$(jqt '.error.code=="wrong_pin"')"
-rm -f "$HOME/.local/state/claude-launcher/chat-pin-fails"
-rm -f "$HOME/.config/claude-launcher/chat-pin"
 
 echo "token services"
 api "status"
