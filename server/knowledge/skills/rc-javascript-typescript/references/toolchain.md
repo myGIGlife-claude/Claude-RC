@@ -1,32 +1,32 @@
-# JS/TS toolchain: versions and config snippets (as of 2026-10)
+# JS/TS toolchain: versions and config snippets (as of 2026-11)
 
-Versions from registry.npmjs.org `dist-tags.latest`, accessed 2026-10-09.
+Versions from registry.npmjs.org `<pkg>/latest`, accessed 2026-11-19 (major-release dates carried over from 2026-10-09 unless re-read).
 
 | Tool | Latest | Major released | Notes |
 |---|---|---|---|
-| typescript | 7.0.2 | 7.0: 2026-07-08 | Native (Go). `@typescript/typescript6` 6.0.2 = JS compiler + API, binary `tsc6` |
-| eslint | 10.12.0 | 10.0: 2026-02-06 | Node `^20.19 \|\| ^22.13 \|\| >=24`, flat config only |
-| typescript-eslint | 8.71.1 | | peer TS `<6.1.0` |
-| @biomejs/biome | 2.5.15 | 2.0: 2025-06-17 | lint + format, one binary |
-| oxlint / oxfmt | 1.87.0 / 0.72.0 | oxlint 1.0: 2025-06-10; oxfmt beta 2026-02-24 | Rust; oxfmt targets Prettier output parity |
-| prettier | 3.9.9 | | |
-| vitest | 5.0.3 | 5.0: 2026-09-03 | Node `^22.12 \|\| ^24 \|\| >=26` |
-| @playwright/test | 1.64.0 | | |
+| typescript | 7.0.2 (7.1 Beta on `@beta`, 2026-10-20) | 7.0: 2026-07-08 | Native (Go). `@typescript/typescript6` 6.0.2 = JS compiler + API, binary `tsc6` |
+| eslint | 10.15.0 | 10.0: 2026-02-06 | Node `^20.19 \|\| ^22.13 \|\| >=24`, flat config only |
+| typescript-eslint | 8.73.0 | | peer TS `>=4.8.4 <6.1.0` |
+| @biomejs/biome | 2.6.8 | 2.0: 2025-06-17 | lint + format, one binary |
+| oxlint / oxfmt | 1.94.0 / 0.79.0 | oxlint 1.0: 2025-06-10; oxfmt beta 2026-02-24 | Rust; oxfmt targets Prettier output parity |
+| prettier | 3.10.1 | | |
+| vitest | 5.1.1 | 5.0: 2026-09-03 | Node `^22.12 \|\| ^24 \|\| >=26` |
+| @playwright/test | 1.65.1 | | |
 | jest | 30.5.2 | 30.0: 2025-06-10 | legacy choice for new code |
-| vite | 8.3.4 | 8.0: 2026-03-12 | Rolldown bundler |
-| rolldown | 1.2.13 | 1.0: 2026-05-07 | |
-| tsdown | 0.23.0 | | library bundler on Rolldown, replaces tsup |
-| tsup | 8.5.1 | last release 2025-11-12 | unmaintained |
+| vite | 8.3.8 | 8.0: 2026-03-12 | Rolldown bundler |
+| rolldown | 1.3.3 | 1.0: 2026-05-07 | |
+| tsdown | 0.23.7 | | library bundler on Rolldown, replaces tsup |
+| tsup | 8.5.1 (not re-checked) | last release 2025-11-12 | unmaintained |
 | esbuild | 0.28.2 | | still pre-1.0 |
-| @swc/core | 1.16.13 | | |
+| @swc/core | 1.16.22 | | |
 | tsx | 4.23.15 | | runs TS incl. non-erasable syntax |
-| npm | 12.2.0 | 12.0: 2026-07-08 | Node `^22.22.2 \|\| ^24.15 \|\| >=26` |
-| pnpm | 12.10.1 | 11.0: 2026-04-28, 12.0: 2026-08-26 | 11 needs Node 22+; 12 is a Rust rewrite |
-| yarn (berry) | 4.18.1 | | Corepack/`packageManager` |
-| bun | 1.4.2 | 1.4.0: 2026-08-20 | |
-| turbo / nx | 2.11.7 / 23.3.0 | | |
-| zod / valibot / arktype | 4.6.5 / 1.5.0 / 2.2.8 | zod 4.0: 2025-07-09; valibot 1.0: 2025-03-19 | Standard Schema |
-| temporal-polyfill | 1.0.5 | | `@js-temporal/polyfill` 0.5.1 (2025-03) is the champions' reference |
+| npm | 12.2.3 | 12.0: 2026-07-08 | Node `^22.22.2 \|\| ^24.15 \|\| >=26` |
+| pnpm | 12.21.0 | 11.0: 2026-04-28, 12.0: 2026-08-26 | 11 needs Node 22+; 12 is a Rust rewrite |
+| yarn (berry) | 4.18.1 (`@yarnpkg/cli-dist`) | | Corepack/`packageManager` |
+| bun | 1.4.5 | 1.4.0: 2026-08-20 | |
+| turbo / nx | 2.11.13 / 24.0.6 | | nx 23 -> 24 since 2026-10 |
+| zod / valibot / arktype | 4.6.7 / 1.5.0 / 2.2.10 | zod 4.0: 2025-07-09; valibot 1.0: 2025-03-19 | Standard Schema |
+| temporal-polyfill | 1.0.8 | | `@js-temporal/polyfill` 0.5.1 (2025-03, not re-checked) is the champions' reference |
 
 ## eslint.config.js (ESLint 10 + typescript-eslint)
 ```js
@@ -78,7 +78,7 @@ steps:
   - run: npm ci
   - run: npm publish   # OIDC; provenance automatic; no NPM_TOKEN
 ```
-Configure the trusted publisher (repo + workflow file) on npmjs.com first. Needs npm >= 11.5.1 and Node >= 22.14. Latest action majors on 2026-10-09: checkout v7.0.1, setup-node v7.1.0; pin to commit SHAs in practice. Provenance is automatic only for public packages from public repos.
+Configure the trusted publisher (repo + workflow file) on npmjs.com first. Needs npm >= 11.5.1 and Node >= 22.14. Action majors v7 (checkout, setup-node) as of 2026-10-09, not re-checked; pin to commit SHAs in practice. Provenance is automatic only for public packages from public repos.
 
 ## Library build (tsdown)
 ```ts

@@ -1,8 +1,8 @@
 ---
 name: rc-us-platform-policy-law
-description: "US law and platform rules for app/website policies as of 2026-10: privacy policy, terms of service/use, EULA, acceptable use, refund policy, subscription auto-renewal, cookie notice, data deletion, DMCA, COPPA, CCPA/CPRA and state privacy laws, FTC, CAN-SPAM, TCPA, ADA/WCAG, App Store privacy labels, Play Data safety form. Use when drafting or reviewing these documents or checking them against the code."
+description: "US law and platform rules for app/website policies as of 2026-11: privacy policy, terms of service/use, EULA, acceptable use, refund policy, subscription auto-renewal, cookie notice, data deletion, DMCA, COPPA, CCPA/CPRA and state privacy laws, FTC, CAN-SPAM, TCPA, ADA/WCAG, App Store privacy labels, Play Data safety form. Use when drafting or reviewing these documents or checking them against the code."
 ---
-# US platform policy law for apps and websites  (as of 2026-10)
+# US platform policy law for apps and websites  (as of 2026-11)
 
 > Drafting aid, not legal advice. Facts are dated; laws here change monthly. Anything marked (unverified) is a lead, not a fact.
 > Engineering controls (DSAR plumbing, breach response, encryption, PCI scope, threat models) live in **rc-security-engineering**
@@ -34,9 +34,17 @@ Federal (verified on official sources unless marked):
   303 (11th Cir. Jan. 24, 2025), CourtListener); current 47 CFR
   64.1200(f)(9) has no one-seller-per-consent wording (eCFR 2026-10-01). Revocation rule in force: any reasonable method
   (STOP, quit, end, revoke, opt out, cancel, unsubscribe), honored within **10 business days**, one confirmation text allowed.
+  **New 2026-11 (FCC 26-67, adopted 2026-09-30, released 2026-10-01; Federal Register 2026-10-26, 91 FR 67214 per law-firm reports, eCFR 64.1200 shows a 91 FR 67219 amendment note; effective date and content per law firms, order text not read: (unverified)):** it replaces the never-effective "revoke all" rule, effective **2026-11-25**: for informational (non-telemarketing) calls a
+  revocation can be limited to that call category, and callers may designate opt-out methods (key-press, a standard reply word such as
+  STOP, or a stated website/number) if they disclose them clearly; telemarketing keeps revoke-all. A further notice asks about shortening
+  the 10-business-day window (comments due 2026-11-25, replies 2026-12-28). Read 47 CFR 64.1200(a)(10) before relying on it.
 - **Fake reviews**: 16 CFR 465 (Consumer Reviews and Testimonials Rule) effective 2024-10-21; civil penalties for knowing violations
-  (up to $53,088 per violation per FTC 2025 letters, inflation-adjusted yearly). FTC sent warning letters 2025-12.
-- **CAN-SPAM** penalty up to $53,088 per email (FTC guide); opt-outs honored within 10 business days.
+  (up to $53,088 per violation; eCFR 16 CFR 1.98 still shows $53,088 from the 2025-01-17 adjustment, read 2026-11-19; a 2026 FTC
+  adjustment notice exists (FR 2026-18853) but I could not read it, so whether the figure changed in 2026 is unverified). FTC warning letters 2025-12.
+- **CAN-SPAM** penalty up to $53,088 per email (FTC guide; same unverified 2026 adjustment caveat); opt-outs honored within 10 business days.
+- **FTC subscription and privacy enforcement 2026-10/11** (ftc.gov press-release listing; complaints not read): action against Toast over
+  hidden fees, subscription and cancellation practices (2026-10-29); five more states joined the FTC's suit against Hims & Hers over
+  sharing sensitive health data (2026-11-10). Subscriptions are still policed through ROSCA and Section 5; no new negative-option proposed rule found as of 2026-11-19.
 - **FTC Health Breach Notification Rule** (16 CFR 318, amendments published 2024-05-30, effective 2024-07-29): health apps not covered by HIPAA; notice within 60 days.
 - **ADA Title II web rule** (state/local government): WCAG 2.1 AA, compliance moved by interim final rule (2026-04-20) to
   **2027-04-26** (50,000+ population) and **2028-04-26** (smaller, special districts) (28 CFR 35.200, eCFR 2026-10-01). No DOJ web
@@ -52,7 +60,10 @@ State (details, thresholds and sources in `references/state-privacy-laws.md`):
   Act 502, signed 2026-05-29, eff. 2027-01-01; California-style: revenue > $25M, or data of 75,000+ consumers/households/devices, or
   50%+ revenue from sale), Alabama (HB 351, eff. 2027-05-01; > 25,000 consumers, or > 25% revenue from sale; signed 2026-04-16 or
   -17 per law-firm reports), Vermont (S.71, Act 145, signed 2026-06-16, eff. **2028-01-01**; 35,000 / 3,000 sensitive / 3,000 sale).
-  Delaware lowers its thresholds to 10,000 (or 5,000 + >20% sale) on 2027-01-01 (delcode.delaware.gov).
+  Delaware lowers its thresholds to 10,000 (or 5,000 + >20% sale) on 2027-01-01 (delcode.delaware.gov). **New:** Delaware HB 380 and
+  HB 381 signed 2026-09-02 (governor's release), effective 2027-01-01: opt-out of automated decisions, narrower employee-data
+  exclusion, more opt-in categories (e.g., neural data, immigration status, government IDs), inferences can be sensitive; bill text not read.
+  Nothing newer found: no further comprehensive law signed 2026-10 to 2026-11-19 (search only, unverified).
 - **Ohio and North Carolina have no comprehensive consumer privacy law** as of 2026-10 (bills only: NC S 1022 filed 2026-04-30,
   parked in Senate Appropriations 2026-05-05; Ohio 136th GA has no consumer-rights bill). They still have breach-notice laws (Ohio R.C. 1349.19, 45 days; N.C.G.S. 75-65, notify the AG too)
   and Ohio's cybersecurity safe harbor (R.C. 1354, affirmative defense with a written program conforming to NIST/ISO/CIS etc.).
@@ -60,16 +71,24 @@ State (details, thresholds and sources in `references/state-privacy-laws.md`):
   revenue threshold $26,625,000 (adjusted 2025-01-01, next adjustment 2027-01-01). Auto-renewal law (AB 2863) amended effective
   **2025-07-01**: express affirmative consent, keep proof 3 years, annual reminder, cancel in the same medium, click-to-cancel online.
   AB 566 (browsers must offer an opt-out signal) and AB 1043 (OS age signal apps must request) start 2027-01-01 (law-firm reports).
+  **New 2026-09/11:** SB 923 (signed 2026-09-27 per the agency newsroom; effective 2027-01-01 per law firms) extends the deletion right
+  to data collected "from or about" the consumer and requires an online request method for online-only businesses. Law-firm reports
+  (Holland & Knight 2026-10-23, unverified on leginfo): SB 690 ends private CIPA pen-register suits over website/app tracking from
+  2027-01-01; AB 2246 replaces the Age-Appropriate Design Code from 2027-01-01. The agency (now "CalPrivacy") fined FedEx (about $3M,
+  2026-11-10) and Hertz ($1.55M, 2026-11-17) and on 2026-11-13 proposed rules on audits of deletion/opt-out platforms.
 - **Age/app-store laws**: Texas SB 2420 is in force: the Fifth Circuit stayed the injunction pending appeal (No. 26-50001,
   2026-06-04) and the Supreme Court refused to vacate the stay (No. 25A1390, 2026-07-06, docket read); the merits appeal is still
-  open. Apple applies it to new Texas Apple Accounts from 2026-06-04 (Apple news 2026-06-03); developers use the Declared Age Range
+  open (no merits ruling found as of 2026-11-19, unverified). Apple applies it to new Texas Apple Accounts from 2026-06-04 (Apple news 2026-06-03); developers use the Declared Age Range
   and PermissionKit Significant Change APIs. Utah: key duties delayed to 2027-05-06, enforcement only by private suit (HB 498, 2026;
   law-firm reports). Louisiana: delayed to 2027-07-01 (HB 977, Act 185, signed 2026-05-15; date per law-firm reports). California
   AADC: *NetChoice v. Bonta* (9th Cir. 2026-03-12) kept the injunction on the data-use limits and dark-pattern ban (vague), lifted it
   on the coverage definition and age estimation and sent those back; the 2024 injunction on impact assessments stands (holding per
   law-firm reports; opinion text not retrieved). Nothing in the AADC is being enforced yet.
 
-Platforms: Apple App Review Guidelines last updated **2026-06-08**; Google Play User Data, Account deletion and Subscriptions policies (pages © 2026, no revision date shown).
+Platforms: Apple App Review Guidelines updated **2026-10-16** (Apple news: 1.2 now names nonconsensual intimate imagery incl. AI-generated,
+new 2.3.14 creative assets and new 2.5.19 hidden/undocumented features, 3.1.1(a) and Section 5 edits; 5.1.1 text read 2026-11-19 still requires an in-app
+privacy link and in-app account deletion); new Apple age-rating declarations (Shared Location, Dating and Relationships) due in App Store
+Connect by **2027-01-12** (news 2026-11-02). Google Play User Data, Account deletion and Subscriptions policies (pages © 2026, no revision date shown).
 
 ### Older documents
 - Policies written before 2025-07 often promise FTC click-to-cancel compliance as "the law", or cite a California ARL without the
@@ -218,7 +237,7 @@ Policy text creates security obligations; the controls are in **rc-security-engi
 - "We collect no personal data" in an app with accounts, logs, crash reports or push notifications.
 - Listing rights but no working way to use them (no form, no inbox, no verification method, no response clock).
 - Citing the vacated FTC click-to-cancel rule or the vacated TCPA one-to-one rule as current law.
-- Treating Ohio or North Carolina as having a comprehensive privacy law (they don't as of 2026-10), or forgetting their breach laws.
+- Treating Ohio or North Carolina as having a comprehensive privacy law (they don't as of 2026-11), or forgetting their breach laws.
 - Liability caps or "no refunds ever" with no consumer-law carve-out; class waivers buried in paragraph 37 without assent.
 - Templates with fake company names, addresses or placeholder emails that ship to production. Use `[OWNER DECISION]` markers.
 - Generic AI prose ("we are committed to your privacy", "navigate", "robust"). Use plain American English: short, specific, true.
@@ -238,7 +257,14 @@ Policy text creates security obligations; the controls are in **rc-security-engi
 - [ ] Change history entry, effective date, version, and next review date set.
 
 ## Sources
-All accessed 2026-10-10 unless noted.
+All accessed 2026-10-10 unless noted; items marked 2026-11-19 were re-checked or added in the November refresh.
+- https://developer.apple.com/news/ - Oct 16 guideline update, Nov 2 age-rating declarations (2026-11-19)
+- https://privacy.ca.gov/about-us/newsroom/ - SB 923 signing, FedEx/Hertz fines, 2026-11-13 proposed rules (2026-11-19)
+- https://www.ftc.gov/news-events/news/press-releases - Toast, Hims & Hers items, no COPPA/CAN-SPAM news since 2026-10 (2026-11-19)
+- https://news.delaware.gov/?p=245951 - Delaware HB 380/381 signed 2026-09-02, effective 2027-01-01 (2026-11-19)
+- https://www.ada.gov/resources/2024-03-08-web-rule/ - Title II dates unchanged (2026-11-19)
+- https://www.ecfr.gov/current/title-16/chapter-I/subchapter-A/part-1/subpart-L/section-1.98 - $53,088 (2025-01-17 adjustment) (2026-11-19)
+- Leads, law firms (2026-11-19): Brownstein (bhfs.com) on the FCC revocation order effective 2026-11-25; Holland & Knight on California 2026 bills
 - https://www.federalregister.gov/documents/2026/02/12/2026-02866/revision-of-the-negative-option-rule-withdrawal-of-the-cars-rule-removal-of-the-non-compete-rule-to - negative option rule restored; cites Custom Commc'ns v. FTC, 142 F.4th 1060
 - https://www.federalregister.gov/documents/2026/03/13/2026-04952/rule-concerning-the-use-of-prenotification-negative-option-plans - ANPRM, comments closed 2026-04-13
 - https://www.ecfr.gov/current/title-16/chapter-I/subchapter-C/part-312 - COPPA Rule 312.5, 312.8, 312.10 (read via eCFR API, 2026-10-01 text)

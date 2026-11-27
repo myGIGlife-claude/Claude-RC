@@ -1,4 +1,4 @@
-# Kotlin language features and library versions (as of 2026-10-09)
+# Kotlin language features and library versions (as of 2026-11-19)
 
 ## Language features by status
 
@@ -23,8 +23,10 @@
 | Context-sensitive resolution | Preview/experimental | 2.2.0 | `-Xcontext-sensitive-resolution` |
 | Collection literals | Experimental | 2.4.0 | `-Xcollection-literals` |
 | Explicit context arguments | Experimental | 2.4.0 | `-Xexplicit-context-arguments` |
-| Name-based destructuring | Experimental in 2.3.20/2.4; **stable in `only-syntax` mode in 2.5.0-Beta1** (2026-09-23) | 2.3.20 | `(val mail = email, val name = username) = user` |
+| Name-based destructuring | Experimental in 2.3.20/2.4; **stable in `only-syntax` mode in 2.5.0 pre-releases** (Beta1 2026-09-23, RC 2026-11-11; 2.5.0 final not out) | 2.3.20 | `(val mail = email, val name = username) = user` |
 | Companion blocks/extensions | Experimental | 2.5.0-Beta1 | `-Xcompanion-blocks-and-extensions` |
+| Unused return value checker | Stable and on by default in 2.5.0-RC (experimental before) | 2.5.0-RC | stay on 2.4.x until 2.5.0 final |
+| Full value classes | Experimental | 2.5.0-RC | `-Xfull-value-classes` |
 | Rich errors (error union types, KEEP-0462) | Not in the 2.4 or 2.5.0-Beta1 release notes; no flag known (unverified) | - | do not write it |
 | Contracts (`contract { }` in your own code) | Experimental API, needs `@OptIn(ExperimentalContracts::class)` (still so in the 2.4 API docs) | 1.3 | stdlib contracts are fine to rely on |
 
@@ -36,7 +38,7 @@
 
 ## Component stability (kotlinlang.org components-stability)
 - Stable: Kotlin/JVM, /Native (1.9.0), /JS, stdlib, kotlinx.coroutines, kotlinx.serialization, KMP + its Gradle plugin (1.9.20), kapt, all-open/no-arg.
-- Beta: Kotlin/Wasm (since 2.2.20), kotlin-reflect, Native C/ObjC interop. Roadmap (2026-08-20): promote Wasm to Stable; Swift export Alpha -> Beta.
+- Beta: Kotlin/Wasm (since 2.2.20), kotlin-reflect, Native C/ObjC interop. Roadmap (2026-08-20): promote Wasm to Stable; Swift export Alpha -> Beta (done in 2.5.0-RC notes).
 - Alpha: kotlinx-datetime, kotlinx-io, Lombok plugin (2.3.20). Experimental: power-assert.
 
 ## KMP / Compose Multiplatform (supported-platforms page)
@@ -49,30 +51,30 @@
 | watchOS, tvOS | Beta | - |
 
 - Apple: iOS min 14 since 2.3.0, raised to iOS/tvOS 15, macOS 12, watchOS 8 in 2.4.0; Intel `macosX64`/`tvosX64`/`watchosX64` deprecated in 2.3.20 (`iosX64` tier 3).
-- Swift export: Alpha (2.4 adds suspend -> async/await, Flow -> AsyncSequence). Most projects still ship an ObjC framework (SKIE is a third-party option, unverified current status).
+- Swift export: Alpha through 2.4.x, Beta in 2.5.0-RC (new `export { swift {} }` DSL). (2.4 adds suspend -> async/await, Flow -> AsyncSequence, unverified on the 2.4 notes.) Most projects still ship an ObjC framework (SKIE is a third-party option, unverified current status).
 - Android library modules in KMP: `com.android.kotlin.multiplatform.library` (required with AGP 9, see rc-android).
 
-## Library versions (Maven Central metadata, 2026-10-09)
+## Library versions (Maven Central metadata, 2026-11-19)
 | Library | Stable | Pre-release |
 |---|---|---|
-| Kotlin Gradle plugin | 2.4.21 | 2.5.0-Beta1 |
-| KSP | 2.3.12 | |
+| Kotlin Gradle plugin | 2.4.21 | 2.5.0-RC |
+| KSP | 2.3.14 | |
 | kotlinx-coroutines | 1.11.0 (2026-05) | |
-| kotlinx-serialization | 1.11.0 | 1.12.0-RC (2026-09-04) |
+| kotlinx-serialization | 1.13.0 (2026-11-11; 1.12.0 2026-10-19 had a reverted exception change) | |
 | kotlinx-datetime | 0.8.0 (alpha component) | |
 | kotlinx-collections-immutable | 0.5.2 | |
-| Ktor | 3.6.0 (2026-09-17) | |
-| Compose Multiplatform | 1.12.1 | 1.13.0-alpha02 |
+| Ktor | 3.6.1 (2026-10-29) | |
+| Compose Multiplatform | 1.12.2 | 1.13.0-rc01 |
 | SQLDelight | 2.4.1 | |
-| Koin | 4.2.2 | |
+| Koin | 4.2.2 | 4.3.0-Beta1 |
 | Coil 3 | 3.6.3 | |
-| Exposed | 1.5.1 | |
-| jOOQ | 3.21.9 | |
-| Spring Boot | 4.1.1 | 4.2.0-M2 |
-| Micronaut platform | 5.2.2 | |
-| JUnit (Jupiter) | 6.1.3 | |
-| Kotest | 6.2.5 | |
-| MockK | 1.14.11 | |
+| Exposed | 1.6.1 | |
+| jOOQ | 3.21.10 | |
+| Spring Boot | 4.2.0 (Maven Central 2026-11-19; release notes not read) | |
+| Micronaut platform | 5.2.7 | |
+| JUnit (Jupiter) | 6.1.3 | 6.2.0-M1 |
+| Kotest | 6.2.7 | |
+| MockK | 1.14.12 | |
 | Turbine | 1.2.1 | |
 | detekt | 1.23.8 (`io.gitlab.arturbosch.detekt`) | 2.0.0-alpha.6 (`dev.detekt`) |
 | ktlint | 1.8.0 | |

@@ -33,7 +33,8 @@ anything not VERIFIED, and that a lawyer or the clerk's office can confirm local
 - 6(b): extensions for good cause before expiry, or after expiry only on motion showing excusable neglect; never for Rules 50(b) and (d),
   52(b), 59(b), (d), (e), or 60(b).
 - 6(d): +3 days only for service by mail, leaving with the clerk, or other consented means; electronic service gets no added days (since 2016).
-- Proposed amendments to Civil Rules 5, 6 and others are slated no earlier than 2028-12-01: not law yet.
+- Proposed amendments to Civil Rules 5, 6 and others are slated no earlier than 2028-12-01: not law yet. No Civil Rules amendment takes
+  effect 2026-12-01 (uscourts.gov pending-rules page, checked 2026-11-19). FRAP 4 text rechecked on Cornell LII 2026-11-19.
 
 ## Federal appeals (FRAP 4, read 2026-10-10)
 - 4(a)(1): civil notice of appeal within 30 days after entry of the judgment or order; 60 days when the United States, its agency or

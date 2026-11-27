@@ -1,4 +1,4 @@
-# Ohio procedure reference  (as of 2026-10)
+# Ohio procedure reference  (as of 2026-11)
 
 Read 2026-10-10 from the Supreme Court of Ohio's official PDFs: Civ.R., App.R., Juv.R. (amended 2026-07-01), Evid.R. (2025-07-01),
 Sup.R. (amended to 2026-08-06), and the Rules Restructuring Reference Chart. Ohio amends rules every **July 1**; check the staff

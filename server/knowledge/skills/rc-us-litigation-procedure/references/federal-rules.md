@@ -1,6 +1,6 @@
-# Federal procedure reference  (as of 2026-10)
+# Federal procedure reference  (as of 2026-11)
 
-Rule texts read 2026-10-10 (law.cornell.edu as a finder; uscourts.gov for what is in force). Verify against the current official
+Rule texts read 2026-10-10 (law.cornell.edu as a finder); the in-force and pending table re-checked on uscourts.gov 2026-11-19. Verify against the current official
 rules and the district's local rules before relying on any line here.
 
 ## Versions in force
@@ -9,8 +9,8 @@ rules and the district's local rules before relying on any line here.
 | FRCP | 2025-12-01 (new 16.1 MDL; 16(b), 26(f) privilege-log timing) | none 2026; 2027-12-01 proposals: 7.1, 26, 41, 45, 81; 2028 drafts: 5, 5.2, 6, 55 |
 | FRE | 2024-12-01 (107, 613(b), 801(d)(2), 804(b)(3), 1006) | **801(d)(1)(A) on 2026-12-01** (Court order 2026-04-08); 2028 drafts: 104, 902 |
 | FRAP | 2025-12-01 (6, 39) | Form 4 on 2026-12-01; 2027: 15, 29, 32 + length appendix; 2028 draft: 25 |
-| Bankruptcy | 2025-12-01 (3002.1, 8006, Ch. 13 forms) | 2026-12-01: 1007, 3018, 5009, 9006, 9014, 9017, new 7043 |
-| Criminal | no 2025 change (posted text dated 2024-12-01) | 2027 proposal: 17; 2028 drafts: 11, 32, 45, 49, 49.1 |
+| Bankruptcy | 2025-12-01 (3002.1, 8006, Ch. 13 forms) | 2026-12-01: 1007, 2007.1 and 3001 (unverified), 3018, 5009, 9006, 9014, 9017, new 7043 |
+| Criminal | no 2025 change (posted text dated 2024-12-01) | 2027 proposal: 17 (transmitted to the Supreme Court 2026-10-20, not yet adopted); 2028 drafts: 11, 32, 45, 49, 49.1 |
 Amendments take effect December 1 unless Congress acts; they govern pending cases "insofar as just and practicable".
 
 ## FRCP essentials

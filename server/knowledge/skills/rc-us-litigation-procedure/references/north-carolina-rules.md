@@ -1,4 +1,4 @@
-# North Carolina procedure reference  (as of 2026-10)
+# North Carolina procedure reference  (as of 2026-11)
 
 N.C. R. Civ. P. (G.S. 1A-1), Rules of Evidence (G.S. 8C-1) and statutes read on ncleg.gov 2026-10-10. N.C. R. App. P. read 2026-10-10
 from the **2025-09-02 codification** on nccourts.gov (the site returns 403 to plain fetches; a browser user-agent works). The rules

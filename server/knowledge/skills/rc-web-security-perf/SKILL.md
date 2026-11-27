@@ -1,8 +1,8 @@
 ---
 name: rc-web-security-perf
-description: Cross-cutting web security, performance and delivery for any language or framework (OWASP Top 10:2025, security headers/CSP/Trusted Types, CORS, cookies, CSRF, XSS, SSRF, TLS and certificate lifetimes, supply chain and CI hardening, AI/LLM web risks, Core Web Vitals, caching/CDN, images/fonts/JS cost, PWA, technical SEO, privacy/consent). Use when adding headers, auth/session cookies, CORS, file uploads, dependencies or GitHub Actions, TLS/ACME, CDN/cache config, perf budgets, or reviewing a web app before launch.
+description: Web security, performance and delivery for any stack (as of 2026-11) - OWASP Top 10:2025, CSP/security headers, CORS, cookies, CSRF, XSS, SSRF, TLS certificate lifetimes/ACME, npm and GitHub Actions supply chain, Core Web Vitals, caching/CDN, PWA, SEO. Use for headers, session cookies, uploads, dependencies, workflows, cache config, perf budgets, pre-launch review.
 ---
-# Web security, performance & delivery  (as of 2026-10)
+# Web security, performance & delivery  (as of 2026-11)
 
 > Facts here are dated (see Sources). Versions, deadlines and policies move: confirm the primary source before pinning a version or promising a date. Anything marked (unverified) is a lead, not a fact.
 
@@ -10,7 +10,7 @@ Language-agnostic. Pair with the stack skill (rc-web-frontend, rc-node-backend, 
 Header templates and longer tables: `references/headers-and-policies.md`. Perf and delivery details: `references/perf-delivery.md`.
 
 ## Currency check
-- **OWASP Top 10:2025** (draft presented 2025-11-06 at Global AppSec DC; final early 2026, exact date unverified). A01 Broken Access
+- **OWASP Top 10:2025** (release candidate 2025-11-06; final published early 2026, secondary sources say January or 2026-02-04, exact date unverified). A01 Broken Access
   Control (now includes SSRF), A02 Security Misconfiguration (up from #5), **A03 Software Supply Chain Failures (new, widened from
   "vulnerable components")**, A04 Cryptographic Failures, A05 Injection, A06 Insecure Design, A07 Authentication Failures,
   A08 Software or Data Integrity Failures, A09 Security Logging and **Alerting** Failures, **A10 Mishandling of Exceptional Conditions (new)**.
@@ -21,34 +21,45 @@ Header templates and longer tables: `references/headers-and-policies.md`. Perf a
   `tlsserver` profile 2026-05-13; default `classic` goes to 64 days on 2027-02-10 and 45 days on 2028-02-16.
 - **Chrome Root Program**: public TLS certs with the clientAuth EKU are being phased out (subordinate CAs 2026-06-15, leaf 2027-03-15).
   Do mTLS with a private CA.
-- **Chrome 154 (October 2026)** turns on "Always Use Secure Connections" by default (Chrome 147 for Enhanced Safe Browsing users): Chrome asks before the first visit to a public HTTP-only site.
+- **Chrome 154** (stable 2026-09-22, confirmed in Chrome's release notes; build 154.0.8037.x): the notes list "Ask before HTTP on by default": Chrome prompts before
+  the first visit to an HTTP-only public site (enterprise policy `HttpsOnlyMode`; Chrome 147 did it for Enhanced Safe Browsing users). Chrome 155 date: (unverified).
 - **Chrome 142 (2025-10-28)**: Local Network Access permission prompt for public pages that reach private/loopback addresses.
-- **Third-party cookies**: Google dropped the removal plan (2025-04) and retired most Privacy Sandbox APIs (announced 2025-10-17;
-  Topics, Protected Audience, Attribution Reporting deprecated from Chrome 144, removal targeted Chrome 150). Safari and Firefox
+- **Third-party cookies**: Google dropped the removal plan (2025-04) and retired most Privacy Sandbox APIs (announced 2025-10-17; the page lists
+  Topics, Protected Audience, Attribution Reporting, Related Website Sets, Private Aggregation and others, with no removal dates; Chrome versions
+  144/150 for deprecation/removal are unverified). Safari and Firefox
   still block/partition by default. Build as if 3P cookies do not exist.
 - **CHIPS (`Partitioned`)**: Chrome 114+, Firefox 141+, Safari 26.2+.
 - **Trusted Types**: Baseline since Firefox 148 (2026-02); Chrome 83+, Safari 26.
 - **Sanitizer API `Element.setHTML()`**: Firefox 148 (2026-02-24), Chrome 146; Safari not yet. Feature-detect.
 - **Core Web Vitals**: LCP, INP, CLS. INP replaced FID 2024-03-12. **LCP and INP measurable in all engines since Safari 26.2 (2025-12-12)**,
-  Baseline Newly available. CrUX still only reports Chrome users.
+  Baseline Newly available. CrUX still only reports Chrome users. Thresholds and the CWV set are unchanged. **2026-10-13**: CrUX added
+  experimental soft-navigation LCP/INP/CLS (`experimental_*_with_softnavs`); more planned for 2026-11, graduation target May 2027.
 - **zstd Content-Encoding**: Chrome 123+, Firefox 126+, Safari 26.3+ (only on macOS Tahoe / iOS 26.3+, not older macOS). Keep Brotli/gzip fallback.
 - **`scheduler.yield()`**: Chromium 129+, Firefox 142+; not Safari. Always fall back.
 - **Speculation Rules (prerender)**: Chromium only; Safari implementation off by default; Firefox none.
 - **JPEG XL**: Safari 17+ decodes it; Chromium re-landed a Rust decoder (jxl-rs) in Chrome 145 code, still behind a flag
   (default-on date unverified). Don't ship JXL without AVIF/WebP fallback.
 - **bfcache**: Chrome now allows `Cache-Control: no-store` pages into bfcache (rollout complete 2025-04), evicting on cookie change.
-- **npm**: classic tokens revoked 2025-12-09; `npm login` gives 2-hour sessions; write tokens capped at 90 days; use
-  OIDC trusted publishing. `min-release-age` (days) in npm 11.10.0 (2026-02); pnpm `minimumReleaseAge` (minutes; pnpm 11 defaults to 1440).
-  Dependabot version updates wait 3 days by default since 2026-07-14 (security updates are not delayed).
-- **Shai-Hulud worm** (npm): 2025-09 wave (500+ packages, `postinstall`) and 2025-11 "Second Coming" (600-800 packages, `preinstall`):
-  stole npm/GitHub/cloud tokens, self-republished via the victim's packages.
-- **GitHub Actions**: `pull_request_target` always runs the default branch's workflow and ref since 2025-12-08; org/enterprise
-  policy can enforce full-SHA pinning and block actions (2025-08-15).
+- **npm 12** (GA 2026-07-08; latest seen 12.2.3, 2026-11-11): dependency lifecycle scripts (`preinstall`/`install`/`postinstall`) do NOT run unless the root
+  package allows them (`allowScripts` in package.json; `npm install-scripts approve`, then `npm rebuild`); `allow-git` and `allow-remote` default to
+  none (git and tarball-URL deps fail); `npm adduser` and `npm shrinkwrap` removed; unknown flags error. Legacy projects on npm 10/11 still run scripts.
+  Earlier: classic tokens revoked 2025-12-09; use OIDC trusted publishing. `min-release-age` (days, default unset) exists since npm 11.10;
+  `min-release-age-exclude` added in 12. Staged publishing (`npm stage publish`, maintainer promotes) can create new packages since 2026-10-02.
+  pnpm `minimumReleaseAge` is in minutes (default 1440 on current pnpm); `blockExoticSubdeps` is on by default; pnpm 12 is stable (release date unverified).
+  Dependabot version updates wait 3 days by default since 2026-07-14 (security updates are not delayed); supports npm 12, pnpm 11/12 (2026-10-20).
+- **Shai-Hulud lineage** (npm): 2025-09 wave (500+ packages, `postinstall`), 2025-11 "Second Coming" (600-800 packages, `preinstall`); **Mini
+  Shai-Hulud 2026-05-19** (compromised `@antv` account; 639 versions of 323 packages, `preinstall` hook, forged SLSA provenance); **ChainDrop
+  2026-08-04** (400+ packages, Bun payload, can abuse GitHub Actions OIDC publishing, writes into Claude/VS Code config paths in repos). All steal
+  npm/GitHub/cloud tokens and republish via the victim's packages. Provenance alone does not prove a package is safe.
+- **GitHub Actions**: **`pull_request_target` is blocked by default in public repos from 2026-12-02** (Free/Team/Enterprise Cloud; brownouts 2026-11-09 and
+  11-16; opt in with an Actions event policy). It already always runs the default branch's workflow and ref since 2025-12-08. Org/enterprise policy can
+  enforce full-SHA pinning (2025-08-15). **Workflow lockfiles GA 2026-10-28** (`.github/workflows/actions.lock`, `gh actions-lock` extension,
+  optional "Require lockfile" policy): locks actions and their transitive deps while keeping tag refs.
 - **NIST SP 800-63B-4** final 2025-07: 15-char minimum for password-only, 8 with MFA; no composition rules, no forced rotation; blocklist check; allow paste.
 - **iOS web apps**: Declarative Web Push (no service worker needed) iOS/iPadOS 18.4+, Safari 18.5 macOS; iOS 26 opens every Home
   Screen site as a web app. Push still needs Home Screen install on iOS.
 - **EU**: Digital Omnibus (proposed 2025-11-19) would move cookie rules into GDPR (Art. 88a) and exempt aggregated first-party
-  analytics; still in legislation as of 2026-10. Current ePrivacy consent rules apply until it passes.
+  analytics; status after 2026-10 not rechecked (unverified); treat as not law. Current ePrivacy consent rules apply until it passes.
 - **AI crawler preferences**: IETF `aipref` (Content-Usage in robots.txt / HTTP header) is still a working-group draft (2026-09). Not a standard yet.
 
 ## What changed / stop doing
@@ -69,7 +80,8 @@ Header templates and longer tables: `references/headers-and-policies.md`. Perf a
 | "jQuery from a CDN" with no SRI | Self-host from the bundle, or `integrity` + `crossorigin` | - |
 | Plan for 1-year (398-day) certs, manual renewal | ACME automation, ARI (renewal info), monitor expiry | SC-081v3 (2026-03-15) |
 | OCSP stapling as a must | Short-lived certs; Let's Encrypt has no OCSP | 2025 |
-| Long-lived npm/PyPI tokens in CI | OIDC trusted publishing, provenance | npm 2025-12-09 |
+| Long-lived npm/PyPI tokens in CI | OIDC trusted publishing (provenance is not a safety proof: Mini Shai-Hulud forged it) | npm 2025-12-09 |
+| Assuming `npm install` runs dependency scripts (`node-gyp` builds, postinstall) | npm 12: approve explicitly (`allowScripts`, `npm install-scripts approve`, `npm rebuild`) | npm 12.0.0, 2026-07-08 |
 | `uses: actions/x@v4` (tag) | Pin to full commit SHA + Dependabot updates it | - |
 | FID as the responsiveness metric | INP <= 200 ms (p75) | 2024-03-12 |
 | Chasing the Lighthouse/PageSpeed score | Field data (CrUX/RUM) at p75; Lighthouse is a lab debugging tool | - |
@@ -158,10 +170,10 @@ Set-Cookie: __Host-sid=...; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=2880
 ### Supply chain (A03)
 - Commit lockfiles; CI uses `npm ci` / `pnpm install --frozen-lockfile` / `pip install --require-hashes` / `go mod verify`.
 - Cooldown on new versions (npm `min-release-age`, pnpm `minimumReleaseAge`, Renovate `minimumReleaseAge`, Dependabot `cooldown`).
-- Block install scripts by default (pnpm 10+ runs none unless allow-listed: `onlyBuiltDependencies` in pnpm 10, `allowBuilds` in pnpm 11; npm `--ignore-scripts` in CI).
+- Block install scripts by default (npm 12 and pnpm 10+ run none unless allow-listed: `allowScripts` in npm 12, `onlyBuiltDependencies` in pnpm 10, `allowBuilds` in pnpm 11+; on npm 10/11 use `--ignore-scripts` in CI).
 - Publish with provenance (npm `--provenance`, PyPI trusted publishers, Sigstore/cosign for images). Generate SBOM (CycloneDX/SPDX via Syft).
 - Dependency Review action on PRs; watch typosquats (new deps with few downloads, near-miss names, recently transferred ownership).
-- GitHub Actions: pin by SHA; `permissions: {}` at top, grant per job; never check out or run PR code in `pull_request_target` or
+- GitHub Actions: pin by SHA (or use workflow lockfiles); `permissions: {}` at top, grant per job; never check out or run PR code in `pull_request_target` or
   `workflow_run`; avoid `${{ github.event.* }}` inside `run:` (pass via `env:`); `persist-credentials: false`; scan with zizmor.
 
 ### Authentication
@@ -228,7 +240,7 @@ The section above is the security content. Testing tools are under "Testing & to
 - Treats the LLM's tool output or a fetched web page as trusted instructions.
 
 ## Before you ship
-- [ ] HTTPS only, HSTS, cert automation with alerting; CAA set; no mixed content (Chrome 154 warns on HTTP)
+- [ ] HTTPS only, HSTS, cert automation with alerting; CAA set; no mixed content (Chrome 154 is meant to ask before HTTP sites)
 - [ ] CSP (nonce/hash + strict-dynamic) enforced, reports collected; `frame-ancestors`, `nosniff`, Referrer-Policy, Permissions-Policy
 - [ ] Session cookies `__Host-`, HttpOnly, Secure, SameSite; CSRF via Fetch Metadata/Origin; CORS allow-list
 - [ ] Authz checked server-side on every object (two-account IDOR test); rate limits on login, signup, reset, expensive APIs
@@ -243,7 +255,7 @@ The section above is the security content. Testing tools are under "Testing & to
 ## Sources
 - https://top10.owasp.org/2025/ - Top 10:2025 list (accessed 2026-10-09)
 - https://top10.owasp.org/2025/0x00_2025-Introduction/ - changes vs 2021, SSRF merged into A01 (2026-10-09)
-- https://www.scworld.com/resource/owasp-global-appsec-conference-the-new-top-10-list - 2025-11-06 presentation (lead only) (2026-10-09)
+- https://semgrep.dev/blog/2026/owasp-top-10-2025-whats-new - final release timing, early 2026 (lead only; date conflicts) (2026-11-19)
 - https://genai.owasp.org/llm-top-10/ - LLM Top 10 2025 list (2026-10-09)
 - https://cheatsheetseries.owasp.org/ - Cheat Sheet Series index; CSRF cheat sheet Fetch Metadata guidance (2026-10-09)
 - https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/X-XSS-Protection - deprecated, use CSP (2026-10-09)
@@ -274,3 +286,16 @@ The section above is the security content. Testing tools are under "Testing & to
 - https://webkit.org/blog/16535/meet-declarative-web-push/ - Declarative Web Push (2026-10-09)
 - https://words.filippo.io/csrf/ - Fetch Metadata CSRF design behind Go's CrossOriginProtection (2026-10-09)
 - https://datatracker.ietf.org/wg/aipref/ - AI preferences drafts status (2026-10-09)
+- https://docs.npmjs.com/cli/v12/using-npm/changelog - npm 12.0.0 (2026-07-08) defaults, 12.2.3 (2026-11-11), min-release-age-exclude (2026-11-19)
+- https://docs.npmjs.com/cli/v11/using-npm/config - min-release-age in days, default unset (2026-11-19)
+- https://github.blog/changelog/2026-06-24-upcoming-breaking-changes-for-npm-v12/ - allowScripts, allow-git, allow-remote defaults (2026-11-19)
+- https://github.blog/changelog/2026-10-02-npm-staged-publishing-now-supports-creating-new-packages/ - staged publishing (2026-11-19)
+- https://github.blog/changelog/label/supply-chain-security/ - Dependabot npm 12/pnpm 12 support 2026-10-20 (2026-11-19)
+- https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2/ - pull_request_target default block, brownouts (2026-11-19)
+- https://github.blog/changelog/2026-10-28-github-actions-workflow-lockfiles-are-generally-available/ - workflow lockfiles GA (2026-11-19)
+- https://microsoft.com/en-us/security/blog/2026/05/20/mini-shai-hulud-compromised-antv-npm-packages-enable-ci-cd-credential-theft - Mini Shai-Hulud (2026-11-19)
+- https://microsoft.com/en-us/security/blog/2026/08/04/chaindrop-supply-chain-compromise-anatomy-self-propagating-worm - ChainDrop (2026-11-19)
+- https://web.dev/blog/crux-experimental-soft-navs - CrUX soft-navigation metrics, 2026-10-13 (2026-11-19)
+- https://privacysandbox.google.com/blog/update-on-plans-for-privacy-sandbox-technologies - retired technologies list, no dates (2026-11-19)
+- https://developer.chrome.com/release-notes/154 and https://chromereleases.googleblog.com/2026/09/stable-channel-update-for-desktop_0856730748.html - Chrome 154 stable 2026-09-22, "Ask before HTTP on by default" (2026-11-19)
+- https://letsencrypt.org/2025/12/02/from-90-to-45 , https://pnpm.io/blog/releases/11.0 , GitHub changelog 2026-11-02 / 2026-10-28 / 2026-10-02 pages above - re-fetched and matched (2026-11-19). The 2026-06 npm 12 preview post said `npm approve-scripts`; the shipped changelog says `npm install-scripts approve` (used here).

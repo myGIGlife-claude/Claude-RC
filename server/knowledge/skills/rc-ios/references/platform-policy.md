@@ -1,4 +1,4 @@
-# Apple platform and App Store policy timeline (as of 2026-10-09)
+# Apple platform and App Store policy timeline (as of 2026-11-19)
 
 All dates from developer.apple.com/news and upcoming-requirements unless marked.
 
@@ -13,12 +13,17 @@ All dates from developer.apple.com/news and upcoming-requirements unless marked.
 | 2026-09-09 | Minimum deployment target for uploads: iOS 13 |
 | 2026-09-14/15 | Xcode 27 (09-14) + Swift 6.4 (09-15) release (Apple silicon only; needs macOS Tahoe 26.6+) |
 | 2026-10-23 | iPhone Duo (foldable) ships with iOS 27.1; build with Xcode 27.1; its screenshots required from April 2027 |
+| 2026-10-15 / 10-29 | Xcode 27.1 / Xcode 27.2 released |
+| 2026-11-02 | macos-14 GitHub Actions images retired |
+| 2026-11-09 | iOS/iPadOS 27.2.1 released |
+| 2026-11-16 | New age-rating declarations (Shared Location, Dating and Relationships) appear in App Store Connect; all apps answer by 2027-01-12 |
 | 2026-12-02 | CocoaPods trunk read-only (cocoapods.org blog) |
 | 2027-02-01 | Original Developer ID Sub-CA expires: re-sign Mac pkg/apps with G2 certificates (notarized + timestamped stay valid) |
 | 2027-04 | Uploads must use the iOS 27 family SDKs (exact day not announced) |
 
 ## Review, privacy and age
 - Privacy manifests + required-reason APIs: enforced at upload since 2024-05-01.
+- Guidelines update 2026-10-16: new 2.3.14 (creative assets) and 2.5.19 (no hidden/dormant/undocumented features); 1.2 and 5 tightened; 3.1.1(a) music-streaming bullet merged into the external-purchase-link entitlement bullet. DPLA updated 2026-10-13.
 - Account deletion in app: guideline 5.1.1(v).
 - Third-party AI: 5.1.2(i), disclose and get explicit permission before sharing personal data.
 - Mini apps, HTML5 games, chatbots, plugins: allowed under 4.7, but all guidelines (privacy, UGC moderation, age gating) apply.

@@ -1,4 +1,4 @@
-# Components, states and flows (as of 2026-10)
+# Components, states and flows (as of 2026-11)
 
 ## Buttons
 - Hierarchy per view: **one** primary (filled), secondary (tonal/outlined), tertiary (text). Destructive = danger color, never primary-by-default.

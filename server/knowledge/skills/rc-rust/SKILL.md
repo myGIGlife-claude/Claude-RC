@@ -1,16 +1,20 @@
 ---
 name: rc-rust
-description: Current Rust (1.99 stable, edition 2024) language, std, cargo workspaces/features/MSRV, error handling, async/Tokio, axum/actix, serde, sqlx/diesel, clap, tracing, testing (nextest, proptest, insta, miri, fuzz), unsafe/FFI/wasm/embedded, build size/speed and supply-chain security. Use when writing or reviewing *.rs, Cargo.toml, Cargo.lock, rust-toolchain.toml, clippy.toml, deny.toml, or choosing Rust vs Go/C++/Java.
+description: Current Rust (1.100 stable, edition 2024) language, std, cargo workspaces/features/MSRV, error handling, async/Tokio, axum/actix, serde, sqlx/diesel, clap, tracing, testing (nextest, proptest, insta, miri, fuzz), unsafe/FFI/wasm/embedded, build size/speed and supply-chain security. Use when writing or reviewing *.rs, Cargo.toml, Cargo.lock, rust-toolchain.toml, clippy.toml, deny.toml, or choosing Rust vs Go/C++/Java.
 ---
-# Rust  (as of 2026-10)
+# Rust  (as of 2026-11)
 
 > Facts are dated (see Sources). Rust ships every 6 weeks; confirm the primary source before pinning a version. "(unverified)" = lead, not fact.
 
 ## Currency check
-- **Stable: Rust 1.99.0 (2026-10-01).** Next: 1.100 on 2026-11-12, 1.101 on 2026-12-24 (releases.rs). Only the newest stable gets fixes;
+- **Stable: Rust 1.100.0 (2026-11-12).** Next: 1.101 on 2026-12-24, 1.102 on 2027-02-04 (releases.rs). 1.99.1 (2026-10-15) fixed three regressions
+  (missing `wcslen`, x86_64 FFI `bool` return zero-extension, rust-lld on macOS); no CVE. Only the newest stable gets fixes;
   there is no project LTS (certified long-term toolchains come from vendors such as Ferrocene).
-- **Edition 2024** (Rust 1.85, 2025-02-20) is current. No next edition announced on the Rust blog (checked 2026-10-10). Editions are per crate and interoperate.
+- **Edition 2024** (Rust 1.85, 2025-02-20) is current. No next edition announced on the Rust blog (checked 2026-11-19). Editions are per crate and interoperate.
 - Last ~12 months (details per release: `references/releases.md`):
+  - 1.100: **never type `!` stable** (nameable anywhere, `Infallible` = alias of `!`; fallback now `!` in 2015/2018/2021 too), **`Allocator` trait + `Vec::new_in`/`Box::new_in`**,
+    `mem::DropGuard`, `trim_prefix/trim_suffix`, `bool::toggle`, `Box::map`/`Rc::map`/`Arc::map`; Cargo: `cargo::unused_dependencies` lint on by default,
+    new build-dir layout, min-publish-age dependency cooldown (key name `global-min-publish-age` under `[registry]` unverified); `i686-pc-windows-gnu` loses host tools (Tier 2 std-only; msvc unverified).
   - 1.99: C-variadic fn definitions, `Vec::into_parts/from_parts`, `fs::set_times`. 1.98: `NumBuffer`/`format_into`, float `algebraic_*`.
   - 1.97: v0 symbol mangling default; `CARGO_BUILD_WARNINGS`. 1.96: `core::range` Copy range types, `assert_matches!`, wasm undefined symbols now link errors.
   - 1.95: `cfg_select!` (replaces `cfg-if`), **if-let guards** in match, `Vec::push_mut`, `Atomic*::update`. 1.94: `array_windows`, `LazyLock::get`, cargo config `include`, TOML 1.1.
@@ -18,13 +22,14 @@ description: Current Rust (1.99 stable, edition 2024) language, std, cargo works
 - Earlier baselines still worth knowing: 1.90 **LLD default linker on x86_64 Linux**, `cargo publish --workspace`; 1.89 `[x; _]` inferred const args, `File::lock`;
   1.88 **let chains** (2024 edition only), cargo cache auto-GC; 1.87 `io::pipe`, `use<..>` in traits; 1.86 **trait upcasting**, `get_disjoint_mut`;
   1.85 **async closures**; 1.84 MSRV-aware resolver; 1.80 `LazyLock`/`LazyCell`; 1.75 `async fn` / RPITIT in traits; 1.70 `OnceLock`.
-- Not stable yet: never type `!` lands in **1.100** (Infallible becomes `= !`); `gen` blocks nightly-only; next trait solver and new borrow checker nightly-only;
-  `cargo -Zscript` and `build-dir-new-layout` still unstable.
-- Ecosystem (crates.io, 2026-10-10): tokio 1.53.2 (LTS 1.51.x to 2027-03, 1.53.x to 2027-09; MSRV 1.85 from 1.54), axum 0.8.9, actix-web 4.15.0,
-  tower 0.5.3, hyper 1.12.0, reqwest 0.13.5, rustls 0.23.45, serde 1.0.229, thiserror 2.0.21, anyhow 1.0.104, miette 7.6.0, clap 4.6.7,
-  sqlx 0.9.0, diesel 2.3.14, sea-orm 2.0.4, tracing 0.1.44, tracing-subscriber 0.3.23, proptest 1.11.0, insta 1.49.0, cargo-nextest 0.9.148,
-  cargo-deny 0.20.2, cargo-audit 0.22.2, cargo-vet 0.10.2, cargo-semver-checks 0.51.0, cargo-fuzz 0.13.2, wasm-bindgen 0.2.129,
-  pyo3 0.29.3, napi 3.14.2, uniffi 0.32.2, cxx 1.0.204, embassy-executor 0.10.0, embedded-hal 1.0.0, sccache 0.18.0.
+- Not stable yet: `gen` blocks nightly-only; next trait solver and new borrow checker nightly-only; `cargo -Zscript` still unstable (the build-dir
+  layout rework itself shipped in 1.100). Nightly began enabling the parallel compiler frontend by default (blog post 2026-11-16; details unverified, stable unchanged).
+- Ecosystem (crates.io API, rechecked 2026-11-19): tokio 1.54.1 (LTS 1.51.x to 2027-03, 1.53.x to 2027-09; MSRV 1.85), axum 0.8.9, actix-web 4.20.0,
+  hyper 1.12.0, reqwest 0.13.5, rustls 0.23.46, serde 1.0.229, thiserror 2.0.21, anyhow 1.0.104, clap 4.6.8,
+  sqlx 0.9.1, diesel 2.4.0, sea-orm 2.0.4, tracing-subscriber 0.3.23, insta 1.49.0, cargo-nextest 0.9.152,
+  cargo-deny 0.22.0 (needs Rust 1.95), cargo-audit 0.23.0, wasm-bindgen 0.2.130, pyo3 0.30.1.
+  Not rechecked (2026-10-10 values): tower 0.5.3, miette 7.6.0, tracing 0.1.44, proptest 1.11.0, cargo-vet 0.10.2, cargo-semver-checks 0.51.0,
+  cargo-fuzz 0.13.2, napi 3.14.2, uniffi 0.32.2, cxx 1.0.204, embassy-executor 0.10.0, embedded-hal 1.0.0, sccache 0.18.0.
 - **async-std is discontinued** (announced in 1.13.1, 2025-02; last crates.io release 1.13.2, 2025-08; points users to `smol`). Rust in the Linux kernel is no longer experimental (Dec 2025).
 
 ### Older versions
@@ -61,6 +66,9 @@ description: Current Rust (1.99 stable, edition 2024) language, std, cargo works
 | axum `/:id`, `/*rest`, `#[async_trait]` extractors | axum 0.8 `/{id}`, `/{*rest}`, plain `impl FromRequestParts` | axum 0.8 |
 | `wasm32-wasi` target | `wasm32-wasip1` / `wasm32-wasip2` | 1.84 (2025-01; new targets since 1.78) |
 | `cargo publish` per crate in order | `cargo publish --workspace` | 1.90 |
+| `Infallible` / `enum Never {}` / `Result<T, Infallible>` tricks | `!` (e.g. `Result<T, !>`) | 1.100 |
+| nightly `allocator_api` for custom allocators | stable `Allocator` trait, `Vec::new_in`, `Box::new_in` | 1.100 |
+| `cargo-udeps`/`machete` alone for unused deps | built-in `cargo::unused_dependencies` lint (not dev-deps) | 1.100 |
 | `.unwrap()` on I/O, parse, lock in production paths | `?` with context; `expect("invariant: ...")` only for real invariants | - |
 | nightly toolchain for "nice" features | stable; nightly only for miri, fuzz, `-Z` tooling in CI | - |
 
@@ -69,7 +77,7 @@ description: Current Rust (1.99 stable, edition 2024) language, std, cargo works
 ```toml
 # rust-toolchain.toml (apps; pin exact so CI = laptop)
 [toolchain]
-channel = "1.99.0"
+channel = "1.100.0"
 components = ["clippy", "rustfmt"]
 ```
 ```toml
@@ -84,7 +92,7 @@ rust-version = "1.85"              # MSRV you actually test in CI
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "1.53", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.54", features = ["rt-multi-thread", "macros"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"             # relax per crate that truly needs it
@@ -200,7 +208,9 @@ opt-level = 1         # faster dev runtime for heavy deps
   `cargo llvm-lines`/`cargo bloat` for size. mold only if LLD is still slow for you; on x86_64 Linux LLD is already default.
 
 ## Security
-- **Supply chain** (biggest real risk): crates.io had malicious crates and the `arrayref` 0.3.10 compromise (RUSTSEC-2026-0260, 2026-08-20: new dep `proc-macro1` with a malicious build script, removed after ~86 minutes; <=0.3.9 unaffected);
+- **Supply chain** (biggest real risk): crates.io had malicious crates and the `arrayref` 0.3.10 compromise (RUSTSEC-2026-0260, 2026-08-20: new dep `proc-macro1` with a malicious build script, removed after ~86 minutes; <=0.3.9 unaffected; RUSTSEC-2026-0265 covers the removed `proc-macro1`, 2026-08-20; `internment`/`append-only-ecosystem` hit the same way (unverified));
+  crates.io now always publishes a RustSec advisory when it removes malware (policy 2026-02-13);
+  use Cargo's min-publish-age cooldown (1.100, RFC 3923; check the resolver docs for the key) so fresh releases are not resolved for a few days;
   the Rust blog warned of targeted attacks on prominent maintainers (2026-09-17). Commit `Cargo.lock`, build `--locked`, run `cargo deny check`
   (advisories, licenses, bans, sources) and/or `cargo audit` in CI; `cargo vet` for audited deps in high-assurance projects. Review `build.rs`
   and proc-macros of new deps: they run code at build time. Publish with crates.io trusted publishing (OIDC via `rust-lang/crates-io-auth-action`; GitHub since 2025-07, GitLab.com since 2026-01) instead of long-lived tokens.
@@ -260,7 +270,12 @@ opt-level = 1         # faster dev runtime for heavy deps
 - Choose C++: existing C++ codebase/ecosystem (game engines, CUDA, Qt) where interop cost outweighs safety gains; add Rust at boundaries via `cxx`.
 
 ## Sources
-- https://blog.rust-lang.org/ : release list and dates 1.85-1.99, patch releases, security/policy posts (accessed 2026-10-09)
+- https://blog.rust-lang.org/ : release list and dates 1.85-1.100, patch releases, security/policy posts, 2026-11-16 parallel-frontend post title (accessed 2026-11-19)
+- https://blog.rust-lang.org/2026/11/12/Rust-1.100.0/ : never type, Allocator API, DropGuard, cargo unused_dependencies, min-publish-age (2026-11-19)
+- https://blog.rust-lang.org/2026/10/15/Rust-1.99.1/ : 1.99.1 regression fixes, no CVE (2026-11-19)
+- https://blog.rust-lang.org/2026/10/02/demoting-i686-windows-targets-to-std-only/ : i686 Windows targets std-only from 1.100 (2026-11-19)
+- https://rustsec.org/advisories/RUSTSEC-2026-0265.html : proc-macro1 removed as malware, tied to RUSTSEC-2026-0260 arrayref (fetched 2026-11-19); also doc.rust-lang.org/stable/releases.html (1.100 notes, 2026-11-19) and releases.rs (1.101 2026-12-24, 1.102 2027-02-04, 2026-11-19)
+- https://blog.rust-lang.org/2026/02/13/crates.io-malicious-crate-update : RustSec advisory always published on malware removal (2026-11-19, via search result)
 - https://blog.rust-lang.org/2026/10/01/Rust-1.99.0/ : C variadics, Vec::into_parts, fs::set_times (2026-10-09)
 - https://blog.rust-lang.org/2026/08/20/Rust-1.98.0/ , .../2026/07/09/Rust-1.97.0/ , .../2026/05/28/Rust-1.96.0/ : 1.96-1.98 features, wasm change, Cargo CVEs (2026-10-09)
 - https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/ , .../2026/03/05/Rust-1.94.0/ , .../2026/01/22/Rust-1.93.0/ : cfg_select!, if-let guards, TOML 1.1 (2026-10-09)
@@ -268,11 +283,10 @@ opt-level = 1         # faster dev runtime for heavy deps
 - https://blog.rust-lang.org/2025/08/07/Rust-1.89.0/ , .../2025/06/26/Rust-1.88.0/ : const `_`, File::lock, let chains, cargo GC (2026-10-09)
 - https://blog.rust-lang.org/2025/05/15/Rust-1.87.0/ , .../2025/04/03/Rust-1.86.0/ : io::pipe, precise capturing in traits, trait upcasting (2026-10-09)
 - https://blog.rust-lang.org/2025/02/20/Rust-1.85.0/ : edition 2024 change list, async closures (2026-10-09)
-- https://releases.rs/ : 1.100 (2026-11-12) and 1.101 (2026-12-24) dates (2026-10-09)
-- https://lwn.net/Articles/1092273/ : never type stable in 1.100, merged 2026-08-24 (2026-10-09)
+- https://releases.rs/ : 1.100 stable, 1.101 (2026-12-24), 1.102 (2027-02-04) dates (2026-11-19)
 - https://doc.rust-lang.org/cargo/reference/resolver.html : resolver 1/2/3, incompatible-rust-versions (2026-10-09)
 - https://doc.rust-lang.org/cargo/reference/unstable.html : -Zscript and build-dir-new-layout still unstable (2026-10-09)
-- https://github.com/tokio-rs/tokio/blob/master/README.md : LTS 1.51.x/1.53.x and MSRV policy (2026-10-09)
+- https://github.com/tokio-rs/tokio/blob/master/README.md : LTS 1.51.x/1.53.x and MSRV 1.85 (2026-11-19)
 - https://github.com/async-rs/async-std (CHANGELOG) and crates.io : discontinued in 1.13.1, last release 1.13.2 (2025-08-15), use smol (2026-10-09)
 - https://blog.rust-lang.org/2024/04/09/updates-to-rusts-wasi-targets/ : wasm32-wasip1/p2 added in 1.78, wasm32-wasi removed in 1.84 (2025-01-09) (2026-10-09)
 - https://blog.rust-lang.org/2026/09/21/github-actions-leaking-secrets-when-miri-output-is-cached/ : Miri target/ cache leak and mitigations (2026-10-09)
@@ -282,5 +296,5 @@ opt-level = 1         # faster dev runtime for heavy deps
 - https://doc.rust-lang.org/std/macro.assert_matches.html : import as `std::assert_matches`, stable 1.96 (2026-10-10)
 - https://releases.rs/docs/1.97.0/ : "Warn on linker output by default" (2026-10-10)
 - https://github.com/rustsec/advisory-db/blob/main/crates/arrayref/RUSTSEC-2026-0260.md and https://blog.rust-lang.org/2026/08/20/supply-chain-attack-on-arrayref : arrayref 0.3.10 malicious release (2026-10-09)
-- https://crates.io/api/v1/crates/<name> : all crate versions listed under Currency check (2026-10-09)
+- https://crates.io/api/v1/crates/<name> : crate versions listed under Currency check (2026-11-19; those marked "not rechecked" date from 2026-10-10)
 - https://github.com/rust-lang/rust/issues/117078 : gen blocks tracking issue, still unstable (2026-10-09)

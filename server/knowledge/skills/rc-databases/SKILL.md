@@ -1,35 +1,36 @@
 ---
 name: rc-databases
-description: Databases as of 2026-10 - choosing a store (Postgres, MySQL/MariaDB, SQLite/Turso, SQL Server, MongoDB, Redis/Valkey, Elasticsearch/OpenSearch, DynamoDB, Firestore, Supabase, pgvector, ClickHouse/Timescale), schema modeling, SQL (joins, CTEs, window functions, upserts, keyset pagination, EXPLAIN, indexes), isolation, locking, zero-downtime migrations, RLS, GDPR erasure, backup/PITR, replication, pooling, ORM N+1.
+description: Databases as of 2026-11 - choosing a store (Postgres, MySQL/MariaDB, SQLite/Turso, SQL Server, MongoDB, Redis/Valkey, Elasticsearch/OpenSearch, DynamoDB, Firestore, Supabase, pgvector, ClickHouse/Timescale), schema modeling, SQL (joins, CTEs, window functions, upserts, keyset pagination, EXPLAIN, indexes), isolation, locking, zero-downtime migrations, RLS, GDPR erasure, backup/PITR, replication, pooling, ORM N+1.
 ---
-# Databases: selection, modeling, SQL, operations (as of 2026-10)
+# Databases: selection, modeling, SQL, operations (as of 2026-11)
 
-> Every version/date below was checked on 2026-10-09 against the source in "Sources" unless marked (unverified). Recheck before pinning.
+> Every version/date below was checked on 2026-11-19 against the source in "Sources" unless marked (unverified). Recheck before pinning.
 > rc-web-backend already has the Postgres 17/18/19 feature table, expand/contract basics, outbox and Postgres-backed queues: this skill goes
 > deeper on modeling, SQL, isolation, operations and the other engines. Engine-by-engine detail: `references/engines.md`.
 > SQL patterns with examples: `references/sql-patterns.md`.
 
 ## Currency check
 
-| Engine | Current (2026-10) | Supported lines / EOL | Licence / notes |
+| Engine | Current (2026-11-19) | Supported lines / EOL | Licence / notes |
 |---|---|---|---|
-| PostgreSQL | 18.6 (18 GA 2025-09-25) | 18 to 2030-11-14, 17 to 2029-11-08, 16 to 2028-11-09, 15 to 2027-11-11, **14 EOL 2026-11-12** | PostgreSQL licence. 19 at Beta 4 (2026-09-24), not GA. |
-| MySQL | 9.7 LTS (GA 2026-04-21, 9.7.3 2026-08-18) | 9.7 premier to 2031-04, 8.4 LTS premier to 2029-04-30; **8.0 EOL 2026-04-30**; innovation 9.x lines live ~1 quarter | GPLv2 + commercial. `mysql_native_password` removed in 9.0. |
-| MariaDB | 12.3 LTS (stable 2026-05-29), 13.0 rolling (2026-09-15) | LTS 11.4 (to 2029-05-29), 11.8 (to 2028-06-04), 10.11 (to 2028-02-16); **10.6 EOL 2026-07** | GPLv2. From 12.3, each major's `.3` is LTS. |
-| SQLite | 3.54.0 (2026-10-09) | single line, long-term file-format stability | Public domain. 3.51.3 (2026-03-13) and 3.53.0 (2026-04-09) fixed a WAL-reset corruption bug: be on >= 3.51.3, ideally 3.53+. |
-| SQL Server | 2025 (17.x, GA 2025-11) | 2022 mainstream to 2028-01-11; 2019 extended to 2030-01-08; **2016 EOL 2026-07-14** | Commercial; Express now 50 GB per DB; Web edition discontinued. |
-| MongoDB | 9.0 (GA 2026-09-28) | 9.0 to 2031-10-31; 8.0 and 8.3 to 2029-10-31; 7.0 to 2027-08-31; 6.0 EOL 2025-07 | SSPL (not OSI). Patch MongoBleed CVE-2025-14847 (8.2.3+ and backports). |
-| Redis | 8.10 (8.10.2, 2026-09-17) | latest minor + previous minor + previous major get fixes | 8.x: RSALv2 / SSPLv1 / **AGPLv3** tri-licence; <= 7.2 was BSD. |
-| Valkey | 9.1.2 (2026-08-31); 9.2 at RC1 (2026-09-16) | 9.0, 8.1, 8.0 still patched | BSD-3, Linux Foundation fork of Redis 7.2.4. |
-| Elasticsearch | 9.5 / 9.4 maintained; 8.19 to 2027-07-15 | | ELv2 / SSPL / **AGPLv3** (AGPL added 2024-08). |
-| OpenSearch | 3.9.0 (2026-09-29); 2.19.x maintenance | | Apache-2.0, Linux Foundation. |
-| pgvector | 0.8.7 (2026-10-01, IVFFlat buffer-overflow fix) | | PostgreSQL licence. |
-| TimescaleDB | 2.30.2 (2026-09-29), PG 16-18 | PG 15 dropped in 2.29 | Apache-2.0 core + TSL (compression, continuous aggregates). |
-| ClickHouse | 26.9 stable; LTS 26.8 and 26.3 | | Apache-2.0. |
+| PostgreSQL | **19.0 GA 2026-11-19**; 18.7 (2026-11-12; 18 GA 2025-09-25) | 19 to 2031-11-19, 18 to 2030-11-14, 17 (17.12) to 2029-11-08, 16 to 2028-11-09, 15 (15.20) to 2027-11-11, **14 EOL: final release 14.25 on 2026-11-12** | PostgreSQL licence. The 2026-11-12 minors are a big security release (52 CVEs and 140+ bug fixes, many CVSS 8.8 code-execution/type-confusion bugs, plus pg_dump/pg_restore/reindexdb issues): patch now. Wait for 19.1+ before production if you avoid x.0. |
+| MySQL | 9.7 LTS (GA 2026-04-21, 9.7.4 2026-10-20) | 9.7 premier to 2031-04-30 (extended 2034), 8.4 LTS (8.4.13) premier to 2029-04-30; **8.0 EOL 2026-04-30**; innovation lines live ~1 quarter | GPLv2 + commercial. `mysql_native_password` removed in 9.0. |
+| MariaDB | 12.3 LTS (12.3.4, 2026-11-17), 13.0 rolling (13.0.2, 2026-09-15; community support ends 2026-12-31) | LTS 12.3 (to 2029-06-12), 11.4 (to 2029-05-29), 11.8 (to 2028-06-04), 10.11 (to 2028-02-16); **10.6 community EOL 2026-07-06** | GPLv2. From 12.3, each major's `.3` is LTS. |
+| SQLite | 3.54.1 (2026-10-16; fixes a 32-bit heap overflow in 3.54.0) | single line, long-term file-format stability | Public domain. 3.51.3 (2026-03-13) and 3.53.0 (2026-04-09) fixed a WAL-reset corruption bug: be on >= 3.51.3, ideally 3.53+/3.54.1. |
+| SQL Server | 2025 (17.x, GA 2025-11, CU11 2026-11-12, build 17.0.5065.9, KB5129223) | 2025 mainstream to 2031-01-06; 2022 mainstream to 2028-01-11; 2019 security to 2030-01-08; **2016 security updates ended 2026-07-14** (paid ESU to 2029-07-17) | Commercial; Express now 50 GB per DB; Web edition discontinued. |
+| MongoDB | 9.0 (9.0.8, 2026-11-10; GA 2026-09-28) | 9.0 to 2031-10-31; 8.0 to 2029-10-31; 7.0 to 2027-08-31; 6.0 EOL 2025-07-31 | SSPL (not OSI). Patch MongoBleed CVE-2025-14847 (8.2.3+ and backports). 9.0 known issues: config-server connection exhaustion in sharded clusters (set `ShardingTaskExecutorPoolMinSizeForConfigServers` to 1 if pool min > 1). |
+| Redis | 8.10 (8.10.3, 2026-10-26); 8.12 at RC3 (2026-11-12) | latest minor + previous minor + previous major get fixes | 8.x: RSALv2 / SSPLv1 / **AGPLv3** tri-licence; <= 7.2 was BSD. 2026-10-26 patches (8.10.3, 8.8.4, 8.6.8, 8.4.8, 8.2.11, 7.4.12, 7.2.17) fix a heap overflow on >4 GB PUBLISH over the cluster bus. |
+| Valkey | **9.2.0 GA (2026-11-18/19)**; 9.1.4, 9.0.8, 8.1.12, 8.0.13 security releases (2026-11-18) | 9.0, 8.1, 8.0 still patched | BSD-3, Linux Foundation fork of Redis 7.2.4. Security fix: use-after-free in client eviction with `maxmemory-clients` (CVE-2026-130822 per the release page; the number looks unusual, check it). 9.2 adds `DELEX`, Zstd/LZ4 RDB compression. |
+| Elasticsearch | 9.5.6 / 9.4.9 (2026-11-02); 8.19.25 | 8.19 to 2027-07-15 | ELv2 / SSPL / **AGPLv3** (AGPL added 2024-08). |
+| OpenSearch | 3.10.0 (2026-11-18); 2.19.7 maintenance | 2.x maintenance ends once 4.0 ships (no date) | Apache-2.0, Linux Foundation. |
+| pgvector | 0.8.7 (2026-10-01, IVFFlat buffer-overflow fix); 0.9.0 unreleased | | PostgreSQL licence. |
+| TimescaleDB | 2.32.1 (2026-11-19), PG 16-18 | PG 15 dropped in 2.29; **use 2.32.1 with the 2026-11 PG minors** (earlier patches: scheduled background jobs fail on PG 18.7/17.12/16.16) | Apache-2.0 core + TSL (compression, continuous aggregates). |
+| ClickHouse | 26.10 and 26.9 stable (26.9.33.10 on 2026-11-19); LTS 26.8 (26.8.41.14) | 26.3 LTS support end (unverified) | Apache-2.0. |
 | Turso (Rust SQLite rewrite) | pre-1.0, MIT | | Replaces libSQL as Turso's direction; keep your own backups. |
 
 What shipped in the last ~12 months (dated):
-- PG 18 (2025-09): `uuidv7()`, async I/O, virtual generated columns, `RETURNING OLD/NEW`, `WITHOUT OVERLAPS`, skip scan, stats kept by `pg_upgrade`, checksums on by default, md5 deprecated. PG 19 beta: `REPACK CONCURRENTLY`, `ON CONFLICT DO SELECT`, `WAIT FOR LSN`, SQL/PGQ, JIT off by default.
+- PG 18 (2025-09): `uuidv7()`, async I/O, virtual generated columns, `RETURNING OLD/NEW`, `WITHOUT OVERLAPS`, skip scan, stats kept by `pg_upgrade`, checksums on by default, md5 deprecated.
+- PG 19 (GA 2026-11-19): `REPACK (CONCURRENTLY)` (replaces `VACUUM FULL`/`CLUSTER` use), `INSERT ... ON CONFLICT DO SELECT ... RETURNING`, `WAIT FOR LSN`, `IGNORE NULLS` in `lead/lag/first_value/last_value/nth_value`, `COPY ... TO` JSON, parallel autovacuum of indexes, `pg_plan_advice`/`pg_stash_advice`, logical WAL level raised automatically, `FOR ALL SEQUENCES` publications, SNI certs (`pg_hosts.conf`), faster FK checks. Behavior changes: JIT off by default, `standard_conforming_strings` forced on (old dumps made with it off will not load), `max_locks_per_transaction` default 128, `json_array()` of an empty subquery gives `[]`, RADIUS auth and `io_workers` removed, md5 login logs a warning, `wal_compression = on` picks the best available method (not always pglz) and TOAST default is `lz4`. SQL/PGQ (`GRAPH_TABLE`) was claimed for the beta but is not in the 19 release notes: treat as not shipped (unverified).
 - SQL Server 2025 (2025-11): `vector` type + `VECTOR_DISTANCE`, native `json` type, `REGEXP_*`, optimized locking, ZSTD backup compression, PBKDF2 password hashes by default, TLS 1.3/TDS 8.0. Vector index, `VECTOR_SEARCH`, fuzzy matching still need `PREVIEW_FEATURES`.
 - MongoDB 9.0 (2026-09): per-operation memory limit, WASM-sandboxed server-side JS back, `constraint` validation level, Queryable Encryption prefix/suffix/substring GA, time-series stored as one namespace, `mongocryptd` deprecated.
 - MySQL 9.7 LTS (2026-04): first LTS since 8.4; SCRAM-SHA-256 default for SASL LDAP. 8.0 went EOL 2026-04-30.
@@ -38,10 +39,11 @@ What shipped in the last ~12 months (dated):
 - Firestore: MongoDB-compatible API GA (2025-08-26); Enterprise edition Native mode + Pipeline queries GA (2026-04-20).
 - Supabase: `sb_publishable_...` / `sb_secret_...` keys; legacy `anon`/`service_role` JWT keys deprecated by end of 2026.
 - Valkey 9 (2025-10) / 9.1; Redis 8.x bundles the query engine, JSON, time series and vector sets.
-- ORMs: SQLAlchemy 2.1 (2026-09-24); Prisma 7 (7.0.0 2025-11-19, 7.10 latest stable) with 8.0 at RC (npm `latest` tag already points at the RC: pin 7.x explicitly); Drizzle 0.45 stable, 1.0 in RC.
+- ORMs: SQLAlchemy 2.1.9 and 2.0.58 (both 2026-11-16); Prisma 7 (7.0.0 2025-11-19, 7.10.1 is the `prev` tag) with 8.0 still at RC (npm `latest` tag points at 8.0.0-rc.34 on 2026-11-19: pin 7.x explicitly); Drizzle 0.45.4 stable (`latest`), 1.0.0-rc.5 on the `rc` tag.
+- Firestore (2026-10): DML (`insert`, `upsert`) in pipeline queries GA 2026-10-22; text search and geospatial search GA 2026-10-19.
 
 ### Older versions (legacy projects: do not upgrade unless asked)
-- PG 14-16: no `uuidv7()` (use bigint identity or an app-side UUIDv7); no virtual generated columns; `MERGE` from 15, `MERGE ... RETURNING` and `JSON_TABLE` from 17; `NULLS NOT DISTINCT` from 15; md5 still silent. PG 14 dies 2026-11-12: flag it, do not silently upgrade.
+- PG 14-16: no `uuidv7()` (use bigint identity or an app-side UUIDv7); no virtual generated columns; `MERGE` from 15, `MERGE ... RETURNING` and `JSON_TABLE` from 17; `NULLS NOT DISTINCT` from 15; md5 still silent. PG 14 is out of support (last release 14.25, 2026-11-12): flag it, do not silently upgrade; PG 15-17 have no `REPACK`, `ON CONFLICT DO SELECT` or `WAIT FOR LSN`.
 - MySQL 8.0 (EOL) / 8.4: 8.4 has `mysql_native_password` disabled by default but loadable; 8.0 still has it enabled. No `VECTOR` type before 9.0. `utf8` means `utf8mb3` on all of them: still write `utf8mb4`.
 - MariaDB 10.6/10.11: `UUID` type from 10.7, `VECTOR` type + vector index from 11.7 (GA line: 11.8 LTS), `RETURNING` on INSERT/DELETE (single-table `UPDATE ... RETURNING` only from 13.0 rolling).
 - SQL Server 2019/2022: no `json`/`vector` types (JSON is `nvarchar` + `ISJSON`), no `REGEXP_*`; 2022 has `GREATEST/LEAST`, `DATE_BUCKET`, `IS DISTINCT FROM`.
@@ -68,7 +70,7 @@ What shipped in the last ~12 months (dated):
 | Supabase `anon` / `service_role` keys | `sb_publishable_` (client, RLS applies) / `sb_secret_` (server only, bypasses RLS) | 2025, legacy deprecated end-2026 |
 | Separate vector DB by default | pgvector (HNSW) in the DB you already run until > ~10-50 M vectors or strict latency SLOs (rule of thumb) | - |
 | `CREATE INDEX` / `ALTER ... NOT NULL` on a live table | `CREATE INDEX CONCURRENTLY`; `CHECK (...) NOT VALID` then `VALIDATE`; MySQL `ALGORITHM=INSTANT/INPLACE, LOCK=NONE` | - |
-| `VACUUM FULL` / `pg_repack` to shrink a table | PG 19 `REPACK CONCURRENTLY`; until then `pg_repack` (extension) | PG 19 |
+| `VACUUM FULL` / `pg_repack` to shrink a table | PG 19 `REPACK (CONCURRENTLY)`; on PG <= 18 `pg_repack` (extension) | PG 19 (2026-11-19) |
 
 ## Do this
 
@@ -77,7 +79,7 @@ Default: **one PostgreSQL** (or SQLite for a single-node app/embedded/mobile). A
 
 | Need | Pick | Not |
 |---|---|---|
-| General OLTP, relations, constraints, reporting later | PostgreSQL 18 (managed if possible) | MongoDB "for flexibility" |
+| General OLTP, relations, constraints, reporting later | PostgreSQL 18 (or 19 once 19.1+ lands; managed if possible) | MongoDB "for flexibility" |
 | Single process / single server / desktop / mobile / edge read replicas | SQLite (WAL) ; Litestream for backup; Turso/libSQL only if you need their sync | Postgres for a CLI tool |
 | Existing MySQL/LAMP/WordPress/Laravel shop | MySQL 8.4 or 9.7 LTS / MariaDB 11.8 or 12.3 LTS | Migrating just because |
 | Windows/.NET shop with licences, SSRS/SSIS | SQL Server 2022/2025 (Azure SQL if cloud) | |
@@ -89,7 +91,7 @@ Default: **one PostgreSQL** (or SQLite for a single-node app/embedded/mobile). A
 | Postgres + auth + storage + realtime as a service | Supabase (it is plain Postgres + PostgREST + RLS) | Treating its client SDK as a backend without RLS |
 | Embeddings / semantic search | pgvector (HNSW) in your Postgres; dedicated (Qdrant, Milvus, Weaviate, Pinecone) at very large scale | A second DB for 100 k vectors |
 | Time-series metrics / events, analytics dashboards | TimescaleDB (in Postgres) for moderate; ClickHouse for large columnar analytics | Row-store OLTP tables for billions of events |
-| Deep multi-hop relationship queries (fraud rings, recommendations, permissions graphs) | Postgres recursive CTE / PG 19 SQL/PGQ first; Neo4j or similar if traversals dominate | A graph DB for a normal FK schema |
+| Deep multi-hop relationship queries (fraud rings, recommendations, permissions graphs) | Postgres recursive CTE first (SQL/PGQ not confirmed in PG 19, unverified); Neo4j or similar if traversals dominate | A graph DB for a normal FK schema |
 | Warehouse / BI over many sources | See "Warehouses" below | Running BI on the OLTP primary |
 
 Consistency questions to answer before picking: do you need multi-row/multi-entity atomic transactions? Read-your-writes after failover? Strong
@@ -148,7 +150,7 @@ SQL Server default is READ COMMITTED with locking; turn on `READ_COMMITTED_SNAPS
 ### 7. Operations
 - Backup = base backup + WAL/binlog archive for PITR (pgBackRest, WAL-G, Barman; MySQL `mysqlbackup`/XtraBackup + binlogs; SQL Server full + diff + log backups; Mongo Atlas continuous backup or `mongodump` only for small DBs). `pg_dump`/`mysqldump` are logical exports, not PITR.
 - **Test restores** on a schedule: restore to a scratch instance, run row-count and checksum queries, record actual RTO/RPO. An untested backup is a hope.
-- Replication: async streaming replicas for read scaling and failover; sync (`synchronous_standby_names`, semi-sync in MySQL) when you cannot lose committed writes. Replicas lag: route read-your-writes reads to the primary or wait for LSN (PG 19 `WAIT FOR LSN`).
+- Replication: async streaming replicas for read scaling and failover; sync (`synchronous_standby_names`, semi-sync in MySQL) when you cannot lose committed writes. Replicas lag: route read-your-writes reads to the primary or wait for LSN (PG 19 `WAIT FOR LSN`, run on the standby).
 - Failover: use a managed service or Patroni (PG) / Orchestrator or InnoDB Cluster (MySQL) / Always On AG (SQL Server) / replica sets (Mongo). Fence the old primary; apps reconnect via a stable endpoint and retry.
 - Partitioning (single node): PG declarative range/list/hash partitions for time-based retention (drop a partition instead of `DELETE`) and very large tables; every query must include the partition key to prune. Sharding (multi node: Citus, Vitess, app-level): last resort, after vertical scale, replicas, partitioning and archiving; choose a shard key that keeps transactions on one shard (usually `tenant_id`).
 - Pooling: PgBouncer transaction mode (no session state: use `SET LOCAL`, avoid session advisory locks/`LISTEN`), or provider poolers (Supabase Supavisor, RDS Proxy). Total server connections ~ a few per CPU core; app pool per instance small (5-20). MySQL handles more connections but still pool (ProxySQL).
@@ -158,10 +160,10 @@ SQL Server default is READ COMMITTED with locking; turn on `READ_COMMITTED_SNAPS
 - No second database until Postgres/SQLite has been measured failing the requirement. No Redis for a cache that fits in process memory on one node. No ORM plugin for soft delete, audit or multi-tenancy when a view, trigger or RLS policy does it. No separate search/vector DB under ~a few million docs (rule of thumb). No migration framework beyond the one your framework already ships.
 
 ### 9. ORMs and query builders
-| Ecosystem | Common choice (2026-10) | Pitfall to check |
+| Ecosystem | Common choice (2026-11) | Pitfall to check |
 |---|---|---|
-| TypeScript | Prisma 7, Drizzle 0.45 (1.0 RC), Kysely, TypeORM, MikroORM | Prisma: N+1 via nested awaits in loops, use `include`/`relationLoadStrategy: "join"`; `prisma migrate dev` must never run in prod (`migrate deploy`); `db push` is not a migration. |
-| Python | SQLAlchemy 2.1 / 2.0, Django ORM, SQLModel | Lazy loading in loops: `selectinload`/`joinedload`; Django `select_related`/`prefetch_related`; async SQLAlchemy raises on implicit lazy loads. Alembic autogenerate misses renames (emits drop+add). |
+| TypeScript | Prisma 7 (8 RC), Drizzle 0.45 (1.0 RC), Kysely, TypeORM, MikroORM | Prisma: N+1 via nested awaits in loops, use `include`/`relationLoadStrategy: "join"`; `prisma migrate dev` must never run in prod (`migrate deploy`); `db push` is not a migration. |
+| Python | SQLAlchemy 2.1 / 2.0 (2.0.58), Django ORM, SQLModel | Lazy loading in loops: `selectinload`/`joinedload`; Django `select_related`/`prefetch_related`; async SQLAlchemy raises on implicit lazy loads. Alembic autogenerate misses renames (emits drop+add). |
 | Java/Kotlin | Hibernate/JPA, jOOQ, Spring Data JDBC, Exposed | `FetchType.EAGER` and open-session-in-view hide N+1; use fetch joins / entity graphs; Flyway/Liquibase for DDL, never `ddl-auto=update` in prod. |
 | .NET | EF Core 10 (LTS, GA 2025-11, supported to 2028-11-10), Dapper | Lazy-loading proxies N+1; `AsNoTracking` for reads; split queries for big includes; `EnsureCreated` is not migrations. |
 | Go | `database/sql` + sqlc, pgx, GORM, ent | GORM silently ignores zero values on update and `AutoMigrate` is not a migration tool; close `rows`. |
@@ -191,7 +193,7 @@ Universal: log SQL in dev, assert query counts in tests for list endpoints, keep
 - Each test in a transaction rolled back, or a template DB clone (PG `CREATE DATABASE ... TEMPLATE`) for speed.
 - Migration CI: apply all migrations on an empty DB and on a prod-schema snapshot; lint (squawk, Atlas); check for long locks.
 - RLS tests: pgTAP or app tests that connect as the app role and assert cross-tenant reads return 0 rows and writes fail.
-- Formatting/linting SQL: sqlfluff (4.4.0 latest on PyPI, 2026-10-10); schema diff: Atlas, migra-style tools.
+- Formatting/linting SQL: sqlfluff (4.4.0 on PyPI as of 2026-10-10, not rechecked 2026-11-19: unverified); schema diff: Atlas, migra-style tools.
 - Supabase: `supabase db lint`, Security/Performance Advisors, pgTAP tests in `supabase/tests/`.
 
 ## Common mistakes in AI-written code
@@ -220,44 +222,47 @@ Universal: log SQL in dev, assert query counts in tests for list endpoints, keep
 - [ ] Sensitive fields encrypted or not stored; retention + erasure path covers DB, caches, search, analytics, logs, backups.
 - [ ] Backups with PITR, encrypted, off-account copy, and a restore test passed this month; RPO/RTO written down.
 - [ ] Pooling and timeouts configured; slow-query logging and `pg_stat_statements` (or equivalent) on; alerts on replica lag, disk, connections, XID age.
-- [ ] Engine on a supported version (PG 14 EOL 2026-11-12, MySQL 8.0 EOL 2026-04-30, SQL Server 2016 EOL 2026-07-14, MariaDB 10.6 EOL 2026-07).
+- [ ] Engine on a supported version (PG 14 EOL 2026-11-12, MySQL 8.0 EOL 2026-04-30, SQL Server 2016 security updates ended 2026-07-14, MariaDB 10.6 community EOL 2026-07-06) and on the latest minor (PG 18.7/17.12/16.16/15.20 fix ~50 CVEs).
 
 ## Sources
-All accessed 2026-10-09.
-- https://www.postgresql.org/support/versioning/ - PG supported versions, minors, EOL dates; 19 Beta 4.
-- https://www.postgresql.org/about/news/postgresql-18-released-3142/ - PG 18 features (uuidv7, AIO, virtual generated columns, RETURNING OLD/NEW, WITHOUT OVERLAPS, skip scan, checksums, md5 deprecation).
-- https://www.postgresql.org/about/news/postgresql-19-beta-1-released-3313/ - PG 19 features (REPACK, ON CONFLICT DO SELECT, WAIT FOR LSN, SQL/PGQ, JIT off, RADIUS removed).
+Accessed 2026-11-19 unless a line says otherwise (lines marked 2026-10-xx were not rechecked).
+- https://www.postgresql.org/support/versioning/ - PG supported versions, minors (19.0, 18.7...), EOL dates; 14 final release.
+- https://www.postgresql.org/about/newsarchive/ - 2026-11-12 minor release incl. 14.25; PG 19 GA 2026-11-19.
+- https://www.postgresql.org/about/news/postgresql-19-released-3449/ - PG 19 headline features and behavior changes.
+- https://www.postgresql.org/docs/19/release-19.html - PG 19 migration notes; no SQL/PGQ entry found.
+- https://www.postgresql.org/support/security/ - CVEs fixed in 18.7 (52 per press coverage of the announcement, mostly CVSS 8.8).
+- https://www.postgresql.org/about/news/postgresql-18-released-3142/ - PG 18 features (accessed 2026-10-09).
 - https://endoflife.date/mysql - MySQL 9.7/8.4/8.0 dates and LTS status.
-- https://dev.mysql.com/doc/relnotes/mysql/9.7/en/ - MySQL 9.7.0 GA 2026-04-21, 9.7.3 2026-08-18.
+- https://dev.mysql.com/doc/relnotes/mysql/9.7/en/ - MySQL 9.7.0 GA 2026-04-21, 9.7.4 2026-10-20.
 - https://dev.mysql.com/doc/refman/9.7/en/mysql-nutshell.html - MySQL 9.7 changes (SCRAM-SHA-256 default, removed variables).
 - https://dev.mysql.com/doc/relnotes/mysql/9.7/en/news-9-0-0.html - `mysql_native_password` removed in 9.0, disabled in 8.4.
 - https://mariadb.org/about/#maintenance-policy - MariaDB LTS policy and 11.8/11.4/10.11 EOL dates.
-- https://mariadb.org/mariadb/all-releases/ - MariaDB 12.3 stable 2026-05-29, 13.0 stable 2026-09-15, latest patches.
-- https://endoflife.date/mariadb - 12.3 LTS EOL 2029-06, 10.6 EOL 2026-07.
-- https://www.sqlite.org/changes.html - SQLite 3.54.0 / 3.53.0 dates and WAL-reset fix.
-- https://learn.microsoft.com/en-us/sql/sql-server/what-s-new-in-sql-server-2025 - SQL Server 2025 features, editions, preview features.
-- https://endoflife.date/mssqlserver - SQL Server support dates.
-- https://www.mongodb.com/docs/manual/release-notes/9.0/ - MongoDB 9.0 GA 2026-09-28 and features.
+- https://mariadb.org/mariadb/all-releases/ - MariaDB 12.3.4 / 13.0.2 and latest patches.
+- https://endoflife.date/mariadb - 12.3 LTS to 2029-06-12, 13.0 community to 2026-12-31, 10.6 community EOL 2026-07-06.
+- https://www.sqlite.org/changes.html - SQLite 3.54.1 (2026-10-16), 3.54.0, 3.53.x, WAL-reset fix.
+- https://learn.microsoft.com/en-us/sql/sql-server/what-s-new-in-sql-server-2025 - SQL Server 2025 features, editions, preview features (accessed 2026-10-09).
+- https://endoflife.date/mssqlserver - SQL Server support dates, 2025 CU11 (page updated 2026-11-14).
+- https://www.mongodb.com/docs/manual/release-notes/9.0/ - MongoDB 9.0.8 (2026-11-10), 9.0 GA 2026-09-28, features, known issues.
 - https://www.mongodb.com/legal/support-policy/lifecycles - MongoDB EOL dates.
-- https://endoflife.date/mongodb - MongoBleed CVE-2025-14847 note.
-- https://github.com/redis/redis/releases - Redis 8.10.2 (2026-09-17) and maintained lines.
+- https://endoflife.date/mongodb - MongoBleed CVE-2025-14847 note (accessed 2026-10-09).
+- https://github.com/redis/redis/releases - Redis 8.10.3 (2026-10-26), 8.12 RC3, cluster-bus PUBLISH heap overflow fix.
 - https://endoflife.date/redis - Redis licensing by version and support policy.
-- https://github.com/valkey-io/valkey/releases - Valkey 9.1.2, 9.2 RC.
-- https://www.elastic.co/blog/elasticsearch-is-open-source-again - Elasticsearch AGPL option (2024-08-29).
-- https://endoflife.date/elasticsearch - Elasticsearch maintained lines.
-- https://endoflife.date/opensearch - OpenSearch 3.9.0, 2.19 maintenance.
-- https://github.com/pgvector/pgvector/blob/master/CHANGELOG.md - pgvector 0.8.x dates and fixes.
-- https://github.com/timescale/timescaledb/releases - TimescaleDB 2.30.2, supported PG versions, licences.
-- https://github.com/ClickHouse/ClickHouse/releases - ClickHouse 26.9 stable, 26.8/26.3 LTS.
-- https://github.com/tursodatabase/turso - Turso status (pre-1.0, MIT, replaces libSQL direction).
+- https://github.com/valkey-io/valkey/releases - Valkey 9.2.0 GA and security releases 9.1.4/9.0.8/8.1.12/8.0.13.
+- https://www.elastic.co/blog/elasticsearch-is-open-source-again - Elasticsearch AGPL option (2024-08-29, accessed 2026-10-09).
+- https://endoflife.date/elasticsearch - Elasticsearch 9.5.6/9.4.9/8.19.25 and 8.19 EOL.
+- https://endoflife.date/opensearch - OpenSearch 3.10.0, 2.19.7 maintenance.
+- https://github.com/pgvector/pgvector/blob/master/CHANGELOG.md - pgvector 0.8.7, 0.9.0 unreleased.
+- https://github.com/timescale/timescaledb/releases - TimescaleDB 2.32.1, PG support, background-worker issue.
+- https://github.com/ClickHouse/ClickHouse/releases - ClickHouse 26.9 stable and 26.8 LTS builds (26.10 tag seen).
+- https://github.com/tursodatabase/turso - Turso status (pre-1.0, MIT).
 - https://aws.amazon.com/about-aws/whats-new/2025/11/amazon-dynamodb-multi-attribute-composite-keys-global-secondary-indexes/ - DynamoDB multi-attribute GSI keys.
-- https://docs.cloud.google.com/firestore/docs/release-notes - Firestore Enterprise/Pipeline GA 2026-04-20.
+- https://docs.cloud.google.com/firestore/docs/release-notes - Firestore Pipeline GA 2026-04-20; DML and search GA Oct 2026.
 - https://cloud.google.com/blog/products/databases/firestore-with-mongodb-compatibility-is-now-ga - Firestore MongoDB compatibility GA.
-- https://supabase.com/docs/guides/api/api-keys - Supabase publishable/secret keys, legacy deprecation.
+- https://supabase.com/docs/guides/api/api-keys - Supabase publishable/secret keys, legacy deprecation by end of 2026 (legacy keys keep working until disabled in the dashboard).
 - https://supabase.com/docs/guides/database/postgres/row-level-security - Supabase RLS pitfalls and performance.
-- https://www.sqlalchemy.org/ - SQLAlchemy 2.1.4 / 2.0.54.
-- https://github.com/drizzle-team/drizzle-orm/releases - Drizzle 0.45.4 stable, 1.0 RC.
-- https://registry.npmjs.org/prisma - Prisma 7.0.0 published 2025-11-19, 7.10.0 latest stable, 8.0.0 only as RC (`latest` tag = RC).
+- https://www.sqlalchemy.org/ - SQLAlchemy 2.1.9 / 2.0.58 (2026-11-16).
+- https://registry.npmjs.org/-/package/drizzle-orm/dist-tags - Drizzle `latest` 0.45.4, `rc` 1.0.0-rc.5.
+- https://registry.npmjs.org/-/package/prisma/dist-tags - Prisma `latest` = 8.0.0-rc.34, `prev` = 7.10.1.
 - https://valkey.io/ and https://github.com/valkey-io/valkey/releases/tag/9.0.0 - Valkey 9.0.0 (2025-10-21) hash-field expiration commands.
 - https://dev.mysql.com/doc/refman/9.7/en/vector-functions.html - MySQL `DISTANCE()` only on HeatWave/MySQL AI (accessed 2026-10-10).
 - https://www.sqlite.org/wal.html - WAL-reset bug: affected 3.7.0-3.51.2, fixed 3.51.3, backports 3.50.7/3.44.6 (accessed 2026-10-10).

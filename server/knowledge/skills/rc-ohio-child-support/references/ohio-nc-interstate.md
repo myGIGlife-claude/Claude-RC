@@ -1,4 +1,13 @@
-# Ohio order, North Carolina collection (as of 2026-10-10)
+# Ohio order, North Carolina collection (as of 2026-11)
+
+Re-verified 2026-11-19 on ncleg.gov: 52C-6-604, 52C-6-605(b)(2) (20 days after notice; Convention orders under 52C-7-707 have 30/60-day
+periods), 52C-6-607 (eight defenses as tabled below); no amendment to them since S.L. 2015-117. 52C-3-305 and 52C-3-316 were touched by S.L.
+2025-25 s. 29(1) (what changed: (unverified)). NC arrears rule change: S.L. 2025-16 s. 1.21(a) rewrote G.S. 50-13.10(d), eff. 2025-10-01,
+so no arrearage accrues for listed periods (child or payor death, child living with payor under order or custody agreement, payor
+incarcerated without resources and not on work release, State-owed foster-care assistance); it applies to NC proceedings, and
+whether it reaches an Ohio order's arrears is governed by 52C-6-604 (issuing-state law): (unverified, NC lawyer). NC Child Support
+Guidelines (G.S. 50-13.4(c1)) are under periodic review by the Conference of Chief District Court Judges, comment notice April 2026;
+adoption and effective date of revised guidelines: (unverified). They matter only for NC-issued or NC-modified orders.
 
 Statutes read 2026-10-10: 28 U.S.C. 1738B (govinfo, 2023 ed.), R.C. Chapter 3115 (codes.ohio.gov), N.C. Gen. Stat. Chapter 52C (ncleg.gov),
 NC CSS policy manual, Intergovernmental chapter (policies.ncdhhs.gov/wp-content/uploads/Intergovernmental_ADA-Accessible.pdf, no revision

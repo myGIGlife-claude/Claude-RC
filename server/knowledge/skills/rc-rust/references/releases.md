@@ -1,7 +1,20 @@
-# Rust releases 1.85 to 1.99: what each shipped (as of 2026-10)
+# Rust releases 1.85 to 1.100: what each shipped (as of 2026-11)
 
-Source for every line: the "Announcing Rust 1.NN" posts on blog.rust-lang.org (accessed 2026-10-09). Highlights only; read the
+Source for every line: the "Announcing Rust 1.NN" posts on blog.rust-lang.org (accessed 2026-10-09; 1.100 and 1.99.1 accessed 2026-11-19). Highlights only; read the
 release notes for the full list. Stable ships every 6 weeks; only the newest stable gets fixes (no LTS from the Rust project).
+
+## 1.100 (2026-11-12)
+- Language: **never type `!` stable** (usable in any type position, e.g. `Result<T, !>`); `Infallible` is now an alias of `!`. Never-type fallback is now `!`
+  (was `()`) in editions 2015/2018/2021, matching 2024: can surface as new unreachable-code warnings or inference changes.
+- Stable **`Allocator` trait**, `alloc::Global`, `alloc::System`, `Vec::new_in`/`with_capacity_in`, `Box::new_in`, `Box::allocator`.
+- `mem::DropGuard` (run a closure on drop, `dismiss` to cancel), unsafe `mem::conjure_zst`, `UnsafeCell::replace/as_ref_unchecked/as_mut_unchecked`,
+  `trim_prefix`/`trim_suffix` (`str`, `[T]`, `Path`), `Box::take`, `Box/Rc/Arc::map`, `bool::toggle`, `Vec::from_fn`.
+- Cargo: `cargo::unused_dependencies` lint on by default (`[lints.cargo]`; dev-deps not covered); consistent build-dir layout by build step (old cache
+  workarounds may break); min-publish-age ("dependency cooldown", RFC 3923; the exact key name `global-min-publish-age` under `[registry]` is (unverified), check the Cargo resolver docs) in `.cargo/config.toml` (skips versions published within the window; versions without `pubtime` are never held back; `cargo install` ignores it).
+- Targets: `i686-pc-windows-gnu` is now Tier 2 without host tools (release notes); the same change for `i686-pc-windows-msvc` is not in the notes (unverified).
+
+## 1.99.1 (2026-10-15)
+- Regression fixes only: missing `wcslen` symbol (UEFI), x86_64 FFI `bool` return zero-extension, `rust-lld` on macOS. No security issue stated.
 
 ## 1.99 (2026-10-01)
 - Language: C-variadic function *definitions* (`extern "C" fn f(args: ...)` with `VaList`, `VaArgSafe`).
@@ -74,9 +87,10 @@ release notes for the full list. Stable ships every 6 weeks; only the newest sta
   references to `static mut` are errors; never-type fallback change; `gen` keyword reserved; `Future`/`IntoFuture` in prelude;
   `std::env::set_var/remove_var` are `unsafe`; resolver 3 (MSRV-aware) default; rustfmt style editions; combined doctests.
 
-## Coming / not stable yet (as of 2026-10-09)
-- Never type `!` stable in **1.100 (2026-11-12)**, `Infallible` becomes an alias for `!` (LWN, merged 2026-08-24).
+## Coming / not stable yet (as of 2026-11-19)
+- Next: 1.101 on 2026-12-24, 1.102 on 2027-02-04 (releases.rs).
 - `gen` blocks: nightly only (`#![feature(gen_blocks)]`), no stabilization date.
 - Next-generation trait solver and next borrow checker (Polonius line): enabled on nightly only (blog, 2026-08).
-- `cargo -Zscript` single-file packages and `build-dir-new-layout`: still unstable in the Cargo book.
-- Next edition: none announced on blog.rust-lang.org (checked 2026-10-10).
+- `cargo -Zscript` single-file packages: still unstable (last confirmed in the Cargo book 2026-10-09; not rechecked). Build-dir layout shipped in 1.100.
+- Nightly: parallel compiler frontend being enabled by default (blog post 2026-11-16, details unverified); stable unchanged.
+- Next edition: none announced on blog.rust-lang.org (checked 2026-11-19).

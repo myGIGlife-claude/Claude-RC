@@ -1,4 +1,4 @@
-# PostgreSQL 17/18/19 and auth details (as of 2026-10)
+# PostgreSQL 17/18/19 and auth details (as of 2026-11)
 
 ## PostgreSQL: what each recent major gave you
 
@@ -6,11 +6,11 @@
 |---|---|---|
 | 17 | 2024-09-26 / 2029-11-08 | `JSON_TABLE`, SQL/JSON `JSON_EXISTS`/`JSON_QUERY`/`JSON_VALUE`; `MERGE ... RETURNING`; `COPY ... (ON_ERROR ignore)`; incremental backups (`pg_basebackup --incremental` + `pg_combinebackup`); failover logical slots; `pg_createsubscriber`; `sslnegotiation=direct` (TLS via ALPN); `pg_maintain` role; vacuum uses up to 20x less memory; `EXPLAIN (SERIALIZE, MEMORY)`. |
 | 18 | 2025-09-25 / 2030-11-14 | Async I/O (`io_method = worker` default, `io_uring` on Linux); `uuidv7()`; virtual generated columns (now the default kind); `RETURNING OLD.*, NEW.*`; temporal `PRIMARY KEY/UNIQUE ... WITHOUT OVERLAPS` and `FOREIGN KEY ... PERIOD`; B-tree skip scan; OR-clause index use; parallel GIN builds; planner stats kept across `pg_upgrade` (+ `--swap`, `--jobs` checks); `oauth` auth method; data checksums on by default in `initdb`; EXPLAIN ANALYZE shows buffers by default; wire protocol 3.2; **md5 password auth deprecated**. |
-| 19 | Beta 4 2026-09-24, GA expected Oct 2026 (unverified) | `REPACK [CONCURRENTLY]`; `INSERT ... ON CONFLICT DO SELECT ... RETURNING` (atomic get-or-create); `UPDATE/DELETE ... FOR PORTION OF`; SQL/PGQ property graphs; `GROUP BY ALL`; `WAIT FOR LSN` (read-your-writes on replicas); `MERGE/SPLIT PARTITIONS`; parallel autovacuum; `pg_plan_advice`; logical replication of sequences; online checksum enable; `pg_stat_lock`. Incompatible: **JIT off by default**, `default_toast_compression = lz4`, **RADIUS auth removed**, warning after each md5 login (`md5_password_warnings`, a PG 18 setting). |
+| 19 | 2026-11-19 / 2031-11-19 | Confirmed in the GA announcement: `REPACK [CONCURRENTLY]` (replaces `VACUUM FULL`/`CLUSTER`); `INSERT ... ON CONFLICT DO SELECT ... RETURNING` (get-or-create); `WAIT FOR LSN` (read-your-writes on standbys); `pg_plan_advice` + `pg_stash_advice`; parallel index autovacuum with scoring; `pg_stat_lock`, `pg_stat_recovery`; logical replication of sequences (`FOR ALL SEQUENCES`); no restart for logical WAL level (`effective_wal_level`); `IGNORE NULLS` window functions; `COPY` to JSON; SNI via `pg_hosts.conf`; `password_expiration_warning_threshold`. From the beta notes, not re-checked at GA: `FOR PORTION OF`, SQL/PGQ, `GROUP BY ALL`, `MERGE/SPLIT PARTITIONS` (unverified). Incompatible: **JIT off by default**, `default_toast_compression = lz4` (when built with LZ4), **RADIUS auth removed**, warning after each md5 login (`md5_password_warnings`), `io_workers` replaced by `io_min_workers`/`io_max_workers`. |
 
 Upgrade notes
 - 18: new clusters have checksums on; `pg_upgrade` from a non-checksum cluster needs `--no-data-checksums` on initdb or enabling checksums first.
-- 14 reaches EOL 2026-11-12: plan upgrades now. Use `pg_upgrade --link`/`--swap` or logical replication for near-zero downtime.
+- 14 reached EOL 2026-11-12 (final 14.25): upgrade now. Use `pg_upgrade --link`/`--swap` or logical replication for near-zero downtime.
 - Feature-detect before using 19-only syntax; managed providers lag GA by weeks to months.
 
 Handy patterns
@@ -55,6 +55,6 @@ Syncable passkeys satisfy NIST AAL2, not AAL3 (800-63B-4).
 Refresh token rotation: every refresh returns a new refresh token, old one invalid; if an already-used token is presented, revoke the
 whole token family and force re-login. Bind refresh tokens to client id and (ideally) DPoP key.
 
-Sources (accessed 2026-10-09): https://www.postgresql.org/about/news/postgresql-17-released-2936/,
-https://www.postgresql.org/about/news/postgresql-18-released-3142/, https://www.postgresql.org/about/news/postgresql-19-beta-1-released-3313/,
+Sources (accessed 2026-11-19 for PG 19 and versioning; others 2026-10-09): https://www.postgresql.org/about/news/postgresql-17-released-2936/,
+https://www.postgresql.org/about/news/postgresql-18-released-3142/, https://www.postgresql.org/about/news/postgresql-19-released-3449/,
 https://www.postgresql.org/support/versioning/, https://www.rfc-editor.org/info/rfc9700, https://pages.nist.gov/800-63-4/sp800-63b.html

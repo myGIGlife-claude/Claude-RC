@@ -1,8 +1,8 @@
 ---
 name: rc-web-backend
-description: Language-agnostic back-end engineering as of 2026-10 - HTTP/REST API design (OpenAPI 3.2, problem+json, pagination, idempotency, QUERY method, versioning/deprecation), GraphQL/gRPC/webhooks, authN/authZ (OAuth 2.1, OIDC, PKCE, passkeys, sessions vs JWT, RBAC/ReBAC), PostgreSQL 17/18/19, SQLite, pgvector, migrations, caching (Redis/Valkey), queues/outbox, rate limiting, S3 uploads, email deliverability, OpenTelemetry, reliability, Docker/Kubernetes/serverless deploys, backups, OWASP API Top 10 and ASVS 5. Use when designing or reviewing an API, auth flow, schema, migration, Dockerfile, deploy pipeline or any server-side service.
+description: Language-agnostic back-end engineering as of 2026-11 - REST API design (OpenAPI 3.2, problem+json, pagination, idempotency, QUERY method), GraphQL/gRPC/webhooks, authN/authZ (OAuth 2.1, OIDC, PKCE, passkeys, JWT, RBAC/ReBAC), PostgreSQL 17/18/19, SQLite, pgvector, migrations, Redis/Valkey, queues/outbox, rate limiting, uploads, OpenTelemetry, Docker/Kubernetes, backups, OWASP API Top 10. Use for APIs, auth, schemas, Dockerfiles.
 ---
-# Web back-end engineering (as of 2026-10)
+# Web back-end engineering (as of 2026-11)
 
 > Facts here are dated (see Sources). Versions, deadlines and policies move: confirm the primary source before pinning a version or promising a date. Anything marked (unverified) is a lead, not a fact.
 
@@ -11,32 +11,32 @@ Stack-agnostic. For language specifics see rc-node-backend, rc-python, rc-go, rc
 
 ## Currency check
 
-| Thing | Current (verified 2026-10-09) | Notes |
+| Thing | Current (verified 2026-11-19) | Notes |
 |---|---|---|
-| PostgreSQL | **18** (18.6) GA 2025-09-25, EOL 2030-11-14; 17 EOL 2029-11; 14 EOL **2026-11-12**; 13 and older EOL | 19 is at Beta 4 (2026-09-24), GA expected Oct 2026 (date unverified). Start new projects on 18. |
-| SQLite | 3.54.0 (2026-10-09) | |
-| pgvector | 0.8.7 (2026-10-01, fixes IVFFlat buffer overflow CVE) | 0.8.0 (2024-10) added iterative index scans. |
-| Redis | 8.x, licensed RSALv2 / SSPLv1 / **AGPLv3** (AGPL option added with Redis 8, 2025-05) | 7.4 to 7.x were source-available only. |
-| Valkey | 9.0 (GA 2025-10-21), latest 9.0.6 (2026-09-01), BSD-3 | Linux Foundation fork of Redis 7.2.4. |
-| Kubernetes | 1.37 / 1.36 / 1.35 maintained; 1.34 EOL 2026-10-27; 1.33 and older EOL | **ingress-nginx retired 2026-03** (no more security fixes); use Gateway API. |
-| OpenAPI | **3.2** (3.2.0 2025-09-19, 3.2.1 2026-09-10); 3.1.x still widely tooled | 3.2 adds `query` method, streaming `itemSchema` (SSE, JSONL), `in: querystring`, hierarchical tags. |
+| PostgreSQL | **19** GA **2026-11-19** (EOL 2031-11-19); **18** (18.7) EOL 2030-11-14; 17 (17.12) EOL 2029-11-08; 16 (16.16) 2028-11-09; 15 (15.20) 2027-11-11; **14 reached EOL 2026-11-12** (final 14.25); 13 and older EOL | Supported list on postgresql.org now shows 15-19. New projects: 18 (19.0 fine for greenfield; managed providers lag GA, check yours). The 2026-11-12 minors are tagged as security releases: patch now. |
+| SQLite | 3.54.1 (2026-10-16; fixes a 32-bit heap overflow); 3.54.0 2026-10-09 | |
+| pgvector | 0.8.7 (2026-10-01, fixes IVFFlat build buffer overflow); 0.9.0 unreleased (drops PG 13/14) | 0.8.0 (2024-10) added iterative index scans. |
+| Redis | 8.x, licensed RSALv2 / SSPLv1 / **AGPLv3** (AGPL option added with Redis 8, 2025-05); GitHub shows 8.10.3 as Latest (2026-10-26) and 8.12 in RC | Version numbering on redis.io/downloads is inconsistent (8.10 vs 8.8): check the release tag before pinning (unverified). 7.4 to 7.x were source-available only. |
+| Valkey | **9.2** (2026-11-19: forkless snapshots, replication compression, ACL roles); 9.1 (2026-05-19); 9.0.8 and 9.1.4 patch releases 2026-11-18; BSD-3 | Linux Foundation fork of Redis 7.2.4. Valkey 9.0 GA was 2025-10-21. |
+| Kubernetes | 1.37 (1.37.1) EOL 2027-10-28 / 1.36 EOL 2027-06-28 / 1.35 EOL 2027-02-28; 1.34 EOL 2026-10-27 (passed); 1.33 and older EOL | **ingress-nginx retired March 2026** (Kubernetes statement; the exact day 03-24 is unverified): no fixes; CVE-2026-116472 (mirror-target self-DoS, Low, CVSS 2.7, advisory 2026-11-05) will not be patched upstream. Use Gateway API (`ingress2gateway` 1.0). 1.38 not yet dated. |
+| OpenAPI | **3.2** (3.2.0 2025-09-19, 3.2.1 2026-09-10, clarifications only); 3.1.x still widely tooled | 3.2 adds `query` method, streaming `itemSchema` (SSE, JSONL), `in: querystring`, hierarchical tags. |
 | GraphQL spec | **September 2025** edition (first since 2021) | `@oneOf` input objects, schema coordinates. |
-| HTTP QUERY method | **RFC 10008** (2026, Proposed Standard) | Safe+idempotent request with a body; cacheable; needs CORS preflight. |
-| OAuth 2.1 | draft-ietf-oauth-v2-1-**16** (2026-09-03), not an RFC yet | Normative today: **RFC 9700** OAuth 2.0 Security BCP (BCP 240, 2025-01). |
+| HTTP QUERY method | **RFC 10008** (June 2026, Proposed Standard) | Safe+idempotent request with a body; cacheable; needs CORS preflight. |
+| OAuth 2.1 | draft-ietf-oauth-v2-1-**17** (2026-10-31), still an Internet-Draft (WG milestone: to IESG Dec 2026) | Normative today: **RFC 9700** OAuth 2.0 Security BCP (BCP 240, 2025-01). |
 | OWASP API Security Top 10 | **2023** edition is still the latest | |
 | OWASP ASVS | **5.0.0** (2025-05-30), 17 chapters, ~350 reqs, IDs renumbered | New chapters: Self-contained Tokens (V9), OAuth/OIDC (V10), WebRTC (V17). |
 | NIST SP 800-63B | **Rev 4** final (2025-08) | 15-char min for password-only, no composition rules, no forced rotation, syncable passkeys OK up to AAL2. |
-| Docker Hardened Images | Free, Apache-2.0 since 2025-12-17, registry `dhi.io` | Debian/Alpine based, SBOM + SLSA L3 provenance. |
+| Docker Hardened Images | Free, Apache-2.0 since 2025-12-17, registry `dhi.io` (free tier now called DHI Community; no license change) | Debian/Alpine based, SBOM + SLSA L3 provenance (SLSA level not re-checked 2026-11). |
 | Authorization engines | OpenFGA = CNCF Incubating (announced 2025-11-11); Cedar = CNCF Sandbox (announced 2025-12-15) | |
-| Email | Gmail/Yahoo bulk rules since 2024-02; **Outlook.com since 2025-05-05** (junk, then 550 5.7.515 reject) | >5,000 msgs/day: SPF+DKIM+DMARC, alignment, RFC 8058 one-click unsubscribe, spam rate <0.3%. |
-| IETF drafts to know | `Idempotency-Key` header (draft-07, expired 2026-04, de-facto standard); `RateLimit`/`RateLimit-Policy` (draft-11, 2026-05) | Use them, but they are not RFCs. |
+| Email | Gmail/Yahoo bulk rules since 2024-02; **Outlook.com since spring 2025** (start date 2025-05-05 unverified on Microsoft's post; 550 5.7.515 reject) | >=5,000 msgs/day to Microsoft consumer mail: SPF+DKIM pass, DMARC record, alignment; Gmail also RFC 8058 one-click unsubscribe, spam rate <0.3%. |
+| IETF drafts to know | `Idempotency-Key` header (draft-**08**, 2026-10-22, active); `RateLimit`/`RateLimit-Policy` (draft-11, 2026-05-23, expires 2026-11-24) | Use them, but they are not RFCs. |
 
 ## What changed / stop doing
 
 | Stop (old) | Do instead (new) | Since |
 |---|---|---|
 | MD5/SHA-1/SHA-256 (even salted) for passwords | Argon2id (m=19 MiB, t=2, p=1 min); bcrypt cost>=10 only for legacy (72-byte limit); PBKDF2-SHA256 600k if FIPS | OWASP cheat sheet, current |
-| Postgres `md5` auth | `scram-sha-256` (md5 deprecated in PG 18 with warnings when setting md5 passwords; PG 19 also warns after md5 login) | PG 18 (2025-09) |
+| Postgres `md5` auth | `scram-sha-256` (md5 deprecated in PG 18; PG 19 warns after each md5 login, silence with `md5_password_warnings`, removal later) | PG 18 (2025-09) |
 | Implicit grant, Resource Owner Password grant | Authorization Code + PKCE for every client; exact redirect URI match | RFC 9700 (2025), OAuth 2.1 draft |
 | JWT access/refresh tokens in `localStorage` | BFF pattern: server-side session, `HttpOnly; Secure; SameSite=Lax` cookie, `__Host-` prefix | browser-apps BCP |
 | Long-lived JWT as a session ("stateless logout") | Opaque server sessions, or short JWT (5-15 min) + rotating refresh tokens with reuse detection | RFC 9700 |
@@ -49,15 +49,15 @@ Stack-agnostic. For language specifics see rc-node-backend, rc-python, rc-go, rc
 | SOAP/WSDL for new public APIs | REST+OpenAPI, or gRPC/Connect internally, GraphQL for client-driven aggregation | - |
 | `uuid_generate_v4()` / random UUID PKs on hot tables | `uuidv7()` built into PG 18 (time-ordered, index-friendly), or bigint identity | PG 18 |
 | `SERIAL` | `GENERATED ALWAYS AS IDENTITY` | PG 10+ |
-| `VACUUM FULL` / pg_repack to shrink tables | `REPACK ... CONCURRENTLY` (PG 19); pg_repack until then | PG 19 |
+| `VACUUM FULL` / `CLUSTER` / pg_repack to shrink tables | `REPACK ... CONCURRENTLY` (PG 19; the old commands still work); pg_repack on 18 and older | PG 19 (2026-11-19) |
 | Big-bang migrations in the deploy step | Expand/contract migrations, `CREATE INDEX CONCURRENTLY`, `NOT VALID` + `VALIDATE` | - |
 | Assuming Redis is BSD | Redis 8 = RSAL/SSPL/AGPL; Valkey = BSD; check what your cloud runs | 2024-03 / 2025-05 |
-| ingress-nginx | Gateway API (`ingress2gateway` to convert) or a maintained controller | retired 2026-03 |
+| ingress-nginx | Gateway API (`ingress2gateway` to convert) or a maintained controller | retired March 2026 |
 | `FROM node:latest`, running as root, fat images | Pinned digest, multi-stage, distroless/DHI/Chainguard, `USER` non-root | - |
 | Secrets in committed `.env`, baked into images, `ARG` | Secret manager (Vault/OpenBao, cloud SM, SOPS), BuildKit `--mount=type=secret`, OIDC CI-to-cloud | - |
 | Sticky sessions | Stateless app nodes; session in DB/Valkey | - |
 | `List-Unsubscribe: mailto:` only | Add `List-Unsubscribe-Post: List-Unsubscribe=One-Click` + HTTPS URL, honour in 48 h | Gmail/Yahoo 2024-02 |
-| Logs-only observability, vendor agents | OpenTelemetry SDK + Collector (OTLP); traces/metrics stable; logs stable only in some SDKs | - |
+| Logs-only observability, vendor agents | OpenTelemetry SDK + Collector (OTLP); traces stable in most SDKs, metrics in most, logs stable only in C++/.NET/Java/PHP/Rust (Go RC; check per language) | status page 2026-11 |
 | Retry immediately in a loop | Exponential backoff + full jitter, retry budget, only idempotent ops | - |
 
 ## Do this
@@ -198,7 +198,7 @@ OWASP API Security Top 10 (2023, still current) mapped to the fix:
 ## Performance & quality
 
 - Targets (typical web API): p95 < 200-300 ms, p99 < 1 s for reads; error rate < 0.1%; DB queries per request bounded (no N+1); pool wait time ~0.
-- Measure: OTel traces for latency breakdown; `pg_stat_statements` top total time; `EXPLAIN (ANALYZE, BUFFERS)`; PG 19 `pg_stat_lock` for lock waits; autovacuum lag (`n_dead_tup`); cache hit ratio; queue depth and age of oldest message.
+- Measure: OTel traces for latency breakdown; `pg_stat_statements` top total time; `EXPLAIN (ANALYZE, BUFFERS)`; PG 19 `pg_stat_lock` for lock waits and `pg_plan_advice` for plan stabilization; autovacuum lag (`n_dead_tup`); cache hit ratio; queue depth and age of oldest message.
 - Load test before launch and after major changes (k6, Gatling, Locust) against production-like data volumes; test the 429 and degradation paths too.
 - Payloads: gzip/br/zstd compression, field selection or sparse fieldsets for heavy resources, avoid chatty APIs (batch endpoints).
 
@@ -238,38 +238,43 @@ OWASP API Security Top 10 (2023, still current) mapped to the fix:
 - [ ] OTel traces/metrics/logs flowing; SLOs and burn-rate alerts defined; dashboards for RED + DB + queue.
 - [ ] Backups with PITR and a **passed restore test** this month; RPO/RTO written down.
 - [ ] Email: SPF/DKIM/DMARC aligned, one-click unsubscribe on marketing mail.
-- [ ] Postgres on a supported major (14 goes EOL 2026-11-12), scram-sha-256 auth, TLS required.
+- [ ] Postgres on a supported major (14 reached EOL 2026-11-12; 15 EOL 2027-11-11), latest minor, scram-sha-256 auth, TLS required.
 
 ## Sources
 
-All accessed 2026-10-09.
-- https://www.postgresql.org/support/versioning/ - PG supported versions, minors, EOL dates.
-- https://www.postgresql.org/about/news/postgresql-18-released-3142/ - PG 18 features (AIO, uuidv7, virtual generated cols, OAuth, skip scan, md5 deprecation).
-- https://www.postgresql.org/about/news/postgresql-19-beta-1-released-3313/ - PG 19 features (REPACK, ON CONFLICT DO SELECT, SQL/PGQ, JIT off, RADIUS removed).
-- https://www.postgresql.org/about/newsarchive/ - PG 19 Beta 4 (2026-09-24), pgvector 0.8.7 security release.
+Accessed 2026-11-19 (items marked 2026-10-09 were not re-fetched).
+- https://www.postgresql.org/support/versioning/ - PG supported versions, minors, EOL dates (19 GA 2026-11-19).
+- https://www.postgresql.org/about/news/postgresql-19-released-3449/ - PG 19 features and incompatibilities.
+- https://www.postgresql.org/about/newsarchive/ - PG 19 GA, 2026-11-12 security minors incl. final 14.25.
+- https://www.postgresql.org/about/news/postgresql-18-released-3142/ - PG 18 features (AIO, uuidv7, virtual generated cols, OAuth, skip scan, md5 deprecation), 2026-10-09.
 - https://github.com/pgvector/pgvector/blob/master/CHANGELOG.md - pgvector versions and dates.
-- https://www.sqlite.org/changes.html - SQLite 3.54.0 date.
-- https://redis.io/blog/agplv3/ - Redis 8 AGPLv3 option, 2024 SSPL change.
-- https://valkey.io/download/releases/ - Valkey 9.0 and 9.0.6 dates.
+- https://www.sqlite.org/changes.html - SQLite 3.54.1 date.
+- https://redis.io/downloads/ and https://github.com/redis/redis/releases - Redis 8.10.3 latest, 8.12 RC (page numbering inconsistent).
+- https://redis.io/blog/agplv3/ - Redis 8 AGPLv3 option, 2024 SSPL change, 2026-10-09.
+- https://valkey.io/download/releases/ and https://valkey.io/blog/ - Valkey 9.0.8, 9.1.4, 9.2 dates and features.
 - https://kubernetes.io/releases/ - supported Kubernetes minors and EOL.
-- https://opensource.googleblog.com/2026/02/the-end-of-an-era-transitioning-away-from-ingress-nginx.html - ingress-nginx retirement March 2026 (lead; corroborated by kubernetes.io blog listing).
-- https://www.openapis.org/blog/2025/09/23/announcing-openapi-v3-2 - OpenAPI 3.2 features.
+- https://kubernetes.io/blog/2026/01/29/ingress-nginx-statement/ and https://kubernetes.io/blog/2026/03/30/kubernetes-v1-36-sneak-peek/ - ingress-nginx retired March 2026 (first post confirms "March 2026"; day 03-24 not confirmed).
+- https://discuss.kubernetes.io/t/security-advisory-cve-2026-116472-ingress-nginx-mirror-target-self-dos/35554 - read 2026-11-19: 2026-11-05, Low (CVSS 3.1 2.7), no upstream fix.
+- https://www.postgresql.org/about/news/postgresql-19-released-3449/ - read 2026-11-19: REPACK (CONCURRENTLY), pg_stat_lock, pg_plan_advice, md5 warning confirmed.
+- https://spec.openapis.org/oas/ and https://github.com/OAI/OpenAPI-Specification/releases - OpenAPI 3.2.1 latest.
+- https://www.openapis.org/blog/2025/09/23/announcing-openapi-v3-2 - OpenAPI 3.2 features, 2026-10-09.
 - https://spec.graphql.org/September2025/ and https://graphql.org/blog/2025-09-08-september-edition/ - GraphQL Sept 2025 edition, @oneOf.
 - https://www.rfc-editor.org/info/rfc10008 - HTTP QUERY method RFC.
 - https://www.rfc-editor.org/info/rfc9745 - Deprecation header.
 - https://www.rfc-editor.org/rfc/rfc9457 - Problem Details.
 - https://www.rfc-editor.org/info/rfc9700 - OAuth 2.0 Security BCP.
-- https://datatracker.ietf.org/doc/draft-ietf-oauth-v2-1/ - OAuth 2.1 draft-16 status.
-- https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/ - Idempotency-Key draft status.
+- https://datatracker.ietf.org/doc/draft-ietf-oauth-v2-1/ - OAuth 2.1 draft-17 status.
+- https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/ - Idempotency-Key draft-08 status.
 - https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/ - RateLimit headers draft-11.
 - https://api-security.owasp.org/ - OWASP API Security Top 10 2023 is latest.
 - https://owasp.org/www-project-application-security-verification-standard/ - ASVS 5.0.0 is current; release date/chapters from https://softwaremill.com/whats-new-in-asvs-5-0/ (secondary).
 - https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html - password hashing parameters.
 - https://pages.nist.gov/800-63-4/sp800-63b.html - NIST 800-63B-4 password and syncable authenticator rules.
 - https://support.google.com/a/answer/81126 - Gmail sender requirements, one-click unsubscribe.
-- https://dmarcian.com/microsoft-enforces-spf-dkim-dmarc/ - Outlook.com May 2025 enforcement (secondary; Microsoft post not fetched).
-- https://www.docker.com/press-release/docker-makes-hardened-images-free-open-and-transparent-for-everyone/ - DHI free, Apache-2.0, dhi.io.
+- https://techcommunity.microsoft.com/blog/microsoftdefenderforoffice365blog/strengthening-email-ecosystem-outlook%E2%80%99s-new-requirements-for-high%E2%80%90volume-senders/4399730 - Outlook.com high-volume sender rules (URL from search; text not fetched, exact start date unverified).
+- https://www.docker.com/press-release/docker-makes-hardened-images-free-open-and-transparent-for-everyone/ - DHI free, Apache-2.0, dhi.io (2025-12-17); docs.docker.com/dhi/ for current naming.
 - https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/ - OpenFGA incubating.
 - https://aws.amazon.com/blogs/opensource/cedar-joins-cncf-as-a-sandbox-project - Cedar CNCF sandbox.
-- https://opentelemetry.io/status/ - OTel signal stability per language.
+- https://opentelemetry.io/status/ - OTel signal stability per language (2026-11-19).
+- https://asvs.owasp.org/ - ASVS 5.0.0 (2025-05-30) still current (2026-11-19).
 - https://aws.amazon.com/about-aws/whats-new/2024/11/amazon-s3-enforcement-conditional-write-operations-general-purpose-buckets/ - S3 conditional writes.

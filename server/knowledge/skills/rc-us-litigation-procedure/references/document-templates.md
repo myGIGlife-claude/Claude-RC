@@ -1,4 +1,4 @@
-# Document structure templates  (as of 2026-10)
+# Document structure templates  (as of 2026-11)
 
 Skeletons only. Every `[BRACKET]` is a blank the person fills from real records. Never invent facts, case numbers, dates,
 signatures, notary blocks or service details. Replace these generic headings with the court's required caption, format, font,

@@ -1,42 +1,48 @@
 ---
 name: rc-wasm-graphics-formats
-description: WebAssembly (Wasm 3.0, WASI 0.2/0.3, components, Wasmtime, wasm-bindgen, Emscripten, TinyGo, Kotlin/Wasm, Blazor, wasm-opt), SVG, Canvas/OffscreenCanvas, WebGL 2/WebGPU/WGSL (three.js, Babylon, PixiJS, wgpu), image formats (AVIF, JPEG XL, Lottie), data formats (JSON, YAML, TOML, XML, CSV, .env, Protobuf, CBOR, Parquet) and custom elements/Lit. Use for .wasm/.wat/.wit/.svg/.wgsl/.yaml/.toml/.proto files.
+description: WebAssembly (Wasm 3.0, WASI 0.2/0.3, Wasmtime, wasm-bindgen, Emscripten, TinyGo, Blazor, wasm-opt), SVG, Canvas, WebGL 2/WebGPU/WGSL (three.js, Babylon, PixiJS, wgpu), AVIF/JPEG XL/Lottie, data formats (JSON, YAML, TOML, XML, CSV, Protobuf, CBOR, Parquet), custom elements/Lit. Use for .wasm/.wat/.wit/.svg/.wgsl/.yaml/.toml/.proto files.
 ---
-# WebAssembly, graphics and data formats (as of 2026-10)
+# WebAssembly, graphics and data formats (as of 2026-11)
 
-> Facts are dated (see Sources), checked 2026-10-09. Anything marked (unverified) is a lead, not a fact.
+> Facts are dated (see Sources); versions rechecked 2026-11-19, browser-support rows from 2026-10 unless noted. Anything marked (unverified) is a lead, not a fact.
 > rc-web-frontend owns HTML/CSS, responsive `<img>`/`srcset`, Lit/declarative shadow DOM basics and Baseline: not repeated here.
 > Data-format pitfalls in depth (JSON, YAML, TOML, XML, CSV, Protobuf, binary formats): `references/data-formats.md`.
 
 ## Currency check
 
-Browsers: Chrome 155, Firefox 157, Safari 27 (web-features 3.42.0). Baseline "newly" = all core browsers now; "widely" = 30+ months.
+Browsers: support rows below come from web-features 3.42.0 (2026-10); 3.47.0 is current (2026-11-19, rows not rechecked). Current browser version numbers: not rechecked (unverified). Baseline "newly" = all core browsers now; "widely" = 30+ months.
 
-| Thing | Current (2026-10) | Notes |
+| Thing | Current (2026-11-19) | Notes |
 |---|---|---|
 | WebAssembly core spec | **Wasm 3.0** (completed 2025-09-17); 2.0 completed 2025-03-20 | 3.0 = memory64, multiple memories, GC, typed function refs, tail calls, exception handling (exnref), relaxed SIMD, deterministic profile, annotations, JS string builtins |
 | Wasm proposals (2026-10) | Phase 5: JSPI, Web CSP. Phase 4: threads, wide arithmetic, compact import section. Phase 3: ESM integration, stack switching, custom page sizes, custom descriptors | Threads is still not in the core spec but has shipped in all browsers since 2021 |
-| WASI | 0.3.0 shipped 2026-06-11 (native async: `stream`/`future`), 0.3.1 2026-08-11; 0.2.0 2024-01, last 0.2.x = 0.2.12 | 0.3.x every 2 months (0.3.2 planned 2026-10-13). WASI 1.0 has no date |
-| Wasmtime | 49.0.2 stable, 50.0.0-rc (monthly majors on the 20th) | LTS every 12th major, 24 months (36, 48); other majors 2 months |
-| Wasmer / WasmEdge | 7.5.0 (2026-10-01) / 0.18.0 (2026-10-05) | |
-| Rust | wasm-bindgen 0.2.129, wasm-pack 0.15.0, trunk 0.21.14 | `rustwasm` org archived 2025-09; wasm-bindgen and wasm-pack live in the `wasm-bindgen` GitHub org, `twiggy` (now `AlexEne/twiggy`) is archived, last commit 2026-02 |
-| Emscripten | 6.0.12 (2026-10-08) | |
-| Binaryen (`wasm-opt`) | version_133 (2026-09-21); npm `binaryen` 132.0.0 | crate `wasm-opt` 0.116.1 is stale (2024): prefer the Binaryen release binary |
-| jco (JS host for components) | 1.37.0 | `jco transpile` turns a component into ES modules |
+| WASI | 0.3.0 shipped 2026-06-11 (native async: `stream`/`future`), 0.3.1 2026-08-11, **0.3.2 2026-10-13**; 0.2.0 2024-01, last 0.2.x = 0.2.12 (unverified, not rechecked) | 0.3.x every 2 months (next due ~2026-12-14 per roadmap). WASI 1.0 has no date |
+| Wasmtime | **50.0.3** stable (2026-11-19); 51.0.0-rc.1 (2026-11-05), 51.0.0 due 2026-11-20 (not confirmed); latest 36.x is 36.0.23 (2026-11-19, CI-only fix over 36.0.22) | LTS every 12th major, 24 months (36.0.x current LTS, 48.0.x next); two LTS + up to two normal majors supported; other majors 2 months. Releases on the 20th |
+| Wasmer / WasmEdge | 7.5.0 (2026-10-01) / 0.18.0 (2026-10-05, not rechecked) | |
+| Rust | wasm-bindgen **0.2.130** (2026-10-30), wasm-pack 0.15.1 (crates.io 2026-11-19) / trunk 0.21.14 (not rechecked) | `rustwasm` org archived 2025-09; wasm-bindgen and wasm-pack live in the `wasm-bindgen` GitHub org, `twiggy` (now `AlexEne/twiggy`) is archived, last commit 2026-02 |
+| Emscripten | **7.0.0 (2026-11-06)**; 6.0.13 (2026-10-19) | 7.0: min browsers Chrome 93, Firefox 92, Safari 15.4; `EMCC_ONLY_FORCED_STDLIBS` removed (use `-nostdlib`; the `-lemcc` advice is unverified); libc++ 23 drops transitive includes. 6.0.13 removed Windows `.bat/.ps1` launchers |
+| Binaryen (`wasm-opt`) | version_133 (2026-09-21, not rechecked); npm `binaryen` 132.0.0 | crate `wasm-opt` 0.116.1 is stale (2024, not rechecked): prefer the Binaryen release binary |
+| jco (JS host for components) | 1.42.0 | `jco transpile` turns a component into ES modules |
 | AssemblyScript | 0.28.20 (2026-07) | still 0.x; no closures/exceptions/async; opposes WASI/component model |
 | Go | `GOOS=js`/`wasip1`; `//go:wasmexport` + `-buildmode=c-shared` reactor since 1.24 | support files moved `misc/wasm` -> `lib/wasm` in 1.24; min binary ~2 MB, TinyGo ~10s of KB |
 | Kotlin/Wasm | Beta | needs browsers with WasmGC + legacy exception handling |
-| Blazor | .NET 10 LTS (to 2028-11-14); .NET 11 at go-live RC | .NET 8 and 9 EOL 2026-11-10 |
-| three.js / Babylon.js / PixiJS | 0.186.1 / 9.30.0 / 8.22.0 | regl 2.1.1 (2024, WebGL only, quiet) |
-| wgpu (Rust) | 30.0.1 | WebGPU impl used by Firefox and Deno |
+| Blazor | .NET 10 LTS (to 2028-11-14, latest 10.0.15); .NET 11.0.0 now released (release-type STS per the index, EOL listed 2028-11-14) | .NET 8 (8.0.34) and 9 (9.0.23) reached EOL 2026-11-10 |
+| three.js / Babylon.js / PixiJS | 0.187.0 / 9.37.1 / 8.23.0 | regl 2.1.1 (2024, WebGL only, quiet; not rechecked) |
+| wgpu (Rust) | 30.0.2 | WebGPU impl used by Firefox and Deno |
 | SVGO | 4.1.0 (v3 line still patched: 3.3.5) | v4: `removeViewBox` and `removeTitle` OFF by default |
-| Lottie | Lottie Animation Format spec 1.0.1 (2025-06); `@lottiefiles/dotlottie-web` 0.81.0 | `lottie-web` 5.13.0 (2025-05) is in slow maintenance |
-| JSON Schema | 2020-12 is still current | no newer stable release |
-| YAML spec | 1.2.2 (2021-10) | js-yaml 5.0 (2026-06-20, 5.4.3 now), `yaml` 2.9.1, PyYAML 6.0.3, ruamel.yaml 0.19.1 |
-| TOML | **1.1.0 (2025-12-18)** | multi-line inline tables + trailing commas, `\xHH`, `\e`, optional seconds |
-| Protobuf JS | `@bufbuild/protobuf` 2.16.0, protobufjs 8.8.0 | |
+| Lottie | Lottie Animation Format spec 1.0.1 (2025-06); `@lottiefiles/dotlottie-web` 0.83.2 | `lottie-web` 5.13.0 (2025-05) is in slow maintenance (not rechecked) |
+| JSON Schema | 2020-12 is still current (2026-10 check) | no newer stable release known |
+| YAML spec | 1.2.2 (2021-10) | js-yaml 5.5.0, `yaml` 2.9.1; PyYAML 6.0.3, ruamel.yaml 0.19.1 (not rechecked) |
+| TOML | **1.1.0 (2025-12-18)** still latest (2026-11-19) | multi-line inline tables + trailing commas, `\xHH`, `\e`, optional seconds |
+| Protobuf JS | `@bufbuild/protobuf` 2.17.0; protobufjs 8.8.0 (not rechecked) | |
+| Lit | 3.3.3 | |
 
-Browser support of what matters here (web-features 3.42.0):
+Security, Wasmtime (check before telling anyone a runtime is "patched"):
+- 2026-10-19/20: two Cranelift miscompilation/sandbox-escape flaws, CVSS 9.9 (RUSTSEC-2026-0380 = CVE-2026-115889; the second, arm64-only CVE-2026-115893 / RUSTSEC-2026-0379, is from a secondary report only). RUSTSEC lists patched as 36.0.19+ on the 36 line and 43.0.0+ (so 48/49/50 lines are fixed at or after their first release shipping it; 48.0.7 and 49.0.4 are secondary-report values, unverified). Update to the newest patch of your line.
+- 2026-11-16: nine advisories (moderate: unbounded memory via empty writes in `wasmtime-wasi`/`wasmtime-wasi-http`, stale GC heap base pointer lets a guest abort the host; the rest low: panics/aborts).
+- 2026-11-19: GHSA-f2pq-268w-886c (High, 7.5): WASI filesystem sandbox escape on **Windows hosts** via a drive-prefixed path component. Fixed in 36.0.22, 48.0.10, 49.0.7, 50.0.3 (verified on the advisory 2026-11-19). If you serve untrusted guests with preopened dirs on Windows, patch now.
+
+Browser support of what matters here (web-features 3.42.0, 2026-10; not rechecked in 2026-11):
 
 | Feature | Status |
 |---|---|
@@ -67,7 +73,9 @@ Browser support of what matters here (web-features 3.42.0):
 - SVGO 3 configs have `removeViewBox`/`removeTitle` on by default: disable them explicitly. `removeScriptElement` was renamed `removeScripts` in v4.
 - js-yaml 4: `load` is already safe (no `!!js/function`), `safeLoad` throws "removed"; 5.x removed `safeLoad/safeDump` exports entirely and `load('')` now throws.
 - TOML 1.0 parsers reject 1.1 syntax (multi-line inline tables, `\e`, `14:15` times): write 1.0-compatible TOML unless every consumer's parser supports 1.1.
-- .NET 8 Blazor: EOL 2026-11-10; flag it, do not migrate unasked.
+- .NET 8 / 9 Blazor: EOL since 2026-11-10; flag it, do not migrate unasked.
+- Emscripten < 7: browser floor was lower; 7.0 raises it to Chrome 93 / Firefox 92 / Safari 15.4.
+- Wasmtime 36 LTS: patch to 36.0.22+ (Windows WASI path escape, 2026-11-19).
 - WebGL 1-only code: still runs; when touching it, prefer WebGL 2 (widely) rather than extending WebGL 1 extension juggling.
 
 ## What changed / stop doing
@@ -124,7 +132,7 @@ const { instance } = await WebAssembly.instantiateStreaming(fetch('/m.wasm'), im
   versions identical. `[profile.release] opt-level = "z"` or `"s"`, `lto = true`, `codegen-units = 1`, `panic = "abort"` (unless you
   need unwinding), then `wasm-opt -Oz`. Check size with `twiggy` (archived 2026-02, still works) or `wasm-tools`.
 - Rust (server/components): `cargo build --target wasm32-wasip2`; WIT + `wit-bindgen`; run with `wasmtime run` / `wasmtime serve`.
-- C/C++: Emscripten 6 (`emcc -O3 -flto -sMODULARIZE -sEXPORT_ES6 -fwasm-exceptions`); `-sALLOW_MEMORY_GROWTH` when sizes unknown;
+- C/C++: Emscripten 7 (`emcc -O3 -flto -sMODULARIZE -sEXPORT_ES6 -fwasm-exceptions`); `-sALLOW_MEMORY_GROWTH` when sizes unknown;
   `-msimd128` only if your audience has SIMD (all current browsers do). For WASI, use wasi-sdk.
 - Go: `GOOS=js GOARCH=wasm` + `lib/wasm/wasm_exec.js` matching the compiler version, or `GOOS=wasip1`. For size use TinyGo
   (subset of Go; check reflection/`encoding/json` support before choosing it).
@@ -272,7 +280,7 @@ customElements.define('rc-counter', RcCounter);
 - Web Components: `@open-wc/testing` or Vitest browser mode; Custom Elements Manifest (`@custom-elements-manifest/analyzer`) for docs/types.
 
 ## Common mistakes in AI-written code
-- Claiming memory64, multi-memory or relaxed SIMD "work in all browsers": not in Safari (2026-10). (JS string builtins do: Safari 26.2+.)
+- Claiming memory64, multi-memory or relaxed SIMD "work in all browsers": not in Safari (2026-10 data). (JS string builtins do: Safari 26.2+.)
 - Saying WebGPU is Baseline or works in Firefox everywhere: Firefox is Windows + Apple-silicon macOS only.
 - `WebAssembly.instantiate(await (await fetch(u)).arrayBuffer())` instead of `instantiateStreaming`; serving `.wasm` as `application/octet-stream`.
 - Keeping a `Uint8Array` view over `memory.buffer` across calls that may grow memory (detached buffer errors).
@@ -303,16 +311,23 @@ customElements.define('rc-counter', RcCounter);
 - https://github.com/WebAssembly/proposals - proposal phases (threads/wide arithmetic phase 4, JSPI phase 5, ESM/stack switching phase 3) - 2026-10-09
 - https://www.npmjs.com/package/web-features 3.42.0 `data.json` - all browser support/Baseline rows above - 2026-10-09
 - https://github.com/mdn/browser-compat-data `api/GPU.json` - WebGPU per-platform notes (Chrome 144 Linux, Firefox 141/145/147) - 2026-10-09
-- https://wasi.dev/roadmap - WASI 0.2.0 (2024-01), 0.3.0 (2026-06-11), 0.3.1, release train - 2026-10-09
-- https://docs.wasmtime.dev/stability-release.html - monthly majors, LTS every 12, 24 months - 2026-10-09
+- https://wasi.dev/roadmap and https://github.com/WebAssembly/WASI/releases - WASI 0.3.0 (2026-06-11), 0.3.1 (2026-08-11), 0.3.2 (2026-10-13), 2-month train - 2026-11-19
+- https://docs.wasmtime.dev/stability-release.html - monthly majors on the 20th, LTS every 12, 24 months, two LTS supported - 2026-11-19
+- https://github.com/bytecodealliance/wasmtime/security/advisories (and GHSA-f2pq-268w-886c) - 2026-11-16 batch, Windows WASI escape 2026-11-19, patched versions - 2026-11-19
+- https://rustsec.org/advisories/RUSTSEC-2026-0380.html - Cranelift CVE-2026-115889, CVSS 9.9, patched 36.0.19 / 43.0.0+ - 2026-11-19
+- https://crates.io/api/v1/crates/wasmtime, /wasm-bindgen, /wgpu - 50.0.3, 0.2.130, 30.0.2 - 2026-11-19
+- https://raw.githubusercontent.com/emscripten-core/emscripten/main/ChangeLog.md - Emscripten 7.0.0 (2026-11-06), 6.0.13, 6.0.12 and breaking changes - 2026-11-19
+- https://registry.npmjs.org/<pkg>/latest - three 0.187.0, @babylonjs/core 9.37.1, pixi.js 8.23.0, svgo 4.1.0, binaryen 132.0.0, js-yaml 5.5.0, yaml 2.9.1, @bufbuild/protobuf 2.17.0, jco 1.42.0, lit 3.3.3, dotlottie-web 0.83.2, assemblyscript 0.28.20, web-features 3.47.0 - 2026-11-19
+- https://github.com/wasmerio/wasmer/releases - Wasmer 7.5.0 (2026-10-01) - 2026-11-19
+- https://webassembly.org/news/ - no new core-spec news since 2026-01-21 post - 2026-11-19
 - crates.io API and GitHub releases (wasmtime, wasmer, WasmEdge, wasm-bindgen, wasm-pack, trunk, wgpu, emscripten, binaryen, svgo, toml, lottie-spec, dotlottie-web) - versions/dates above - 2026-10-09
 - https://registry.npmjs.org (npm view) - three, @babylonjs/core, pixi.js, regl, lit, @lit-labs/ssr, svgo, assemblyscript, binaryen, jco, yaml, js-yaml, smol-toml, ajv, @bufbuild/protobuf, protobufjs, msgpackr, cbor-x - 2026-10-09
 - https://go.dev/doc/go1.24 and https://go.dev/wiki/WebAssembly - go:wasmexport, c-shared reactor, lib/wasm, binary sizes - 2026-10-09
-- https://kotlinlang.org/docs/wasm-overview.html - Kotlin/Wasm Beta, needs WasmGC - 2026-10-09
+- https://kotlinlang.org/docs/wasm-overview.html - Kotlin/Wasm still Beta, needs WasmGC - 2026-11-19
 - https://www.assemblyscript.org/status.html - AssemblyScript limitations and WASI stance - 2026-10-09
-- https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/releases-index.json - .NET 10 LTS, 11 go-live, 8/9 EOL 2026-11-10 - 2026-10-09
+- https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/releases-index.json - .NET 10 LTS (10.0.15), 11.0.0 active, 8/9 EOL 2026-11-10 - 2026-11-19
 - https://github.com/svg/svgo/releases/tag/v4.0.0 - removeViewBox/removeTitle off by default, removeScripts rename - 2026-10-09
-- https://github.com/toml-lang/toml CHANGELOG - TOML 1.0.0 (2021-01-11), 1.1.0 (2025-12-18) changes - 2026-10-09
+- https://github.com/toml-lang/toml CHANGELOG - TOML 1.0.0 (2021-01-11), 1.1.0 (2025-12-18) still latest - 2026-11-19
 - https://json-schema.org/specification - 2020-12 still current - 2026-10-09
 - https://github.com/nodeca/js-yaml CHANGELOG - js-yaml 5.0 (2026-06-20) API changes, 5.4.1 merge limits - 2026-10-09
 - https://blog.rust-lang.org/2024/04/09/updates-to-rusts-wasi-targets/ - wasm32-wasip1 stable 1.78, wasm32-wasi removed 1.84 - 2026-10-09
@@ -325,4 +340,4 @@ customElements.define('rc-counter', RcCounter);
 - https://github.com/mdn/browser-compat-data `webassembly/*.json` - exnref (Chrome 137, Firefox 131, Safari 18.4), tail calls, typed refs, JS string builtins (Safari 26.2), relaxed SIMD/multi-memory (Safari preview only) - 2026-10-10
 - https://web-platform-dx.github.io/web-features-explorer/ (wasm-jspi, wasm-memory64, webgpu, jpegxl, offscreen-canvas, scoped-custom-element-registries) - Baseline status/dates - 2026-10-10
 
-Unverified in this pass (rules of thumb only): Basis/KTX2 advice, size/perf numbers.
+Unverified in the 2026-11 pass (rules of thumb or carried over from 2026-10): Basis/KTX2 advice, size/perf numbers, current browser version numbers, browser-support table rows, Binaryen version_133 date, wasm-pack/trunk/WasmEdge/protobufjs/regl/lottie-web versions, second Wasmtime October CVE and its 48.0.7/49.0.4 fix versions (secondary report only).

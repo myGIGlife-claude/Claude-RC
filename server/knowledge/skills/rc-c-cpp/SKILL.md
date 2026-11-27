@@ -2,36 +2,40 @@
 name: rc-c-cpp
 description: Current C (C17/C23/C2y) and C++ (C++20/23/26) practice, GCC 16/Clang 23/MSVC 14.51 support, hardening flags, sanitizers, clang-tidy, CMake presets, vcpkg/Conan, GoogleTest/Catch2, fuzzing, gdb/rr, UB and concurrency pitfalls. Use when writing, reviewing or building *.c, *.h, *.cpp, *.hpp, *.cppm, CMakeLists.txt, CMakePresets.json, meson.build, conanfile.py, vcpkg.json, .clang-tidy, .clang-format, or when advice might be pre-C++17.
 ---
-# C and C++  (as of 2026-10)
+# C and C++  (as of 2026-11)
 
 > Facts are dated (see Sources). Compiler support moves every release: check the compiler's own status page before relying on a
 > C++26 feature. Anything marked (unverified) is a lead, not a fact.
 
 ## Currency check
 - **Standards**
-  - C23 = ISO/IEC 9899:2024 (adopted 2024). Next C ("C2y", latest working draft N3886, 2026-05-24, pre-Ottawa): `_Countof` /
+  - C23 = ISO/IEC 9899:2024 (adopted 2024). Next C ("C2y", latest working draft N3998 post-Ottawa, 2026-10-25; WG14 met in Buzios 2026-11-16..20): `_Countof` /
     `<stdcountof.h>` (N3469), named loops (`break label;`), `if` declarations, case ranges, `++/--` on complex. Publication year (unverified; drafts call it 202y).
-  - C++23 = ISO/IEC 14882:2024. **C++26 technically complete 2026-03** (London/Croydon meeting), sent to DIS ballot; ISO publication
-    (unverified whether published yet; WG21 convenor report of 2026-07 still lists 2024 as latest). Ship poll 114 for, 12 against, 3 abstain.
+  - C++23 = ISO/IEC 14882:2024. **C++26 technically complete 2026-03** (London/Croydon; ship poll 114 for, 12 against, 3 abstain), but
+    **the ISO DIS ballot FAILED in 2026-10** (reported in news, not yet on isocpp.org/open-std pages; the Register says 13 yes / 9 no / 12 abstain, another outlet says
+    12 of 20 in favor: exact counts (unverified), only secondary sources), over Contracts (P2900). NOT published. WG21 met in Buzios 2026-11-16..21 to pick a path (drop or split Contracts, TS,
+    or re-ballot): outcome (unverified, not found 2026-11-19). Treat C++26 as "final draft N5050", not a published standard; `__cplusplus`
+    in that draft is 202603L. Compilers keep shipping the features regardless.
   - C++26 headline: static reflection (P2996), contracts (`pre`/`post`/`contract_assert`, P2900), `std::execution` senders/receivers
     (P2300), **erroneous behavior** for uninitialized locals (P2795: reading one is no longer UB), hardened standard library (P3471),
     `std::simd`, `std::inplace_vector`, `#embed`, pack indexing, `= delete("why")`, `_` placeholder, expansion statements
-    (`template for`), `std::optional<T&>`, `std::function_ref`, `std::indirect`/`std::polymorphic`.
+    (`template for`), `std::optional<T&>`, `std::function_ref`, `std::indirect`/`std::polymorphic`. (Contents may change if the committee edits the draft after the failed ballot.)
   - C++29 work started (3-year cycle): focus on more UB removal and safety profiles.
 - **Compilers** (details: `references/support.md`)
-  - GCC 16.1 2026-04-30, **16.2 2026-08-07**; maintained 15.3, 14.4; 13.5 (2026-09-11) was the final GCC 13 release (branch closed). GCC 17 in development.
+  - GCC 16.1 2026-04-30, **16.2 2026-08-07**; maintained 15.3, 14.4; 13.5 (2026-09-11) was the final GCC 13 release (branch closed). GCC 17 in development (status 2026-11-16: general bugfixing).
     GCC 16 **defaults to `-std=gnu++20`** (was gnu++17) and C++20 in libstdc++ is no longer experimental; experimental C++26 reflection
     (`-freflection`), contracts, expansion statements, constexpr exceptions, `std::simd`, `std::inplace_vector`.
     GCC 15 **defaults C to `-std=gnu23`** (`bool`/`true`/`false` keywords, `()` means no parameters).
-  - LLVM/Clang **23.1.0 2026-08-25**, latest 23.1.3 (2026-10-06); 22.1.x (last 22.1.8, 2026-06-16). Clang has NO reflection, contracts or
+  - LLVM/Clang **23.1.0 2026-08-25**, latest 23.1.6 (2026-11-17); 22.1.x (last 22.1.8, 2026-06-16, not rechecked). Clang has NO reflection, contracts or
     erroneous-behavior support upstream yet; expansion statements partial (23). New `-Wlifetime-safety` (23).
   - MSVC Build Tools **14.51** (Visual Studio 2026 18.6, 2026-05); 14.50 = VS 2026 18.0 (2025-11). `/std:c++latest` for new features,
-    `/std:c++23preview` to stop at C++23. Binary compatible back to VS 2015. Targets Windows 10+ only; ARM32 toolchain removed.
-- **Libraries**: libc++ has no `std::execution`, `std::simd`, `inplace_vector` yet (2026-10). libstdc++ 16 has `simd`/`inplace_vector`,
+    `/std:c++23preview` to stop at C++23. 14.51 added `<flat_map>`/`<flat_set>`, TR1 and `<experimental/filesystem>` removed, regex overhaul. No newer toolset on the docs page 2026-11-19. Binary compatible back to VS 2015. Targets Windows 10+ only; ARM32 toolchain removed.
+- **Libraries**: libc++ has no `std::execution`, `std::simd`, `inplace_vector` yet (as of 2026-10, not rechecked). libstdc++ 16 has `simd`/`inplace_vector`,
   no `std::execution` listed. MSVC STL: none of these listed. Use NVIDIA `stdexec` (reference impl, no tagged releases) if you need P2300 now.
-- **Tools** (latest, 2026-10): CMake 4.4.4, Ninja 1.13.2, Meson 1.12.1, Bazel 9.3.0, vcpkg 2026.07.29, Conan 2.33.0,
-  GoogleTest 1.18.0, Catch2 3.16.1, doctest 2.5.3, Google Benchmark 1.9.5, AFL++ 5.03c, cppcheck 2.22.0, CodeQL CLI 2.27.2,
-  include-what-you-use 0.27, Valgrind 3.27.1 (2026-05-20), rr 5.9.0 (2025-02), {fmt} 12.2.0.
+- **Tools** (latest, 2026-11-19): CMake 4.5.1 (4.5.0 2026-11-12), Ninja 1.13.2, Meson 1.12.1, Bazel 9.3.3 (10.0.0 in RC), vcpkg 2026.10.16,
+  Conan 2.34.0 (2026-10-28), GoogleTest 1.18.0, Catch2 3.16.1, doctest 2.5.3, Google Benchmark 1.10.0 (2026-10-14), AFL++ 5.03c,
+  cppcheck 2.22.0, CodeQL CLI 2.27.5, {fmt} 12.2.1 (2026-11-07), rr 5.10.0 (2026-10-15). Not rechecked since 2026-10: include-what-you-use 0.27,
+  Valgrind 3.27.1 (2026-05-20).
 - **Policy**: CISA/NSA joint guide on reducing memory-related vulnerabilities (2025-06-24); CISA/FBI "Product Security Bad Practices"
   v2 (2025-01) expected vendors to publish a memory-safety roadmap by end of 2025 (v1 said 2026-01-01; guidance, not law, but asked in procurement). New critical-infrastructure code in C/C++ needs a justification.
 - **Older versions** (do not upgrade unless asked):
@@ -76,7 +80,7 @@ CMakeLists.txt  CMakePresets.json  vcpkg.json (or conanfile.py)  .clang-format  
 src/  include/<proj>/  tests/  fuzz/
 ```
 ```cmake
-cmake_minimum_required(VERSION 3.28...4.4)
+cmake_minimum_required(VERSION 3.28...4.5)
 project(app LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)          # 20 if VS 2022 / GCC 13 must build it
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -199,6 +203,7 @@ or on toolchains Rust lacks. Mixed: new memory-sensitive components in Rust behi
   when `f()` returns a view of a temporary). Lambda capturing `[&]` in a thread/coroutine that outlives the scope.
 - Coroutines taking parameters by reference (`const std::string&`) — the reference dangles after the first suspend.
 - Claiming C++26 features "work in Clang/MSVC": reflection, contracts and `std::execution` are GCC-16-experimental or library-only (2026-10).
+  Also: calling C++26 "published/ISO standard" (DIS ballot failed 2026-10; still a draft).
   Inventing APIs: `std::print` needs `<print>` (C++23); `std::expected` needs C++23 and `<expected>`; there is no `std::task` in C++23.
 - Signed overflow, shift by >= width, `int` index vs `size_t` loops, `abs(INT_MIN)`, strict-aliasing via pointer casts (use `memcpy`/`bit_cast`),
   reading inactive union members in C++, `memcpy` on non-trivially-copyable types, modifying a container while iterating.
@@ -220,6 +225,14 @@ or on toolchains Rust lacks. Mixed: new memory-sensitive components in Rust behi
 - [ ] Release artifacts carry separate debug symbols; crash/core collection documented; rollback = previous binary + matching symbols.
 
 ## Sources
+- Refresh 2026-11-19: https://gcc.gnu.org/ (release dates unchanged, GCC 17 bugfixing stage 2026-11-16);
+  https://theregister.com/devops/2026/11/13/c26-stumbles-at-finish-line-over-contracts-dispute/5309526 (C++26 DIS ballot failed, vote counts; secondary news, lead);
+  https://open-std.org/JTC1/SC22/WG21/docs/papers/2026/n5051.html (N5051 editors' report: N5050, dated 2026-06-01, is the final C++26 draft and DIS basis, `__cplusplus` 202603L; accessed 2026-11-19);
+  https://herbsutter.com/ (March 2026 "C++26 is done", 114/12/3 vote, accessed 2026-11-19; no DIS-ballot post found);
+  https://www.open-std.org/jtc1/sc22/wg14/www/wg14_document_log (N3998 newest C draft, 2026-10-25; Buzios meeting 11-16..20);
+  GitHub releases API (llvm 23.1.6, CMake 4.5.1, vcpkg 2026.10.16, Conan 2.34.0, Bazel 9.3.3, rr 5.10.0, Benchmark 1.10.0, fmt 12.2.1, CodeQL 2.27.5, others unchanged);
+  https://learn.microsoft.com/en-us/cpp/overview/what-s-new-for-msvc (14.51 still newest, removals);
+  https://best.openssf.org/Compiler-Hardening-Guides/Compiler-Options-Hardening-Guide-for-C-and-C++.html (still updated 2026-08-20)
 - https://gcc.gnu.org/ : GCC 16.2 (2026-08-07), 15.3, 14.4, 13.5 release dates, GCC 17 in development (2026-10-09)
 - https://gcc.gnu.org/pipermail/gcc/2026-April/248065.html : GCC 16.1 released 2026-04-30 (via search index, 2026-10-09)
 - https://gcc.gnu.org/gcc-16/changes.html : default gnu++20, C++26 reflection/contracts/expansion statements, libstdc++ simd/inplace_vector/optional<T&>, ABI changes, JSON diags removed, C2y items, counted_by on pointers (2026-10-09)

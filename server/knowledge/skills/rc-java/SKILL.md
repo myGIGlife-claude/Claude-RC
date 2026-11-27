@@ -1,8 +1,8 @@
 ---
 name: rc-java
-description: Current Java (JDK 21/25 LTS, JDK 27) and JVM backend practice as of 2026-10, covering language features, Maven/Gradle builds, Spring Boot 4 / Spring Framework 7, Quarkus/Micronaut/Helidon, JPA/Hibernate 7, JUnit 6/Testcontainers 2, GraalVM native image, containers, GC/JFR tuning and security. Use when writing or reviewing *.java, pom.xml, build.gradle(.kts), application.properties/yml, Spring/Jakarta code, or when upgrading a JDK or framework.
+description: Current Java (JDK 21/25 LTS, JDK 27) and JVM backend practice as of 2026-11, covering language features, Maven/Gradle builds, Spring Boot 4 / Spring Framework 7, Quarkus/Micronaut/Helidon, JPA/Hibernate 7, JUnit 6/Testcontainers 2, GraalVM native image, containers, GC/JFR tuning and security. Use when writing or reviewing *.java, pom.xml, build.gradle(.kts), application.properties/yml, Spring/Jakarta code, or when upgrading a JDK or framework.
 ---
-# Java and the JVM ecosystem (as of 2026-10)
+# Java and the JVM ecosystem (as of 2026-11)
 
 > Facts here are dated (see Sources). Versions, deadlines and policies move: confirm the primary source before pinning a version or promising a date. Anything marked (unverified) is a lead, not a fact.
 
@@ -11,26 +11,27 @@ Per-release JEP list: `references/jdk-features.md`.
 
 ## Currency check
 
-| Thing | Current (2026-10) | Notes |
+| Thing | Current (2026-11) | Notes |
 |---|---|---|
 | JDK LTS | **25** (2025-09-16), 21 (2023-09), 17 (2021-09) | Next LTS: 29 (2027-09, planned) |
 | JDK feature release | **27** (2026-09-15) | 26 lost Oracle support 2026-09; 28 EA (GA 2027-03) |
 | Oracle Premier support | 17 until 2026-09 (ended), 21 until 2028-09, 25 until 2030-09 | Temurin: 17 to at least 2027-10, 21 to 2029-12, 25 to 2031-09 |
-| Spring Boot | **4.1.x** (4.1.1); 4.0.x OSS until 2026-12 | 4.1 OSS until 2027-07; 3.5 OSS ended 2026-06; 4.2 planned 2026-11 |
-| Spring Framework | 7.0 (2025-11); 7.1 planned 2026-11 | Baseline JDK 17, recommends 25; Jakarta EE 11 |
+| Spring Boot | **4.2.0** (on Maven Central 2026-11-19; the api.spring.io releases list still showed RC2 that day); 4.1.x (4.1.3); 4.0.x (4.0.10) OSS until 2026-12-31 | 4.1 OSS until 2027-07-31; 4.2 OSS until 2027-12-31; 3.5 OSS ended 2026-06-30 (commercial to 2032-06). Existing 4.1 projects need no upgrade; read the 4.2 release notes before moving (not read in this pass) |
+| Spring Framework | **7.1.0** (on Maven Central 2026-11-19); 7.0.x (7.0.11) | Baseline JDK 17, recommends 25; Jakarta EE 11 |
 | Jakarta EE | 11 (Java 17+; Servlet 6.1, Persistence 3.2, Data 1.0, CDI 4.1) | EE 12 in progress |
-| Hibernate ORM | **7.4** stable (JPA 3.2); 8.0 beta (JPA 4.0) | 7.0+ is Apache-2.0 licensed |
-| Maven | **3.10.0** (2026-09-27); 3.9.16 (2026-05) previous series; 4.0.0-rc-7 (2026-09-24), not GA | Maven 4 needs Java 17 to run |
-| Gradle | **9.8.1** (2026-10) | 9.x needs Java 17+ to run; config cache preferred |
+| Hibernate ORM | **7.4** stable (7.4.17; JPA 3.2); 8.0.0.CR1 (on Maven Central 2026-11-19; JPA 4.0 and Java 17/21/25/27 per the earlier draft, unverified) | 7.0+ is Apache-2.0 licensed |
+| Maven | **3.10.1** (2026-11-11; 3.10 series, runs on Java 8); 3.9.16 (2026-05-13); 4.0.0-rc-7 (2026-09-24), not GA | Maven 4 needs Java 17 to run |
+| Gradle | **9.9.2** (2026-11-19); 8.14.8 is the last 8.x | 9.x needs Java 17+ to run; config cache preferred |
 | Kotlin | 2.4.21 (2026-10-08) | 2.5.0 planned 2026-12 |
 | JUnit | **6.1.3** (2026-08) | Java 17 baseline, one version for Platform/Jupiter/Vintage |
 | Mockito | 5.24.0 (2026-09) | |
 | Testcontainers | 2.0.x (2.0.5) | JUnit 4 support removed in 2.0 |
-| Quarkus | 3.40 LTS (2026-09-30); 4.0.0.Beta1 (2026-10-01) | |
-| Micronaut / Helidon | 5.2.x / 27 (Helidon now versions with the JDK) | Helidon 27 needs JDK 27; Helidon 4 is the LTS line |
+| Quarkus | 3.40 LTS (3.40.1.2 emergency CVE release 2026-11-09; 3.33 LTS got 3.33.4.2 the same day); 4.0 is at 4.0.0.CR1 (Maven Central 2026-11-11; Final not seen) | Patch to the latest LTS micro: emergency releases fixed CVEs (CVE ids not confirmed here) |
+| Micronaut / Helidon | **5.2.7** (platform BOM on Maven Central, 2026-11-18; 5.1.x and 5.0.x lines continue) / Helidon 27.0.2 (Helidon versions with the JDK) | Micronaut 5.0 GA 2026-05-20, Java 25 baseline. Helidon 27 needs JDK 27; Helidon 4 is the LTS line (unverified this pass) |
 | GraalVM | 25.x line (JDK 25 based) | Oracle detached GraalVM from Java SE products after JDK 24 |
 
 Shipped in the last ~12 months (dated): JDK 25 LTS (2025-09: scoped values, compact source files + `void main()`, module imports, flexible constructor bodies, AOT cache one-step, compact object headers, generational Shenandoah); Spring Boot 4.0 / Framework 7.0 (2025-11); JDK 26 (2026-03: HTTP/3 client, `Thread.stop` removed, final-field mutation warnings, AOT cache with any GC); Spring Boot 4.1 (2026: gRPC support); JDK 27 (2026-09: G1 default everywhere, compact headers on by default, PQ hybrid TLS 1.3).
+Since 2026-10: Oracle October 2026 CPU (2026-10-20, 55 Java SE fixes per press) shipped Java SE 27.0.1, 25.0.5, 21.0.13, 17.0.21 (fixed versions from secondary press, unverified on Oracle notes): patch to the latest update of your LTS; next CPU 2027-01-19, with Critical Security Patch Updates 2026-11-17 and 2026-12-15 (press-reported). Spring Boot 4.2.0 and Framework 7.1.0 (Central, 2026-11-19), Micronaut 5.2.7, Hibernate 8.0.0.CR1, Gradle 9.9.2 (2026-11-19) and Maven 3.10.1 (all on their registries by 2026-11-19).
 
 **Pick a JDK:** new projects target **25**. 21 is fine but upgrade if you use virtual threads heavily (pinning on `synchronized` was only fixed in 24). Use 27 only if you track every 6-month release. Never ship on a non-LTS release past its 6 months (26, 24, 23, 22) or anything below 17.
 
@@ -40,7 +41,7 @@ Shipped in the last ~12 months (dated): JDK 25 LTS (2025-09: scoped values, comp
 |---|---|---|
 | Fixed `ThreadPoolExecutor` / `new Thread` for blocking I/O | `Executors.newVirtualThreadPerTaskExecutor()`, or `spring.threads.virtual.enabled=true` | JDK 21 (pinning-free 24) |
 | `ThreadLocal` for request context | `ScopedValue` | JDK 25 (final) |
-| `CompletableFuture` fan-out with manual cancel | `StructuredTaskScope` (still **preview** in 27; only behind `--enable-preview`) | preview |
+| `CompletableFuture` fan-out with manual cancel | `StructuredTaskScope` (still **preview** in 27; only behind `--enable-preview`; JEP 543 reportedly proposed to finalize it in JDK 28, unverified) | preview |
 | Lombok `@Data`/`@Value` for carriers | `record` (+ compact constructor for validation) | JDK 16 |
 | `instanceof` + cast chains, visitor pattern | sealed interfaces + `switch` with record patterns | JDK 21 |
 | unused catch/lambda names `ignored` | `_` unnamed variables | JDK 22 |
@@ -223,22 +224,27 @@ tasks.test { useJUnitPlatform() }
 - [ ] Startup/latency measured; AOT cache or native image only if the numbers justify it.
 
 ## Sources
-All accessed 2026-10-09.
-- https://openjdk.org/projects/jdk/21/ , /22/ , /23/ , /24/ , /25/ , /26/ , /27/ : GA dates and JEP lists per release.
-- https://jdk.java.net/27/ : JDK 27 GA builds; JDK 28 early access.
-- https://www.oracle.com/java/technologies/java-se-support-roadmap.html : Oracle Premier/Extended support dates, 29 as next LTS.
-- https://adoptium.net/support/ : Temurin support windows.
+Accessed 2026-11-19 unless a line says 2026-10-09 (not re-fetched: openjdk.org and oracle.com returned 403 on 2026-11-19, so Oracle support dates and per-JEP detail below are carried from 2026-10-09; JDK 27 JEPs, JDK 28 GA date and LTS/feature numbers were re-checked via InfoQ, GitHub and Adoptium on 2026-11-19).
+- https://openjdk.org/projects/jdk/21/ , /22/ , /23/ , /24/ , /25/ , /26/ , /27/ : GA dates and JEP lists per release (2026-10-09).
+- https://jdk.java.net/27/ : JDK 27 GA builds; JDK 28 early access (2026-10-09).
+- https://www.oracle.com/java/technologies/java-se-support-roadmap.html : Oracle Premier/Extended support dates, 29 as next LTS (2026-10-09).
+- https://adoptium.net/support/ : Temurin windows (17 and 11 at least 2027-10, 21 2029-12, 25 2031-09, 27 2027-03).
+- https://www.securityweek.com/oracle-patches-over-1200-vulnerabilities-with-october-2026-cpu : Oct 2026 CPU (secondary, lead only); https://www.oracle.com/security-alerts/cpuoct2026.html : CPU date 2026-10-20.
+- https://quarkus.io/blog/ : Quarkus 3.40.1.2 and 3.33.4.2 emergency releases 2026-11-09; https://quarkus.io/blog/quarkus-4-0-0-beta1-released/ : 4.0 beta (Central shows 4.0.0.CR1 on 2026-11-11).
+- https://micronaut.io/2026/05/20/micronaut-framework-5-0-0-released/ , https://micronaut.io/2026/08/31/micronaut-framework-5-1-3/ : Micronaut 5.0 GA, 5.1.3 (5.2.7 is the newest per Maven Central).
 - https://openjdk.org/jeps/401 : Value classes integrated as preview, target JDK 28.
 - https://openjdk.org/jeps/512 , /jeps/514 , /jeps/525 , /jeps/500 : compact source files, AOT cache flags, structured concurrency API, final-field mutation warnings.
 - https://bugs.openjdk.org/browse/JDK-8368370 : Thread.stop removed in JDK 26.
 - https://github.com/spring-projects/spring-boot/wiki/Spring-Boot-4.0-Release-Notes , .../Spring-Boot-4.0-Migration-Guide , .../Spring-Boot-4.1-Release-Notes : Boot 4 changes, starters, Jackson 3, test changes, 4.1 features.
 - https://github.com/spring-projects/spring-framework/wiki/Spring-Framework-7.0-Release-Notes : Framework 7 baselines, removals, JSpecify, resilience, RestTestClient.
 - https://spring.io/blog/2025/09/30/the-state-of-http-clients-in-spring/ : RestTemplate deprecation timeline.
-- https://spring.io/projects/spring-boot : current Boot 4.1.1. https://api.spring.io/projects/spring-boot/generations : Boot OSS/commercial support end dates.
+- https://spring.io/projects/spring-boot : Boot generations. https://api.spring.io/projects/spring-boot/generations : Boot OSS/commercial support end dates (4.0 2026-12-31, 4.1 2027-07-31, 4.2 2027-12-31; re-fetched 2026-11-19). The /releases API lagged Maven Central that day.
+- https://repo.maven.apache.org/maven2/ maven-metadata.xml for spring-boot, spring-core, micronaut-platform, hibernate-core, apache-maven, junit-jupiter, mockito-core, testcontainers, quarkus-bom, helidon (2026-11-19): Boot 4.2.0, 4.1.3, 4.0.10; Framework 7.1.0; Micronaut 5.2.7; Quarkus 4.0.0.CR1; Helidon 27.0.2; Maven 3.10.1; JUnit 6.1.3; Mockito 5.24.0; Testcontainers 2.0.5. https://services.gradle.org/versions/current : Gradle 9.9.2.
+- https://raw.githubusercontent.com/openjdk/jdk/master/make/conf/version-numbers.conf : JDK 28 GA date 2027-03-23. https://www.infoq.com/news/2026/09/java27-released/ : JDK 27 GA 2026-09-15 and its nine JEPs (523, 527, 531, 532, 533, 534, 536, 537, 538). https://api.adoptium.net/v3/info/available_releases : LTS 25, newest feature release 27 (2026-11-19).
 - https://jakarta.ee/release/11/ : Jakarta EE 11 contents.
 - https://hibernate.org/orm/releases/ , https://docs.hibernate.org/orm/7.0/migration-guide/migration-guide.html : Hibernate series and 7.0 removals.
 - https://maven.apache.org/docs/history.html , https://maven.apache.org/whatsnewinmaven4.html : Maven versions, Maven 4 changes.
-- https://gradle.org/releases/ , https://docs.gradle.org/9.0.0/release-notes.html : Gradle versions, 9.0 requirements.
+- https://gradle.org/releases/ , https://docs.gradle.org/9.0.0/release-notes.html : Gradle 9.9.2 (2026-11-19), 9.0 requirements.
 - https://kotlinlang.org/docs/releases.html : Kotlin 2.4.21.
 - https://docs.junit.org/current/release-notes/ : JUnit 6.1.3, 6.0 changes.
 - https://github.com/mockito/mockito/releases : Mockito 5.24.0.
@@ -247,4 +253,4 @@ All accessed 2026-10-09.
 - https://www.graalvm.org/release-notes/ , https://blogs.oracle.com/java/detaching-graalvm-from-the-java-ecosystem-train : GraalVM 25 line, decoupling from Java SE.
 - https://docs.liquibase.com/community/release-notes/5-0 : Liquibase 5.0 FSL license.
 
-Unverified in this pass: JSpecify current version, Flyway current version, async-profiler current version, Boot 4.1 GA day (spring.io lists 2026-06-30 as the generation start).
+Unverified in this pass: JSpecify, Flyway, async-profiler versions; Boot 4.2 and Framework 7.1 release notes (GA itself confirmed on Maven Central); Quarkus 4.0 Final; Hibernate 8 details; JDK 28 JEP list (GA date 2027-03-23 is in the openjdk master build config); Oracle fixed-version numbers (25.0.5, 21.0.13, 17.0.21).

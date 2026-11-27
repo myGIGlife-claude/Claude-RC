@@ -1,8 +1,8 @@
 ---
 name: rc-android
-description: "Native Android development (Kotlin, Jetpack Compose, Material 3, Gradle/AGP) as of October 2026, covering platform behavior changes (API 35-37), Play policy and target-API deadlines, architecture, security, performance, testing and UI/UX. Use when you write or review Android code: build.gradle(.kts), libs.versions.toml, AndroidManifest.xml, Compose screens, ViewModels, Room, WorkManager, permissions, R8 rules, Play Console releases, or when you upgrade targetSdk, AGP, Kotlin or the Compose BOM."
+description: "Native Android development (Kotlin, Jetpack Compose, Material 3, Gradle/AGP) as of November 2026, covering platform behavior changes (API 35-37), Play policy and target-API deadlines, architecture, security, performance, testing and UI/UX. Use when you write or review Android code: build.gradle(.kts), libs.versions.toml, AndroidManifest.xml, Compose screens, ViewModels, Room, WorkManager, permissions, R8 rules, Play Console releases, or when you upgrade targetSdk, AGP, Kotlin or the Compose BOM."
 ---
-# Native Android development (as of 2026-10)
+# Native Android development (as of 2026-11)
 
 > Facts here are dated (see Sources). Versions, deadlines and policies move: confirm the primary source before pinning a version or promising a date. Anything marked (unverified) is a lead, not a fact.
 
@@ -10,22 +10,24 @@ Platform details and the full version table are in `references/platform-and-poli
 
 ## Currency check
 
-| Thing | Current (verified 2026-10-09) | Notes |
+| Thing | Current (verified 2026-11-19) | Notes |
 |---|---|---|
-| Newest stable Android | **Android 17, API 37**. Stable 2026-06-16 | Android 17 QPR betas (37.1, 37.2) are in progress. Android 16 = API 36, 15 = API 35 |
-| Play target API | New apps and updates: **API 36** from 2026-08-31 (Wear OS/Automotive OS: 35, XR: 34. TV: 34 since 2025-08-31) | Extension to **2026-11-01** on request. API 37 is not yet required |
+| Newest stable Android | **Android 17, API 37**. Stable 2026-06-16 | Android 17 QPR1 (API 37.1) reached Platform Stability at Beta 6, with a final API diff. Its final-release date is unverified. No Android 18 beta found as of 2026-11-19 (press reports only, unverified). Android 16 = API 36, 15 = API 35 |
+| Play target API | New apps and updates: **API 36** since 2026-08-31 (Wear OS/Automotive OS: 35, XR: 34. TV: 34 since 2025-08-31) | The 2026-11-01 extension window has passed. **API 37 is required from August 2027** per the Android developers blog (2026-11-18). The Play Help page does not list it yet |
 | 16 KB page size | Play: updates that don't support 16 KB **blocked from 2027-02-01** (wording on the page-sizes doc) | Only affects apps with native `.so` files (including those from SDKs). AGP >= 8.5.1 and NDK r28+ align by default |
-| Developer verification | Certified devices (Android 7+) in BR/ID/SG/TH check developer registration from **2026-09-30**, global in 2027+ | Phase 1 checks installs from participating app stores (Play, Galaxy Store, Xiaomi GetApps and others). `adb install` is unchanged. Play registers ~99% of its apps automatically. Hobbyist "limited distribution" accounts allow up to 20 devices |
-| Kotlin | **2.4.21** (2026-10-08). 2.4.0 language release on 2026-06-03 | K1 is gone. Context parameters and explicit backing fields are **stable in 2.4** |
-| AGP | **9.4.1** (2026-09-18; 9.4.0 notes: needs Gradle >= 9.6, JDK 17, build-tools 36. Max API 37) | AGP 9.0 (2026-01) turned on built-in Kotlin and the new DSL. **AGP 10 is planned for late 2026** and removes the opt-outs |
-| Gradle | **9.8.1** (2026-10-07) | |
-| KSP | 2.3.x (KSP2. Versioned separately from Kotlin since 2.3) | |
-| Compose BOM | **2026.09.00**: ui/foundation 1.12.1, material3 1.4.0, adaptive 1.3.0 | material3 1.5.0 is in beta: `ButtonGroup`, `FloatingToolbar` and the expressive top app bars become stable there. `LoadingIndicator` stays experimental |
-| Navigation 3 | **1.2.0** (2026-09-23). First stable 1.0.0 shipped 2025-11-19 | Use it for new Compose apps. Nav2 is listed with the View libraries in maintenance |
+| Developer verification | Live since **2026-09-30** in BR/ID/SG/TH on certified devices (Android 8 / API 26+), for installs from participating stores. **Global rollout starts January 2027** with Play, Galaxy Store, Honor, Oppo, Xiaomi, Transsion and Vivo, then all install sources over several months | `adb install` is unchanged. Play registers ~99% of its apps automatically. "Limited distribution" accounts (hobbyists) now allow up to **50** devices (was 20). Developer ID Status API and Developer Console API exist for CI |
+| Play adaptive quality | **April 2027**: new apps and updates need baseline Tier 3 adaptive quality (foldables) plus foldable screenshots (3 foldable + 2 phone). Games: screenshots April 2027, Tier 3 **August 2027** | Apps that miss it can't publish or update and may lose visibility. Un-updated apps stay downloadable. Foldable screenshot upload is live in Play Console |
+| Kotlin | **2.4.21** (2026-10-08). 2.4.0 language release on 2026-06-03. **2.5.0-RC** published 2026-11-11 (stable planned December 2026) | K1 is gone. Context parameters and explicit backing fields are **stable in 2.4** |
+| AGP | **9.5.1** (9.5.0 and 9.5.1 are on Google Maven, 9.6.0 alphas too. 9.5 notes: Gradle >= 9.6.0, JDK 17, build-tools 36.0.0, max API 37. Exact release dates unverified) | AGP 9.0 (2026-01) turned on built-in Kotlin and the new DSL. **AGP 10 is planned for late 2026** and removes the opt-outs |
+| Gradle | **9.9.2** (2026-11-19) | |
+| KSP | **2.3.14** (2026-11-13). KSP2, versioned separately from Kotlin since 2.3 | |
+| Compose BOM | **2026.11.01** (2026-11-18): Compose 1.13.0, material3 **1.5.0 stable**, adaptive 1.3.0 | The Compose release post says the BOM needs Kotlin 2.2+ and compileSdk 37.1. The M3 notes say the core compileSdk 37 requirement was dropped and only `material3-a2ui` needs 37.1, so check your build. Stable in M3 1.5: `ButtonGroup`, `FloatingToolbar`, top app bars, `BottomAppBar`, `SearchBar`. `LoadingIndicator` and `MaterialShapes` stay experimental |
+| Navigation 3 | **1.2.2** (2026-11-18). 1.2 added deep links and richer predictive back. First stable 1.0.0 shipped 2025-11-19 | Use it for new Compose apps. Nav2 is listed with the View libraries in maintenance |
 | Room | **2.8.5** and **Room 3.0.3** (`androidx.room3`, KSP-only, coroutine-first, KMP) | Room 3 has a new package and Maven group, so it can live side by side with 2.x |
-| Lifecycle / Activity | 2.11.0 / 1.13.0 | |
-| Others (stable) | DataStore 1.2.1, WorkManager 2.12.0, Credentials 1.6.0, Hilt (Dagger) 2.60.1, Koin 4.2.2, Coil 3.6.3, Ktor 3.6.0, OkHttp 5.5.0, Retrofit 3.0.0, coroutines 1.11.0, kotlinx.serialization 1.11.0, Compose Multiplatform 1.12.1 (2026-09-22) | |
-| Policy shift | **Compose-first** (announced with Android 17): new APIs, libraries and guidance target Compose only. Fragment, RecyclerView, ViewPager(2), ConstraintLayout, CoordinatorLayout, MDC-Views, Preference and DataBinding get **critical fixes only** | Views still work. Interop is supported in both directions |
+| Lifecycle / Activity | 2.11.1 / 1.13.0 | |
+| Others (stable) | DataStore 1.3.0, WorkManager 2.12.0, Credentials 1.6.0, AppFunctions 1.0.0 (2026-11-18), Hilt (Dagger) 2.60.1, Koin 4.2.2, Coil 3.6.3, Ktor 3.6.1, OkHttp 5.5.1, Retrofit 3.0.0, coroutines 1.11.0, kotlinx.serialization 1.13.0, Compose Multiplatform 1.12.2 (1.13.0-rc01 is out) | |
+| Compose 1.13 deprecations (2026-11-18) | Compose Material 2 library (no longer maintained), value-based `BasicTextField` and M2 `TextField` (use `TextFieldState`), `VisualTransformation` (use `OutputTransformation`/`InputTransformation`), `ConstraintLayout`/`MotionLayout` for Compose. `Modifier.onFocusedBoundsChanged` is now a no-op | FlexBox and Grid are stable and supersede `FlowRow`/`FlowColumn` for new code. `computedStateOf` is new (prefer it to `derivedStateOf` unless you need cached heavy results). M3 value-based `TextField` is not deprecated in 1.5.0 but is in 1.6.0-alpha01 |
+| Policy shift | **Compose-first** (announced with Android 17, 2026-05-19): new APIs, libraries and guidance target Compose only. Fragment, RecyclerView, ViewPager(2), ConstraintLayout, CoordinatorLayout, MDC-Views, Preference and DataBinding get **critical fixes only** | Views still work. Interop is supported in both directions |
 
 ## What changed / stop doing
 
@@ -63,15 +65,15 @@ Platform details and the full version table are in `references/platform-and-poli
 ```toml
 # gradle/libs.versions.toml (excerpt)
 [versions]
-agp = "9.4.1"
+agp = "9.5.1"
 kotlin = "2.4.21"
-composeBom = "2026.09.00"
+composeBom = "2026.11.01"
 [libraries]
 compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
-ksp = { id = "com.google.devtools.ksp", version = "2.3.12" }
+ksp = { id = "com.google.devtools.ksp", version = "2.3.14" }
 ```
 ```kotlin
 // app/build.gradle.kts: no kotlin-android plugin under AGP 9
@@ -115,10 +117,10 @@ class HomeViewModel(repo: ItemRepo, private val saved: SavedStateHandle) : ViewM
 - Data: use Room for structured data. New KMP or greenfield code can start on **Room 3** (`androidx.room3`, KSP, suspend/Flow DAOs, `SQLiteDriver`). Use DataStore for settings, WorkManager for deferrable guaranteed work, Paging 3 (`collectAsLazyPagingItems`) for long lists, and Coil 3 (`AsyncImage`) for images.
 - Networking: Retrofit 3 or Ktor 3 over OkHttp 5 + kotlinx.serialization. Don't use Gson for new Kotlin code: it ignores defaults and nullability.
 - Kotlin idioms: `suspend` for one-shot calls, `Flow` for streams, structured concurrency (no `GlobalScope`), and inject the dispatchers. Main-safety is the callee's job (`withContext(io)` inside the repo). Use `sealed interface` for results and events. `@JvmInline value class` for IDs.
-- KMP: share data and domain modules (Room 3, DataStore, Ktor, kotlinx.serialization and lifecycle-viewmodel are all KMP). Compose Multiplatform (1.12) shares UI on iOS (stable) and desktop. Web is still maturing. Under AGP 9, a module with `kotlin("multiplatform")` can't also apply `com.android.application/library`: use the Android-KMP library plugin.
+- KMP: share data and domain modules (Room 3, DataStore, Ktor, kotlinx.serialization and lifecycle-viewmodel are all KMP). Compose Multiplatform (1.12.2) shares UI on iOS (stable) and desktop. Web is still maturing. Under AGP 9, a module with `kotlin("multiplatform")` can't also apply `com.android.application/library`: use the Android-KMP library plugin.
 
 ### Compose UI
-- Theme: `MaterialTheme` with dynamic color (`dynamicLightColorScheme(ctx)` on API 31+, brand fallback), a dark theme, and M3 type and shape scales. Material 3 Expressive: `ButtonGroup`, `FloatingToolbar` and expressive top app bars are stable in material3 **1.5** (beta). `LoadingIndicator` is still experimental, and `LocalMotionScheme` is deprecated (use `MaterialTheme.motionScheme`). On 1.4 all of it needs `@OptIn`.
+- Theme: `MaterialTheme` with dynamic color (`dynamicLightColorScheme(ctx)` on API 31+, brand fallback), a dark theme, and M3 type and shape scales. Material 3 Expressive: `ButtonGroup`, `FloatingToolbar` and expressive top app bars are stable in material3 **1.5.0** (2026-11-18). `LoadingIndicator` and `MaterialShapes` are still experimental, and `LocalMotionScheme` is deprecated or removed (the 1.5.0 notes disagree: use `MaterialTheme.motionScheme`). On 1.4 all of it needs `@OptIn`. `Slider`/`RangeSlider` moved to `SliderState` (source-breaking). Prefer `FlexBox`/`Grid` (stable in 1.13) over `FlowRow` for new wrapping layouts, and state-based `TextField` overloads.
 - Adaptive: `NavigationSuiteScaffold` picks a bar, rail or drawer from the window size. Use `ListDetailPaneScaffold` / `SupportingPaneScaffold` or Nav3 scenes. Breakpoints: compact <600, medium 600-840, expanded 840-1200, large 1200-1600, extra-large >=1600 dp (large/extra-large only with `currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true)`). Decide from `currentWindowAdaptiveInfo()`, never from device type or orientation.
 - Insets: call `enableEdgeToEdge()` in `onCreate`. Apply `Scaffold`'s `innerPadding` (or `contentWindowInsets`), use `Modifier.safeDrawingPadding()` / `imePadding()`, and add `contentPadding` on lazy lists so the last item clears the nav bar.
 - State: hoist state and keep screens stateless. Use `rememberSaveable` for UI-only state and `derivedStateOf` for values computed from fast-changing state. Use `LaunchedEffect(key)` for keyed side effects, `rememberUpdatedState` for long-lived lambdas, and `DisposableEffect` for listeners.
@@ -161,11 +163,11 @@ class HomeViewModel(repo: ItemRepo, private val saved: SavedStateHandle) : ViewM
 - **WebView**: `javaScriptEnabled` only when needed, `allowFileAccess=false`, and no `addJavascriptInterface` on untrusted content. Use `WebViewAssetLoader` instead of `file://`, and restrict navigation to your origins.
 - **Play Integrity**: use standard requests with `requestHash`, decrypt and verify on your server, and enforce in tiers (on Android 13+, `MEETS_STRONG_INTEGRITY` also requires security patches from the last year; on 12 and lower it doesn't, so check the SDK level too). Never trust a verdict checked on the device.
 - **Native code**: no dynamic code loading. At target 37, `System.load` of writable files throws.
-- **Sideloaded APKs**: the signing key must stay stable, and register package + key for developer verification (checks start 2026-09-30 in the first four countries).
+- **Sideloaded APKs**: the signing key must stay stable, and register package + key for developer verification (live since 2026-09-30 in four countries, global rollout from January 2027).
 - Logs: no PII or tokens in `Log.*`. Strip release logging with R8 `-assumenosideeffects`.
 
 ## Performance & quality
-- Play bad-behavior thresholds (28-day): user-perceived crash rate **1.09%** (8% per phone model), user-perceived ANR **0.47%** (8% per model), excessive partial wake locks **5%** of sessions. New memory vitals (memory by RAM tier, bitmap memory 200 MB for background/user-perceived services) and the DEX-optimization criterion may affect store visibility from **2027-02**.
+- Play bad-behavior thresholds (28-day): user-perceived crash rate **1.09%** (8% per phone model), user-perceived ANR **0.47%** (8% per model), excessive partial wake locks **5%** of sessions. Memory vitals (memory by RAM tier, bitmap memory 200 MB for background/user-perceived services, 400 MB cached) and DEX code optimization (apps with more than 10 MB of DEX need at least 25% optimized/obfuscated/shrunk) may affect store visibility from **February 2027**.
 - Startup: aim for a cold start well under 1 s on mid-range hardware. Use baseline + startup profiles, lazy initialization (no work in `Application.onCreate`, and use App Startup only where needed), and R8 on. Measure with Macrobenchmark `StartupTimingMetric`, not stopwatch logs.
 - Jank: `FrameTimingMetric`, the JankStats library, and Perfetto traces (`androidx.tracing`). In Compose, check recomposition counts in the Layout Inspector.
 - Memory: avoid leaking Activity/Context into singletons. Use LeakCanary in debug, `ApplicationExitInfo` for kill reasons (Android 17: "MemoryLimiter:AnonSwap"), and `ProfilingManager` for field heap dumps.
@@ -174,7 +176,7 @@ class HomeViewModel(repo: ItemRepo, private val saved: SavedStateHandle) : ViewM
 
 ## Testing & tooling
 - Unit: JUnit 4 (Android instrumentation is still JUnit 4. JUnit 5 for JVM-only modules is fine via a third-party plugin), `kotlinx-coroutines-test` (`runTest`, `StandardTestDispatcher`, `Dispatchers.setMain`), Turbine for Flows, and fakes over mocks (MockK when you must).
-- UI: Compose testing (`createComposeRule`, semantics matchers, `useUnmergedTree`) running on the JVM via Robolectric (4.17) or on device. Espresso is only for View screens. Use UI Automator 2.4 for cross-app and system UI.
+- UI: Compose testing (`createComposeRule`, semantics matchers, `useUnmergedTree`) running on the JVM via Robolectric (4.18.1) or on device. Espresso is only for View screens. Use UI Automator 2.4.1 for cross-app and system UI.
 - Screenshot: the Compose Preview Screenshot Testing plugin (`com.android.compose.screenshot`, maturity unverified) or Roborazzi/Paparazzi. Cover dark mode, font scale and size classes.
 - Performance: Macrobenchmark 1.5 + Baseline Profile Gradle plugin on a physical device or a managed device in CI.
 - Lint: Android Lint (`warningsAsErrors` for security checks), detekt or ktlint, and Compose lint rules. Add the `play-policy-insights` / R8 analyzer checks in Android Studio.
@@ -196,7 +198,7 @@ class HomeViewModel(repo: ItemRepo, private val saved: SavedStateHandle) : ViewM
 - Hardcoded `dp` text sizes, icons without descriptions, 32dp touch targets.
 
 ## Before you ship
-- [ ] `targetSdk` >= 36 (Play deadline passed 2026-08-31. Extension ends 2026-11-01). `compileSdk` 37. Tested with 37 behavior changes.
+- [ ] `targetSdk` >= 36 (Play deadline passed 2026-08-31. Extension window ended 2026-11-01). Plan API 37 before August 2027. `compileSdk` 37 (37.1 if your Compose version asks). Tested with 37 behavior changes.
 - [ ] Edge-to-edge correct on gesture and 3-button nav, IME, cutouts. Predictive back works (no `onBackPressed`).
 - [ ] Usable resized, in landscape, on tablet/foldable/desktop windows, and at 200% font scale. TalkBack walkthrough done.
 - [ ] Release build: R8 on with optimize defaults, shrink resources, a baseline profile, an AAB, 16 KB-aligned native libs (`zipalign -c -P 16 -v 4 app.apk`).
@@ -207,33 +209,39 @@ class HomeViewModel(repo: ItemRepo, private val saved: SavedStateHandle) : ViewM
 - [ ] Sideloaded distribution: package + signing key registered for developer verification.
 
 ## Sources
-All accessed 2026-10-09.
-- https://developer.android.com/about/versions: version list, Android 17 current, QPR betas
-- https://developer.android.com/blog/posts/android-17-is-here: Android 17 stable on 2026-06-16, API 37, Compose-first, config-change recreation, NPU, contact picker
-- https://developer.android.com/about/versions/17/behavior-changes-17: target-37 changes (local network, CT default, BAL, large-screen no opt-out, bg audio, static final, DCL)
-- https://developer.android.com/about/versions/17/behavior-changes-all: all-app Android 17 changes (memory limits, OTP delay, URI grants in Android 18, cleartext deprecation)
-- https://developer.android.com/about/versions/16/behavior-changes-16: target-36 changes (edge-to-edge opt-out gone, predictive back, resizability, health perms)
-- https://developer.android.com/develop/ui/compose/first: Compose-first, View libraries in maintenance
-- https://support.google.com/googleplay/android-developer/answer/11926878: target API deadlines 2025/2026, extension to 2026-11-01
+Accessed 2026-11-19, except lines marked "(2026-10-09)", which were not re-fetched in the November refresh.
+- https://developer.android.com/about/versions/17/qpr1/release-notes: QPR1 Platform Stability at Beta 6, API diff 37.1 (page lists betas only up to 2026-08-17)
+- https://developer.android.com/blog/posts/android-17-is-here (2026-10-09): Android 17 stable on 2026-06-16, API 37, Compose-first, config-change recreation, NPU, contact picker
+- https://developer.android.com/about/versions/17/behavior-changes-17: target-37 changes re-read (local network, CT default, BAL, large-screen no opt-out, bg audio, static final, DCL, OTP, widget bitmap cap)
+- https://developer.android.com/about/versions/17/behavior-changes-all (2026-10-09): all-app Android 17 changes (memory limits, OTP delay, URI grants in Android 18, cleartext deprecation)
+- https://developer.android.com/about/versions/16/behavior-changes-16 (2026-10-09): target-36 changes
+- https://developer.android.com/develop/ui/compose/first (2026-10-09): Compose-first, View libraries in maintenance
+- https://support.google.com/googleplay/android-developer/answer/11926878: target API 36 deadline 2026-08-31, form factors, extension to 2026-11-01 (no API 37 date listed)
+- https://developer.android.com/blog/posts/google-play-adaptive-quality-standards (published 2026-11-18, re-read 2026-11-19): April 2027 Tier 3 and 3 foldable + 2 phone screenshots, August 2027 new and updated apps must target API 37
+- https://dl.google.com/android/maven2/ maven-metadata.xml (2026-11-19): AGP 9.5.1 (9.6.0-alpha04 newest), Compose BOM 2026.11.01, material3 1.5.0, Room 2.8.5, Room3 3.0.3, Navigation3 1.2.2 (1.3.0-alpha05), AppFunctions 1.0.0, WorkManager 2.12.0, DataStore 1.3.0
+- https://developer.android.com/guide/practices/page-sizes (2026-11-19): 16 KB updates blocked from 2027-02-01; https://developer.android.com/about/versions/17/behavior-changes-17 (2026-11-19): target 37 behavior list
+- https://developer.android.com/blog/posts/elevating-game-quality-foldables-large-screens-google-play: games dates (April and August 2027)
 - https://developer.android.com/guide/practices/page-sizes: 16 KB requirement, 2027-02-01 date, tooling
-- https://developer.android.com/developer-verification: developer verification timeline and account types
-- https://developer.android.com/developer-verification/guides: what to register, participating stores, ADB unchanged
-- https://developer.android.com/google/play/integrity/verdicts: MEETS_STRONG_INTEGRITY requirements
-- dl.google.com maven-metadata: AGP 9.4.1 (2026-09-18)
-- https://developer.android.com/build/releases/gradle-plugin: AGP 9.4.0 compatibility
-- https://developer.android.com/build/releases/agp-9-0-0-release-notes: AGP 9 defaults and removals
-- https://developer.android.com/build/releases/gradle-plugin-roadmap: AGP 10 late 2026, removals
-- https://developer.android.com/build/migrate-to-built-in-kotlin: built-in Kotlin, legacy-kapt, compilerOptions
-- https://gradle.org/releases/: Gradle 9.8.1
-- https://kotlinlang.org/docs/releases.html: Kotlin release dates
-- https://kotlinlang.org/docs/whatsnew24.html: context parameters and explicit backing fields stable, K1 removed
-- https://developer.android.com/develop/ui/compose/bom/bom-mapping: BOM 2026.09.00 mapping
-- https://developer.android.com/jetpack/androidx/releases/compose-material3: Expressive stabilization in 1.5
-- https://developer.android.com/jetpack/androidx/releases/navigation3: Nav3 1.2.0, 1.0 date
-- https://developer.android.com/jetpack/androidx/releases/room and /room3: Room 2.8.5, Room 3.0.3
-- https://developer.android.com/jetpack/androidx/versions: AndroidX stable versions
-- https://developer.android.com/jetpack/androidx/releases/security: security-crypto deprecated
-- repo1.maven.org and dl.google.com maven-metadata: third-party library versions (Hilt, Koin, Coil, Ktor, OkHttp, Retrofit, coroutines, serialization, KSP, Robolectric, CMP 1.12.1 on 2026-09-22)
+- https://developer.android.com/developer-verification: verification timeline (Android 8+, four countries, 2027 global)
+- https://developer.android.com/blog/posts/android-developer-verification-2027: global rollout January 2027, seven distributors, 50-device limited accounts, APIs
+- https://developer.android.com/google/play/integrity/verdicts (2026-10-09): MEETS_STRONG_INTEGRITY requirements
+- https://developer.android.com/build/releases/gradle-plugin: AGP 9.5 compatibility (Gradle 9.6.0, JDK 17, build-tools 36.0.0, API 37)
+- dl.google.com/dl/android/maven2/com/android/tools/build/gradle/maven-metadata.xml: AGP 9.5.1 present, 9.6.0 alphas, lastUpdated 2026-11-16
+- https://developer.android.com/build/releases/agp-9-0-0-release-notes (2026-10-09): AGP 9 defaults and removals
+- https://developer.android.com/build/releases/gradle-plugin-roadmap: AGP 10 late 2026, removed APIs and flags
+- https://developer.android.com/build/migrate-to-built-in-kotlin (2026-10-09): built-in Kotlin, legacy-kapt, compilerOptions
+- https://gradle.org/releases/: Gradle 9.9.2 (2026-11-19)
+- https://kotlinlang.org/docs/releases.html: Kotlin 2.4.21, 2.5.0 planned December 2026
+- repo1.maven.org kotlin-stdlib maven-metadata: 2.5.0-RC on 2026-11-11, latest stable 2.4.21
+- https://kotlinlang.org/docs/whatsnew24.html (2026-10-09): context parameters and explicit backing fields stable, K1 removed
+- https://developer.android.com/develop/ui/compose/bom/bom-mapping: BOM 2026.11.01 (ui/animation/foundation 1.13.0, material3 1.5.0, adaptive 1.3.0)
+- https://developer.android.com/blog/posts/jetpack-compose-november-2026-release: Compose 1.13, deprecations, FlexBox/Grid stable, compileSdk 37.1 note
+- https://developer.android.com/jetpack/androidx/releases/compose-material3: M3 1.5.0 stable contents and still-experimental APIs
+- https://developer.android.com/blog/posts/build-it-your-way-a-next-era-of-android-development: Nav3 1.2 stable, AppFunctions beta (2026-10-28)
+- https://developer.android.com/jetpack/androidx/releases/navigation3: Nav3 1.2.2
+- https://developer.android.com/jetpack/androidx/versions: AndroidX stable versions (Activity, Lifecycle, DataStore, WorkManager, Room, Room 3, Credentials, Biometric, Benchmark, Window, UI Automator, AppFunctions, security-crypto 1.1.0)
+- repo1.maven.org maven-metadata: KSP 2.3.14, Hilt 2.60.1, Koin 4.2.2, Coil 3.6.3, Ktor 3.6.1, OkHttp 5.5.1, Retrofit 3.0.0, coroutines 1.11.0, serialization 1.13.0, Compose Multiplatform 1.12.2, Robolectric 4.18.1, MockK 1.14.12, Turbine 1.2.1
+- dl.google.com maven-metadata: Play Integrity 1.6.0
 - https://developer.android.com/develop/ui/compose/performance/stability/strongskipping: strong skipping default
 - https://developer.android.com/topic/performance/app-optimization/enable-app-optimization: R8 setup, `optimization {}` block
 - https://developer.android.com/develop/ui/compose/system/system-bars: edge-to-edge in Compose
@@ -245,4 +253,4 @@ All accessed 2026-10-09.
 - https://support.google.com/googleplay/android-developer/answer/13327111: account deletion
 - https://developer.android.com/identity/sign-in/credential-manager: Credential Manager replaces legacy sign-in
 - https://developer.android.com/google/play/integrity/overview: Play Integrity standard requests, verdict tiers
-- https://developer.android.com/topic/performance/vitals: vitals thresholds, 2027-02 memory visibility
+- https://developer.android.com/topic/performance/vitals: thresholds 1.09% / 0.47% / 5%, memory, bitmap and DEX criteria, visibility from February 2027

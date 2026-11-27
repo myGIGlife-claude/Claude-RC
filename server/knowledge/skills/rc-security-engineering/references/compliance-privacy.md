@@ -1,4 +1,4 @@
-# Compliance and privacy for developers  (as of 2026-10)
+# Compliance and privacy for developers  (as of 2026-11)
 
 Engineering guidance, not legal advice. Confirm scope with counsel; these are the things code and infrastructure must make possible.
 
@@ -10,7 +10,7 @@ Engineering guidance, not legal advice. Confirm scope with counsel; these are th
 | CCPA/CPRA (California) | For-profit meeting revenue/volume thresholds and handling CA residents' data | Notice at collection, right to know/delete/correct, opt-out of sale/sharing (honor Global Privacy Control), sensitive-PI limit, contracts with service providers; 45-day response (+45) |
 | CPPA regulations (2026-01-01) | Same, for higher-risk processing | Risk assessments before high-risk processing (submissions to CPPA from 2028-04-01), ADMT notice/opt-out/access from 2027-01-01, annual independent cybersecurity audits, first certification due 2028-04-01 (revenue > $100M), 2029-04-01 ($50-100M), 2030-04-01 (< $50M) |
 | Other US state laws | ~20 states with comprehensive privacy laws (unverified count) | Same building blocks: notices, rights, opt-outs, GPC, data protection assessments |
-| HIPAA | Covered entities and their business associates handling PHI | BAA with every vendor touching PHI, access controls, audit logs, encryption (current rule "addressable", treat as required), risk analysis, breach notice within 60 days. Security Rule overhaul (NPRM 2025-01-06) is NOT final as of 2026-10 |
+| HIPAA | Covered entities and their business associates handling PHI | BAA with every vendor touching PHI, access controls, audit logs, encryption (current rule "addressable", treat as required), risk analysis, breach notice within 60 days. Security Rule overhaul (NPRM 2025-01-06) is NOT final as of 2026-11-19; the 2026 Unified Agenda projects final action July 2027 (was May 2026), per law-firm reports |
 | PCI DSS 4.0.1 | You store, process or transmit card data, or can affect its security | Minimize scope: hosted fields/redirect (SAQ A) so card data never touches your servers; payment-page script inventory + integrity (6.4.3) and tamper detection (11.6.1) mandatory since 2025-03-31; MFA into the CDE; no PAN in logs |
 | SOC 2 (AICPA TSC) | B2B buyers ask for it | Not a law: an audit of your controls. Type I = design at a point in time; Type II = operating over 3-12 months. Evidence: access reviews, change management (PR reviews, CI), vendor reviews, incident drills, backups tested |
 | ISO/IEC 27001:2022 | Buyers (esp. EU) ask for it | ISMS: risk assessment, Statement of Applicability over 93 Annex A controls; 2013 certificates expired after the 2025-10-31 transition |
@@ -55,7 +55,9 @@ Engineering guidance, not legal advice. Confirm scope with counsel; these are th
 - US states: 30-60 days typical, varies by state (unverified per state). PCI: notify the acquirer/brands per contract, immediately.
 - Contracts (DPAs, enterprise MSAs) often require 24-72 h notice to customers: read them before the incident.
 
-## Sources (accessed 2026-10-09)
+## Sources (accessed 2026-10-09 unless noted)
+- https://www.dwt.com/blogs/privacy--security-law-blog/2026/07/hhs-updates-hipaa-rulemaking-timeframes - HIPAA Security Rule final action July 2027 (lead, accessed 2026-11-19)
+- https://www.enisa.europa.eu/news/the-cra-single-reporting-platform-is-launched - SRP live, reporting from 2026-09-11 (accessed 2026-11-19)
 - https://www.enisa.europa.eu/topics/product-security/vulnerability-services/eu-incident-response-and-cyber-crisis-management/single-reporting-platform-srp - CRA SRP
 - https://www.crowell.com/en/insights/client-alerts/its-live-the-cyber-resilience-act-reporting-is-mandatory-as-of-today-11-september-2026 - CRA reporting live (lead)
 - https://www.cppa.ca.gov/announcements/2025/20250923.html - CPPA regulations approved, effective 2026-01-01
