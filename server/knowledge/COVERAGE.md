@@ -18,7 +18,7 @@ Status values: **done** (written and independently fact-checked; a few leads sta
 | 4 Android | done | rc-android (Compose, Play policy, security, adaptive); Google Play Billing and device APIs (camera, BLE, NFC) are shallow: refine |
 | 5 iOS and Apple platforms | done | rc-ios; macOS/watchOS shallow: refine |
 | 6 Cross-platform (Flutter, React Native, Expo, KMP/CMP, MAUI, Capacitor, Tauri, Electron) | done | rc-cross-platform (decision guide, native-first when it wins), rc-dart-flutter |
-| 7 UI/UX and product design | done | rc-ui-ux-design |
+| 7 UI/UX and product design | done | rc-ui-ux-design, rc-ui-craft |
 | 8 Databases and data engineering | done | rc-databases |
 | 9 Cloud, Linux, Docker, Kubernetes, IaC, CI/CD, DNS/TLS, observability, DR, hardening | done | rc-devops-linux, rc-cloud-platforms |
 | 10 Security, privacy, compliance | done | rc-web-security-perf, rc-security-engineering |

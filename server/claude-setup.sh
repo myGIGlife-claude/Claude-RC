@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id), 50 = grok worker kind, 51 = grok account sign-in (device code; worker-login-cancel), 52 = gemini account sign-in, fail-fast quota errors, 53 = starred-chat queue (queue-status/-on/-off/-star/-log, sessions.starred), 54 = worker-rename, 54 = worker-rename
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id), 50 = grok worker kind, 51 = grok account sign-in (device code; worker-login-cancel), 52 = gemini account sign-in, fail-fast quota errors, 53 = starred-chat queue (queue-status/-on/-off/-star/-log, sessions.starred), 54 = worker-rename, 55 = inbox (inbox, inbox-dismiss), 56 = no chat PIN, 58 = copy between servers (copy-list/-keygen/-authorize/-probe/-send/-status/-apply/-cancel)
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=54
+SCRIPT_API=58
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 CLAUDERC_API="${CLAUDERC_API:-https://api.github.com}"
@@ -781,6 +781,7 @@ api_start_session() {
 
 do_status() {
   ensure_env_hook   # keeps Claude's settings in step with the saved tokens
+  copy_prune        # an expired copy key and day-old copy leftovers go
   ensure_push_hook
   local claude_ok=false gh_ok=false gh_user="" scopes="[]" aws_ok=false aws_json="null" ident
   claude_logged_in && claude_ok=true
@@ -917,14 +918,20 @@ do_repos() {
         })}' <<<"$raw")"
 }
 
+# claude_panes: one line per Claude session, fields joined by @@: name, pane folder, start command, current command,
+# created, attached, session_path. Same detection as claude-autostart: any session whose pane started claude (login
+# and sign-in helpers left out).
+claude_panes() {
+  { tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}@@#{session_created}@@#{session_attached}@@#{session_path}' 2>/dev/null || true; } |
+    awk -F'@@' -v l1="$CLAUDE_LOGIN_SESSION" -v l2="$AWS_LOGIN_SESSION" \
+      '($3 ~ /claude/ || $4 == "claude") && $1 != l1 && $1 != l2 && $1 != "mcp-auth" && $1 !~ /^worker-login-/ && !seen[$1]++'
+}
+
 # The running Claude sessions as a JSON array (what `sessions` and `migrate-plan` report).
 sessions_list_json() {
   local s
-  # Same detection as claude-autostart: any session whose pane started claude.
   # A General chat is a session named chat-<id> started in <chat dir>/<id> (session_path, which doesn't move with cd).
-  s="$({ tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}@@#{session_created}@@#{session_attached}@@#{session_path}' 2>/dev/null || true; } |
-    awk -F'@@' -v l1="$CLAUDE_LOGIN_SESSION" -v l2="$AWS_LOGIN_SESSION" \
-      '($3 ~ /claude/ || $4 == "claude") && $1 != l1 && $1 != l2 && $1 != "mcp-auth" && $1 !~ /^worker-login-/ && !seen[$1]++' |
+  s="$(claude_panes |
     jq -Rc --arg cd "$CHAT_DIR" --arg cr "$(realpath -m -- "$CHAT_DIR")" --arg re "$GENERAL_SESS_RE" 'split("@@")
       | ((.[0] | select(test($re)) | ltrimstr("chat-")) // null) as $id
       | ($id != null and (.[6] == ($cd + "/" + $id) or .[6] == ($cr + "/" + $id))) as $g
@@ -2285,6 +2292,7 @@ conn_port="${CLAUDERC_CONN:-}"; conn_port="${conn_port##* }"
 add_sshd_port "$conn_port"
 while read -r p; do add_sshd_port "$p"; done < <(sshd -T 2>/dev/null | awk '/^port /{print $2}')
 # This server's address (first field of SSH_CONNECTION) is never banned by fail2ban; used only when it is a plain IP.
+# Tailscale addresses (100.64.0.0/10, fd7a:115c:a1e0::/48) are never banned either: retries from your own devices on the tailnet.
 client_ip="${CLAUDERC_CONN:-}"; client_ip="${client_ip%% *}"
 if ! [[ "$client_ip" =~ ^(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])){3}$ ||
   ("$client_ip" == *:* && "$client_ip" =~ ^[0-9A-Fa-f:.]{2,45}$) ]]; then client_ip=""; fi
@@ -2329,7 +2337,7 @@ if has harden && ((pkgs_ok)); then
 enabled = true
 backend = systemd
 port = $f2b_ports
-ignoreip = 127.0.0.1/8 ::1${client_ip:+ $client_ip}
+ignoreip = 127.0.0.1/8 ::1 100.64.0.0/10 fd7a:115c:a1e0::/48${client_ip:+ $client_ip}
 maxretry = 4
 findtime = 10m
 bantime = 1h
@@ -4263,14 +4271,14 @@ do_mcp_auth_start() {
   for ((i = 0; i < 120; i++)); do
     sleep 0.5
     text="$(mcp_auth_screen)"
-    url="$(grep -A1 'copy this URL manually' <<<"$text" | grep -oE 'https://[^[:space:]]+' | head -n 1)"
+    url="$(grep -A3 -E 'copy this URL manually|Use the URL below' <<<"$text" | grep -oE 'https://[^[:space:]]+' | head -n 1)"
     [[ -n "$url" ]] && break
     sel="$(grep -m1 '❯' <<<"$text")"
     if grep -q 'Yes, I trust this folder' <<<"$text"; then
       [[ "$sel" == *"Yes, I trust"* ]] && mcp_auth_key Enter || mcp_auth_key Down
-    elif grep -qE '[0-9]\. (Re-?a|A)uthenticate' <<<"$text"; then
+    elif grep -qE '([0-9]\. |^ *(❯ *)?)(Re-?a|A)uthenticate *$' <<<"$text"; then
       [[ "$sel" == *uthenticate* ]] && mcp_auth_key Enter || mcp_auth_key Down
-    elif grep -q 'Manage MCP servers' <<<"$text"; then
+    elif grep -qE 'Manage MCP servers|^ *MCP servers *$' <<<"$text"; then   # Claude Code 2.1.33x dropped "Manage"
       ((moves++ < 40)) || break
       [[ " $sel " == *" $name "* ]] && mcp_auth_key Enter || mcp_auth_key Down
     fi
@@ -4413,69 +4421,20 @@ do_disconnect() {
 }
 
 # ---- In-app chat ----------------------------------------------------------------
-# Chat needs a PIN on top of the phone's key. It lives only in this file on the
-# server (mode 600), so you can read it here if you forget it; no action ever
-# returns it. 5 wrong PINs lock chat for 30 minutes (or until you delete
-# chat-locked on the server).
-CHAT_PIN_FILE="$LAUNCHER_CONFIG_DIR/chat-pin"
-CHAT_LOCK="$LAUNCHER_CONFIG_DIR/chat-locked"
-CHAT_FAILS="$API_STATE_DIR/chat-pin-fails"
 CHAT_LOG="$API_STATE_DIR/chat.log"
-
-chat_pin() { sed -n 's/^PIN=\([0-9]\{6,12\}\)$/\1/p' "$CHAT_PIN_FILE" 2>/dev/null | head -n 1; }
-
-chat_locked_until() {
-  local t
-  [[ -f "$CHAT_LOCK" ]] || return 1
-  t=$(($(stat -c %Y "$CHAT_LOCK") + 1800))
-  if (($(date +%s) >= t)); then rm -f "$CHAT_LOCK"; return 1; fi
-  echo "$t"
-}
-
-# check_pin <pin>: returns, or ends the call with an error (counting failures).
-check_pin() {
-  local want n until
-  want="$(chat_pin)"
-  [[ -n "$want" ]] || api_err pin_not_set "Set a chat PIN in the app first."
-  # One guess at a time: parallel calls would each read the same fail count.
-  exec 8>>"$CHAT_FAILS.lock"; flock -w 10 8 || api_err busy "Try again in a moment."
-  if until="$(chat_locked_until)"; then
-    api_err chat_locked "Too many wrong PINs. Chat is locked until $(date -d "@$until" +%H:%M), or delete ~/.config/claude-launcher/chat-locked on the server."
-  fi
-  if [[ "$1" == "$want" ]]; then rm -f "$CHAT_FAILS"; return 0; fi
-  n=$(($(cat "$CHAT_FAILS" 2>/dev/null || echo 0) + 1))
-  echo "$n" >"$CHAT_FAILS"
-  if ((n >= 5)); then
-    rm -f "$CHAT_FAILS"; touch "$CHAT_LOCK"
-    api_err chat_locked "Too many wrong PINs. Chat is locked for 30 minutes (or delete ~/.config/claude-launcher/chat-locked on the server)."
-  fi
-  api_err wrong_pin "Wrong PIN ($((5 - n)) tries left). Forgot it? It's in ~/.config/claude-launcher/chat-pin on the server."
-}
-
 chat_log() { printf '%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" >>"$CHAT_LOG" 2>/dev/null; }
 
-# chat-pin-status: whether a PIN is set and whether chat is locked.
+# The chat PIN was removed (SCRIPT_API 56): the app lock guards the app. Apps still send a PIN line first; it is read and ignored.
+check_pin() { :; }
+
+# chat-pin-status / chat-pin-set: kept for older apps, which ask for a PIN they think is set; any PIN works.
 do_chat_pin_status() {
   [[ $# -eq 0 ]] || bad_args "chat-pin-status takes no arguments"
-  local set=false until
-  [[ -n "$(chat_pin)" ]] && set=true
-  until="$(chat_locked_until)" || until=""
-  api_ok "$(jq -cn --argjson s "$set" --arg u "$until" '{set:$s, locked_until:(if $u == "" then null else ($u|tonumber) end)}')"
+  api_ok '{"set":true,"required":false,"locked_until":null}'
 }
-
-# chat-pin-set: stdin = new PIN, then the current PIN when one is set.
 do_chat_pin_set() {
   [[ $# -eq 0 ]] || bad_args "chat-pin-set takes no arguments"
-  local new old tmp
-  new="$(read_secret_line)"; old="$(read_secret_line)"
   exec 0</dev/null
-  [[ "$new" =~ ^[0-9]{6,12}$ ]] || api_err invalid_name "The PIN must be 6 to 12 digits."
-  [[ -z "$(chat_pin)" ]] || check_pin "$old"
-  mkdir -p "$LAUNCHER_CONFIG_DIR"
-  tmp="$(mktemp "$CHAT_PIN_FILE.XXXXXX")"; chmod 600 "$tmp"
-  printf '# cLaudeRC chat PIN. The app never shows it; this file is how you get it back.\n# Delete this file to remove the PIN (then set a new one in the app).\nPIN=%s\n' "$new" >"$tmp"
-  mv "$tmp" "$CHAT_PIN_FILE"
-  chat_log - pin-set
   api_ok '{"set":true}'
 }
 
@@ -4513,15 +4472,49 @@ do_chat_open() {
 # whether it's working or waiting on a question (with that screen).
 do_chat_history() {
   [[ $# -eq 1 ]] || bad_args "usage: chat-history <session>"
-  local pin sess f screen waiting=false busy=false tmp mode model="" ask=null
-  pin="$(read_secret_line)"; exec 0</dev/null
+  local pin sess tmp; pin="$(read_secret_line)"; exec 0</dev/null
   chat_session "$1"; sess="$CHAT_SESS"
   check_pin "$pin"
+  tmp="$(mktemp)"
+  chat_history_json "$sess" "$tmp"
+  api_ok_file "$tmp"
+}
+
+# chat_screen <sess>: the last 15 lines of the session's screen.
+chat_screen() {
+  tmux capture-pane -p -J -t "=$1:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15
+}
+
+# chat_mode <screen>: the permission mode Claude's status line shows (none shown = default).
+chat_mode() {
+  local mode
+  mode="$(grep -oE '(auto mode|plan mode|accept edits|bypass permissions) on' <<<"$1" | tail -n 1)"
+  case "$mode" in "auto mode"*) echo auto ;; "plan mode"*) echo plan ;; "accept edits"*) echo edits ;; "bypass"*) echo bypass ;; *) echo default ;; esac
+}
+
+# chat_token <sess>: changes whenever what the app shows changes. Transcript identity + size + mtime, waiting/busy,
+# the mode, and a checksum of the screen only while waiting (while busy the spinner changes every second).
+chat_token() {
+  local sess="$1" f screen w=0 b=0 mode m=0 ck=0 st
+  tmux has-session -t "=$sess" 2>/dev/null || { echo gone; return; }
   f="$(chat_transcript "$sess")"
-  screen="$(tmux capture-pane -p -J -t "=$sess:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15)"
-  # The permission mode Claude's status line shows (none shown = default).
-  mode="$(grep -oE '(auto mode|plan mode|accept edits|bypass permissions) on' <<<"$screen" | tail -n 1)"
-  case "$mode" in "auto mode"*) mode=auto ;; "plan mode"*) mode=plan ;; "accept edits"*) mode=edits ;; "bypass"*) mode=bypass ;; *) mode=default ;; esac
+  st="$({ [[ -n "$f" ]] && stat -c '%i.%s.%Y' "$f"; } 2>/dev/null)"
+  screen="$(chat_screen "$sess")"
+  grep -qE "$WAIT_RE" <<<"$screen" && w=1
+  grep -q "esc to interrupt" <<<"$screen" && b=1
+  mode="$(chat_mode "$screen")"
+  case "$mode" in auto) m=1 ;; plan) m=2 ;; edits) m=3 ;; bypass) m=4 ;; esac
+  ((w)) && ck="$(printf '%s' "$screen" | cksum | cut -d' ' -f1)"
+  echo "v1.${st:-0.0.0}.$w$b$m.$ck"
+}
+
+# chat_history_json <sess> <out>: writes the chat-history answer (with its token) to <out>.
+chat_history_json() {
+  local sess="$1" out="$2" f screen waiting=false busy=false tmp mode model="" ask=null tok
+  tok="$(chat_token "$sess")"
+  f="$(chat_transcript "$sess")"
+  screen="$(chat_screen "$sess")"
+  mode="$(chat_mode "$screen")"
   grep -qE "$WAIT_RE" <<<"$screen" && waiting=true
   grep -q "esc to interrupt" <<<"$screen" && busy=true
   # Claude's multiple-choice question (AskUserQuestion) still waiting for an answer, as data for the app.
@@ -4574,10 +4567,44 @@ do_chat_history() {
       # The last 60 of your messages and Claude replies, with the tool steps between them.
       ([to_entries[] | select(.value.role != "tool") | .key] | .[-60] // 0) as $from | .[$from:]' >"$tmp"
   jq -e . "$tmp" >/dev/null 2>&1 || echo '[]' >"$tmp"
-  jq -c --arg s "$sess" --argjson w "$waiting" --argjson b "$busy" --arg sc "$screen" --arg mo "$mode" --arg md "$model" --argjson ak "$ask" \
-    '{session:$s, messages:., waiting:$w, busy:$b, mode:$mo, model:$md, ask:$ak, screen:(if $w then $sc else null end)}' "$tmp" >"$tmp.out"
+  jq -c --arg s "$sess" --argjson w "$waiting" --argjson b "$busy" --arg sc "$screen" --arg mo "$mode" --arg md "$model" --argjson ak "$ask" --arg tk "$tok" \
+    '{session:$s, messages:., waiting:$w, busy:$b, mode:$mo, model:$md, ask:$ak, screen:(if $w then $sc else null end), token:$tk}' "$tmp" >"$out"
   rm -f "$tmp"
-  api_ok_file "$tmp.out"
+}
+
+# chat-watch <session>: stdin = PIN line, then the app's last token (empty = none). Answers like chat-history,
+# plus changed:true, as soon as the token differs; else {changed:false, token} after CLAUDERC_WATCH_SECS.
+# Polls with stat once a second (no inotify). Two watchers per session at most (flock slots); no shared lock,
+# so chat-send is never blocked. A bare newline every CLAUDERC_WATCH_BEAT ticks to the answer stream: when the
+# client has gone the write fails and we leave (the launcher execs us, so the pipe is the client's own).
+do_chat_watch() {
+  [[ $# -eq 1 ]] || bad_args "usage: chat-watch <session>"
+  local pin have sess tok fd="" i n=0 end tmp d="$LAUNCHER_CONFIG_DIR/watch"
+  pin="$(read_secret_line)"; have="$(read_secret_line)"; exec 0</dev/null
+  chat_session "$1"; sess="$CHAT_SESS"
+  check_pin "$pin"
+  [[ "$have" =~ ^[A-Za-z0-9.:-]{0,120}$ ]] || have=""
+  mkdir -p "$d" && chmod 700 "$d"
+  for i in 1 2; do
+    exec {fd}>>"$d/$sess.$i"
+    flock -n "$fd" && break
+    exec {fd}>&-; fd=""
+  done
+  [[ -n "$fd" ]] || api_ok "$(jq -cn --arg s "$sess" '{session:$s,changed:false,token:"",retry:true}')"
+  end=$((SECONDS + ${CLAUDERC_WATCH_SECS:-25}))
+  while :; do
+    tok="$(chat_token "$sess")"
+    [[ "$tok" != gone ]] || api_err invalid_name "No running session named '$1'."
+    if [[ "$tok" != "$have" ]]; then
+      tmp="$(mktemp)"
+      chat_history_json "$sess" "$tmp"
+      jq -c '. + {changed:true}' "$tmp" >"$tmp.out" 2>/dev/null; rm -f "$tmp"
+      api_ok_file "$tmp.out"
+    fi
+    ((SECONDS < end)) || api_ok "$(jq -cn --arg s "$sess" --arg t "$tok" '{session:$s,changed:false,token:$t}')"
+    sleep 1
+    ((++n % ${CLAUDERC_WATCH_BEAT:-5})) || printf '\n' >&3 2>/dev/null || exit 0
+  done
 }
 
 # chat_paste <session> <message> [guard]: paste the message into the session's box (bracketed paste) and press Enter.
@@ -4587,11 +4614,11 @@ chat_paste() {
   local sess="$1" msg="$2" guard="${3:-}" scr
   chat_guard() {   # 0 = safe to go on
     [[ -n "$guard" ]] || return 0
-    scr="$(tmux capture-pane -p -J -t "=$sess:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15)"
+    scr="$(chat_screen "$sess")"
     ! grep -qE "$WAIT_RE" <<<"$scr"
   }
   if [[ -n "$guard" ]]; then
-    scr="$(tmux capture-pane -p -J -t "=$sess:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15)"
+    scr="$(chat_screen "$sess")"
     ! grep -qE "$WAIT_RE|esc to interrupt" <<<"$scr" || api_err internal "The session is busy or waiting for you."
   fi
   printf '%s' "$msg" | tmux load-buffer -b "clauderc-chat-$$" - || api_err internal "Couldn't hand the message to tmux."
@@ -5020,6 +5047,298 @@ queue_tick() {
   printf '%s\n' "$QST" >"$QUEUE_DIR/state.json.new" && chmod 600 "$QUEUE_DIR/state.json.new" && mv "$QUEUE_DIR/state.json.new" "$QUEUE_DIR/state.json"
 }
 
+# ---------------- Inbox: what needs the owner right now (SCRIPT_API 55, docs/ultimate-design.md section 1) ----------------
+# Read-only: panes are only captured (never typed into); the queue state, transcripts and the gh cache are only read.
+# Items carry names, states, tool names, PR numbers/titles and workflow names; never pane text, reply text, the
+# QUESTION line, commands or file paths. State in $INBOX_DIR (700, files 600, written tmp + mv):
+#   gh.json   {ts, repos:{"o/r":{dir, branch, ts, stale, prs:[…], builds:[…]}}, logins:{claude, github, workers:{…}}}
+#   seen      TSV id fp ts: when a prompt / login item was first seen (its `since`)
+#   dismissed TSV id fp ts: hidden while the pair still matches; pruned after 7 days
+INBOX_DIR="$LAUNCHER_CONFIG_DIR/inbox"
+INBOX_TTL=300                                        # the gh cache: 5 minutes
+INBOX_GH_TIMEOUT="${CLAUDERC_INBOX_GH_TIMEOUT:-8}"   # per gh call (the tests make it short)
+INBOX_GH_BUDGET=25                                   # every gh call of one refresh together, in seconds
+INBOX_MAX_REPOS=30
+INBOX_KEEP=604800                                    # dismissals: 7 days
+# unverified: the wording of Claude Code's permission prompts (from current Claude Code, not seen on a real pane here).
+# Check it on a real pane before `act` (P3) relies on it; a miss only drops approve/deny (the item stays, open only).
+PERM_RE='Do you want to (proceed|make this edit|create|run)|Allow .* to'
+INBOX_ID_RE='^[a-z]{2,10}-[0-9a-f]{12}$'
+INBOX_FP_RE='^[0-9a-f]{12}$'
+GITHUB_URL_RE='^(https://([^/@]+@)?|ssh://([^/@]+@)?|[A-Za-z0-9._-]+@)github\.com[:/]'
+
+inbox_init() { mkdir -p "$INBOX_DIR" && chmod 700 "$INBOX_DIR"; }
+inbox_sha() { printf '%s' "$1" | sha1sum | cut -c1-12; }
+
+# inbox_put <file> <content>: atomic, mode 600.
+inbox_put() {
+  local tmp; tmp="$(mktemp "$1.XXXXXX")" || return 1
+  { printf '%s\n' "$2" >"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$1"; } || { rm -f "$tmp"; return 1; }
+}
+
+# inbox_tsv_map <file>: {"<id> <fp>": ts} from an "id fp ts" TSV file ({} when there is none).
+inbox_tsv_map() {
+  [[ -f "$1" ]] || { echo '{}'; return; }   # (jq -Rs on a missing file still prints a value, then fails)
+  jq -Rsc 'split("\n") | map(split("\t") | select(length == 3 and (.[2] | test("^[0-9]+$"))) | {key:(.[0] + " " + .[1]), value:(.[2] | tonumber)}) | from_entries' "$1" 2>/dev/null || echo '{}'
+}
+
+# inbox_cache: the gh cache, {} when there is none or it is broken.
+inbox_cache() { jq -c 'if type == "object" then . else {} end' "$INBOX_DIR/gh.json" 2>/dev/null || echo '{}'; }
+inbox_fresh() {
+  local ts; ts="$(jq -r '.ts // 0 | numbers | floor' <<<"$1" 2>/dev/null)"
+  [[ "$ts" =~ ^[0-9]+$ ]] && ((ts > 0 && ts <= INOW && INOW - ts < INBOX_TTL))   # stamped in the future = the clock moved: refresh
+}
+
+# inbox_prompt_lines <session>: the pane's last lines minus Claude's status bar: what a prompt's fp is made of.
+inbox_prompt_lines() {
+  qpane "$1" | grep -vE '^[[:space:]]*$|^[─━╭╰│ ]+$|⏵⏵|shift\+tab|for shortcuts|esc to interrupt|full +\$[0-9]|last +\$[0-9]|tokens\)$' | sed -e 's/[[:space:]]*$//' || true
+}
+
+# inbox_pending_tool <transcript>: "<tool_use id> <tool name>" of the newest tool_use with no tool_result (last 200
+# lines), or nothing. Only these two fields leave here; the tool's input (commands, paths) never does.
+# unverified: that a waiting permission prompt's tool_use is already in the transcript (P3 checks it on a real server).
+inbox_pending_tool() {
+  [[ -n "$1" && -f "$1" ]] || return 0
+  tail -n 200 "$1" 2>/dev/null | jq -Rc 'fromjson? // empty' 2>/dev/null | jq -rs '
+    [.[] | objects | .message.content? | arrays | .[] | objects] as $b
+    | [$b[] | select(.type == "tool_result") | .tool_use_id] as $done
+    | [$b[] | select(.type == "tool_use" and ((.id // "") | type == "string" and length > 0)) | select(.id as $i | $done | index($i) | not)]
+    | last // empty | "\(.id) \(.name // "")"' 2>/dev/null || true
+}
+
+# inbox_prompt_rows: a row per Claude session whose pane waits on a question (WAIT_RE, the same test `sessions` makes).
+# Approve/deny only for a permission prompt (PERM_RE) whose pending tool_use was found. fp = session + tool_use id +
+# the prompt's lines, so a new prompt in the same chat is a new item.
+inbox_prompt_rows() {
+  local s screen pend tid tool act
+  while IFS= read -r s; do
+    [[ -n "$s" ]] || continue
+    screen="$(qpane "$s")"
+    grep -qE "$WAIT_RE" <<<"$screen" || continue
+    tid=""; tool=""
+    pend="$(inbox_pending_tool "$(chat_transcript "$s")")"
+    [[ -n "$pend" ]] && read -r tid tool <<<"$pend"
+    [[ "$tid" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || tid=""
+    [[ "$tool" =~ ^[A-Za-z0-9_.:-]{1,64}$ ]] || tool=""
+    act=false
+    grep -qE "$PERM_RE" <<<"$screen" && [[ -n "$tid" && -n "$tool" ]] && act=true
+    jq -cn --arg s "$s" --arg tool "$tool" --argjson act "$act" \
+      --arg fp "$(inbox_sha "$s"$'\n'"$tid"$'\n'"$(inbox_prompt_lines "$s")")" \
+      '{kind:"prompt", key:"prompt|\($s)", fp:$fp, scope:$s, session:$s,
+        text:(if $act then "wants to use \($tool)" else "is waiting for an answer" end), title:null, since:null,
+        actions:(if $act then ["open","approve","deny","dismiss"] else ["open","dismiss"] end), number:null, run:null}'
+  done < <(claude_panes | awk -F'@@' '{print $1}')
+}
+
+# inbox_queue_rows <live sessions json>: starred chats the queue parked. question -> "asked you a question"; needs_you,
+# error, stopped -> `parked` with the queue's note (fixed strings set by the tick, never reply text). fp = the state's since.
+inbox_queue_rows() {
+  [[ -f "$QUEUE_DIR/queue.json" ]] || return 0
+  queue_status_json | jq -c --argjson live "$1" '.chats[]
+    | select(.state == "question" or .state == "needs_you" or .state == "error" or .state == "stopped")
+    | (if .state == "question" then "question" else "parked" end) as $k
+    | ((.note // "") | tostring | gsub("[[:cntrl:]]"; "") | .[0:60]) as $n
+    | .session as $s
+    | {kind:$k, key:"\($k)|\($s)", fpsrc:"\(.since // 0)", scope:$s,
+       session:(if .state != "stopped" and ($live | index($s)) != null then $s else null end),
+       text:(if $k == "question" then "asked you a question" elif .state == "stopped" then "session not running" elif $n != "" then $n else "needs you" end),
+       title:null, since:(.since // 0), actions:["open","dismiss"], number:null, run:null}' 2>/dev/null || true
+}
+
+# inbox_gh_rows <cache> <live sessions json>: pr and build rows from the gh cache (session = the project's tmux session if it runs).
+inbox_gh_rows() {
+  jq -c --argjson live "$2" '(.repos // {}) | to_entries[] | .key as $slug | .value as $e
+    | (($e.dir // "") | gsub("[.:]"; "-")) as $s
+    | (if $s != "" and ($live | index($s)) != null then $s else null end) as $sess
+    | (($e.prs // [])[] | {kind:"pr", key:"pr|\($slug)|\(.number)", fpsrc:"\(.head)|\(.concl)", scope:$slug, session:$sess,
+         text:"#\(.number) ready to merge · \(.checks) checks green", title, since, actions:["merge","open","dismiss"], number, run:null}),
+      (($e.builds // [])[] | {kind:"build", key:"build|\($slug)|\(.workflow)", fpsrc:"\(.run)", scope:$slug, session:$sess,
+         text:"\(.workflow) failed on \($e.branch)", title:null, since, actions:["open","dismiss"], number:null, run})' <<<"$1" 2>/dev/null || true
+}
+
+# inbox_login_rows <cache>: Claude / GitHub signed out, workers without a login (from the cached checks).
+# Workers are keyed login|worker:<name> so a worker named like a service can't share its id.
+inbox_login_rows() {
+  jq -c 'def row($k; $scope; $t; $st): {kind:"login", key:"login|\($k)", fpsrc:$st, scope:$scope, session:null, text:$t,
+           title:null, since:null, actions:["open","dismiss"], number:null, run:null};
+    (.logins // {}) as $l
+    | (if $l.claude == false then row("claude"; "claude"; "Claude sign-in failed"; "claude:signed_out") else empty end),
+      (if $l.github == false then row("github"; "github"; "GitHub sign-in failed"; "github:signed_out") else empty end),
+      (($l.workers // {}) | to_entries[] | select(.value == false) | row("worker:\(.key)"; .key; "worker sign-in failed"; "worker:\(.key):signed_out"))' <<<"$1" 2>/dev/null || true
+}
+
+# inbox_finish: rows (stdin, one JSON object per line) get id = <kind>- + 12 hex of sha1(key) and fp = 12 hex of sha1 of
+# the state an action would act on (prompt rows bring their own fp).
+inbox_finish() {
+  local row k key fp fps
+  while IFS= read -r row; do
+    [[ -n "$row" ]] || continue
+    IFS=$'\x1f' read -r k key fp fps < <(jq -r '[.kind, .key, (.fp // ""), (.fpsrc // "")] | map(tostring) | join("\u001f")' <<<"$row")
+    [[ -n "$fp" ]] || fp="$(inbox_sha "$fps")"
+    jq -c --arg id "$k-$(inbox_sha "$key")" --arg fp "$fp" '{id:$id, fp:$fp} + del(.key, .fpsrc, .fp)' <<<"$row"
+  done
+}
+
+# inbox_dismissed: {"<id> <fp>": ts} of dismissals younger than 7 days. Takes inbox/dismiss.lock (fd 4) unless
+# INBOX_DLOCK is set (the caller holds it), and drops older or broken lines from the file.
+inbox_dismissed() {
+  local f="$INBOX_DIR/dismissed" m locked=1
+  if [[ -z "${INBOX_DLOCK:-}" ]]; then
+    exec 4>>"$INBOX_DIR/dismiss.lock"
+    flock -w 10 4 || locked=0   # busy: read only, prune next time
+  fi
+  m="$(inbox_tsv_map "$f" | jq -c --argjson min "$((INOW - INBOX_KEEP))" 'with_entries(select(.value >= $min))')"
+  if ((locked)) && [[ -f "$f" && "$(jq -r length <<<"$m")" != "$(grep -c . "$f" 2>/dev/null)" ]]; then
+    inbox_put "$f" "$(jq -r 'to_entries | map("\(.key | sub(" "; "\t"))\t\(.value)") | join("\n")' <<<"$m")" || true
+  fi
+  printf '%s' "$m"
+}
+
+# inbox_repos <gh user>: "<o/r> <folder> <default branch>" for each project folder whose origin is a github.com repo of
+# the owner (gh user or DEFAULT_OWNER), each repo once, at most INBOX_MAX_REPOS.
+inbox_repos() {
+  local d name url slug br owner seen=" " n=0 u="${1,,}" o="${DEFAULT_OWNER,,}"
+  for d in "$PROJECTS_DIR"/*/; do
+    d="${d%/}"; name="${d##*/}"
+    [[ -e "$d/.git" && "$name" =~ $PROJECT_RE ]] || continue
+    url="$(git -C "$d" remote get-url origin 2>/dev/null </dev/null)" || continue
+    [[ "$url" =~ $GITHUB_URL_RE ]] || continue
+    slug="$(origin_slug "$d")"
+    [[ "$slug" =~ $REPO_RE && "$seen" != *" $slug "* ]] || continue
+    owner="${slug%%/*}"
+    [[ ( -n "$u" && "$owner" == "$u" ) || ( -n "$o" && "$owner" == "$o" ) ]] || continue
+    br="$(git -C "$d" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null </dev/null)"; br="${br#origin/}"
+    [[ "$br" =~ ^[A-Za-z0-9._][A-Za-z0-9._/-]{0,99}$ ]] || br=main
+    seen+="$slug "
+    printf '%s %s %s\n' "$slug" "$name" "$br"
+    n=$((n + 1)); ((n >= INBOX_MAX_REPOS)) && break
+  done
+  return 0
+}
+
+# inbox_gh <deadline epoch> <gh args…>: one gh call, at most INBOX_GH_TIMEOUT seconds and never past the deadline.
+inbox_gh() {
+  local left now
+  now="$(date +%s)"; left=$(($1 - now)); shift
+  ((left > INBOX_GH_TIMEOUT)) && left=$INBOX_GH_TIMEOUT
+  ((left >= 1)) || return 1
+  timeout --kill-after=2 "$left" gh "$@" </dev/null 2>/dev/null
+}
+
+# inbox_fetch_repo <o/r> <default branch> <deadline>: {prs, builds} of one repo, only what qualifies; fails on any error.
+# PR: open, not draft, not from a fork, base = default branch, mergeable, every check green (non-empty rollup).
+# Build: per workflow the newest completed run on the default branch; failure/timed_out/startup_failure = an item.
+# unverified: the shapes of gh's JSON (statusCheckRollup entries with __typename CheckRun {conclusion} / StatusContext
+# {state} in upper case, run conclusions in lower case) are from gh's docs, not from a real call on this server.
+inbox_fetch_repo() {
+  local prs runs
+  prs="$(inbox_gh "$3" pr list -R "$1" --state open -L 20 --json number,title,headRefOid,isDraft,mergeable,isCrossRepository,baseRefName,statusCheckRollup,updatedAt)" || return 1
+  runs="$(inbox_gh "$3" run list -R "$1" -b "$2" -L 10 --json databaseId,workflowName,status,conclusion,headSha,createdAt)" || return 1
+  jq -cn --argjson p "$prs" --argjson r "$runs" --arg b "$2" '
+    def clean($n): tostring | gsub("[[:cntrl:]]"; "") | .[0:$n];
+    def epoch: (try (sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) catch 0) // 0;
+    def ok_check: if .__typename == "StatusContext" then .state == "SUCCESS"
+      else ((.conclusion // "") | tostring | ascii_upcase) as $c | $c == "SUCCESS" or $c == "NEUTRAL" or $c == "SKIPPED" end;
+    def green: (.statusCheckRollup | type) == "array" and (.statusCheckRollup | length) > 0 and all(.statusCheckRollup[]; ok_check);
+    {prs: [$p[]? | select((.number | type) == "number" and .isDraft == false and .isCrossRepository == false
+                          and .mergeable == "MERGEABLE" and .baseRefName == $b and green)
+           | {number, title:((.title // "") | clean(80)), head:((.headRefOid // "") | clean(64)), checks:(.statusCheckRollup | length),
+              concl:([.statusCheckRollup[] | (.conclusion // .state // "") | tostring] | join(",")), since:((.updatedAt // "") | epoch)}],
+     builds: [[$r[]? | select(.status == "completed" and (.databaseId | type) == "number" and (.workflowName | type) == "string")]
+              | group_by(.workflowName)[] | max_by(.createdAt // "")
+              | select(((.conclusion // "") | tostring | ascii_downcase) as $c | $c == "failure" or $c == "timed_out" or $c == "startup_failure")
+              | {workflow:(.workflowName | clean(60)), run:.databaseId, since:((.createdAt // "") | epoch)}]}' 2>/dev/null
+}
+
+# inbox_refresh: rebuild gh.json (the caller holds inbox/lock). A repo whose calls fail or time out keeps its old entry,
+# marked stale. Logins: the same local checks `status` and `worker-list` make, no new probes.
+inbox_refresh() {
+  local old user="" gh_in=false gh_ok=false repos='{}' deadline slug dir br e w='{}' d n s
+  old="$(inbox_cache)"
+  deadline=$(($(date +%s) + INBOX_GH_BUDGET))
+  if command -v gh >/dev/null 2>&1; then
+    gh_in=true
+    github_logged_in && user="$(t 10 gh api user --jq .login </dev/null 2>/dev/null)"
+    if [[ "$user" =~ $OWNER_RE ]]; then gh_ok=true; else user=""; fi
+  fi
+  if [[ "$gh_ok" == true ]]; then
+    while read -r slug dir br; do
+      [[ -n "$slug" ]] || continue
+      if e="$(inbox_fetch_repo "$slug" "$br" "$deadline")" && [[ -n "$e" ]]; then
+        e="$(jq -c --arg d "$dir" --arg b "$br" --argjson now "$INOW" '. + {dir:$d, branch:$b, ts:$now, stale:false}' <<<"$e")"
+      else
+        e="$(jq -c --arg k "$slug" --arg d "$dir" --arg b "$br" '({prs:[], builds:[]} + (.repos[$k] // {})) + {dir:$d, branch:$b, stale:true}' <<<"$old")"
+      fi
+      repos="$(jq -c --arg k "$slug" --argjson e "$e" '.[$k] = $e' <<<"$repos")"
+    done < <(inbox_repos "$user")
+  fi
+  for d in "$WORKERS_DIR"/*/; do
+    [[ -f "$d/meta.json" ]] || continue
+    n="$(basename "$d")"; [[ "$n" =~ $WORKER_RE ]] || continue
+    s=false; worker_signed "${d%/}" && s=true
+    w="$(jq -c --arg n "$n" --argjson s "$s" '.[$n] = $s' <<<"$w")"
+  done
+  inbox_put "$INBOX_DIR/gh.json" "$(jq -cn --argjson now "$INOW" --argjson r "$repos" --argjson w "$w" \
+    --argjson c "$(creds_ok "${LOGIN_CONFIG_DIR:-$HOME/.claude}/.credentials.json" && echo true || echo false)" \
+    --argjson g "$(if [[ "$gh_in" == true ]]; then echo "$gh_ok"; else echo null; fi)" \
+    '{ts:$now, repos:$r, logins:{claude:$c, github:$g, workers:$w}}')" || true
+}
+
+# inbox_build <cache> <stale true|false>: the answer {now, gh_age, stale, count, items}. Keeps inbox/seen (first-seen
+# times of prompt and login items still there) and leaves out dismissed id+fp pairs.
+inbox_build() {
+  local live rows items dis age stale="$2"
+  live="$({ tmux list-sessions -F '#{session_name}' 2>/dev/null || true; } | jq -Rsc 'split("\n") | map(select(. != ""))')"
+  rows="$({ inbox_prompt_rows; inbox_queue_rows "$live"; inbox_gh_rows "$1" "$live"; inbox_login_rows "$1"; } | inbox_finish)"
+  items="$(jq -sc --argjson seen "$(inbox_tsv_map "$INBOX_DIR/seen")" --argjson now "$INOW" \
+    'map(.since = (.since // $seen[.id + " " + .fp] // $now))' <<<"$rows")" || return 1
+  inbox_put "$INBOX_DIR/seen" "$(jq -r 'map(select(.kind == "prompt" or .kind == "login") | "\(.id)\t\(.fp)\t\(.since)") | join("\n")' <<<"$items")" || true
+  dis="$(inbox_dismissed)"
+  age="$(jq -r --argjson now "$INOW" '(.ts // null | numbers | $now - . | if . < 0 then 0 else . end) // "null"' <<<"$1")"
+  [[ "$(jq -r '[(.repos // {})[] | .stale == true] | any' <<<"$1")" == true ]] && stale=true
+  jq -cn --argjson items "$items" --argjson dis "${dis:-{\}}" --argjson now "$INOW" --argjson age "${age:-null}" --argjson stale "$stale" '
+    {"prompt":0, "question":1, "parked":2, "pr":3, "build":4, "login":5} as $rank
+    | [$items[] | select($dis[.id + " " + .fp] == null)] | sort_by([($rank[.kind] // 9), .since])
+    | {now:$now, gh_age:$age, stale:$stale, count:length,
+       items:map({id, fp, kind, scope, session, text, title, since, actions, number, run})}'
+}
+
+# inbox: what needs the owner now. Uses the gh cache; when it is older than 5 minutes it is refreshed here under
+# inbox/lock (fd 5). A refresh already running is waited for up to 30 s, then the old cache is answered, marked stale.
+do_inbox() {
+  [[ $# -eq 0 ]] || bad_args "inbox takes no arguments"
+  inbox_init || api_err internal "Couldn't create the inbox folder."
+  INOW="${CLAUDERC_NOW:-$(date +%s)}"
+  local cache stale=false
+  cache="$(inbox_cache)"
+  if ! inbox_fresh "$cache"; then
+    exec 5>>"$INBOX_DIR/lock"
+    if flock -w 30 5; then
+      cache="$(inbox_cache)"   # another call may have refreshed it while we waited
+      inbox_fresh "$cache" || { inbox_refresh; cache="$(inbox_cache)"; }
+    else
+      stale=true
+    fi
+    exec 5>&-
+  fi
+  api_ok "$(inbox_build "$cache" "$stale")"
+}
+
+# inbox-dismiss <id> <fp>: hide that item until its fp changes. No PIN: hiding can't do harm, and it comes back as
+# soon as anything about it changes. Answers {count} (from the cache; never refreshes).
+do_inbox_dismiss() {
+  [[ $# -eq 2 && "$1" =~ $INBOX_ID_RE && "$2" =~ $INBOX_FP_RE ]] || bad_args "usage: inbox-dismiss <id> <fp>"
+  inbox_init || api_err internal "Couldn't create the inbox folder."
+  INOW="${CLAUDERC_NOW:-$(date +%s)}"
+  exec 4>>"$INBOX_DIR/dismiss.lock"
+  flock -w 10 4 || api_err busy "The inbox is busy. Try again in a moment."
+  INBOX_DLOCK=1 inbox_dismissed >/dev/null   # prune first
+  grep -q "^$1"$'\t'"$2"$'\t' "$INBOX_DIR/dismissed" 2>/dev/null ||
+    (umask 077; printf '%s\t%s\t%s\n' "$1" "$2" "$INOW" >>"$INBOX_DIR/dismissed") || api_err internal "Couldn't save the dismissal."
+  exec 4>&-
+  api_ok "$(inbox_build "$(inbox_cache)" false | jq -c '{count}')"
+}
+
 # chat-commands <session>: stdin = PIN. The slash commands Claude can run there beyond the built-ins:
 # your skills and commands, the project's, and those of enabled plugins (as plugin:name).
 do_chat_commands() {
@@ -5200,6 +5519,7 @@ do_chat_file() {
   check_pin "$pin"
   dir="$(session_dir "$sess")"
   [[ -d "$dir" ]] || api_err internal "Couldn't find the session's folder."
+  [[ "$path" == /* ]] || path="$dir/$path"   # Claude sends relative paths: they mean the project folder, not this script's cwd
   real="$(realpath -e -- "$path" 2>/dev/null)" && [[ -f "$real" ]] || api_err invalid_name "That file isn't on the server any more."
   case "$real" in
     "$(realpath "$dir")"/* | "/tmp/claude-$(id -u)/$(claude_proj_slug "$dir")"/*) ok=true ;;
@@ -5292,7 +5612,7 @@ migrate_job_alive() {
 migrate_job_active() {
   [[ -s "$MIGRATE_STATUS" ]] || return 1
   case "$(jq -r '.phase // ""' "$MIGRATE_STATUS" 2>/dev/null)" in
-    export | transfer | restore) migrate_job_alive ;;
+    export | transfer | restore | pack | apply) migrate_job_alive ;;
     *) return 1 ;;
   esac
 }
@@ -5342,7 +5662,7 @@ do_migrate_keygen() {
 # The key may only run `claude-backup receive`; an older clauderc-migrate line is replaced.
 do_migrate_authorize() {
   [[ $# -eq 0 ]] || bad_args "migrate-authorize reads the key on stdin"
-  local key addr blob opts tmp ak="$HOME/.ssh/authorized_keys"
+  local key addr blob opts
   key="$(read_secret_line)"; addr="$(read_secret_line)"
   exec 0</dev/null
   migrate_need_run   # it lets another key push a backup here that migrate-restore unpacks: never from a lost phone alone
@@ -5356,17 +5676,24 @@ do_migrate_authorize() {
   # from= only for a literal IP (sshd compares it with the client's IP, it doesn't resolve names): a host name would lock the sender out.
   addr="${addr,,}"
   if migrate_is_ip "$addr"; then opts+=",from=\"$addr\""; fi
+  with_state_lock migrate_ak_put clauderc-migrate "$opts" "$blob"
+}
+
+# migrate_ak_put <marker> <options> <blob>: the one authorized_keys line carrying <marker> (the key's comment) becomes
+# "<options> ssh-ed25519 <blob> <marker>"; other lines, including the other marker's, stay. Answers and exits.
+migrate_ak_put() {
+  local marker="$1" opts="$2" blob="$3" tmp ak="$HOME/.ssh/authorized_keys"
   [[ -d "$HOME/.ssh" ]] || mkdir -m 700 "$HOME/.ssh" || api_err internal "Couldn't create ~/.ssh."
-  # An existing file is copied first (minus the older clauderc-migrate line); if that fails it is left exactly as it was.
+  # An existing file is copied first (minus the older line of this marker); if that fails it is left exactly as it was.
   if [[ -e "$ak" && ( ! -f "$ak" || ! -r "$ak" ) ]]; then
     api_err internal "Your authorized_keys file can't be read: left as it is."
   fi
   tmp="$(mktemp "$HOME/.ssh/authorized_keys.XXXXXX")" || api_err internal "Couldn't write ~/.ssh/authorized_keys."
-  if [[ -f "$ak" ]] && ! awk '$NF != "clauderc-migrate"' "$ak" >"$tmp"; then
+  if [[ -f "$ak" ]] && ! awk -v m="$marker" '$NF != m' "$ak" >"$tmp"; then
     rm -f "$tmp"
     api_err internal "Couldn't read ~/.ssh/authorized_keys: left as it is."
   fi
-  if printf '%s ssh-ed25519 %s clauderc-migrate\n' "$opts" "$blob" >>"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$ak"; then
+  if printf '%s ssh-ed25519 %s %s\n' "$opts" "$blob" "$marker" >>"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$ak"; then
     api_ok '{"authorized":true}'
   fi
   rm -f "$tmp"
@@ -5382,8 +5709,8 @@ migrate_is_ip() {
 
 # ---- the detached jobs (internal: started as `claude-setup.sh --migrate-worker`, not reachable through the runner)
 
-MIGRATE_JOB="" MIGRATE_STARTED=0 MIGRATE_FILE="" MIGRATE_FINISHED=0 MIGRATE_CHILD=""
-MIGRATE_ON_FAIL=() MIGRATE_ALWAYS=()   # files removed when the job fails / whenever it ends
+MIGRATE_JOB="" MIGRATE_STARTED=0 MIGRATE_FILE="" MIGRATE_FINISHED=0 MIGRATE_CHILD="" MIGRATE_FAIL_HOOK="" MIGRATE_RESULT_FILE=""
+MIGRATE_ON_FAIL=() MIGRATE_ALWAYS=() MIGRATE_RMDIRS=()   # files removed when the job fails / whenever it ends; folders removed either way
 
 migrate_progress() { migrate_status_write "$MIGRATE_JOB" "$1" "$2" "$3" "$4" "$MIGRATE_FILE" "$MIGRATE_STARTED" ""; }
 
@@ -5391,6 +5718,8 @@ migrate_fail() {
   local f pct=0 bytes=0
   read -r pct bytes < <(jq -r '[(.pct // 0), (.bytes // 0)] | @tsv' "$MIGRATE_STATUS" 2>/dev/null) || true
   for f in "${MIGRATE_ON_FAIL[@]}" "${MIGRATE_ALWAYS[@]}"; do rm -f -- "$f"; done
+  for f in "${MIGRATE_RMDIRS[@]}"; do rm -rf -- "$f"; done
+  [[ -z "$MIGRATE_FAIL_HOOK" ]] || "$MIGRATE_FAIL_HOOK" || true   # copy-apply closes its key line
   MIGRATE_FINISHED=1
   migrate_status_write "$MIGRATE_JOB" failed "Failed" "${pct:-0}" "${bytes:-0}" "$MIGRATE_FILE" "$MIGRATE_STARTED" "$1"
   exit 1
@@ -5401,6 +5730,7 @@ migrate_worker_exit() {
   [[ -z "$MIGRATE_CHILD" ]] || kill "$MIGRATE_CHILD" 2>/dev/null
   ((MIGRATE_FINISHED == 1)) || migrate_fail "The job stopped unexpectedly"
   for f in "${MIGRATE_ALWAYS[@]}"; do rm -f -- "$f"; done
+  for f in "${MIGRATE_RMDIRS[@]}"; do rm -rf -- "$f"; done
 }
 
 # PROGRESS lines (CLAUDE_BACKUP_PROGRESS=1) on stdin; anything else is kept in $1 for the error text.
@@ -5428,26 +5758,14 @@ migrate_read_progress() {
   done
 }
 
-# migrate_worker_send <host> <port> <user> <host-key type> <known_hosts file> <out file> <started>
-migrate_worker_send() {
-  local host="$1" port="$2" user="$3" ktype="$4" kh="$5" out="$6" started="$7"
-  local pf="$MIGRATE_CFG/passphrase" errlog sshout rc size pos pct msg name hostalg="$4" t0
-  MIGRATE_JOB=send MIGRATE_STARTED="$started"
-  errlog="$(mktemp "$MIGRATE_STATE/err.XXXXXX")"; sshout="$(mktemp "$MIGRATE_STATE/out.XXXXXX")"
-  MIGRATE_ON_FAIL=("$out"); MIGRATE_ALWAYS=("$kh" "$errlog" "$sshout")
-  migrate_progress export "Packing up this server" 0 0
-
-  CLAUDE_BACKUP_PROGRESS=1 "$(migrate_backup_bin)" export --no-claude-login --pass-file "$pf" --out "$out" </dev/null 2>&1 >/dev/null |
-    migrate_read_progress "$errlog" send
-  rc="${PIPESTATUS[0]}"
-  ((rc == 0)) || migrate_fail "The export failed: $(migrate_last_lines "$errlog")"
-  [[ -s "$out" ]] || migrate_fail "The export produced no file."
-  size="$(stat -c %s "$out")"
-
-  : >"$errlog"
-  migrate_progress transfer "Sending to the new server" 60 0
+# migrate_ssh_push <host> <port> <user> <host-key type> <known_hosts file> <key> <file to send> <stdout file> <stderr file> <size>
+# Streams the file to `receive` on the other server over ssh (pinned host key) and reports 60-99% from the stream's position.
+# A failure ends the job (migrate_fail).
+migrate_ssh_push() {
+  local host="$1" port="$2" user="$3" ktype="$4" kh="$5" key="$6" out="$7" sshout="$8" errlog="$9" size="${10}"
+  local hostalg="$4" rc pos pct msg t0
   [[ "$ktype" == ssh-rsa ]] && hostalg="rsa-sha2-512,rsa-sha2-256,ssh-rsa"
-  ssh -F /dev/null -i "$MIGRATE_CFG/key" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none \
+  ssh -F /dev/null -i "$key" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none \
     -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$kh" -o GlobalKnownHostsFile=/dev/null -o UpdateHostKeys=no \
     -o "HostKeyAlgorithms=$hostalg" -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
     -o ForwardAgent=no -o LogLevel=ERROR -T -p "$port" "$user@$host" receive <"$out" >"$sshout" 2>"$errlog" &
@@ -5468,6 +5786,27 @@ migrate_worker_send() {
   wait "$MIGRATE_CHILD"; rc=$?
   MIGRATE_CHILD=""
   ((rc == 0)) || migrate_fail "Couldn't send the file: $(migrate_last_lines "$errlog")"
+}
+
+# migrate_worker_send <host> <port> <user> <host-key type> <known_hosts file> <out file> <started>
+migrate_worker_send() {
+  local host="$1" port="$2" user="$3" ktype="$4" kh="$5" out="$6" started="$7"
+  local pf="$MIGRATE_CFG/passphrase" errlog sshout rc size name
+  MIGRATE_JOB=send MIGRATE_STARTED="$started"
+  errlog="$(mktemp "$MIGRATE_STATE/err.XXXXXX")"; sshout="$(mktemp "$MIGRATE_STATE/out.XXXXXX")"
+  MIGRATE_ON_FAIL=("$out"); MIGRATE_ALWAYS=("$kh" "$errlog" "$sshout")
+  migrate_progress export "Packing up this server" 0 0
+
+  CLAUDE_BACKUP_PROGRESS=1 "$(migrate_backup_bin)" export --no-claude-login --pass-file "$pf" --out "$out" </dev/null 2>&1 >/dev/null |
+    migrate_read_progress "$errlog" send
+  rc="${PIPESTATUS[0]}"
+  ((rc == 0)) || migrate_fail "The export failed: $(migrate_last_lines "$errlog")"
+  [[ -s "$out" ]] || migrate_fail "The export produced no file."
+  size="$(stat -c %s "$out")"
+
+  : >"$errlog"
+  migrate_progress transfer "Sending to the new server" 60 0
+  migrate_ssh_push "$host" "$port" "$user" "$ktype" "$kh" "$MIGRATE_CFG/key" "$out" "$sshout" "$errlog" "$size"
   name="$(grep -oE 'incoming-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\.gpg' "$sshout" | head -n 1 || true)"
   [[ -n "$name" ]] || migrate_fail "The new server didn't confirm that it got the file."
   MIGRATE_FINISHED=1
@@ -5508,6 +5847,8 @@ migrate_worker() {
   case "$kind" in
     send) migrate_worker_send "$@" ;;
     restore) migrate_worker_restore "$@" ;;
+    copy-send) copy_ctx; copy_worker_send "$@" ;;
+    copy-apply) copy_ctx; copy_worker_apply "$@" ;;
     *) MIGRATE_FINISHED=1; exit 2 ;;
   esac
 }
@@ -5565,9 +5906,10 @@ do_migrate_passphrase() {
 # migrate-status: where the current job is. A job whose worker died without finishing is reported (and recorded) as failed.
 do_migrate_status() {
   [[ $# -eq 0 ]] || bad_args "migrate-status takes no arguments"
+  local out
   if [[ -s "$MIGRATE_STATUS" ]] && jq -e 'type == "object" and has("phase")' "$MIGRATE_STATUS" >/dev/null 2>&1; then
     case "$(jq -r '.phase' "$MIGRATE_STATUS")" in
-      export | transfer | restore)
+      export | transfer | restore | pack | apply)
         if ! migrate_job_alive; then
           rm -f "$MIGRATE_STATE"/restore-pass.*   # a dead restore leaves its passphrase file behind
           jq -c '.phase = "failed" | .message = "Failed" | .error = "The job stopped unexpectedly" | .updated = (now | floor) | .pid = null' \
@@ -5575,7 +5917,10 @@ do_migrate_status() {
         fi
         ;;
     esac
-    api_ok "$(jq -c 'del(.pid)' "$MIGRATE_STATUS")"
+    # copy jobs keep what they skipped or refused in result.json
+    out="$(jq -c 'del(.pid)' "$MIGRATE_STATUS")"
+    [[ ! -s "${MIGRATE_RESULT_FILE:-}" ]] || out="$(jq -c --slurpfile r "$MIGRATE_RESULT_FILE" '. + {result:$r[0]}' <<<"$out")"
+    api_ok "$out"
   fi
   api_ok '{"job":"none","phase":"none","message":"","pct":0,"bytes":0}'
 }
@@ -5839,6 +6184,12 @@ migrate_repo_path() {
   return 1
 }
 
+migrate_ak_drop_migrate() {
+  local ak="$HOME/.ssh/authorized_keys" tmp
+  tmp="$(mktemp "$ak.XXXXXX")" || return 1
+  awk '$NF != "clauderc-migrate"' "$ak" >"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$ak" || { rm -f "$tmp"; return 1; }
+}
+
 # migrate-verify [manifest file]: the checklist at the end of the wizard. Read-only, except that it removes the migrate key.
 do_migrate_verify() {
   [[ $# -le 1 ]] || bad_args "usage: migrate-verify [manifest file name]"
@@ -5944,9 +6295,8 @@ do_migrate_verify() {
   # the transfer key must not stay authorized
   ak="$HOME/.ssh/authorized_keys"
   if [[ -f "$ak" ]] && awk '$NF == "clauderc-migrate" { f = 1 } END { exit !f }' "$ak"; then
-    tmp="$(mktemp "$HOME/.ssh/authorized_keys.XXXXXX")"
-    if [[ -n "$tmp" ]] && awk '$NF != "clauderc-migrate"' "$ak" >"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$ak"; then migrate_vitem migrate_key_removed true removed
-    else rm -f "$tmp"; migrate_vitem migrate_key_removed false "couldn't remove the transfer key from ~/.ssh/authorized_keys"; fi
+    if with_state_lock migrate_ak_drop_migrate; then migrate_vitem migrate_key_removed true removed
+    else migrate_vitem migrate_key_removed false "couldn't remove the transfer key from ~/.ssh/authorized_keys"; fi
   else
     migrate_vitem migrate_key_removed true "no transfer key found"
   fi
@@ -6043,6 +6393,683 @@ do_migrate_reboot() {
   api_ok '{"rebooting":true}'
 }
 
+# ======================================================================
+# Copy between servers (the contract is docs/copy-design.md). Same machinery as Migrate, with its own marker
+# (clauderc-copy), folders and status file: copy_ctx points the migrate helpers at them.
+#   COPY_CFG   ~/.config/claude-launcher/copy: the one-time key, the copy files B receives, staging folders
+#   COPY_STATE ~/.local/state/claude-launcher/copy: status.json, result.json, the job lock
+# Nothing here deletes anything on the source. Secret values never leave a server except inside the tar.gz that goes
+# straight to the other server over the pinned SSH key.
+# ======================================================================
+COPY_CFG="$LAUNCHER_CONFIG_DIR/copy"
+COPY_STATE="$API_STATE_DIR/copy"
+COPY_FILE_RE='^copy-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\.tgz$'
+COPY_PROJECT_RE='^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$'   # no leading dot or dash
+COPY_BRANCH_RE='^[A-Za-z0-9._/@+-]{1,200}$'
+COPY_MAX_LIST=20000
+COPY_JUNK_RE='(^|/)(node_modules|build|\.gradle|target|\.cache|__pycache__)(/|$)'
+# Only names set-secret or a built-in service could set are merged from another server's env file (an allowlist), and never
+# GOOGLE_APPLICATION_CREDENTIALS (the app's Firebase service owns it).
+COPY_GIT=(git -c core.fsmonitor=false -c core.hooksPath=/dev/null)   # the server's own git calls on received repos
+COPY_ROOT=""   # set by copy_project_root / the secrets kind
+
+copy_ctx() {
+  MIGRATE_CFG="$COPY_CFG"; MIGRATE_STATE="$COPY_STATE"; MIGRATE_STATUS="$COPY_STATE/status.json"
+  MIGRATE_RESULT_FILE="$COPY_STATE/result.json"
+}
+
+# A relative path with no .., no leading / and no control characters or backslashes.
+copy_rel_ok() {
+  local r="$1"
+  [[ -n "$r" && "$r" != /* && ! "$r" =~ [[:cntrl:]] && "$r" != *'\'* ]] || return 1
+  case "/$r/" in */../* | */./* | *//*) return 1 ;; esac
+  return 0
+}
+
+# No folder on the way from <root> to <rel> is a link (or a file).
+copy_parents_ok() {
+  local p="$1" c
+  local -a parts
+  [[ "$2" == */* ]] || return 0
+  IFS=/ read -ra parts <<<"${2%/*}"
+  for c in "${parts[@]}"; do
+    p="$p/$c"
+    if [[ -L "$p" || ( -e "$p" && ! -d "$p" ) ]]; then return 1; fi
+  done
+  return 0
+}
+
+# copy_project_root <name>: sets COPY_ROOT; the folder must resolve to <projects dir>/<name>, inside the home folder.
+copy_project_root() {
+  local pd hd
+  [[ "$1" =~ $COPY_PROJECT_RE ]] || return 1
+  pd="$(realpath -m -- "$PROJECTS_DIR")"; hd="$(realpath -m -- "$HOME")"
+  [[ "$pd" == "$hd"/* ]] || return 1
+  COPY_ROOT="$PROJECTS_DIR/$1"
+  [[ "$(realpath -m -- "$COPY_ROOT")" == "$pd/$1" ]]
+}
+
+# copy_ak_drop all|expired: remove the clauderc-copy line(s) of authorized_keys (a line without a readable expiry counts as
+# expired). Other lines, the migrate line included, are never touched. Run it through with_state_lock.
+copy_ak_drop() {
+  local ak="$HOME/.ssh/authorized_keys" tmp
+  [[ -f "$ak" ]] && grep -q ' clauderc-copy$' "$ak" 2>/dev/null || return 0
+  tmp="$(mktemp "$ak.XXXXXX")" || return 1
+  if awk -v mode="$1" -v now="$(date -u +%Y%m%d%H%M)" '
+      $NF == "clauderc-copy" { if (mode == "all") next; i = index($0, "expiry-time=\""); if (i == 0 || substr($0, i + 13, 12) + 0 < now + 0) next }
+      { print }' "$ak" >"$tmp"; then
+    if cmp -s "$tmp" "$ak"; then rm -f "$tmp"; else chmod 600 "$tmp" && mv -f "$tmp" "$ak"; fi
+  else
+    rm -f "$tmp"; return 1
+  fi
+}
+copy_drop_key() { with_state_lock copy_ak_drop all; }
+
+# Called by do_status (every app poll): expired keys and leftovers older than a day go.
+copy_prune() {
+  if [[ -f "$HOME/.ssh/authorized_keys" ]] && grep -q ' clauderc-copy$' "$HOME/.ssh/authorized_keys" 2>/dev/null; then
+    with_state_lock copy_ak_drop expired
+  fi
+  [[ -d "$COPY_CFG" ]] || return 0
+  find "$COPY_CFG" -maxdepth 1 \( -name 'copy-*.tgz' -o -name 'copy-*.tgz.part' -o -name 'stage.*' -o -name 'send.*' \) -mmin +1440 \
+    -exec rm -rf -- {} + 2>/dev/null
+  return 0
+}
+
+# ---- copy-list
+
+# Relative paths (NUL-separated) on stdin -> "size<TAB>mtime<TAB>mode<TAB>path" lines; junk, odd names and vanished files dropped.
+copy_files_tsv() {
+  LC_ALL=C grep -zvE "$COPY_JUNK_RE|[[:cntrl:]]" | (cd "$1" && xargs -0 -r stat --printf='%s\t%Y\t%a\t%n\n' --) 2>/dev/null
+}
+
+# The files of project folder $1 that are worth copying: a git repo = untracked and ignored files only (the rest comes from git),
+# anything else = every file. $2 = all: the whole folder, .git included.
+copy_project_nul() {
+  if [[ "${2:-}" != all && -d "$1/.git" && "$("${COPY_GIT[@]}" -C "$1" rev-parse --show-toplevel 2>/dev/null)" == "$(realpath -- "$1")" ]]; then
+    "${COPY_GIT[@]}" -C "$1" ls-files -z --others 2>/dev/null | grep -zv '/$'
+  else
+    (cd "$1" && find . \( -name node_modules -o -name build -o -name .gradle -o -name target -o -name .cache -o -name __pycache__ \) -prune \
+      -o \( -type f -o -type l \) -printf '%P\0')
+  fi
+}
+
+copy_secrets_tsv() {
+  local m n
+  if [[ -f "$SERVICES_ENV" ]]; then
+    m="$(stat -c %Y "$SERVICES_ENV")"
+    sed -nE 's/^export ([A-Z_][A-Z0-9_]*)=.*/\1/p' "$SERVICES_ENV" | while IFS= read -r n; do printf '0\t%s\t600\tenv/%s\n' "$m" "$n"; done
+  fi
+  find "$SECRET_FILES_DIR" -maxdepth 1 -type f -printf 'secret-files/%f\0' 2>/dev/null | copy_files_tsv "$LAUNCHER_CONFIG_DIR"
+  { find "$KEYSTORE_DIR" -maxdepth 1 -type f -name '*.jks' -printf 'keystores/%f\0' 2>/dev/null
+    [[ ! -f "$APPLE_DIR/AuthKey.p8" ]] || printf 'apple/AuthKey.p8\0'; } | copy_files_tsv "$LAUNCHER_CONFIG_DIR" | sed 's/$/\t1/'
+}
+
+# Local branches of repo $1 that some commit no remote has: "commits<TAB>time<TAB>sha<TAB>name" (what a bundle would carry).
+copy_bundle_tsv() {
+  local b sha ts n
+  "${COPY_GIT[@]}" -C "$1" for-each-ref --format='%(refname:short)%09%(objectname)%09%(committerdate:unix)' refs/heads 2>/dev/null |
+    while IFS=$'\t' read -r b sha ts; do
+      [[ "$b" =~ $COPY_BRANCH_RE && "$b" != -* ]] || continue
+      n="$("${COPY_GIT[@]}" -C "$1" rev-list --count "$sha" --not --remotes 2>/dev/null)" || continue
+      if [[ "$n" =~ ^[0-9]+$ ]] && ((n > 0)); then printf '%s\t%s\t%s\t%s\n' "$n" "$ts" "$sha" "$b"; fi
+    done
+}
+
+# copy-list <project|secrets|bundle> [project]: what this server has, names and sizes only. A bundle list on a server that is
+# sent "name sha" lines on stdin answers which of those commits it already has.
+do_copy_list() {
+  local kind="${1:-}" proj="${2:-}" tsv="" exists=null line n sha
+  case "$kind" in
+    secrets) [[ $# -eq 1 ]] ;;
+    project | bundle) [[ $# -eq 2 ]] ;;
+    *) false ;;
+  esac || bad_args "usage: copy-list <project|secrets|bundle> [project]"
+  local -a have=()
+  if [[ "$kind" == bundle ]]; then
+    while IFS= read -r -t 5 line; do
+      line="${line//$'\r'/}"
+      [[ -z "$line" ]] || have+=("$line")
+      ((${#have[@]} <= COPY_MAX_LIST)) || break
+    done
+  fi
+  exec 0</dev/null
+  if [[ "$kind" == secrets ]]; then
+    tsv="$(copy_secrets_tsv | head -n $((COPY_MAX_LIST + 1)))"
+  else
+    copy_project_root "$proj" || api_err invalid_name "That isn't a project folder name."
+    if [[ -d "$COPY_ROOT" ]]; then
+      exists=true
+      if [[ "$kind" == project ]]; then
+        tsv="$(copy_project_nul "$COPY_ROOT" | head -z -n $((COPY_MAX_LIST + 1)) | copy_files_tsv "$COPY_ROOT")"
+      elif ((${#have[@]} == 0)); then
+        tsv="$(copy_bundle_tsv "$COPY_ROOT" | head -n $((COPY_MAX_LIST + 1)))"
+      else
+        for line in "${have[@]}"; do
+          n="${line%% *}"; sha="${line#* }"
+          [[ "$n" =~ $COPY_BRANCH_RE && "$n" != -* && "$sha" =~ ^[0-9a-f]{40,64}$ ]] || continue
+          "${COPY_GIT[@]}" -C "$COPY_ROOT" cat-file -e "$sha^{commit}" 2>/dev/null && tsv+="0"$'\t'"0"$'\t'"$sha"$'\t'"$n"$'\n'
+        done
+      fi
+    else
+      exists=false
+    fi
+  fi
+  api_ok "$(jq -Rn --argjson cap "$COPY_MAX_LIST" --argjson ex "$exists" '
+    [inputs | select(length > 0) | split("\t") | {path:.[3], size:(.[0] | tonumber), mtime:(.[1] | tonumber), mode:.[2]}
+      + (if .[4] == "1" then {optional:true} else {} end)] as $e
+    | {entries:$e[:$cap], truncated:($e | length > $cap)} + (if $ex == null then {} else {exists:$ex} end)' <<<"$tsv")"
+}
+
+# ---- copy-keygen / copy-authorize / copy-probe
+
+# copy-keygen: a NEW key for this copy (the old one is deleted), and this server's Tailscale IPv4 if it has one.
+do_copy_keygen() {
+  [[ $# -eq 0 ]] || bad_args "copy-keygen takes no arguments"
+  umask 077
+  need ssh-keygen
+  copy_ctx
+  local key="$COPY_CFG/key" pub tip=""
+  mkdir -p "$COPY_CFG" "$COPY_STATE" && chmod 700 "$COPY_CFG" "$COPY_STATE" || api_err internal "Couldn't create $COPY_CFG."
+  migrate_job_active && api_err busy "A copy is running."
+  rm -f "$key" "$key.pub"
+  ssh-keygen -q -t ed25519 -N '' -C clauderc-copy -f "$key" </dev/null >/dev/null 2>&1 || api_err internal "Couldn't create the copy key."
+  chmod 600 "$key"
+  pub="$(awk 'NR == 1 {print $1, $2, "clauderc-copy"}' "$key.pub")"
+  [[ "$pub" =~ ^ssh-ed25519\ [A-Za-z0-9+/]+=*\ clauderc-copy$ ]] || api_err internal "The copy key is unreadable."
+  if command -v tailscale >/dev/null 2>&1; then
+    tip="$(t 5 tailscale ip -4 2>/dev/null </dev/null | head -n 1)" || tip=""
+    migrate_is_ip "$tip" || tip=""
+  fi
+  api_ok "$(jq -cn --arg k "$pub" --arg ip "$tip" '{public_key:$k, tailnet_ip:$ip}')"
+}
+
+# copy-authorize: stdin = the source's public key line, its address (optional), minutes to live (default 120, max 720).
+# One line, forced to `claude-backup receive --copy`, that sshd itself stops honouring at expiry-time.
+do_copy_authorize() {
+  [[ $# -eq 0 ]] || bad_args "copy-authorize reads the key on stdin"
+  local key addr mins blob opts exp
+  key="$(read_secret_line)"; addr="$(read_secret_line)"; mins="$(read_secret_line)"
+  exec 0</dev/null
+  migrate_need_run   # it lets another key push files here that copy-apply unpacks: never from a lost phone alone
+  umask 077
+  [[ "$key" =~ $MIGRATE_PUBKEY_RE && ${#key} -le 300 ]] || api_err invalid_name "That isn't a public key line (ssh-ed25519 AAAA…)."
+  [[ -z "$addr" || "$addr" =~ $MIGRATE_ADDR_RE ]] || api_err invalid_name "That isn't a host name or IP address."
+  [[ -z "$mins" ]] && mins=120
+  [[ "$mins" =~ ^[0-9]{1,4}$ ]] && ((10#$mins >= 1 && 10#$mins <= 720)) || api_err invalid_name "The minutes must be 1-720."
+  [[ "$HOME" =~ ^/[A-Za-z0-9._/-]+$ ]] || api_err internal "The home folder name can't be put in an authorized_keys option."
+  [[ -x "$HOME/.local/bin/claude-backup" ]] || api_err not_configured "claude-backup is missing: run Update now"
+  blob="$(awk '{print $2}' <<<"$key")"
+  opts="restrict,command=\"$HOME/.local/bin/claude-backup receive --copy\""
+  addr="${addr,,}"
+  if migrate_is_ip "$addr"; then opts+=",from=\"$addr\""; fi
+  exp="$(date -u -d "+$((10#$mins)) minutes" +%Y%m%d%H%M)Z"
+  opts+=",expiry-time=\"$exp\""
+  mkdir -p "$COPY_CFG" && chmod 700 "$COPY_CFG"
+  with_state_lock migrate_ak_put clauderc-copy "$opts" "$blob"
+}
+
+# copy-probe: stdin = host, port, host-key type, host-key base64. Does that server answer with exactly that host key?
+# (No identity at all: "Permission denied" means the SSH door is there and the pinned key matched.)
+do_copy_probe() {
+  [[ $# -eq 0 ]] || bad_args "copy-probe reads the target on stdin"
+  local host port ktype blob d kh out hostalg reach=false ok=false
+  host="$(read_secret_line)"; port="$(read_secret_line)"; ktype="$(read_secret_line)"; blob="$(read_secret_line)"
+  exec 0</dev/null
+  umask 077
+  [[ "$host" =~ $MIGRATE_HOST_RE ]] || api_err invalid_name "That isn't a host name or IP address."
+  [[ "$port" =~ ^[0-9]{1,5}$ ]] && ((10#$port >= 1 && 10#$port <= 65535)) || api_err invalid_name "The port must be 1-65535."
+  port=$((10#$port))
+  [[ "$ktype" =~ $MIGRATE_HOSTKEY_TYPE_RE ]] || api_err invalid_name "That host key type isn't supported."
+  [[ "$blob" =~ $MIGRATE_BLOB_RE ]] || api_err invalid_name "That host key isn't valid base64."
+  need ssh
+  host="${host,,}"; hostalg="$ktype"
+  [[ "$ktype" == ssh-rsa ]] && hostalg="rsa-sha2-512,rsa-sha2-256,ssh-rsa"
+  d="$(mktemp -d)" || api_err internal "Couldn't make a temporary folder."
+  kh="$d/known_hosts"
+  if ((port == 22)); then printf '%s %s %s\n' "$host" "$ktype" "$blob" >"$kh"; else printf '[%s]:%s %s %s\n' "$host" "$port" "$ktype" "$blob" >"$kh"; fi
+  # -i names a file that doesn't exist: an explicit identity switches the default ~/.ssh/id_* keys off.
+  out="$(t 25 ssh -F /dev/null -i "$d/none" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o PreferredAuthentications=publickey \
+    -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$kh" -o GlobalKnownHostsFile=/dev/null -o UpdateHostKeys=no \
+    -o "HostKeyAlgorithms=$hostalg" -o ConnectTimeout=8 -o LogLevel=ERROR -T -p "$port" "clauderc-probe@$host" true </dev/null 2>&1)" || true
+  rm -rf "$d"
+  case "$out" in
+    *"Permission denied"*) reach=true ok=true ;;
+    *"Host key verification failed"* | *"REMOTE HOST IDENTIFICATION HAS CHANGED"*) reach=true ;;
+  esac
+  api_ok "$(jq -cn --argjson r "$reach" --argjson k "$ok" '{reachable:$r, hostkey_ok:$k}')"
+}
+
+# ---- copy-send
+
+# copy-send <secrets | project NAME | bundle NAME>: stdin = host, port, user, host-key type, host-key base64 (as migrate-send), then
+# optionally the chosen relative paths (secrets: env/NAME, secret-files/…; bundle: branch names) one per line. No line = everything
+# listed. For a project, the single line "." means the whole folder including .git (the folder is missing on the other server).
+do_copy_send() {
+  local kind="${1:-}" proj="${2:-}" host port user ktype blob kh started hostpat line n=0 p
+  case "$kind" in
+    secrets) [[ $# -eq 1 ]] ;;
+    project | bundle) [[ $# -eq 2 ]] ;;
+    *) false ;;
+  esac || bad_args "usage: copy-send <secrets|project|bundle> [project] (the target on stdin)"
+  migrate_need_run
+  host="$(read_secret_line)"; port="$(read_secret_line)"; user="$(read_secret_line)"
+  ktype="$(read_secret_line)"; blob="$(read_secret_line)"
+  local -a chosen=()
+  while IFS= read -r -t 15 line; do
+    line="${line//$'\r'/}"
+    [[ -z "$line" ]] && continue
+    chosen+=("$line")
+    ((${#chosen[@]} <= COPY_MAX_LIST)) || api_err invalid_name "Too many paths (the limit is $COPY_MAX_LIST)."
+  done
+  exec 0</dev/null
+  umask 077
+  [[ "$host" =~ $MIGRATE_HOST_RE ]] || api_err invalid_name "That isn't a host name or IP address."
+  [[ "$port" =~ ^[0-9]{1,5}$ ]] && ((10#$port >= 1 && 10#$port <= 65535)) || api_err invalid_name "The port must be 1-65535."
+  port=$((10#$port))
+  [[ "$user" =~ $MIGRATE_USER_RE ]] || api_err invalid_name "That isn't a valid user name."
+  [[ "$ktype" =~ $MIGRATE_HOSTKEY_TYPE_RE ]] || api_err invalid_name "That host key type isn't supported."
+  [[ "$blob" =~ $MIGRATE_BLOB_RE ]] || api_err invalid_name "That host key isn't valid base64."
+  if [[ "$kind" != secrets ]]; then
+    copy_project_root "$proj" || api_err invalid_name "That isn't a project folder name."
+    [[ -d "$COPY_ROOT" && ! -L "$COPY_ROOT" ]] || api_err invalid_name "There is no project folder $proj."
+  fi
+  for p in "${chosen[@]}"; do
+    case "$kind" in
+      bundle) [[ "$p" =~ $COPY_BRANCH_RE && "$p" != -* ]] ;;
+      project) [[ "$p" == . ]] || copy_rel_ok "$p" ;;
+      secrets) [[ "$p" =~ ^(secret-files/[^/]+|keystores/[^/]+\.jks|apple/AuthKey\.p8|env/[A-Z_][A-Z0-9_]*)$ ]] && copy_rel_ok "$p" ;;
+    esac || api_err invalid_name "That path can't be copied: ${p:0:60}"
+  done
+  need ssh; need tar
+  copy_ctx
+  migrate_take_job
+  [[ -s "$COPY_CFG/key" ]] || api_err not_ready "The copy key doesn't exist yet (copy-keygen)."
+  rm -f "$COPY_STATE/result.json"
+  host="${host,,}"
+  if ((port == 22)); then hostpat="$host"; else hostpat="[$host]:$port"; fi
+  kh="$COPY_CFG/known_hosts"
+  printf '%s %s %s\n' "$hostpat" "$ktype" "$blob" >"$kh" || api_err internal "Couldn't write the pinned host key."
+  : >"$COPY_CFG/chosen"
+  for p in "${chosen[@]}"; do printf '%s\n' "$p" >>"$COPY_CFG/chosen"; done
+  started="$(date +%s)"
+  migrate_status_write send pack "Packing the files" 0 0 "" "$started" "" || api_err internal "Couldn't write the status."
+  setsid "$SCRIPT_PATH" --migrate-worker copy-send "$kind" "${proj:--}" "$host" "$port" "$user" "$ktype" "$kh" "$started" \
+    </dev/null >/dev/null 2>&1 3>&- 8>&- 9>&- &
+  api_ok '{"started":true}'
+}
+
+# Packs the chosen files into $1/out.tgz (.clauderc-copy.json first) and sends it. Everything it made, and the private key, goes at the end.
+copy_worker_send() {
+  local kind="$1" proj="$2" host="$3" port="$4" user="$5" ktype="$6" kh="$7" started="$8"
+  local tmpd root="" list p tsv size name src rc line
+  local -a chosen=() tarargs
+  MIGRATE_JOB=send MIGRATE_STARTED="$started"
+  tmpd="$(mktemp -d "$COPY_CFG/send.XXXXXX")" || migrate_fail "Couldn't make a working folder."
+  MIGRATE_RMDIRS=("$tmpd"); MIGRATE_ALWAYS=("$kh" "$COPY_CFG/key" "$COPY_CFG/key.pub" "$COPY_CFG/chosen")
+  list="$tmpd/list.nul"; tsv="$tmpd/files.tsv"
+  while IFS= read -r line; do chosen+=("$line"); done <"$COPY_CFG/chosen"
+  src="$(hostname -s 2>/dev/null | tr -cd 'A-Za-z0-9-' | cut -c1-40)"; [[ -n "$src" ]] || src=other
+  migrate_progress pack "Looking at the files" 5 0
+  : >"$list"; : >"$tsv"
+  case "$kind" in
+    project)
+      copy_project_root "$proj" || migrate_fail "That isn't a project folder."
+      root="$COPY_ROOT"
+      if ((${#chosen[@]} == 1)) && [[ "${chosen[0]}" == . ]]; then copy_project_nul "$root" all >"$list"
+      elif ((${#chosen[@]} > 0)); then for p in "${chosen[@]}"; do printf '%s\0' "$p"; done >"$list"
+      else copy_project_nul "$root" >"$list"; fi
+      # a link on the way would let a chosen name reach outside the folder; what isn't there any more is dropped
+      for p in "${chosen[@]}"; do
+        [[ "$p" == . ]] || copy_parents_ok "$root" "$p" || migrate_fail "A folder on the way to $p is a link."
+      done
+      copy_files_tsv "$root" <"$list" >"$tsv"
+      # the manifest lists exactly what is packed: the stat'ed names (junk-free, still there)
+      awk -F'\t' '{ printf "%s\0", substr($0, length($1 $2 $3) + 4) }' "$tsv" >"$list"
+      ;;
+    secrets)
+      root="$LAUNCHER_CONFIG_DIR"
+      local env_names=() entry opt
+      if ((${#chosen[@]} == 0)); then
+        while IFS=$'\t' read -r _ _ _ entry opt; do [[ "$opt" == 1 ]] || chosen+=("$entry"); done < <(copy_secrets_tsv)
+      fi
+      for p in "${chosen[@]}"; do
+        case "$p" in env/*) env_names+=("${p#env/}") ;; *) printf '%s\0' "$p" ;; esac
+      done >"$list"
+      if ((${#env_names[@]} > 0)) && [[ -f "$SERVICES_ENV" ]]; then
+        # only the chosen names go into the copy of the env file
+        for p in "${env_names[@]}"; do grep -E "^export ${p}=" "$SERVICES_ENV" || true; done >"$tmpd/env"
+        chmod 600 "$tmpd/env"
+        [[ ! -s "$tmpd/env" ]] || printf '%s\t%s\t600\tenv\n' "$(stat -c %s "$tmpd/env")" "$(stat -c %Y "$tmpd/env")" >"$tsv"
+      fi
+      copy_files_tsv "$root" <"$list" >>"$tsv"
+      ;;
+    bundle)
+      copy_project_root "$proj" || migrate_fail "That isn't a project folder."
+      root="$COPY_ROOT"
+      local -a want=() b
+      copy_bundle_tsv "$root" >"$tmpd/branches.tsv"
+      if ((${#chosen[@]} == 0)); then while IFS=$'\t' read -r _ _ _ b; do want+=("$b"); done <"$tmpd/branches.tsv"; else want=("${chosen[@]}"); fi
+      ((${#want[@]} > 0)) || migrate_fail "There is no commit here that a remote lacks."
+      for b in "${want[@]}"; do
+        awk -F'\t' -v b="$b" '$4 == b {f = 1} END {exit !f}' "$tmpd/branches.tsv" || migrate_fail "Branch $b has nothing to bundle."
+      done
+      "${COPY_GIT[@]}" -C "$root" bundle create "$tmpd/bundle" "${want[@]}" --not --remotes >/dev/null 2>"$tmpd/err" ||
+        migrate_fail "git couldn't make the bundle: $(migrate_last_lines "$tmpd/err")"
+      ;;
+  esac
+  migrate_progress pack "Packing the files" 20 0
+  jq -n --arg kind "$kind" --arg project "$([[ "$kind" == secrets ]] && echo "" || echo "$proj")" --arg source "$src" --argjson now "$(date +%s)" \
+    --rawfile tsv "$tsv" --rawfile br "$([[ -f "$tmpd/branches.tsv" ]] && echo "$tmpd/branches.tsv" || echo /dev/null)" '
+    {version:1, kind:$kind, project:$project, source:$source, created:$now,
+     files:[$tsv | split("\n")[] | select(length > 0) | split("\t") | {path:.[3], size:(.[0] | tonumber), mtime:(.[1] | tonumber), mode:.[2]}],
+     branches:[$br | split("\n")[] | select(length > 0) | split("\t") | {name:.[3], sha:.[2]}]}' >"$tmpd/.clauderc-copy.json" ||
+    migrate_fail "Couldn't write the manifest."
+  if [[ "$kind" == bundle ]]; then
+    # only the asked-for branches are named in the manifest
+    jq -c --argjson w "$(printf '%s\n' "${want[@]}" | jq -R . | jq -sc .)" '.branches |= map(select(.name as $n | $w | index($n)))' "$tmpd/.clauderc-copy.json" >"$tmpd/m2" &&
+      mv -f "$tmpd/m2" "$tmpd/.clauderc-copy.json"
+  fi
+  tarargs=(-czf "$tmpd/out.tgz" --numeric-owner --hard-dereference --no-recursion --null --verbatim-files-from -C "$tmpd" .clauderc-copy.json)
+  [[ "$kind" != bundle ]] || tarargs+=(bundle)
+  [[ ! -f "$tmpd/env" || "$kind" != secrets ]] || tarargs+=(env)
+  [[ "$kind" == bundle ]] || tarargs+=(-C "$root" -T "$list")
+  tar "${tarargs[@]}" 2>"$tmpd/err"; rc=$?
+  ((rc <= 1)) || migrate_fail "Packing failed: $(migrate_last_lines "$tmpd/err")"
+  size="$(stat -c %s "$tmpd/out.tgz")"
+  : >"$tmpd/err"
+  migrate_progress transfer "Sending to the other server" 60 0
+  migrate_ssh_push "$host" "$port" "$user" "$ktype" "$kh" "$COPY_CFG/key" "$tmpd/out.tgz" "$tmpd/out" "$tmpd/err" "$size"
+  name="$(grep -oE 'copy-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\.tgz' "$tmpd/out" | head -n 1 || true)"
+  [[ -n "$name" ]] || migrate_fail "The other server didn't confirm that it got the file."
+  MIGRATE_FINISHED=1
+  migrate_status_write send "done" "Sent to the other server" 100 "$size" "$name" "$started" ""
+}
+
+# ---- copy-status / copy-cancel
+
+do_copy_status() {
+  [[ $# -eq 0 ]] || bad_args "copy-status takes no arguments"
+  copy_ctx
+  do_migrate_status
+}
+
+# copy-cancel: close the door and tidy up (this server's key line, the received copy files, a stopped job's leftovers, the key).
+do_copy_cancel() {
+  [[ $# -eq 0 ]] || bad_args "copy-cancel takes no arguments"
+  copy_ctx
+  migrate_job_active && api_err busy "A copy is running: wait for it to end."
+  copy_drop_key || api_err internal "Couldn't update ~/.ssh/authorized_keys."
+  if [[ -d "$COPY_CFG" ]]; then
+    rm -rf -- "$COPY_CFG"/copy-*.tgz "$COPY_CFG"/copy-*.tgz.part "$COPY_CFG"/stage.* "$COPY_CFG"/send.* "$COPY_CFG/key" "$COPY_CFG/key.pub" \
+      "$COPY_CFG/known_hosts" "$COPY_CFG/chosen"
+  fi
+  api_ok '{"cancelled":true}'
+}
+
+# ---- copy-apply
+
+# copy-apply <copy file>: stdin = the policy (new-only | newer), then the relative paths the owner agreed to overwrite.
+do_copy_apply() {
+  [[ $# -eq 1 && "$1" =~ $COPY_FILE_RE ]] || bad_args "usage: copy-apply <copy-….tgz> (policy and overwrite list on stdin)"
+  local name="$1" policy line started p
+  local -a ow=()
+  policy="$(read_secret_line)"
+  while IFS= read -r -t 15 line; do
+    line="${line//$'\r'/}"
+    [[ -z "$line" ]] && continue
+    ow+=("$line")
+    ((${#ow[@]} <= COPY_MAX_LIST)) || api_err invalid_name "Too many paths (the limit is $COPY_MAX_LIST)."
+  done
+  exec 0</dev/null
+  migrate_need_run   # it unpacks into projects and the secrets folder
+  umask 077
+  [[ "$policy" == new-only || "$policy" == newer ]] || api_err invalid_name "The policy must be new-only or newer."
+  for p in "${ow[@]}"; do copy_rel_ok "$p" || api_err invalid_name "That path can't be overwritten: ${p:0:60}"; done
+  need tar
+  copy_ctx
+  [[ -f "$COPY_CFG/$name" && ! -L "$COPY_CFG/$name" ]] || api_err invalid_name "There is no $name here."
+  migrate_take_job
+  rm -f "$COPY_STATE/result.json"
+  for p in "${ow[@]}"; do printf '%s\n' "$p"; done >"$COPY_STATE/overwrite" || api_err internal "Couldn't save the list."
+  started="$(date +%s)"
+  migrate_status_write apply apply "Checking the file" 0 0 "$name" "$started" "" || api_err internal "Couldn't write the status."
+  setsid "$SCRIPT_PATH" --migrate-worker copy-apply "$name" "$policy" "$COPY_STATE/overwrite" "$started" </dev/null >/dev/null 2>&1 3>&- 8>&- 9>&- &
+  api_ok '{"started":true}'
+}
+
+COPY_STAGE="" COPY_BACKUP="" COPY_POLICY="" COPY_RES=""
+COPY_OW=()
+
+copy_res() { printf '%s\t%s\t%s\n' "$1" "$2" "${3:-}" >>"$COPY_RES"; }
+copy_fail() { migrate_fail "$1"; }
+
+# copy_scan_archive <file>: every member must be a plain file, folder or symlink with a safe unique name, none under a symlink.
+# Writes names.nul (files) and links.nul (symlinks) into the staging folder and members.txt (names, one per line).
+copy_scan_archive() {
+  local f="$1" st="$COPY_STAGE" line type rest nm p n_plain n_verbose=0 total=0 avail
+  local -A seen=() lset=()
+  local -a names=() lnames=()
+  local re='^(.)[-rwxsStT]{9} [^ ]+ +([0-9]+) [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}(:[0-9]{2})? (.*)$'
+  n_plain="$(LC_ALL=C.UTF-8 tar --quoting-style=escape -tzf "$f" 2>/dev/null | wc -l)"
+  LC_ALL=C.UTF-8 tar --quoting-style=escape --numeric-owner -tvzf "$f" >"$st/verbose" 2>/dev/null || copy_fail "That isn't a readable copy file."
+  while IFS= read -r line; do
+    n_verbose=$((n_verbose + 1))
+    [[ "$line" =~ $re ]] || copy_fail "The copy file has a member line I can't read: refused."
+    type="${BASH_REMATCH[1]}"; total=$((total + 10#${BASH_REMATCH[2]})); rest="${BASH_REMATCH[4]}"
+    case "$type" in
+      -) nm="$rest" ;;
+      d) nm="${rest%/}" ;;
+      l) nm="${rest%% -> *}" ;;
+      *) copy_fail "The copy file has a member that isn't a plain file, folder or link: refused." ;;
+    esac
+    copy_rel_ok "$nm" || copy_fail "The copy file has an unsafe member name: refused."
+    [[ -z "${seen[k$nm]:-}" ]] || copy_fail "The copy file lists $nm twice: refused."
+    seen[k$nm]=1
+    case "$type" in
+      l) lset["k$nm"]=1; lnames+=("$nm") ;;
+      -) [[ "$nm" == .clauderc-copy.json ]] || names+=("$nm") ;;
+    esac
+  done <"$st/verbose"
+  ((n_plain == n_verbose)) || copy_fail "The copy file's member list doesn't add up: refused."
+  # the unpacked size (a gzip bomb) must fit on this disk with 1 GB to spare
+  avail="$(df -Pk -- "$COPY_CFG" 2>/dev/null | awk 'NR == 2 { printf "%.0f\n", $4 * 1024 }')"
+  [[ "$avail" =~ ^[0-9]+$ ]] || avail=0
+  ((total + 1073741824 <= avail)) || copy_fail "Not enough free disk space to unpack the copy ($((total / 1048576)) MB needed): refused."
+  # no member may sit below a member that is a symlink
+  for nm in "${names[@]}" "${lnames[@]}"; do
+    p="$nm"
+    while [[ "$p" == */* ]]; do
+      p="${p%/*}"
+      [[ -z "${lset[k$p]:-}" ]] || copy_fail "The copy file writes below a symlink ($p): refused."
+    done
+  done
+  for nm in "${names[@]}"; do printf '%s\0' "$nm"; done >"$st/names.nul"
+  for nm in "${lnames[@]}"; do printf '%s\0' "$nm"; done >"$st/links.nul"
+  printf '%s\n' "${names[@]}" "${lnames[@]}" | LC_ALL=C sort >"$st/members.txt"
+}
+
+# copy_backup <root> <rel>: B's version is kept in ~/backups/pre-copy-<time>/ before anything overwrites it.
+copy_backup() {
+  if [[ -z "$COPY_BACKUP" ]]; then
+    COPY_BACKUP="$HOME/backups/pre-copy-$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$HOME/backups" "$COPY_BACKUP" && chmod 700 "$HOME/backups" "$COPY_BACKUP" || copy_fail "Couldn't create $COPY_BACKUP."
+  fi
+  mkdir -p "$COPY_BACKUP/$(dirname -- "$2")" && cp -a --no-dereference -- "$1/$2" "$COPY_BACKUP/$2" || copy_fail "Couldn't back up $2 first."
+}
+
+# copy_place <staged root> <dest root> <rel> <secret 0|1> <mode>: policy, backup, move.
+copy_place() {
+  local x="$1" root="$2" rel="$3" secret="$4" mode="$5" src dest named=0 p am bm
+  src="$x/$rel"; dest="$root/$rel"
+  copy_parents_ok "$root" "$rel" || { copy_res refused "$rel" "a folder on the way is a link or a file"; return 0; }
+  for p in "${COPY_OW[@]}"; do [[ "$p" == "$rel" ]] && named=1; done
+  if [[ -e "$dest" || -L "$dest" ]]; then
+    if [[ -d "$dest" && ! -L "$dest" ]]; then copy_res refused "$rel" "a folder is in the way"; return 0; fi
+    if [[ -f "$src" && ! -L "$src" && -f "$dest" && ! -L "$dest" ]] && cmp -s "$src" "$dest"; then copy_res skipped "$rel" "same"; return 0; fi
+    am="$(stat -c %Y "$src")"; bm="$(stat -c %Y "$dest")"
+    if ((named == 0)); then
+      if [[ "$COPY_POLICY" == newer ]] && ((am > bm)); then :; else copy_res skipped "$rel" "exists"; return 0; fi
+    fi
+    copy_backup "$root" "$rel"
+  fi
+  mkdir -p "$(dirname -- "$dest")" && mv -f -T -- "$src" "$dest" || { copy_res refused "$rel" "couldn't move it into place"; return 0; }
+  if [[ -L "$dest" ]]; then
+    # a link that lands outside the destination once B's own folders are in the picture is taken back out
+    local rr; rr="$(realpath -m -- "$root")"; p="$(realpath -m -- "$dest")"
+    if [[ "$p" != "$rr"/* ]]; then rm -f -- "$dest"; copy_res refused "$rel" "a symlink that points outside the folder"; return 0; fi
+  else
+    if ((secret == 1)); then chmod 600 "$dest"
+    elif [[ "$mode" =~ ^[0-7]{3,4}$ ]]; then chmod "$(printf '%o' $((8#${mode: -3} & 8#755)))" "$dest"; fi
+  fi
+  copy_res copied "$rel"
+}
+
+# The other server's env file names merged into this one: only names this server lacks; another value = a conflict, never written.
+copy_env_merge() {
+  local f="$1" line n v cur added=0
+  [[ -f "$f" ]] || return 0
+  [[ ! -f "$SERVICES_ENV" ]] || { copy_backup "$LAUNCHER_CONFIG_DIR" env 2>/dev/null || true; }
+  while IFS= read -r line; do
+    [[ "$line" =~ ^export\ ([A-Z_][A-Z0-9_]*)=\'(.*)\'$ ]] || continue
+    n="${BASH_REMATCH[1]}"; v="${BASH_REMATCH[2]}"
+    if [[ "$n" == GOOGLE_APPLICATION_CREDENTIALS ]] || ! { custom_name_ok "$n" || service_var_name "$n"; }; then
+      copy_res refused "env/$n" "this name can't be copied"; continue
+    fi
+    if [[ -z "$v" || ${#v} -gt 4000 || "$v" == *"'"* ]]; then copy_res refused "env/$n" "the value is empty, too long, or has a single quote"; continue; fi
+    if grep -q "^export $n=" "$SERVICES_ENV" 2>/dev/null; then
+      cur="$(sed -n "s/^export $n='\\(.*\\)'\$/\\1/p" "$SERVICES_ENV" | head -n 1)"
+      if [[ "$cur" == "$v" ]]; then copy_res skipped "env/$n" "same"; else copy_res env_conflict "$n"; fi
+    else
+      set_env "$n" "$v"; service_var_name "$n" || custom_names_edit add "$n"
+      copy_res env_added "$n"; added=1
+    fi
+  done <"$f"
+  if ((added == 1)); then ensure_env_hook; fi
+}
+
+copy_apply_bundle() {
+  local x="$1" proj="$2" src="$3" manifest="$4" b root rc made=0
+  local -a refs=() names=()
+  copy_project_root "$proj" || copy_fail "The copy names a project folder that isn't allowed."
+  root="$COPY_ROOT"
+  [[ -f "$x/bundle" && ! -L "$x/bundle" ]] || copy_fail "The copy has no bundle in it."
+  while IFS= read -r b; do
+    [[ "$b" =~ $COPY_BRANCH_RE && "$b" != -* ]] || copy_fail "The copy names a branch that isn't allowed."
+    names+=("$b"); refs+=("+refs/heads/$b:refs/remotes/from-$src/$b")
+  done < <(jq -r '.branches[].name' "$manifest")
+  ((${#names[@]} > 0)) || copy_fail "The copy names no branch."
+  if [[ -d "$root" ]]; then
+    [[ "$("${COPY_GIT[@]}" -C "$root" rev-parse --show-toplevel 2>/dev/null)" == "$(realpath -- "$root")" ]] || copy_fail "$proj is a folder here but not a git repository: copy the project instead."
+  else
+    mkdir -p "$PROJECTS_DIR" && git init -q "$root" || copy_fail "Couldn't create the repository."
+    made=1
+  fi
+  # fetch only writes refs/remotes/from-<source>/…: no local branch moves. Hooks off.
+  "${COPY_GIT[@]}" -C "$root" fetch -q --no-tags "$x/bundle" "${refs[@]}" 2>"$COPY_STAGE/giterr"; rc=$?
+  if ((rc != 0)); then
+    ((made == 0)) || rm -rf -- "$root"   # a repository this job just made, still empty
+    copy_fail "git couldn't take the bundle (copy the project first if the repository is missing here): $(migrate_last_lines "$COPY_STAGE/giterr")"
+  fi
+  # a repository made just now has no branch: the first one becomes the local branch
+  if ! "${COPY_GIT[@]}" -C "$root" rev-parse -q --verify HEAD >/dev/null 2>&1; then
+    "${COPY_GIT[@]}" -C "$root" checkout -q -b "${names[0]}" "refs/remotes/from-$src/${names[0]}" 2>/dev/null || true
+  fi
+  for b in "${names[@]}"; do copy_res fetched "$b" "refs/remotes/from-$src/$b"; done
+}
+
+# The detached apply job: check, stage, place file by file, close the door.
+copy_worker_apply() {
+  local name="$1" policy="$2" owf="$3" started="$4" file="$COPY_CFG/$1" st x kind proj src root secret rel mode n total i line rc
+  MIGRATE_JOB=apply MIGRATE_STARTED="$started" MIGRATE_FILE="$name" MIGRATE_FAIL_HOOK=copy_drop_key
+  COPY_POLICY="$policy"; COPY_OW=()
+  while IFS= read -r line; do COPY_OW+=("$line"); done <"$owf"
+  st="$(mktemp -d "$COPY_CFG/stage.XXXXXX")" || copy_fail "Couldn't make a staging folder."
+  COPY_STAGE="$st"; COPY_RES="$st/res.tsv"; : >"$COPY_RES"
+  MIGRATE_RMDIRS=("$st"); MIGRATE_ALWAYS=("$owf")   # the copy file stays after a failure so a retry works
+  x="$st/x"; mkdir -p "$x"
+  migrate_progress apply "Checking the file" 2 0
+  tar -xzOf "$file" .clauderc-copy.json >"$st/manifest.json" 2>/dev/null || copy_fail "The copy file has no manifest."
+  jq -e 'type == "object" and .version == 1 and (.kind | IN("project", "secrets", "bundle")) and (.files | type == "array") and (.branches | type == "array")' \
+    "$st/manifest.json" >/dev/null 2>&1 || copy_fail "The manifest isn't valid."
+  kind="$(jq -r .kind "$st/manifest.json")"; proj="$(jq -r '.project // ""' "$st/manifest.json")"; src="$(jq -r '.source // ""' "$st/manifest.json")"
+  [[ "$src" =~ ^[A-Za-z0-9-]{1,40}$ ]] || src=other
+  copy_scan_archive "$file"
+  if [[ "$kind" == bundle ]]; then
+    [[ "$(cat "$st/members.txt")" == bundle ]] || copy_fail "The copy has members a bundle doesn't have: refused."
+  else
+    jq -r '.files[].path' "$st/manifest.json" | LC_ALL=C sort >"$st/listed.txt"
+    [[ -z "$(LC_ALL=C comm -13 "$st/listed.txt" "$st/members.txt" | head -n 1)" ]] || copy_fail "The copy has files its manifest doesn't list: refused."
+  fi
+  migrate_progress apply "Unpacking" 10 0
+  # files first, then the symlinks: nothing can be written through a link, because none exists while files are written
+  if [[ -s "$st/names.nul" ]]; then
+    tar -xzf "$file" -C "$x" --no-same-owner --no-same-permissions --no-overwrite-dir --no-wildcards --null --verbatim-files-from -T "$st/names.nul" \
+      2>"$st/tarerr" || copy_fail "Unpacking failed: $(migrate_last_lines "$st/tarerr")"
+  fi
+  if [[ -s "$st/links.nul" ]]; then
+    tar -xzf "$file" -C "$x" --no-same-owner --no-wildcards --null --verbatim-files-from -T "$st/links.nul" 2>"$st/tarerr" ||
+      copy_fail "Unpacking failed: $(migrate_last_lines "$st/tarerr")"
+  fi
+  [[ -z "$(find "$x" ! -type f ! -type d ! -type l -print -quit)" ]] || copy_fail "Unpacking made something that isn't a file, folder or link: refused."
+  # a symlink must resolve to somewhere inside the unpacked tree (real resolution, so ".." after a link can't climb out)
+  local xr l
+  xr="$(realpath -- "$x")"
+  while IFS= read -r -d '' rel; do
+    n="$(realpath -m -- "$x/$rel")"; l="$(realpath -m -s -- "$x/$(dirname -- "$rel")/$(readlink -- "$x/$rel")")"
+    if [[ "$n" != "$xr" && "$n" != "$xr"/* ]] || [[ "$l" != "$x" && "$l" != "$x"/* ]]; then
+      rm -f -- "$x/$rel"; copy_res refused "$rel" "a symlink that points outside the folder"
+    fi
+  done < <(cd "$x" && find . -type l -printf '%P\0')
+  case "$kind" in
+    bundle)
+      migrate_progress apply "Fetching the branches" 60 0
+      copy_apply_bundle "$x" "$proj" "$src" "$st/manifest.json"
+      ;;
+    *)
+      secret=0
+      if [[ "$kind" == project ]]; then
+        copy_project_root "$proj" || copy_fail "The copy names a project folder that isn't allowed."
+        root="$COPY_ROOT"
+        mkdir -p "$PROJECTS_DIR" || copy_fail "Couldn't create the projects folder."
+        if [[ -d "$root" ]]; then COPY_OW_GIT=0; else COPY_OW_GIT=1; mkdir -p "$root" || copy_fail "Couldn't create $root."; fi
+      else
+        secret=1; root="$LAUNCHER_CONFIG_DIR"; COPY_OW_GIT=0
+        mkdir -p "$root" && chmod 700 "$root" || copy_fail "Couldn't create $root."
+        # the env file is merged by name below, never placed as a file
+        [[ ! -f "$x/env" ]] || { copy_env_merge "$x/env"; rm -f -- "$x/env"; }
+      fi
+      total="$(cd "$x" && find . \( -type f -o -type l \) | wc -l)"; i=0
+      while IFS= read -r -d '' rel; do
+        i=$((i + 1))
+        ((total > 0 && i % 50 == 0)) && migrate_progress apply "Placing the files ($i of $total)" $((20 + 78 * i / total)) 0
+        if [[ "$kind" == project && "$COPY_OW_GIT" == 0 ]] && [[ "/$rel/" == */.git/* ]]; then
+          copy_res refused "$rel" "the .git folder is never overwritten"; continue
+        fi
+        if [[ "$kind" == secrets ]] && ! [[ "$rel" =~ ^(secret-files/[^/]+|keystores/[^/]+\.jks|apple/AuthKey\.p8)$ ]]; then
+          copy_res refused "$rel" "not a secrets file"; continue
+        fi
+        mode="$(jq -r --arg p "$rel" '[.files[] | select(.path == $p) | .mode][0] // ""' "$st/manifest.json")"
+        copy_place "$x" "$root" "$rel" "$secret" "$mode"
+      done < <(cd "$x" && find . \( -type f -o -type l \) -printf '%P\0' | LC_ALL=C sort -z)
+      ;;
+  esac
+  migrate_progress apply "Closing the door" 99 0
+  copy_drop_key
+  rm -f -- "$file"
+  jq -Rn --arg bk "$COPY_BACKUP" --argjson kr "$(grep -q ' clauderc-copy$' "$HOME/.ssh/authorized_keys" 2>/dev/null && echo false || echo true)" '
+    [inputs | split("\t")] as $r
+    | {copied:[$r[] | select(.[0] == "copied") | .[1]],
+       skipped:[$r[] | select(.[0] == "skipped") | {path:.[1], reason:.[2]}],
+       refused:[$r[] | select(.[0] == "refused") | {path:.[1], reason:.[2]}],
+       env_added:[$r[] | select(.[0] == "env_added") | .[1]],
+       env_conflicts:[$r[] | select(.[0] == "env_conflict") | .[1]],
+       fetched:[$r[] | select(.[0] == "fetched") | .[1]],
+       backup:$bk, key_removed:$kr}' "$COPY_RES" >"$COPY_STATE/result.json" || copy_fail "Couldn't write the result."
+  MIGRATE_FINISHED=1
+  migrate_status_write apply "done" "Copied" 100 0 "" "$started" ""
+}
+
 api_main() {
   # fd 3 = the one JSON object; everything else goes to stderr.
   exec 3>&1 1>&2
@@ -6056,8 +7083,8 @@ api_main() {
   shift || true
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | set-secret-file | login-keystore | login-apple | youtube-login-start | \
-      chat-pin-set | queue-on | queue-star | chat-open | chat-history | general-rename | chat-send | chat-interrupt | chat-commands | permissions-get | permissions-set | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
-      migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | host-probe | host-add | host-keyimport | host-authorize | host-harden | drive-passphrase) ;;  # these read stdin
+      chat-pin-set | queue-on | queue-star | chat-open | chat-history | chat-watch | general-rename | chat-send | chat-interrupt | chat-commands | permissions-get | permissions-set | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
+      migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | copy-list | copy-authorize | copy-probe | copy-send | copy-apply | host-probe | host-add | host-keyimport | host-authorize | host-harden | drive-passphrase) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -6075,6 +7102,8 @@ api_main() {
     queue-off)           do_queue_off "$@" ;;
     queue-star)          do_queue_star "$@" ;;
     queue-log)           do_queue_log "$@" ;;
+    inbox)               do_inbox "$@" ;;
+    inbox-dismiss)       do_inbox_dismiss "$@" ;;
     sessions)            [[ $# -eq 0 ]] || bad_args "sessions takes no arguments"; do_sessions ;;
     general-list)        do_general_list "$@" ;;
     general-new)         do_general_new "$@" ;;
@@ -6175,11 +7204,20 @@ api_main() {
     migrate-clone)       do_migrate_clone "$@" ;;
     migrate-signout-old) do_migrate_signout_old "$@" ;;
     migrate-reboot)      do_migrate_reboot "$@" ;;
+    copy-list)           do_copy_list "$@" ;;
+    copy-keygen)         do_copy_keygen "$@" ;;
+    copy-authorize)      do_copy_authorize "$@" ;;
+    copy-probe)          do_copy_probe "$@" ;;
+    copy-send)           do_copy_send "$@" ;;
+    copy-status)         do_copy_status "$@" ;;
+    copy-apply)          do_copy_apply "$@" ;;
+    copy-cancel)         do_copy_cancel "$@" ;;
     disconnect)         do_disconnect "$@" ;;
     chat-pin-status)     do_chat_pin_status "$@" ;;
     chat-pin-set)        do_chat_pin_set "$@" ;;
     chat-open)           do_chat_open "$@" ;;
     chat-history)        do_chat_history "$@" ;;
+    chat-watch)          do_chat_watch "$@" ;;
     chat-send)           do_chat_send "$@" ;;
     chat-interrupt)      do_chat_interrupt "$@" ;;
     chat-commands)       do_chat_commands "$@" ;;

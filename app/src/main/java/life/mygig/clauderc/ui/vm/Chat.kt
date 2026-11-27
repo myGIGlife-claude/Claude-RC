@@ -14,45 +14,43 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import life.mygig.clauderc.api.ApiException
 import life.mygig.clauderc.api.AskQuestion
+import life.mygig.clauderc.api.CHAT_WATCH_MIN_SCRIPT_API
+import life.mygig.clauderc.api.Codes
 import life.mygig.clauderc.api.ChatCommand
 import life.mygig.clauderc.api.ChatData
 import life.mygig.clauderc.api.ChatLogEntry
 import life.mygig.clauderc.api.LauncherApi
-import life.mygig.clauderc.api.PinStatus
 import life.mygig.clauderc.api.Permissions
-import life.mygig.clauderc.data.ChatPinVault
 import life.mygig.clauderc.data.cached
 import life.mygig.clauderc.data.chatDraftsStore
 import life.mygig.clauderc.data.chatVoiceStore
+import life.mygig.clauderc.data.deleteOldChatPin
 import life.mygig.clauderc.ui.friendly
 import life.mygig.clauderc.ui.screens.ChatImage
 
-/** Server answers that mean the PIN is wrong or the chat locked: retrying won't help. */
-private val PIN_CODES = setOf("wrong_pin", "chat_locked", "pin_not_set")
-
 /**
- * In-app chat. The PIN is kept only in memory while the chat is unlocked, and forgotten the
- * moment the app goes to the background (lockChat, from MainActivity.onStop),
- * unless you chose "don't ask again for" a while: then it's kept encrypted in
- * ChatPinVault until that runs out or the phone restarts.
+ * In-app chat, behind App lock only (no chat PIN any more). The history poll runs only while
+ * the chat is on screen ([setOnScreen], from ChatScreen) and the app is in front ([pauseChat] /
+ * [resumeChat], from MainActivity's onStop/onStart).
  * [onClose] clears what other groups keep for the open chat (its workers, its hosts).
  */
 class ChatController(
     app: Application,
     private val api: LauncherApi,
     private val tools: VmTools,
+    private val scriptApi: () -> Int,
     private val onClose: () -> Unit,
 ) {
+    init {
+        tools.scope.launch(Dispatchers.IO) { deleteOldChatPin(app) }   // the old PIN copy: delete, never read
+    }
+
     private val _chatSession = MutableStateFlow<String?>(null)
     val chatSession = _chatSession.asStateFlow()
-    private val _chatPinNeeded = MutableStateFlow<PinStatus?>(null)
-    val chatPinNeeded = _chatPinNeeded.asStateFlow()
     private val _chatError = MutableStateFlow<String?>(null)
     val chatError = _chatError.asStateFlow()
     private val _chat = MutableStateFlow<ChatData?>(null)
     val chat = _chat.asStateFlow()
-    private var chatPin: String? = null
-    private val pinVault = ChatPinVault(app)
     /** Messages you sent that the conversation file doesn't show yet (Claude queues them while it works). */
     private val _chatCommands = MutableStateFlow<List<ChatCommand>>(emptyList())
     /** Slash commands from your skills, commands and plugins, for the suggestions above the chat box. */
@@ -88,14 +86,8 @@ class ChatController(
         _chat.value = null
         _chatCommands.value = emptyList()
         _chatError.value = null
-        if (chatPin == null) chatPin = pinVault.load()
-        if (chatPin != null) { startChatPolling(); return }
-        tools.scope.launch {
-            _chatPinNeeded.value = runCatching { api.chatPinStatus() }.getOrElse { e ->
-                _chatError.value = (e as? ApiException)?.let { friendly(it).first } ?: e.message
-                PinStatus(set = true)
-            }
-        }
+        chatPoller?.cancel()
+        updatePolling()   // a chat already on screen switches here; a new one starts when ChatScreen shows
     }
 
     /** Files Claude sent, kept in memory while the chat is open (about 24 MB). */
@@ -106,14 +98,10 @@ class ChatController(
     suspend fun chatFileBytes(path: String): ByteArray {
         fileCache.get(path)?.let { return it }
         val session = _chatSession.value ?: throw IllegalStateException("The chat is closed")
-        val pin = chatPin ?: throw IllegalStateException("The chat is locked")
-        val f = try { api.chatFile(session, pin, path) } catch (e: ApiException) { throw IllegalStateException(friendly(e).first) }
+        val f = try { api.chatFile(session, path) } catch (e: ApiException) { throw IllegalStateException(friendly(e).first) }
         // Megabytes of text: decode off the main thread.
         return withContext(Dispatchers.Default) { android.util.Base64.decode(f.data, android.util.Base64.DEFAULT) }.also { fileCache.put(path, it) }
     }
-
-    /** The chat PIN if it is in memory or kept in the vault (null = ask the owner). */
-    fun savedPin(): String? = chatPin ?: pinVault.load()
 
     fun closeChat() {
         fileCache.evictAll()
@@ -123,78 +111,63 @@ class ChatController(
         _chatPending.value = emptyList()
         _chatSession.value = null
         _chat.value = null
-        _chatPinNeeded.value = null
         onClose()
     }
 
-    /** App went to the background: forget the PIN; the chat asks again on return. */
-    /** A system screen the chat opened (file picker, Save, voice): leaving for it isn't "leaving the app". */
-    private var externalUntil = 0L
-    fun externalScreen() { externalUntil = SystemClock.elapsedRealtime() + 120_000 }
+    /** ChatScreen is composed (not hidden behind App lock or gone): the history poll may run. */
+    private var onScreen = false
+    /** The app is in front (MainActivity onStart/onStop). */
+    private var foreground = true
 
-    fun lockChat() {
-        chatPoller?.cancel()
-        if (SystemClock.elapsedRealtime() < externalUntil) return
-        if (chatPin != null && pinVault.load() != null) return
-        chatPin = null
-        if (_chatSession.value != null) { _chat.value = null; _chatPinNeeded.value = PinStatus(set = true) }
-    }
+    fun setOnScreen(shown: Boolean) { onScreen = shown; updatePolling() }
 
-    /** The server refused the PIN: drop it and ask again, even inside the picker grace window. */
-    private fun forgetChatPin() {
-        pinVault.clear()
-        chatPin = null
-        if (_chatSession.value != null) { _chat.value = null; _chatPinNeeded.value = PinStatus(set = true) }
-    }
+    /** App went to the background: stop polling (uploads carry on). */
+    fun pauseChat() { foreground = false; chatPoller?.cancel() }
 
-    /** Back in front while still unlocked: carry on polling. */
-    fun resumeChat() {
-        // The grace window covers one trip out (picker, Save), not later ones: if it ran out while we were away, lock now.
-        val expired = externalUntil != 0L && SystemClock.elapsedRealtime() >= externalUntil
-        externalUntil = 0L
-        if (expired) lockChat()
-        if (chatPin != null && _chatSession.value != null && _chatPinNeeded.value == null) startChatPolling()
-    }
+    /** Back in front: refresh at once and carry on polling, if the chat is still on screen. */
+    fun resumeChat() { foreground = true; updatePolling() }
 
-    fun setChatPin(newPin: String) = tools.scope.launch {
-        _chatError.value = null
-        try {
-            api.chatPinSet(newPin)
-            unlockChat(newPin)
-        } catch (e: ApiException) { _chatError.value = friendly(e).first }
-    }
-
-    /** [keepMinutes] > 0: don't ask again for that long, even after leaving the app. */
-    fun unlockChat(pin: String, keepMinutes: Int = 0) = tools.scope.launch {
-        val session = _chatSession.value ?: return@launch
-        _chatError.value = null
-        try {
-            api.chatOpen(session, pin)
-            chatPin = pin
-            if (keepMinutes > 0) pinVault.save(pin, keepMinutes) else pinVault.clear()
-            _chatPinNeeded.value = null
-            startChatPolling()
-        } catch (e: ApiException) { _chatError.value = friendly(e).first }
+    /** Starts the poll when the open chat is on screen and the app in front, stops it otherwise. */
+    private fun updatePolling() {
+        if (onScreen && foreground && _chatSession.value != null) {
+            if (chatPoller?.isActive != true) startChatPolling()
+        } else chatPoller?.cancel()
     }
 
     private fun startChatPolling() {
         chatPoller?.cancel()
-        val s0 = _chatSession.value; val p0 = chatPin
-        if (s0 != null && p0 != null) tools.scope.launch {
-            runCatching { api.chatCommands(s0, p0).commands }.getOrNull()?.let { if (_chatSession.value == s0) _chatCommands.value = it }
+        val s0 = _chatSession.value
+        // Opening or returning to a chat tells the queue the owner is here (it backs off that chat).
+        if (s0 != null) tools.scope.launch { runCatching { api.chatOpen(s0) } }
+        // Slash commands once per opened chat (openChat empties them), not on every return to the app.
+        if (s0 != null && _chatCommands.value.isEmpty()) tools.scope.launch {
+            runCatching { api.chatCommands(s0).commands }.getOrNull()?.let { if (_chatSession.value == s0) _chatCommands.value = it }
         }
         chatPoller = tools.scope.launch {
+            var token = ""
+            var legacy = scriptApi() < CHAT_WATCH_MIN_SCRIPT_API
             while (true) {
                 val session = _chatSession.value ?: break
-                val pin = chatPin ?: break
+                var pause = 4_000L
                 try {
-                    setChat(session, api.chatHistory(session, pin))
-                    _chatError.value = null
+                    if (legacy) {
+                        setChat(session, api.chatHistory(session))
+                        _chatError.value = null
+                    } else {
+                        val d = api.chatWatch(session, token)
+                        _chatError.value = null
+                        if (!d.retry) {
+                            token = d.token
+                            if (d.changed) setChat(session, d)
+                        }
+                        pause = watchDelayMs(d)
+                    }
                 } catch (e: ApiException) {
-                    if (e.code in PIN_CODES) { forgetChatPin(); _chatError.value = friendly(e).first; break }
                     _chatError.value = friendly(e).first
+                    // A server that doesn't know chat-watch refuses it: poll that chat the old way.
+                    if (!legacy && e.code == Codes.FORBIDDEN) legacy = true
                 }
-                delay(if (_chat.value?.busy == true) 2_000 else 4_000)
+                delay(if (legacy) (if (_chat.value?.busy == true) 2_000 else 4_000) else pause)   // old way: busy 2 s, else 4 s
             }
         }
     }
@@ -205,7 +178,6 @@ class ChatController(
      */
     fun answerAsk(qs: List<AskQuestion>, picks: List<Set<Int>>, others: List<String>) {
         val session = _chatSession.value ?: return
-        val pin = chatPin ?: return
         tools.action("Sending your answers…") {
             val keys = mutableListOf<String>()
             suspend fun flush() {
@@ -224,7 +196,7 @@ class ChatController(
                     other.isNotEmpty() -> {
                         keys += (n + 1).toString()
                         flush()
-                        api.chatSend(session, pin, other)
+                        api.chatSend(session, other)
                         delay(800)
                     }
                     else -> keys += ((picks[qi].firstOrNull() ?: 0) + 1).toString()
@@ -232,12 +204,12 @@ class ChatController(
             }
             flush()
             delay(800)
-            var h = api.chatHistory(session, pin)
+            var h = api.chatHistory(session)
             // A "Review your answers" screen after several questions: the first entry is Submit.
             if (h.screen?.contains("Submit answers") == true) {
                 api.keys(session, "Enter")
                 delay(500)
-                h = api.chatHistory(session, pin)
+                h = api.chatHistory(session)
             }
             setChat(session, h)
         }
@@ -252,27 +224,24 @@ class ChatController(
     fun clearPermissions() { _permissions.value = null; _permissionsOpen.value = false }
     fun loadPermissions() {
         val session = _chatSession.value ?: return
-        val pin = chatPin ?: return
-        tools.action("Loading permissions…") { _permissions.value = api.permissionsGet(session, pin) }
+        tools.action("Loading permissions…") { _permissions.value = api.permissionsGet(session) }
     }
     /** One change (see permissionChange); the screen shows the file as the server saved it. */
     fun changePermissions(json: String) {
         val session = _chatSession.value ?: return
-        val pin = chatPin ?: return
         tools.action("Saving…") {
-            api.permissionsSet(session, pin, json)
-            _permissions.value = api.permissionsGet(session, pin)
+            api.permissionsSet(session, json)
+            _permissions.value = api.permissionsGet(session)
         }
     }
 
     /** A slash command like /model: it never shows as a message, so it isn't tracked as pending. */
     fun chatCommand(text: String) {
         val session = _chatSession.value ?: return
-        val pin = chatPin ?: return
         tools.action("Sending $text…") {
-            api.chatSend(session, pin, text)
+            api.chatSend(session, text)
             delay(1500)
-            setChat(session, api.chatHistory(session, pin))
+            setChat(session, api.chatHistory(session))
         }
     }
 
@@ -283,7 +252,6 @@ class ChatController(
      */
     fun sendChat(text: String, onSent: () -> Unit, onFail: () -> Unit = {}) {
         val session = _chatSession.value ?: return
-        val pin = chatPin ?: return
         val items = _attachments.value
         if (AttachQueue.active(items) > 0) { tools.say("Wait until the attachments have uploaded."); return }
         val sent = items.filter { it.state == AttachState.Ready && it.path != null }
@@ -309,9 +277,9 @@ class ChatController(
             onFail()
             tools.report(e)
         }) {
-            api.chatSend(session, pin, message)
+            api.chatSend(session, message)
             delay(800)
-            setChat(session, api.chatHistory(session, pin))
+            setChat(session, api.chatHistory(session))
         }
     }
 
@@ -321,7 +289,6 @@ class ChatController(
     /** New history; drop pending messages the conversation now shows. */
     private fun setChat(session: String, c: ChatData) {
         if (session != _chatSession.value) return   // a late reply from the chat we just left
-        if (chatPin == null) return   // locked while this reply was on its way: it must not reappear
         _chat.value = c.withoutCleared(clearedAfter, session)
         // Compare loosely: Claude Code may change spacing, and the server cuts long messages at 8000 characters.
         fun norm(t: String) = t.trim().replace(Regex("\\s+"), " ").take(7000)
@@ -350,7 +317,6 @@ class ChatController(
     fun attachFiles(resolver: android.content.ContentResolver, uris: List<android.net.Uri>) {
         val session = _chatSession.value ?: return
         if (uris.isEmpty()) return
-        if (chatPin == null) { tools.say("Unlock the chat to attach files."); return }
         uploadResolver = resolver
         tools.scope.launch {
             val metas = withContext(Dispatchers.IO) { uris.map { it to ChatImage.meta(resolver, it) } }
@@ -403,21 +369,17 @@ class ChatController(
                 val b64 = withContext(Dispatchers.Default) { android.util.Base64.encodeToString(ok.bytes, android.util.Base64.NO_WRAP) }
                 var failure: ApiException? = null
                 for (attempt in 1..3) {
-                    val pin = chatPin
-                    if (pin == null) { failure = ApiException("chat_locked", "The chat is locked: unlock it, then tap to retry."); break }
                     try {
-                        val path = api.upload(session, pin, name, b64).path
+                        val path = api.upload(session, name, b64).path
                         updateAttachments { AttachQueue.finish(it, id, path) }
                         return@withPermit
                     } catch (e: ApiException) {
                         failure = e
-                        if (e.code in PIN_CODES) break
                         if (attempt < 3) delay(800)
                     }
                 }
                 val e = failure ?: return@withPermit
                 updateAttachments { AttachQueue.fail(it, id, friendly(e).first) }
-                if (e.code == "wrong_pin" || e.code == "pin_not_set") { forgetChatPin(); return@withPermit }
                 // One message for a batch that fails together (say the connection dropped), not one per photo.
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastUploadReport > 5_000) { lastUploadReport = now; tools.report(e) }
@@ -434,14 +396,13 @@ class ChatController(
 
     fun interruptChat() {
         val session = _chatSession.value ?: return
-        val pin = chatPin ?: return
-        tools.action("Stopping…") { api.chatInterrupt(session, pin) }
+        tools.action("Stopping…") { api.chatInterrupt(session) }
     }
 
     /** Answer a question in the chat's session (keys, like the log's). */
     fun chatKey(key: String) {
         val session = _chatSession.value ?: return
-        tools.action("Sending $key…") { api.keys(session, key); chatPin?.let { _chat.value = api.chatHistory(session, it) } }
+        tools.action("Sending $key…") { api.keys(session, key); _chat.value = api.chatHistory(session) }
     }
 
     /** Another server: session names repeat across servers, so nothing of the old one's chats may stay. */
@@ -450,8 +411,6 @@ class ChatController(
         closeChat()
         queuedBySession.clear()
         draftPrefs.edit { it.clear() }
-        chatPin = null
-        pinVault.clear()
     }
 }
 
@@ -462,3 +421,6 @@ internal fun ChatData.withoutCleared(marks: MutableMap<String, String>, session:
     if (i < 0) { marks.remove(session); return this }
     return copy(messages = messages.drop(i + 1))
 }
+
+/** Pause after a chat-watch answer: slots busy = 4 s; a change = 1.5 s before the next watch; nothing new = straight back. */
+internal fun watchDelayMs(d: ChatData): Long = if (d.retry) 4_000 else if (d.changed) 1_500 else 0

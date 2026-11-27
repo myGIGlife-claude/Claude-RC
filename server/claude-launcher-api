@@ -20,7 +20,7 @@ PROJECT_RE='^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$'
 REPO_RE='^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._][A-Za-z0-9._-]*$'
 OWNER_RE='^[A-Za-z0-9][A-Za-z0-9-]{0,38}$'
 WORKER_RE='^[A-Za-z][A-Za-z0-9_-]{0,29}$'
-KNOWN="status owners repos sessions new open clone-status start stop tail login-claude-start login-claude-code login-claude-cancel login-github login-aws-keys login-aws-sso-start login-gitlab login-docker self-update install-cli run claude-cmd restart login-token keys set-secret set-secret-file remove-secret login-keystore remove-keystore login-apple remove-apple youtube-login-start youtube-login-poll mcp mcp-refresh plugins disconnect chat-pin-status chat-pin-set chat-open chat-history chat-send chat-interrupt chat-commands upload chat-log doctor-start mcp-auth-start mcp-auth-finish mcp-auth-cancel repo-edit chat-file cluster worker-list worker-add worker-set worker-set-key worker-remove worker-runs worker-login-start worker-login-code worker-login-cancel cluster-config cluster-config-set cluster-session cluster-attach cluster-assign push-config push-setup push-register push-session push-test skills-update migrate-plan migrate-keygen migrate-authorize migrate-send migrate-passphrase migrate-status migrate-restore migrate-sudo-check migrate-create-user migrate-verify migrate-signout-old migrate-reboot migrate-clone host-list host-probe host-keygen host-keyimport host-add host-test host-authorize host-key-export knowledge-status knowledge-schedule knowledge-refresh host-remove host-session host-attach host-harden drive-login-start drive-login-poll drive-status drive-passphrase drive-backup drive-backup-status drive-list drive-delete drive-schedule drive-logout drive-restore general-list general-new general-open general-rename general-stop general-delete queue-status queue-on queue-off queue-star queue-log worker-rename"
+KNOWN="status owners repos sessions new open clone-status start stop tail login-claude-start login-claude-code login-claude-cancel login-github login-aws-keys login-aws-sso-start login-gitlab login-docker self-update install-cli run claude-cmd restart login-token keys set-secret set-secret-file remove-secret login-keystore remove-keystore login-apple remove-apple youtube-login-start youtube-login-poll mcp mcp-refresh plugins disconnect chat-pin-status chat-pin-set chat-open chat-history chat-watch chat-send chat-interrupt chat-commands upload chat-log doctor-start mcp-auth-start mcp-auth-finish mcp-auth-cancel repo-edit chat-file cluster worker-list worker-add worker-set worker-set-key worker-remove worker-runs worker-login-start worker-login-code worker-login-cancel cluster-config cluster-config-set cluster-session cluster-attach cluster-assign push-config push-setup push-register push-session push-test skills-update migrate-plan migrate-keygen migrate-authorize migrate-send migrate-passphrase migrate-status migrate-restore migrate-sudo-check migrate-create-user migrate-verify migrate-signout-old migrate-reboot migrate-clone copy-list copy-keygen copy-authorize copy-probe copy-send copy-status copy-apply copy-cancel host-list host-probe host-keygen host-keyimport host-add host-test host-authorize host-key-export knowledge-status knowledge-schedule knowledge-refresh host-remove host-session host-attach host-harden drive-login-start drive-login-poll drive-status drive-passphrase drive-backup drive-backup-status drive-list drive-delete drive-schedule drive-logout drive-restore general-list general-new general-open general-rename general-stop general-delete queue-status queue-on queue-off queue-star queue-log worker-rename inbox inbox-dismiss"
 GENERAL_ID_RE='^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$'
 HOST_RE='^[a-z][a-z0-9-]{0,29}$'
 TOKEN_RE='^[A-Za-z0-9._/=-]{1,200}$'
@@ -86,7 +86,7 @@ case "$sub" in
   repos)
     ((nargs == 0)) || { ((nargs == 1)) && [[ "${args[0]}" == --refresh ]]; } || deny "$sub"
     ;;
-  start | stop | chat-open | chat-history | chat-send | chat-interrupt | chat-commands | permissions-get | permissions-set | chat-file | upload)
+  start | stop | chat-open | chat-history | chat-watch | chat-send | chat-interrupt | chat-commands | permissions-get | permissions-set | chat-file | upload)
     ((nargs == 1)) && [[ "${args[0]}" =~ $PROJECT_RE ]] || deny "$sub"
     ;;
   general-list | general-new | queue-status | queue-on | queue-off)
@@ -97,6 +97,12 @@ case "$sub" in
     ;;
   queue-log)
     ((nargs == 0)) || { ((nargs == 2)) && [[ "${args[0]}" == --lines && "${args[1]}" =~ ^[0-9]{1,3}$ ]]; } || deny "$sub"
+    ;;
+  inbox)
+    ((nargs == 0)) || deny "$sub"
+    ;;
+  inbox-dismiss)   # <kind>-<12 hex id> <12 hex fp>; no PIN (hiding can't do harm)
+    ((nargs == 2)) && [[ "${args[0]}" =~ ^[a-z]{2,10}-[0-9a-f]{12}$ && "${args[1]}" =~ ^[0-9a-f]{12}$ ]] || deny "$sub"
     ;;
   general-open | general-rename | general-stop | general-delete)
     ((nargs == 1)) && [[ "${args[0]}" =~ $GENERAL_ID_RE ]] || deny "$sub"   # (rename reads the title on stdin)
@@ -156,6 +162,16 @@ case "$sub" in
     ;;
   migrate-plan | migrate-keygen | migrate-authorize | migrate-send | migrate-passphrase | migrate-status)
     ((nargs == 0)) || deny "$sub"   # (authorize and send read their values on stdin)
+    ;;
+  copy-keygen | copy-authorize | copy-probe | copy-status | copy-cancel)
+    ((nargs == 0)) || deny "$sub"   # (authorize and probe read their values on stdin)
+    ;;
+  copy-list | copy-send)   # <secrets> | <project|bundle> <project>; copy-list bundle may read "name sha" lines, copy-send the target and chosen paths
+    { ((nargs == 1)) && [[ "${args[0]}" == secrets ]]; } ||
+      { ((nargs == 2)) && [[ "${args[0]}" == project || "${args[0]}" == bundle ]] && [[ "${args[1]}" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$ ]]; } || deny "$sub"
+    ;;
+  copy-apply)
+    ((nargs == 1)) && [[ "${args[0]}" =~ ^copy-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\.tgz$ ]] || deny "$sub"   # (policy and overwrite list on stdin)
     ;;
   migrate-restore)
     ((nargs == 1)) && [[ "${args[0]}" =~ ^incoming-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\.gpg$ ]] || deny "$sub"
@@ -264,6 +280,12 @@ case "$sub" in
 esac
 
 [[ -n "$SETUP_SCRIPT" ]] || deny "$sub" internal "claude-setup.sh was not found on the server."
+
+# chat-watch streams (heartbeat newlines; a closed channel ends it), so it can't be captured like the others.
+if [[ "$sub" == chat-watch ]]; then
+  log_line "$sub" ok
+  exec "$SETUP_SCRIPT" --api "$sub" "${args[@]}" 2>/dev/null
+fi
 
 out="$("$SETUP_SCRIPT" --api "$sub" "${args[@]}" 2>/dev/null)"
 rc=$?

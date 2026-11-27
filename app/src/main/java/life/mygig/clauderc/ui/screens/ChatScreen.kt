@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -38,11 +37,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Star
 import life.mygig.clauderc.ui.components.Stop
 import androidx.compose.material3.Button
@@ -52,7 +49,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -72,21 +68,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import life.mygig.clauderc.api.ChatMessage
-import life.mygig.clauderc.api.PinStatus
 import life.mygig.clauderc.api.queueLine
 import life.mygig.clauderc.ui.LayoutKind
 import life.mygig.clauderc.ui.MainViewModel
@@ -98,11 +90,10 @@ import life.mygig.clauderc.ui.components.claudeHealth
 import life.mygig.clauderc.ui.theme.Term
 import life.mygig.clauderc.ui.theme.statusColors
 
-/** Chat with a Claude session inside the app. Behind App lock and the chat PIN. */
+/** Chat with a Claude session inside the app. Behind App lock. */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ChatScreen(vm: MainViewModel, session: String) {
-    val pinNeeded by vm.chats.chatPinNeeded.collectAsStateWithLifecycle()
     val chat by vm.chats.chat.collectAsStateWithLifecycle()
     val error by vm.chats.chatError.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
@@ -129,13 +120,14 @@ fun ChatScreen(vm: MainViewModel, session: String) {
     var showControls by remember { mutableStateOf(false) }
     val voice = remember { ChatVoice(context, voicePrefs) { vm.say(it) } }
     DisposableEffect(voice) { onDispose { voice.shutdown() } }
-    LaunchedEffect(pinNeeded) { if (pinNeeded != null) voice.pause() }   // locked: stop reading aloud
+    // The history poll runs only while this screen is shown (App lock's screen replaces it, so it stops there too).
+    DisposableEffect(Unit) { vm.chats.setOnScreen(true); onDispose { vm.chats.setOnScreen(false) } }
     LaunchedEffect(speak) { voicePrefs.edit().putBoolean("speak", speak).apply(); if (!speak) voice.pause() else voice.warmUp() }
     // With the speaker on, read Claude's new replies aloud (not the ones already there when the chat opened).
     val spoken = remember { mutableSetOf<String>() }
     var primed by remember { mutableStateOf(false) }
-    LaunchedEffect(chat?.messages, voice.ready, speak, pinNeeded) {
-        if (!voice.ready || chat == null || pinNeeded != null) return@LaunchedEffect   // still loading: wait, so old replies aren't read out
+    LaunchedEffect(chat?.messages, voice.ready, speak) {
+        if (!voice.ready || chat == null) return@LaunchedEffect   // still loading: wait, so old replies aren't read out
         val replies = chat?.messages.orEmpty().filter { it.role == "assistant" }.map { (it.id + it.text.hashCode()) to it.text }
         if (!primed) { spoken += replies.map { it.first }; primed = true; return@LaunchedEffect }
         if (!speak) { spoken += replies.map { it.first }; return@LaunchedEffect }   // heard by reading; Play still works
@@ -163,17 +155,17 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                             val health = claudeHealth(c?.busy == true, c?.waiting == true)
                             StatusDot(if (c == null) Health.OFF else health)
                             Text(
-                                when { pinNeeded != null -> "locked"; c == null -> "loading…"; c.waiting -> "needs an answer"; c.busy -> "working…"; else -> "idle" },
+                                when { c == null -> "loading…"; c.waiting -> "needs an answer"; c.busy -> "working…"; else -> "idle" },
                                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            if (starredChat && pinNeeded == null) {
+                            if (starredChat) {
                                 val q = queueStatus
                                 Text(
                                     "· " + queueLine(q?.enabled == true, q?.chats?.firstOrNull { it.session == session }, q?.limitedUntil ?: 0),
                                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            if (c != null && pinNeeded == null) {
+                            if (c != null) {
                                 // Model and mode in one quiet line; tap for everything about this chat.
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
@@ -195,7 +187,7 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                     val generalChats by vm.general.chats.collectAsStateWithLifecycle()
                     val general = session.startsWith("chat-") &&
                         (sessionList.any { it.name == session && it.general } || generalChats.any { it.session == session })
-                    val showQueue = !general && vm.queue.supported() && pinNeeded == null
+                    val showQueue = !general && vm.queue.supported()
                     if (showQueue) IconButton(onClick = { vm.queue.setStar(session, !starredChat) }) {
                         Icon(
                             Icons.Filled.Star,
@@ -203,8 +195,8 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                             tint = if (starredChat) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                         )
                     }
-                    val showWorkers = !general && (st?.scriptApi ?: 0) >= life.mygig.clauderc.api.Updates.MIN_SCRIPT_API && pinNeeded == null
-                    chat?.takeIf { pinNeeded == null }?.let { c ->
+                    val showWorkers = !general && (st?.scriptApi ?: 0) >= life.mygig.clauderc.api.Updates.MIN_SCRIPT_API
+                    chat?.let { c ->
                         if (showWorkers) IconButton(onClick = { showCluster = true; vm.team.loadChatWorkers(); vm.webHosts.loadChatHosts() }) {
                             Icon(Icons.Filled.Hub, contentDescription = "Workers and servers for this chat", tint = MaterialTheme.colorScheme.primary)
                         }
@@ -221,7 +213,6 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                     if (showCluster) ChatClusterSheet(vm, onClose = { showCluster = false })
                     val permsOpen by vm.chats.permissionsOpen.collectAsStateWithLifecycle()
                     if (permsOpen) PermissionsSheet(vm, onClose = { vm.chats.clearPermissions() })
-                    Icon(Icons.Filled.Lock, contentDescription = "PIN-protected", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 val notice by vm.chatNotice.collectAsStateWithLifecycle()
                 notice?.let { n ->
@@ -229,18 +220,13 @@ fun ChatScreen(vm: MainViewModel, session: String) {
                         Text(n, color = MaterialTheme.colorScheme.inverseOnSurface, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
                     }
                 }
-                val need = pinNeeded
-                if (need != null) {
-                    PinGate(vm, need, error)
-                } else {
-                    androidx.compose.runtime.key(vm.chats.chatSession.collectAsStateWithLifecycle().value) { Messages(vm, voice, chat?.messages.orEmpty(), pending, Modifier.weight(1f)) }
-                    chat?.takeIf { it.waiting }?.let { c -> c.ask?.takeIf { it.isNotEmpty() }?.let { AskCard(vm, it, busy == null) } ?: PromptCard(vm, c.screen.orEmpty(), busy == null) }
-                    error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp)) }
-                    Composer(
-                        vm, working = chat?.busy == true, enabled = busy == null && chat != null,
-                        onPhotos = { launchPhotos() }, onFiles = { pickFiles.launch(arrayOf("*/*")) },
-                    )
-                }
+                androidx.compose.runtime.key(vm.chats.chatSession.collectAsStateWithLifecycle().value) { Messages(vm, voice, chat?.messages.orEmpty(), pending, Modifier.weight(1f)) }
+                chat?.takeIf { it.waiting }?.let { c -> c.ask?.takeIf { it.isNotEmpty() }?.let { AskCard(vm, it, busy == null) } ?: PromptCard(vm, c.screen.orEmpty(), busy == null) }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp)) }
+                Composer(
+                    vm, working = chat?.busy == true, enabled = busy == null && chat != null,
+                    onPhotos = { launchPhotos() }, onFiles = { pickFiles.launch(arrayOf("*/*")) },
+                )
             }
           }
         }
@@ -438,8 +424,7 @@ private fun Composer(vm: MainViewModel, working: Boolean, enabled: Boolean, onPh
         AttachmentStrip(attachments, onRemove = { vm.chats.removeAttachment(it) }, onRetry = { vm.chats.retryAttachment(it) })
         Surface(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
             Row(Modifier.padding(start = 4.dp, end = 5.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                // externalScreen first: leaving for a picker mustn't count as leaving the app (app lock / chat PIN grace).
-                AttachButton(enabled, onPhotos = { vm.chats.externalScreen(); onPhotos() }, onFiles = { vm.chats.externalScreen(); onFiles() })
+                AttachButton(enabled, onPhotos = onPhotos, onFiles = onFiles)
                 OutlinedTextField(
                     value = field, onValueChange = { field = it }, visualTransformation = GhostText(ghost, ghostColor), placeholder = { Text("Message Claude") },
                     modifier = Modifier.weight(1f), maxLines = 6, shape = RoundedCornerShape(22.dp),
@@ -481,56 +466,3 @@ private class GhostText(val ghost: String, val color: androidx.compose.ui.graphi
     }
 }
 
-/** Enter the chat PIN, or create one the first time. The app never stores or shows it. */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-@Composable
-private fun PinGate(vm: MainViewModel, status: PinStatus, error: String?) {
-    var pin by remember { mutableStateOf("") }
-    var again by remember { mutableStateOf("") }
-    var keep by rememberSaveable { mutableStateOf(0) }
-    val setup = !status.set
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.padding(top = 24.dp).height(48.dp))
-        Text(if (setup) "Create a chat PIN" else "Enter your chat PIN", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            if (setup) "6 to 12 digits. It's kept only on your server, in ~/.config/claude-launcher/chat-pin, which is where you can find it if you forget it. This app never shows it."
-            else "Asked when you open a chat or come back to the app. Forgot it? It's in ~/.config/claude-launcher/chat-pin on your server.",
-            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        val digits = { s: String -> s.filter(Char::isDigit).take(12) }
-        OutlinedTextField(
-            value = pin, onValueChange = { pin = digits(it) }, label = { Text("PIN") }, singleLine = true,
-            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-        )
-        if (setup) {
-            OutlinedTextField(
-                value = again, onValueChange = { again = digits(it) }, label = { Text("PIN again") }, singleLine = true,
-                visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
-                isError = again.isNotEmpty() && again != pin,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-            )
-        }
-        if (!setup) {
-            Text("Don't ask again for", style = MaterialTheme.typography.labelLarge)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(0 to "Ask always", 30 to "30 min", 60 to "1 h", 240 to "4 h").forEach { (m, label) ->
-                    FilterChip(selected = keep == m, onClick = { keep = m }, label = { Text(label) })
-                }
-            }
-            if (keep > 0) {
-                Text("Restarting the phone asks again. Until then the PIN is kept encrypted on this phone.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-        Button(
-            onClick = {
-                val p = pin
-                if (setup) vm.chats.setChatPin(p) else vm.chats.unlockChat(p, keep)
-                pin = ""; again = ""
-            },
-            enabled = pin.length >= 6 && (!setup || again == pin),
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-        ) { Text(if (setup) "Create PIN and open chat" else "Unlock chat") }
-    }
-}

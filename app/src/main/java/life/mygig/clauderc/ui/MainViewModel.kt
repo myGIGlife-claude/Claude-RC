@@ -54,6 +54,7 @@ import life.mygig.clauderc.ssh.SshRunner
 import life.mygig.clauderc.ui.vm.AddServerController
 import life.mygig.clauderc.ui.vm.ChatController
 import life.mygig.clauderc.ui.vm.ConnectionsController
+import life.mygig.clauderc.ui.vm.CopyController
 import life.mygig.clauderc.ui.vm.DriveController
 import life.mygig.clauderc.ui.vm.HostsController
 import life.mygig.clauderc.ui.vm.KnowledgeController
@@ -136,12 +137,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Google Drive backup. */
     val drive = DriveController(api, tools)
-    /** In-app chat: PIN, polling, pending messages, drafts, files. */
-    val chats: ChatController = ChatController(app, api, tools) { team.clearChat(); webHosts.clearChatHosts() }
+    /** In-app chat: polling, pending messages, drafts, files. */
+    val chats: ChatController = ChatController(app, api, tools, { _status.value?.scriptApi ?: 0 }) { team.clearChat(); webHosts.clearChatHosts() }
     /** General chats (not tied to a repo): the Sessions screen's General chat tab. */
     val general = GeneralChatsController(api, tools, { _status.value?.scriptApi }, { chats.openChat(it) }) { refreshSessions() }
     /** Auto-continue queue: kill switch, stars, log (docs/queue-design.md). */
-    val queue = QueueController(api, tools, { _status.value?.scriptApi ?: 0 }, { chats.savedPin() }) { edit -> _sessions.value = edit(_sessions.value) }
+    val queue = QueueController(api, tools, { _status.value?.scriptApi ?: 0 }) { edit -> _sessions.value = edit(_sessions.value) }
+    /** Settings › Connection › Copy: files and secrets from one server to another (docs/copy-design.md). */
+    val copy = CopyController(tools, store) { apiFor(it) }
     /** Team (extra Claude accounts), cluster settings and the open chat's workers. */
     val team: TeamController = TeamController(api, store, tools, { apiFor(it) }) { chats.chatSession.value }
     /** Hosts: web servers chats can work on (docs/hosts-design.md). */
@@ -245,7 +248,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         viewModelScope.launch {
-            // Only once unlocked: App lock first, and a chat still asks for its PIN.
+            // Only once unlocked: App lock is what protects the chats.
             combine(unlocked, widgetTap) { u, t -> t.takeIf { u } }.filterNotNull().collect { t ->
                 widgetTap.value = null
                 handleWidgetTap(t)
@@ -842,7 +845,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         connections.clearServerState()
         general.clearServerState()
         queue.clearServerState()
-        chats.clearServerState()   // chat log, open chat, queued messages, drafts, PIN (session names repeat across servers)
+        chats.clearServerState()   // chat log, open chat, queued messages, drafts (session names repeat across servers)
+        SshRunner.closeAll()   // a removed or changed server's connection must not linger
     }
 
     fun acceptHostKey(accept: Boolean) {
@@ -894,6 +898,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** What a server is for: stored on the phone only, no connection needed. */
     fun setServerPurpose(id: String, text: String) = viewModelScope.launch { store.setPurpose(id, text) }
 
+    /**
+     * Purpose and Tailscale address, both phone-only. A changed address is part of the connection key, so the
+     * next call opens a fresh connection that tries it; the old one is swept once idle.
+     */
+    fun setServerDetails(id: String, purpose: String, tailnetHost: String) = viewModelScope.launch {
+        store.setPurpose(id, purpose)
+        store.setTailnetHost(id, tailnetHost)
+    }
+
     fun switchServer(id: String) = viewModelScope.launch {
         if (id == store.current().activeId) return@launch
         store.switchServer(id)
@@ -922,6 +935,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         } catch (e: Exception) {
             say("Couldn't create a new key: ${e.message}")
         }
+    }
+
+    /** After a backup restore: show the restored phone key and connect to the restored server (a failure shows the usual plain error; the data stays). */
+    fun afterRestore() = viewModelScope.launch {
+        runCatching { _publicKey.value = withContext(Dispatchers.Default) { keys.publicKey() } }
+        if (store.current().isConfigured) refreshStatus()
     }
 
     fun setAppLock(on: Boolean) = viewModelScope.launch { store.setAppLock(on) }

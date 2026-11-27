@@ -5,6 +5,7 @@ import com.jcraft.jsch.HostKey
 import com.jcraft.jsch.HostKeyRepository
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.JSchException
+import com.jcraft.jsch.Session
 import com.jcraft.jsch.UIKeyboardInteractive
 import com.jcraft.jsch.UserInfo
 import java.io.ByteArrayOutputStream
@@ -13,6 +14,9 @@ import java.security.MessageDigest
 import java.util.Base64
 import java.util.Timer
 import java.util.TimerTask
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 data class ServerConfig(
@@ -22,7 +26,20 @@ data class ServerConfig(
     /** Pinned host key: algorithm name and base64 wire blob. */
     val hostKeyType: String,
     val hostKeyBlob: String,
+    /** Optional second address of the same server (its Tailscale address), tried first; "" = none. */
+    val tailnetHost: String = "",
 )
+
+/**
+ * Which addresses [SshRunner] dials for [cfg], in order. With a Tailscale address it goes first and [ServerConfig.host]
+ * is the fallback, unless [remembered] (the address that worked last, for a few minutes) is the normal host: then
+ * straight there. The same host key is pinned for every address.
+ */
+internal fun addressesToTry(cfg: ServerConfig, remembered: String?): List<String> {
+    val alt = cfg.tailnetHost.trim()
+    if (alt.isEmpty() || alt.equals(cfg.host, ignoreCase = true)) return listOf(cfg.host)
+    return if (remembered == cfg.host) listOf(cfg.host) else listOf(alt, cfg.host)
+}
 
 data class HostKeyInfo(val type: String, val blob: String) {
     val fingerprint: String get() = fingerprintOf(Base64.getDecoder().decode(blob))
@@ -53,9 +70,41 @@ fun passwordConnectFailure(msg: String, hostKeyMismatch: Boolean, host: String, 
 }
 
 /**
- * One short SSH exec per call: connect, run one allowlisted action, read its
- * output, disconnect. The server's forced command ignores anything but the
- * action string, so this never gets (or asks for) a shell.
+ * What a cached connection belongs to: another server, pinned host key or phone key means another
+ * connection, so a re-pinned key or a regenerated phone key is always checked by a fresh handshake.
+ */
+internal data class SshConnectionKey(
+    val host: String,
+    val port: Int,
+    val user: String,
+    val hostKeyType: String,
+    val hostKeyBlob: String,
+    /** Base64 of the phone's public key blob (a ByteArray would compare by identity). */
+    val identityBlob: String,
+    /** Part of the server's settings: editing it starts a fresh connection (and forgets which address worked). */
+    val tailnetHost: String = "",
+) {
+    companion object {
+        fun of(config: ServerConfig, identity: Ed25519Identity) = SshConnectionKey(
+            config.host, config.port, config.user, config.hostKeyType, config.hostKeyBlob,
+            Base64.getEncoder().encodeToString(identity.publicBlob), config.tailnetHost.trim(),
+        )
+    }
+}
+
+/**
+ * Whether a channel that failed to open may be tried once more on a fresh connection: only when the
+ * connection was a reused one, only once, and only for JSch's channel-open failures (sent before the
+ * exec request). "channel request: timeout" / "failed to send channel request" mean the command may
+ * already run on the server, so they never retry.
+ */
+internal fun mayRetryOnFreshConnection(reused: Boolean, attempt: Int, message: String?): Boolean =
+    reused && attempt == 0 && (message == "session is down" || message == "channel is not opened.")
+
+/**
+ * One SSH exec channel per call on a cached connection: run one allowlisted action,
+ * read its output, close the channel. The server's forced command ignores anything
+ * but the action string, so this never gets (or asks for) a shell.
  */
 object SshRunner {
 
@@ -104,6 +153,11 @@ object SshRunner {
      * Run [command] (becomes SSH_ORIGINAL_COMMAND on the server). [stdin] is
      * written and closed for actions that take secrets, so they never appear in
      * the command line.
+     *
+     * Each call is its own exec channel on a shared, cached connection (one per
+     * [SshConnectionKey]), so parallel screens don't each pay a TCP+SSH handshake.
+     * [timeoutMs] counts from when the connection is ready and covers waiting for
+     * a free channel plus the answer.
      */
     fun exec(
         config: ServerConfig,
@@ -115,12 +169,210 @@ object SshRunner {
         if (config.host.isBlank() || config.user.isBlank() || config.hostKeyBlob.isBlank()) {
             throw SshFailure(SshFailure.Kind.NOT_CONFIGURED, "Server settings are incomplete")
         }
+        val key = SshConnectionKey.of(config, identity)
+        var deadline = 0L
+        var attempt = 0
+        while (true) {
+            val (pooled, reused) = lease(key, config, identity)
+            try {
+                if (deadline == 0L) deadline = System.currentTimeMillis() + timeoutMs
+                val wait = deadline - System.currentTimeMillis()
+                if (wait <= 0 || !pooled.slots.tryAcquire(wait, TimeUnit.MILLISECONDS)) {
+                    throw SshFailure(SshFailure.Kind.TIMEOUT, "The server is busy with other calls. Try again.")
+                }
+                try {
+                    val openTimeout = if (reused) REUSED_OPEN_TIMEOUT_MS else CONNECT_TIMEOUT_MS
+                    return runChannel(pooled.session, command, stdin, openTimeout, deadline)
+                } catch (e: ChannelOpenFailed) {
+                    // Nothing reached the server's command yet. A reused connection that can't open a
+                    // channel is likely dead (network change, server restart): stop handing it out.
+                    if (reused) retire(key, pooled)
+                    if (!mayRetryOnFreshConnection(reused, attempt, e.cause.message)) throw e.cause
+                    attempt++
+                } finally {
+                    pooled.slots.release()
+                }
+            } finally {
+                release(pooled)
+            }
+        }
+    }
+
+    /**
+     * The phone changed networks: stop handing out cached connections (their socket may be on the old network)
+     * so the next call opens a fresh one. Calls still running on them finish or fail on their own.
+     */
+    fun retireAll() {
+        val idle = synchronized(poolLock) {
+            generation++   // a connect in progress may be on the old network too: use it for its own call only
+            workedAt.clear()   // on another network the other address may be the quick one
+            pool.entries.toList().filter { (k, p) -> retireLocked(k, p) }.map { it.value }
+        }
+        if (idle.isEmpty()) return
+        Thread { idle.forEach { runCatching { it.session.disconnect() } } }.apply { isDaemon = true; start() }
+    }
+
+    /** Close every cached connection (server switched, removed or changed). Calls still on them fail. */
+    fun closeAll() {
+        val all = synchronized(poolLock) {
+            generation++
+            workedAt.clear()
+            val list = pool.values.toList()
+            pool.clear()
+            list.forEach { it.retired = true; it.closed = true }
+            stopSweeperIfEmpty()
+            list
+        }
+        if (all.isEmpty()) return
+        // Off the caller's thread: the UI calls this, and disconnect writes to the socket.
+        Thread { all.forEach { runCatching { it.session.disconnect() } } }.apply { isDaemon = true; start() }
+    }
+
+    private const val MAX_CHANNELS = 8   // server sshd MaxSessions is 10
+    private const val REUSED_OPEN_TIMEOUT_MS = 10_000   // a dead cached connection costs this before the retry
+    private const val IDLE_CLOSE_MS = 60_000L
+    private const val KEEPALIVE_MS = 15_000
+    private const val KEEPALIVE_COUNT = 2
+
+    private class Pooled(val session: Session) {
+        val slots = Semaphore(MAX_CHANNELS)
+        // Guarded by poolLock.
+        var users = 0
+        var lastUsed = System.currentTimeMillis()
+        var retired = false
+        var closed = false
+    }
+
+    private data class Lease(val pooled: Pooled, val reused: Boolean)
+
+    /** Thrown before the command reached the server; carries JSch's own exception. */
+    private class ChannelOpenFailed(override val cause: JSchException) : Exception(cause)
+
+    private val poolLock = Any()
+    private val pool = HashMap<SshConnectionKey, Pooled>()
+    private var generation = 0
+    private var sweeper: Timer? = null
+    // One connect at a time per key, so parallel callers share it instead of each opening one.
+    private val connectLocks = ConcurrentHashMap<SshConnectionKey, Any>()
+
+    private const val TAILNET_CONNECT_TIMEOUT_MS = 4_000
+    private const val REMEMBER_ADDRESS_MS = 5 * 60_000L
+    private data class Worked(val address: String, val at: Long)
+    // Guarded by poolLock: which address of a server connected last, so the next connect goes straight there.
+    private val workedAt = HashMap<SshConnectionKey, Worked>()
+
+    private fun rememberedAddress(key: SshConnectionKey): String? = synchronized(poolLock) {
+        workedAt[key]?.takeIf { System.currentTimeMillis() - it.at < REMEMBER_ADDRESS_MS }?.address
+    }
+
+    private fun lease(key: SshConnectionKey, config: ServerConfig, identity: Ed25519Identity): Lease {
+        synchronized(connectLocks.computeIfAbsent(key) { Any() }) {
+            var gen = 0
+            var stale: Pooled? = null
+            synchronized(poolLock) {
+                val p = pool[key]
+                val now = System.currentTimeMillis()
+                // Idle too long counts as stale too: the sweeper may not have run (phone asleep).
+                if (p != null && !p.retired && p.session.isConnected && (p.users > 0 || now - p.lastUsed < IDLE_CLOSE_MS)) {
+                    p.users++
+                    p.lastUsed = now
+                    return Lease(p, reused = true)
+                }
+                if (p != null && retireLocked(key, p)) stale = p
+                gen = generation
+            }
+            stale?.let { runCatching { it.session.disconnect() } }
+            val remembered = rememberedAddress(key)
+            val (session, address) = connect(config, identity, remembered)
+            val fresh = Pooled(session)
+            synchronized(poolLock) {
+                fresh.users++
+                // closeAll ran during the connect: use it for this call only (and don't remember its address).
+                if (gen == generation) {
+                    pool[key] = fresh; startSweeper()
+                    // Only a change restarts the clock, so a skipped Tailscale address is tried again after a while.
+                    if (address != remembered) workedAt[key] = Worked(address, System.currentTimeMillis())
+                } else fresh.retired = true
+            }
+            return Lease(fresh, reused = false)
+        }
+    }
+
+    private fun release(p: Pooled) {
+        val close = synchronized(poolLock) {
+            p.users--
+            p.lastUsed = System.currentTimeMillis()
+            (p.retired && p.users == 0 && !p.closed).also { if (it) p.closed = true }
+        }
+        if (close) runCatching { p.session.disconnect() }
+    }
+
+    private fun retire(key: SshConnectionKey, p: Pooled) {
+        if (synchronized(poolLock) { retireLocked(key, p) }) runCatching { p.session.disconnect() }
+    }
+
+    /** Stops handing [p] out; true if the caller must disconnect it now (no call is using it). */
+    private fun retireLocked(key: SshConnectionKey, p: Pooled): Boolean {
+        p.retired = true
+        if (pool[key] === p) pool.remove(key)
+        stopSweeperIfEmpty()
+        return (p.users == 0 && !p.closed).also { if (it) p.closed = true }
+    }
+
+    private fun startSweeper() {
+        if (sweeper != null) return
+        sweeper = Timer("ssh-idle", true).apply {
+            schedule(object : TimerTask() { override fun run() = sweepIdle() }, KEEPALIVE_MS.toLong(), KEEPALIVE_MS.toLong())
+        }
+    }
+
+    private fun stopSweeperIfEmpty() {
+        if (pool.isEmpty()) { sweeper?.cancel(); sweeper = null }
+    }
+
+    private fun sweepIdle() {
+        val idle = synchronized(poolLock) {
+            val now = System.currentTimeMillis()
+            pool.entries.map { it.key to it.value }
+                .filter { (_, p) -> p.users == 0 && (now - p.lastUsed >= IDLE_CLOSE_MS || !p.session.isConnected) }
+                .filter { (k, p) -> retireLocked(k, p) }
+                .map { it.second }
+                .also { stopSweeperIfEmpty() }
+        }
+        idle.forEach { runCatching { it.session.disconnect() } }
+    }
+
+    /**
+     * A connected, authenticated session to [config] and the address it used. Each address in [addressesToTry]
+     * is dialled in turn (a Tailscale address with a short timeout, the last one with the normal one); any failure
+     * moves on to the next EXCEPT a host-key mismatch, which stops at once. Every address must show the same
+     * pinned key. When all fail, the normal host's error is the one thrown.
+     */
+    private fun connect(config: ServerConfig, identity: Ed25519Identity, remembered: String?): Pair<Session, String> {
+        val addresses = addressesToTry(config, remembered)
+        var last: SshFailure? = null
+        for ((i, address) in addresses.withIndex()) {
+            val isLast = i == addresses.lastIndex
+            try {
+                return connectTo(config, address, identity, if (isLast) CONNECT_TIMEOUT_MS else TAILNET_CONNECT_TIMEOUT_MS) to address
+            } catch (e: SshFailure) {
+                if (e.kind == SshFailure.Kind.HOST_KEY_CHANGED || isLast) throw e
+                last = e
+            }
+        }
+        throw last ?: SshFailure(SshFailure.Kind.NOT_CONFIGURED, "Server settings are incomplete")
+    }
+
+    /** One connect to [address] (the server's host or its Tailscale address) with the pinned host key; same checks and wording as ever. */
+    private fun connectTo(config: ServerConfig, address: String, identity: Ed25519Identity, connectTimeoutMs: Int): Session {
         val jsch = JSch()
         jsch.addIdentity("clauderc", identity.privatePem(), identity.publicBlob, null)
-        val pinned = PinnedRepository(config.host, config.port, config.hostKeyType, config.hostKeyBlob)
+        // Same pinned key whichever address is dialled: check() compares the key bytes only.
+        val pinned = PinnedRepository(address, config.port, config.hostKeyType, config.hostKeyBlob)
         jsch.hostKeyRepository = pinned
+        val viaTailnet = address != config.host
 
-        val session = jsch.getSession(config.user, config.host, config.port)
+        val session = jsch.getSession(config.user, address, config.port)
         session.setConfig("StrictHostKeyChecking", "yes")
         session.setConfig("PreferredAuthentications", "publickey")
         // Only accept the pinned key type, so the server can't pick another one.
@@ -129,47 +381,68 @@ object SshRunner {
             if (config.hostKeyType == "ssh-rsa") "rsa-sha2-512,rsa-sha2-256" else config.hostKeyType,
         )
         session.userInfo = SilentUserInfo
-        session.timeout = CONNECT_TIMEOUT_MS
+        // Chat histories are large, repetitive JSON: compress when the server agrees (after auth, OpenSSH's default).
+        session.setConfig("compression.s2c", "zlib@openssh.com,none")
+        session.setConfig("compression.c2s", "zlib@openssh.com,none")
+        // This is also the socket read timeout once connected (JSch's setTimeout): each quiet 15 s sends a
+        // keepalive, and two unanswered in a row drop the session, so a dead link is noticed in ~45 s.
+        session.setServerAliveInterval(KEEPALIVE_MS)
+        session.setServerAliveCountMax(KEEPALIVE_COUNT)
+        session.setDaemonThread(true)
 
         try {
-            try {
-                session.connect(CONNECT_TIMEOUT_MS)
-            } catch (e: JSchException) {
-                val msg = e.message.orEmpty()
-                when {
-                    pinned.mismatch -> throw SshFailure(
+            session.connect(connectTimeoutMs)
+            return session
+        } catch (e: JSchException) {
+            session.disconnect()
+            val msg = e.message.orEmpty()
+            when {
+                pinned.mismatch -> throw SshFailure(
+                    SshFailure.Kind.HOST_KEY_CHANGED,
+                    if (viaTailnet) "The host key at the Tailscale address $address is not the pinned one. Refusing to connect."
+                    else "The server's host key has changed. Refusing to connect.",
+                    e,
+                )
+                msg.contains("Auth fail", true) || msg.contains("auth cancel", true) ->
+                    throw SshFailure(
+                        SshFailure.Kind.AUTH_FAILED,
+                        "The server didn't accept this phone's key.",
+                        e,
+                    )
+                msg.contains("Algorithm negotiation fail", true) && msg.contains("server_host_key", true) ->
+                    throw SshFailure(
                         SshFailure.Kind.HOST_KEY_CHANGED,
-                        "The server's host key has changed. Refusing to connect.",
+                        "The server no longer offers the pinned host key type.",
                         e,
                     )
-                    msg.contains("Auth fail", true) || msg.contains("auth cancel", true) ->
-                        throw SshFailure(
-                            SshFailure.Kind.AUTH_FAILED,
-                            "The server didn't accept this phone's key.",
-                            e,
-                        )
-                    msg.contains("Algorithm negotiation fail", true) && msg.contains("server_host_key", true) ->
-                        throw SshFailure(
-                            SshFailure.Kind.HOST_KEY_CHANGED,
-                            "The server no longer offers the pinned host key type.",
-                            e,
-                        )
-                    msg.contains("timeout", true) ->
-                        throw SshFailure(SshFailure.Kind.TIMEOUT, "Timed out connecting to ${config.host}", e)
-                    else -> throw SshFailure(
-                        SshFailure.Kind.NETWORK,
-                        "Could not connect to ${config.host}:${config.port} ($msg)",
-                        e,
-                    )
-                }
+                msg.contains("timeout", true) ->
+                    throw SshFailure(SshFailure.Kind.TIMEOUT, "Timed out connecting to $address", e)
+                else -> throw SshFailure(
+                    SshFailure.Kind.NETWORK,
+                    "Could not connect to $address:${config.port} ($msg)",
+                    e,
+                )
             }
+        }
+    }
 
-            val channel = session.openChannel("exec") as ChannelExec
+    /** One exec channel on [session]: command, stdin then EOF, output to EOF. Only ever closes the channel. */
+    private fun runChannel(session: Session, command: String, stdin: String?, openTimeoutMs: Int, deadline: Long): String {
+        val channel = try {
+            session.openChannel("exec") as? ChannelExec
+        } catch (e: JSchException) {
+            throw ChannelOpenFailed(e)
+        } ?: throw ChannelOpenFailed(JSchException("session is down"))
+        try {
             channel.setCommand(command)
             channel.setPty(false)
             val out = channel.inputStream
             val input = channel.outputStream
-            channel.connect(CONNECT_TIMEOUT_MS)
+            try {
+                channel.connect(openTimeoutMs)
+            } catch (e: JSchException) {
+                throw ChannelOpenFailed(e)
+            }
             try {
                 if (stdin != null) input.write((stdin + "\n").toByteArray())
                 input.flush()
@@ -180,14 +453,14 @@ object SshRunner {
             // Blocking reads, not available()+sleep polling: JSch's pipe writer only
             // wakes when a reader finds it empty, else after 1 s, so polling capped
             // answers at ~32 KB/s (a 3 MB file took over 2 minutes).
-            // On timeout the watchdog closes the channel, which ends the read.
+            // On timeout the watchdog closes the channel (never the shared session), which ends the read.
             val buf = ByteArrayOutputStream()
             val chunk = ByteArray(65536)
             val timedOut = AtomicBoolean(false)
             val watchdog = Timer(true)
             watchdog.schedule(object : TimerTask() {
                 override fun run() { timedOut.set(true); channel.disconnect() }
-            }, timeoutMs)
+            }, maxOf(1L, deadline - System.currentTimeMillis()))
             try {
                 while (true) {
                     val n = out.read(chunk)
@@ -200,10 +473,9 @@ object SshRunner {
                 watchdog.cancel()
             }
             if (timedOut.get()) throw SshFailure(SshFailure.Kind.TIMEOUT, "The server took too long to answer")
-            channel.disconnect()
             return buf.toString(Charsets.UTF_8.name())
         } finally {
-            session.disconnect()
+            channel.disconnect()
         }
     }
 

@@ -159,6 +159,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                     ) { Text("Connect with a password") }
                 }
             }
+            AppBackupSection(vm, restoreOnly = true)
             SectionLabel("Or by hand")
             Step(1, "On your Linux server, open a terminal as the user Claude should run as.")
             Step(2, "Run this one command. It installs the cLaudeRC scripts and session auto-restore (asks for sudo once) and lets this phone in.")
@@ -303,6 +304,9 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                                 } else if (srv.id == s.activeId) {
                                     Text("No purpose set", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
                                 }
+                                if (srv.tailnetHost.isNotBlank()) {
+                                    Text("Tailscale ${srv.tailnetHost}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
                             TextButton(onClick = { editPurpose = srv }) { Text("Edit") }
                             if (srv.id != s.activeId) TextButton(onClick = { vm.switchServer(srv.id) }) { Text("Use") }
@@ -321,6 +325,20 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                         Text("Move everything from one server to another", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     OutlinedButton(onClick = { vm.migrateOpen() }) { Text("Open") }
+                }
+            }
+
+            // Copy needs two servers in the app (and script API 58 on both: the screen checks that).
+            if (s.servers.count { it.isConfigured } >= 2) {
+                SectionLabel("Copy")
+                CardBox {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Copy between servers")
+                            Text("Send a project, keys or unpushed work from one server to another", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        OutlinedButton(onClick = { vm.copy.open() }) { Text("Open") }
+                    }
                 }
             }
         }
@@ -370,7 +388,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 Column(Modifier.weight(1f)) {
                     Text("App lock")
                     Text(
-                        "Required: to open the app, Settings and Run a command. Chat also needs its own PIN.",
+                        "Required: to open the app, Settings and Run a command. It also protects your chats.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -450,7 +468,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
     editPurpose?.let { srv ->
         PurposeDialog(
             srv,
-            onSave = { text -> editPurpose = null; vm.setServerPurpose(srv.id, text) },
+            onSave = { text, tailnet -> editPurpose = null; vm.setServerDetails(srv.id, text, tailnet) },
             onDismiss = { editPurpose = null },
         )
     }

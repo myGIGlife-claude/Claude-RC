@@ -10,6 +10,12 @@ import kotlinx.serialization.Serializable
 /** Queue actions arrived with server script API 53; older servers get no queue UI. */
 const val QUEUE_MIN_SCRIPT_API = 53
 
+/** The copy-* actions (Copy between servers, docs/copy-design.md) arrived with server script API 58; both servers need it. */
+const val COPY_MIN_SCRIPT_API = 58
+
+/** chat-watch (long-poll for the open chat) arrived with server script API 57; older servers are polled with chat-history. */
+const val CHAT_WATCH_MIN_SCRIPT_API = 57
+
 /** Usage of the owner's account as the server last saw it (null = unknown). */
 @Serializable
 data class QueueUsage(

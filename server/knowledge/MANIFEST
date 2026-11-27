@@ -1,5 +1,6 @@
 197f0d69c6b085513a453f3ccb955405fb35db9b9faf6e39ec5dbd7f218e0a27  VERSION
-9ec15dd8b74230159178caea29447c93925f61ea67791c7b91b5f85954931fa9  rules/rc-knowledge.md
+5e523c07f2b33c49a1f72d22432d6fb2f84fcb7e025aca67256d343e40126b34  rules/rc-knowledge.md
+8cb56e5de5b9403d03c56c41f6c6087319d728ab56156f2cf55002d71ec74205  skills/rc-agent-workflow/SKILL.md
 f4b48b3d49a7cf625b2999e1d0d6a627a26404a06a94e40e907211cbc77184f0  skills/rc-american-english-writing/SKILL.md
 6c42350ff73a20f8579d0b86bc78837c4984284eac85138d7961ef80a4a441c3  skills/rc-american-english-writing/references/sources.md
 139631bfeb7fa369adf67198e7d26db35c70857c05e4d3f61efff3937497f808  skills/rc-american-english-writing/references/ui-copy.md
@@ -7,6 +8,7 @@ bf867472318da87073a1d8724e7de887eb8060cd2c3c651932a916061ec67aa6  skills/rc-andr
 76c811f893009c9009050e6e0bfcfd3581113d00909393e4873b5f80c8d7b099  skills/rc-android/references/platform-and-policy.md
 116114f7598841a0ba4e243a595de44ba5fb65d5880f311f857007611a74a0d9  skills/rc-architecture-systems/SKILL.md
 50ce43e976f7140830755c345035e510f1b58ca913d6893028a1faf227e3d34b  skills/rc-architecture-systems/references/decisions.md
+ea2075fda3a06b9615c8f616c24f3efd935ca66048f7d5dfc021467530a2a124  skills/rc-audit-and-verify/SKILL.md
 d0472c6e318c5f23523177c2408f47e2e615a2d9eb2a82c712375ef7e4f2bfb7  skills/rc-c-cpp/SKILL.md
 8ea93d05195ac554e1749a7264223636bdc0446a2c56fb9e176c6f382b44b6c8  skills/rc-c-cpp/references/support.md
 7e28509e3b9b4622f629f4c7ec46b94cdd4b4d02815cd1c02f530e01e439214a  skills/rc-cloud-platforms/SKILL.md
@@ -46,6 +48,7 @@ df531a2d2c2e663ba01b1e20fb4edd897bfa60be1a14f5baec8e940126f9912e  skills/rc-ohio
 54e92a9b1c24455ded5d48b2313daa9dc905e7f2396431441b97c2863bb92c45  skills/rc-php/references/versions.md
 5cd6483dfb7b83b15bf4d7a75099ec49763e0e8d755d31f0d052ef17a162bbcf  skills/rc-python/SKILL.md
 997b289f8128c871fea467a15885ea955a7a52df9cfb4b2185b43b6ad1483e50  skills/rc-python/references/versions.md
+b8f8a69bd64c312ba3cb48d2d852ad93ff2badcce911940594f494db7100feb6  skills/rc-research-and-explain/SKILL.md
 b4d434b94255f2eaadacc6ebf6116021bb024202f3bdd8bc1537bd5c2acef637  skills/rc-ruby-rails/SKILL.md
 fac9d755f4f0e1cdcc1b1787fc38a303f9433a30e92673d7b42d215c8fa3f734  skills/rc-ruby-rails/references/versions.md
 55a6520aa7ca1fb0639e05e99b2ba186b197d0acabfb615b108c7603aab3aded  skills/rc-rust/SKILL.md
@@ -59,6 +62,10 @@ da5355b7a4b3f7b77b19d8f108976008fe3741d0a108b388fc79953faf6fa53c  skills/rc-shel
 975704cbbb505bfe802f2bb1f29c24bc038b3654cd8e6d1a8c4cbaec1a30e514  skills/rc-testing-debugging/SKILL.md
 0e4c0a3905c751fce5416a7f1440d6e6433327b652a1da75af33c973a3a5a5f2  skills/rc-testing-debugging/references/debugging-toolbox.md
 928b96e652604b5ba11b18838cee504462bf3639e95b355beb1823b3b2ffb47c  skills/rc-testing-debugging/references/tool-versions.md
+6dcd69c03b1dfdfd7b6e31ccefb11f7a43b4036595a517e229f06b4e8ac293ce  skills/rc-ui-craft/SKILL.md
+b3048228e9003084f286cd3ead4211ac9bdfc567ac8bdbe23146106bcc5f2907  skills/rc-ui-craft/references/motion-and-gestures.md
+bf07f16c2c7ef8d9073e908b5cd112d6251a847bf163ff4d4f0a2c6952647cbc  skills/rc-ui-craft/references/three-and-video.md
+1209f9e38d2cc018bd6c157eb06add4ed8d5c4e05c3ca906906697fdfa601827  skills/rc-ui-craft/references/ui-states-forms-overlays.md
 0e5f39983a3f086ce80910e672d402ac217290ee5a87230d7fbc35d4fad13fb2  skills/rc-ui-ux-design/SKILL.md
 6901bd09e908af37e641758c21564dd23747882ec9339c77ca6bc4b0c80b9015  skills/rc-ui-ux-design/references/a11y-and-law.md
 52f946c772e8fc9ab1f29d3b50b9d1a3b202e57602688547a2da5f4da6e86e4a  skills/rc-ui-ux-design/references/components-and-states.md
