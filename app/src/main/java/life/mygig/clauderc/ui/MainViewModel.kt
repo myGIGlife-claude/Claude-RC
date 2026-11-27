@@ -895,6 +895,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** What a server is for: stored on the phone only, no connection needed. */
     fun setServerPurpose(id: String, text: String) = viewModelScope.launch { store.setPurpose(id, text) }
 
+    /**
+     * Purpose and Tailscale address, both phone-only. A changed address is part of the connection key, so the
+     * next call opens a fresh connection that tries it; the old one is swept once idle.
+     */
+    fun setServerDetails(id: String, purpose: String, tailnetHost: String) = viewModelScope.launch {
+        store.setPurpose(id, purpose)
+        store.setTailnetHost(id, tailnetHost)
+    }
+
     fun switchServer(id: String) = viewModelScope.launch {
         if (id == store.current().activeId) return@launch
         store.switchServer(id)

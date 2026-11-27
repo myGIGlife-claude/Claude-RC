@@ -304,6 +304,9 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                                 } else if (srv.id == s.activeId) {
                                     Text("No purpose set", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
                                 }
+                                if (srv.tailnetHost.isNotBlank()) {
+                                    Text("Tailscale ${srv.tailnetHost}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
                             TextButton(onClick = { editPurpose = srv }) { Text("Edit") }
                             if (srv.id != s.activeId) TextButton(onClick = { vm.switchServer(srv.id) }) { Text("Use") }
@@ -451,7 +454,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
     editPurpose?.let { srv ->
         PurposeDialog(
             srv,
-            onSave = { text -> editPurpose = null; vm.setServerPurpose(srv.id, text) },
+            onSave = { text, tailnet -> editPurpose = null; vm.setServerDetails(srv.id, text, tailnet) },
             onDismiss = { editPurpose = null },
         )
     }
