@@ -513,8 +513,8 @@ private fun MigrateSignInStep(vm: MainViewModel, ui: MigrateUi) {
         CardBox {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(if (t.done) "✓" else "•", color = if (t.done) MaterialTheme.statusColors.okText else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
-                Text(if (t.main) "Claude (main account)" else t.name, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                OutlinedButton(onClick = { vm.migrateSignInStart(t.name, t.main) }, enabled = !ui.busy && prompt == null) {
+                Text(if (t.main) "Claude (main account)" else if (t.kind == "claude") t.name else "${t.name} (${t.kind})", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                OutlinedButton(onClick = { vm.migrateSignInStart(t.name, t.main, t.kind) }, enabled = !ui.busy && prompt == null) {
                     Text(if (t.done) "Sign in again" else "Sign in")
                 }
             }
@@ -544,12 +544,31 @@ private fun MigrateSignInStep(vm: MainViewModel, ui: MigrateUi) {
 private fun MigrateSignInCard(vm: MainViewModel, prompt: MigrateSignInPrompt, busy: Boolean) {
     val context = LocalContext.current
     // Not saved: a new page means a new code.
-    var code by remember(prompt.login.url) { mutableStateOf("") }
+    var code by remember(prompt.login?.url, prompt.name) { mutableStateOf("") }
+    val login = prompt.login
+    if (login == null) {
+        CardBox {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Sign in ${prompt.name}", style = MaterialTheme.typography.titleSmall)
+                MigrateHint("Paste an API key for this worker (Grok: console.x.ai, Gemini: aistudio.google.com/apikey). It is saved on the new server only. To use its account instead, skip it here and sign in from the Cluster screen on the new server.")
+                OutlinedTextField(
+                    value = code, onValueChange = { code = it.trim() }, label = { Text("API key") }, singleLine = true, enabled = !busy,
+                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(onClick = { vm.migrateSignInCancel() }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Cancel") }
+                    Button(onClick = { vm.migrateSignInKey(prompt.name, code); code = "" }, enabled = !busy && code.length >= 16, modifier = Modifier.weight(1f)) { Text("Save key") }
+                }
+            }
+        }
+        return
+    }
     CardBox {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Sign in ${if (prompt.main) "Claude" else prompt.name}", style = MaterialTheme.typography.titleSmall)
             Text("1. Open the link and approve the sign-in.", style = MaterialTheme.typography.bodyMedium)
-            Button(onClick = { openUrl(context, prompt.login.url) }, modifier = Modifier.fillMaxWidth()) { Text("Open link") }
+            Button(onClick = { openUrl(context, login.url) }, modifier = Modifier.fillMaxWidth()) { Text("Open link") }
             Text("2. Paste the code it shows you.", style = MaterialTheme.typography.bodyMedium)
             OutlinedTextField(
                 value = code, onValueChange = { code = it.trim() },
@@ -705,6 +724,15 @@ private fun MigrateVerify(vm: MainViewModel, ui: MigrateUi) {
         }
     }
     if (v != null) MigrateFixes(vm, ui, v.items.filter { !it.ok }.map { it.id })
+    if (ui.plan?.sessions.orEmpty().any { !it.general }) {
+        CardBox {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Sessions", style = MaterialTheme.typography.titleSmall)
+                MigrateHint("The old server's sessions were stopped for the move. Start them again on the new server (chats resume their last conversation).")
+                OutlinedButton(onClick = { vm.migrateStartSessions() }, enabled = !ui.busy, modifier = Modifier.fillMaxWidth()) { Text("Start the sessions") }
+            }
+        }
+    }
     ui.setupEntry?.let { s ->
         CardBox {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

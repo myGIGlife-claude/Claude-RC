@@ -424,6 +424,17 @@ collect() { # collect <all 0|1> <max bytes>
   { grep -hoE '^(export +)?[A-Za-z_][A-Za-z0-9_]*=' "$HOME/.config/claude-launcher/env" 2>/dev/null |
     sed -E 's/^export +//; s/=$//' || true; } >"$TMP/envnames"
 
+  # Tools, cron jobs (schedule + program name only: arguments can hold secrets) and non-stock timers (names only), so migrate-verify can compare with the new server.
+  { for w in docker uv bun node npm gh aws apktool jadx supabase tailscale python3 java go rustc; do
+      ! command -v "$w" >/dev/null 2>&1 || echo "$w"
+    done; } >"$TMP/tools"
+  { if command -v crontab >/dev/null 2>&1; then crontab -l 2>/dev/null | grep -vE '^[[:space:]]*(#|$)|^[A-Za-z_][A-Za-z0-9_]*=' |
+    awk '{ c = ($1 ~ /^@/) ? $2 : $6; n = split(c, a, "/"); if (a[n] != "") print (($1 ~ /^@/) ? $1 : $1" "$2" "$3" "$4" "$5) " " a[n] }' || true; fi; } >"$TMP/cron"
+  { { systemctl --user list-timers --all --no-legend 2>/dev/null || true; systemctl list-timers --all --no-legend 2>/dev/null || true; } |
+      grep -oE '[A-Za-z0-9@:._-]+\.timer' | sed 's/\.timer$//' |
+      grep -vE '^(apt-daily|apt-daily-upgrade|dpkg-db-backup|fstrim|logrotate|man-db|e2scrub_all|motd-news|fwupd-refresh|update-notifier-download|update-notifier-motd|launchpadlib-cache-clean|sysstat-collect|sysstat-summary|systemd-tmpfiles-clean|snapd\.snap-repair|ua-timer|esm-cache|apport-autoreport|cloud-init-hotplugd|plocate-updatedb|anacron)$' || true
+  } | sort -u >"$TMP/timers"
+
   # Which Claude logins exist here (names only), whether or not they are stored.
   if [[ -f .claude/.credentials.json ]]; then echo true >"$TMP/login_main"; else echo false >"$TMP/login_main"; fi
   : >"$TMP/login_workers"
@@ -440,10 +451,12 @@ facts_json() {
     --argjson vols "$(lines_json "$TMP/docker_volumes")" --argjson cont "$(lines_json "$TMP/docker_containers")" \
     --argjson units "$(lines_json "$TMP/units")" --argjson envnames "$(lines_json "$TMP/envnames")" \
     --argjson backed "$(lines_json "$TMP/backed_up")" \
+    --argjson tools "$(lines_json "$TMP/tools")" --argjson cron "$(lines_json "$TMP/cron")" \
+    --argjson timers "$(lines_json "$TMP/timers")" \
     --argjson ports "$(jq -Rn '[inputs | tonumber?]' <"$TMP/ports")" \
     --argjson main "$(cat "$TMP/login_main")" --argjson workers "$(lines_json "$TMP/login_workers")" \
     '{repos: $repos, other_dirs: $other_dirs, other_dirs_saved: $other_saved, docker_volumes: $vols,
-      docker_containers: $cont, systemd_units: $units, listening: $ports, env_var_names: $envnames, backed_up: $backed,
+      docker_containers: $cont, systemd_units: $units, listening: $ports, tools: $tools, cron: $cron, timers: $timers, env_var_names: $envnames, backed_up: $backed,
       claude_logins: {main: $main, workers: $workers}}'
 }
 
@@ -651,7 +664,7 @@ cmd_plan() {
     '{repos: (.repos | map({dir, path, state, rescued, skipped_reason: (.skipped_reason // "")})),
       other_dirs, docker_volumes, docker_containers,
       logins: {claude: .claude_logins.main, workers: .claude_logins.workers},
-      estimate_mb: $est, systemd_units, listening, env_var_names}' >"$TMP/plan.json"
+      estimate_mb: $est, systemd_units, listening, tools, cron, timers, env_var_names}' >"$TMP/plan.json"
   if ((json)); then
     jq -c . "$TMP/plan.json"
     return 0

@@ -2405,7 +2405,7 @@ tmux new-session -d -s migsess -c "$HOME" "claude --remote-control migsess; exec
 api "migrate-plan"
 tmux kill-session -t "=migsess" 2>/dev/null
 check "migrate-plan: merged shape" "$(jqt '.ok and (.data | keys) == ["docker_volumes","estimate_mb","logins","other_dirs","repos","services","sessions"] and .data.estimate_mb==12 and .data.logins == {claude:true,workers:["ops"]} and .data.docker_volumes==["db"] and .data.other_dirs==["/home/x/data"] and .data.repos[0].dir=="/home/x/projects/app"')"
-check "migrate-plan: sessions are name/busy/waiting, services are ids" "$(jqt '(.data.sessions | length > 0 and all(keys == ["busy","name","waiting"])) and (.data.services | all(type=="string"))')"
+check "migrate-plan: sessions are name/project/general/busy/waiting, services are ids" "$(jqt '(.data.sessions | length > 0 and all(keys == ["busy","general","name","project","waiting"])) and (.data.services | all(type=="string"))')"
 [[ "$(tail -n 1 "$STUB_STATE/backup-argv")" == "plan --json" ]]; check "migrate-plan runs 'plan --json'" $?
 
 echo "migrate keygen / authorize"
@@ -2786,8 +2786,8 @@ mkgit vdirty
 jq -cn '{repos:[{dir:"vapp",path:"projects/vapp",state:"clean",remote:"x"},{dir:"vdirty",path:"projects/vdirty",state:"dirty"}],claude_logins:{main:true,workers:["vw"]}}' >"$MST/m1.json"
 mkdir -p "$HOME/.ssh"; printf '%s\n%s\n' "ssh-ed25519 AAAAkeep keepme" "restrict,command=\"x\" ssh-ed25519 AAAAmig clauderc-migrate" >"$AK"
 api "migrate-verify m1.json"
-check "verify: everything ok -> ok true, 12 items" "$(jqt '.ok and .data.ok and (.data.items | length) == 12 and all(.data.items[]; .ok and (.detail | length) > 0)')"
-check "verify: item ids in order" "$(jqt '[.data.items[].id] == ["scripts_installed","script_api_current","claude_home","launcher_config","workers","repos","remotes","claude_runs","gh","autostart","pending_logins","migrate_key_removed"]')"
+check "verify: everything ok -> ok true, 13 items" "$(jqt '.ok and .data.ok and (.data.items | length) == 13 and all(.data.items[]; .ok and (.detail | length) > 0)')"
+check "verify: item ids in order" "$(jqt '[.data.items[].id] == ["scripts_installed","script_api_current","claude_home","launcher_config","workers","repos","remotes","claude_runs","gh","autostart","pending_logins","tools_match","migrate_key_removed"]')"
 check "verify: details" "$(jqt '(.data.items | map({(.id): .detail}) | add) | .repos=="2 repo(s) present" and .remotes=="1 remote(s) reachable" and .pending_logins=="nothing to sign in" and .migrate_key_removed=="removed"')"
 [[ "$(cat "$AK")" == "ssh-ed25519 AAAAkeep keepme" && "$(stat -c %a "$AK")" == 600 ]]; check "verify: the migrate key line was removed, the others kept (mode 600)" $?
 api "migrate-verify m1.json"
@@ -2801,6 +2801,9 @@ check "verify: a missing repo and a missing worker fail with details" "$(jqt '(.
 rm -f "$HOME/.config/claude-launcher/workers/vw/home/.credentials.json" "$HOME/.claude/.credentials.json"
 api "migrate-verify m1.json"
 check "verify: missing logins are information only (pending_logins ok:true, lists them)" "$(jqt '.data.ok and ((.data.items[] | select(.id=="pending_logins")) | .ok and .detail=="still to sign in: main, vw")')"
+jq -cn '{claude_logins:{main:false,workers:[]},tools:["bash","no-such-tool-x"],timers:["gone-timer"],cron:["0 2 * * * /bin/backup-job"]}' >"$MST/m4.json"
+api "migrate-verify m4.json"
+check "verify: tools_match lists missing tool and timer, cron as re-create (info only)" "$(jqt '.data.ok and ((.data.items[] | select(.id=="tools_match")) | .ok and (.detail | contains("no-such-tool-x") and contains("timer gone-timer") and contains("re-create if still needed") and contains("backup-job") and (contains("bash,")|not)))')"
 echo '{"claudeAiOauth":{}}' >"$HOME/.claude/.credentials.json"
 api "migrate-verify m1.json"
 check "verify: a logged-out credentials file counts as no login" "$(jqt '((.data.items[] | select(.id=="pending_logins")) | .detail=="still to sign in: main, vw")')"

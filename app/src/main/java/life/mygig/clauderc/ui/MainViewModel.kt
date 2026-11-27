@@ -986,7 +986,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Sends the backup, then restores it (resumes whatever is already running). */
     fun migrateTransfer() = migrateFlow.transferNow()
 
-    fun migrateSignInStart(name: String, main: Boolean) = migrateFlow.signInStart(name, main)
+    fun migrateSignInStart(name: String, main: Boolean, kind: String = "claude") = migrateFlow.signInStart(name, main, kind)
+    fun migrateSignInKey(name: String, key: String) = migrateFlow.signInKey(name, key)
+    fun migrateStartSessions() = migrateFlow.startSessions()
     fun migrateSignInCode(name: String, main: Boolean, code: String) = migrateFlow.signInCode(name, main, code)
     fun migrateSignInCancel() = migrateFlow.signInCancel()
     fun migrateSignInFinish(skipPending: Boolean = false) = migrateFlow.signInFinish(skipPending)

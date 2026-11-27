@@ -504,7 +504,7 @@ data class WorkerRunsData(val runs: List<WorkerRun> = emptyList())
 // In-app Migrate (docs/migrate-design.md): the server's migrate-* answers.
 
 @Serializable
-data class MigrateSession(val name: String = "", val busy: Boolean = false, val waiting: Boolean = false)
+data class MigrateSession(val name: String = "", val project: String = "", val general: Boolean = false, val busy: Boolean = false, val waiting: Boolean = false)
 
 @Serializable
 data class MigrateRepo(
