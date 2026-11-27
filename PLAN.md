@@ -4,13 +4,13 @@ Last updated: 2026-11-27 16:30 UTC
 cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage Claude Code sessions on your own server from a phone.
 
 ## Current task
-Connection improvements (Jonathan 2026-11-27): C1-C5 merged in #254 (SCRIPT_API 57 installed); C6 on branch `server-copy`. Old AWS server (Lightsail ai_paradise) STOPPED, not deleted, until everything is verified.
+Connection improvements (Jonathan 2026-11-27): C1-C5 merged in #254 (SCRIPT_API 57 installed); C6 merged in #255 (SCRIPT_API 58 installed). Old AWS server (Lightsail ai_paradise) STOPPED, not deleted, until everything is verified.
 - [x] C1 Drop cached SSH on network change (ClaudeRcApp NetworkCallback -> SshRunner.retireAll). Check: CI green, phone switch Wi-Fi/mobile reconnects at once.
 - [x] C2 fail2ban never bans Tailscale ranges (host harden script + this server's /etc/fail2ban/jail.d/clauderc-tailnet.local). Check: test-api.sh green.
 - [x] C3 SSH compression zlib@openssh.com. Check: CI + release APK connects.
 - [x] C4 Tailscale address per server, tried first with fallback (worker task 56a3998b). Check: unit tests, Settings field.
 - [x] C5 chat-watch long-poll replacing chat-history polling (Opus design in progress, then build; SCRIPT_API bump).
-- [ ] C6 Copy between servers (docs/copy-design.md, approved; SCRIPT_API 58), PR open. Check: CI green, merge, self-update, then a real copy between two servers.
+- [x] C6 Copy between servers merged in #255, SCRIPT_API 58 installed. Still to do: a real copy between two servers on the phone; `test-sshd.sh` copy checks passed on CI.
 
 ## Model rule (Jonathan, 2026-11-16, master rule in ~/.claude/CLAUDE.md)
 Orchestrator splits work into small tasks and picks the cheapest model that does each reliably: Haiku = simple, repetitive; Sonnet = standard build, refactor, tests, moderate debugging; Opus = architecture, hard debugging, ambiguous or system-wide, security design/review (Opus takes every top-tier task by default, Agent `model: opus` or `planner`); Fable 5.2 only when Opus failed or is clearly not enough (one-line reason). Same bug survives 2 fixes: go up one level. Orchestrator keeps review, integration and final verification (real build on CI, never "it compiles").
