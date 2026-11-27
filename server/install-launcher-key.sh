@@ -38,6 +38,14 @@ if command -v ssh-keygen >/dev/null; then
     { echo "ssh-keygen rejected the key." >&2; exit 2; }
 fi
 
+# Same lock claude-setup.sh's with_state_lock holds, so a concurrent migrate/copy edit of authorized_keys isn't lost.
+if command -v flock >/dev/null; then
+  lockdir="${XDG_CONFIG_HOME:-$HOME/.config}/claude-launcher"
+  mkdir -p -m 700 "$lockdir"
+  exec 6>>"$lockdir/.state.lock"
+  flock -w 20 6 || { echo "Another change is still being saved. Try again in a moment." >&2; exit 1; }
+fi
+
 mkdir -p "$HOME/.ssh"
 chmod 700 "$HOME/.ssh"
 touch "$AUTH_KEYS"

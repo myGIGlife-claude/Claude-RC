@@ -5676,7 +5676,7 @@ do_migrate_authorize() {
   # from= only for a literal IP (sshd compares it with the client's IP, it doesn't resolve names): a host name would lock the sender out.
   addr="${addr,,}"
   if migrate_is_ip "$addr"; then opts+=",from=\"$addr\""; fi
-  migrate_ak_put clauderc-migrate "$opts" "$blob"
+  with_state_lock migrate_ak_put clauderc-migrate "$opts" "$blob"
 }
 
 # migrate_ak_put <marker> <options> <blob>: the one authorized_keys line carrying <marker> (the key's comment) becomes
@@ -6184,6 +6184,12 @@ migrate_repo_path() {
   return 1
 }
 
+migrate_ak_drop_migrate() {
+  local ak="$HOME/.ssh/authorized_keys" tmp
+  tmp="$(mktemp "$ak.XXXXXX")" || return 1
+  awk '$NF != "clauderc-migrate"' "$ak" >"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$ak" || { rm -f "$tmp"; return 1; }
+}
+
 # migrate-verify [manifest file]: the checklist at the end of the wizard. Read-only, except that it removes the migrate key.
 do_migrate_verify() {
   [[ $# -le 1 ]] || bad_args "usage: migrate-verify [manifest file name]"
@@ -6289,9 +6295,8 @@ do_migrate_verify() {
   # the transfer key must not stay authorized
   ak="$HOME/.ssh/authorized_keys"
   if [[ -f "$ak" ]] && awk '$NF == "clauderc-migrate" { f = 1 } END { exit !f }' "$ak"; then
-    tmp="$(mktemp "$HOME/.ssh/authorized_keys.XXXXXX")"
-    if [[ -n "$tmp" ]] && awk '$NF != "clauderc-migrate"' "$ak" >"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$ak"; then migrate_vitem migrate_key_removed true removed
-    else rm -f "$tmp"; migrate_vitem migrate_key_removed false "couldn't remove the transfer key from ~/.ssh/authorized_keys"; fi
+    if with_state_lock migrate_ak_drop_migrate; then migrate_vitem migrate_key_removed true removed
+    else migrate_vitem migrate_key_removed false "couldn't remove the transfer key from ~/.ssh/authorized_keys"; fi
   else
     migrate_vitem migrate_key_removed true "no transfer key found"
   fi
@@ -6403,8 +6408,9 @@ COPY_PROJECT_RE='^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$'   # no leading dot or dash
 COPY_BRANCH_RE='^[A-Za-z0-9._/@+-]{1,200}$'
 COPY_MAX_LIST=20000
 COPY_JUNK_RE='(^|/)(node_modules|build|\.gradle|target|\.cache|__pycache__)(/|$)'
-# Names that change how programs run: never merged from another server's env file.
-COPY_ENV_DENY_RE='^(PATH|LD_[A-Z_]*|BASH_ENV|ENV|IFS|SHELL|HOME|PS4|PROMPT_COMMAND|GIT_SSH|GIT_SSH_COMMAND|SSH_ASKPASS|CLAUDE_CONFIG_DIR|CLAUDERC_[A-Z_]*)$'
+# Only names set-secret or a built-in service could set are merged from another server's env file (an allowlist), and never
+# GOOGLE_APPLICATION_CREDENTIALS (the app's Firebase service owns it).
+COPY_GIT=(git -c core.fsmonitor=false -c core.hooksPath=/dev/null)   # the server's own git calls on received repos
 COPY_ROOT=""   # set by copy_project_root / the secrets kind
 
 copy_ctx() {
@@ -6480,8 +6486,8 @@ copy_files_tsv() {
 # The files of project folder $1 that are worth copying: a git repo = untracked and ignored files only (the rest comes from git),
 # anything else = every file. $2 = all: the whole folder, .git included.
 copy_project_nul() {
-  if [[ "${2:-}" != all && -d "$1/.git" && "$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" == "$(realpath -- "$1")" ]]; then
-    git -C "$1" ls-files -z --others 2>/dev/null | grep -zv '/$'
+  if [[ "${2:-}" != all && -d "$1/.git" && "$("${COPY_GIT[@]}" -C "$1" rev-parse --show-toplevel 2>/dev/null)" == "$(realpath -- "$1")" ]]; then
+    "${COPY_GIT[@]}" -C "$1" ls-files -z --others 2>/dev/null | grep -zv '/$'
   else
     (cd "$1" && find . \( -name node_modules -o -name build -o -name .gradle -o -name target -o -name .cache -o -name __pycache__ \) -prune \
       -o \( -type f -o -type l \) -printf '%P\0')
@@ -6502,10 +6508,10 @@ copy_secrets_tsv() {
 # Local branches of repo $1 that some commit no remote has: "commits<TAB>time<TAB>sha<TAB>name" (what a bundle would carry).
 copy_bundle_tsv() {
   local b sha ts n
-  git -C "$1" for-each-ref --format='%(refname:short)%09%(objectname)%09%(committerdate:unix)' refs/heads 2>/dev/null |
+  "${COPY_GIT[@]}" -C "$1" for-each-ref --format='%(refname:short)%09%(objectname)%09%(committerdate:unix)' refs/heads 2>/dev/null |
     while IFS=$'\t' read -r b sha ts; do
       [[ "$b" =~ $COPY_BRANCH_RE && "$b" != -* ]] || continue
-      n="$(git -C "$1" rev-list --count "$sha" --not --remotes 2>/dev/null)" || continue
+      n="$("${COPY_GIT[@]}" -C "$1" rev-list --count "$sha" --not --remotes 2>/dev/null)" || continue
       if [[ "$n" =~ ^[0-9]+$ ]] && ((n > 0)); then printf '%s\t%s\t%s\t%s\n' "$n" "$ts" "$sha" "$b"; fi
     done
 }
@@ -6542,7 +6548,7 @@ do_copy_list() {
         for line in "${have[@]}"; do
           n="${line%% *}"; sha="${line#* }"
           [[ "$n" =~ $COPY_BRANCH_RE && "$n" != -* && "$sha" =~ ^[0-9a-f]{40,64}$ ]] || continue
-          git -C "$COPY_ROOT" cat-file -e "$sha^{commit}" 2>/dev/null && tsv+="0"$'\t'"0"$'\t'"$sha"$'\t'"$n"$'\n'
+          "${COPY_GIT[@]}" -C "$COPY_ROOT" cat-file -e "$sha^{commit}" 2>/dev/null && tsv+="0"$'\t'"0"$'\t'"$sha"$'\t'"$n"$'\n'
         done
       fi
     else
@@ -6693,7 +6699,7 @@ do_copy_send() {
   api_ok '{"started":true}'
 }
 
-# Packs the chosen files into $1/out.tgz (manifest.json first) and sends it. Everything it made, and the private key, goes at the end.
+# Packs the chosen files into $1/out.tgz (.clauderc-copy.json first) and sends it. Everything it made, and the private key, goes at the end.
 copy_worker_send() {
   local kind="$1" proj="$2" host="$3" port="$4" user="$5" ktype="$6" kh="$7" started="$8"
   local tmpd root="" list p tsv size name src rc line
@@ -6748,7 +6754,7 @@ copy_worker_send() {
       for b in "${want[@]}"; do
         awk -F'\t' -v b="$b" '$4 == b {f = 1} END {exit !f}' "$tmpd/branches.tsv" || migrate_fail "Branch $b has nothing to bundle."
       done
-      git -C "$root" bundle create "$tmpd/bundle" "${want[@]}" --not --remotes >/dev/null 2>"$tmpd/err" ||
+      "${COPY_GIT[@]}" -C "$root" bundle create "$tmpd/bundle" "${want[@]}" --not --remotes >/dev/null 2>"$tmpd/err" ||
         migrate_fail "git couldn't make the bundle: $(migrate_last_lines "$tmpd/err")"
       ;;
   esac
@@ -6757,14 +6763,14 @@ copy_worker_send() {
     --rawfile tsv "$tsv" --rawfile br "$([[ -f "$tmpd/branches.tsv" ]] && echo "$tmpd/branches.tsv" || echo /dev/null)" '
     {version:1, kind:$kind, project:$project, source:$source, created:$now,
      files:[$tsv | split("\n")[] | select(length > 0) | split("\t") | {path:.[3], size:(.[0] | tonumber), mtime:(.[1] | tonumber), mode:.[2]}],
-     branches:[$br | split("\n")[] | select(length > 0) | split("\t") | {name:.[3], sha:.[2]}]}' >"$tmpd/manifest.json" ||
+     branches:[$br | split("\n")[] | select(length > 0) | split("\t") | {name:.[3], sha:.[2]}]}' >"$tmpd/.clauderc-copy.json" ||
     migrate_fail "Couldn't write the manifest."
   if [[ "$kind" == bundle ]]; then
     # only the asked-for branches are named in the manifest
-    jq -c --argjson w "$(printf '%s\n' "${want[@]}" | jq -R . | jq -sc .)" '.branches |= map(select(.name as $n | $w | index($n)))' "$tmpd/manifest.json" >"$tmpd/m2" &&
-      mv -f "$tmpd/m2" "$tmpd/manifest.json"
+    jq -c --argjson w "$(printf '%s\n' "${want[@]}" | jq -R . | jq -sc .)" '.branches |= map(select(.name as $n | $w | index($n)))' "$tmpd/.clauderc-copy.json" >"$tmpd/m2" &&
+      mv -f "$tmpd/m2" "$tmpd/.clauderc-copy.json"
   fi
-  tarargs=(-czf "$tmpd/out.tgz" --numeric-owner --no-recursion --null --verbatim-files-from -C "$tmpd" manifest.json)
+  tarargs=(-czf "$tmpd/out.tgz" --numeric-owner --hard-dereference --no-recursion --null --verbatim-files-from -C "$tmpd" .clauderc-copy.json)
   [[ "$kind" != bundle ]] || tarargs+=(bundle)
   [[ ! -f "$tmpd/env" || "$kind" != secrets ]] || tarargs+=(env)
   [[ "$kind" == bundle ]] || tarargs+=(-C "$root" -T "$list")
@@ -6862,7 +6868,7 @@ copy_scan_archive() {
     seen[k$nm]=1
     case "$type" in
       l) lset["k$nm"]=1; lnames+=("$nm") ;;
-      -) [[ "$nm" == manifest.json ]] || names+=("$nm") ;;
+      -) [[ "$nm" == .clauderc-copy.json ]] || names+=("$nm") ;;
     esac
   done <"$st/verbose"
   ((n_plain == n_verbose)) || copy_fail "The copy file's member list doesn't add up: refused."
@@ -6908,9 +6914,13 @@ copy_place() {
     copy_backup "$root" "$rel"
   fi
   mkdir -p "$(dirname -- "$dest")" && mv -f -T -- "$src" "$dest" || { copy_res refused "$rel" "couldn't move it into place"; return 0; }
-  if [[ ! -L "$dest" ]]; then
+  if [[ -L "$dest" ]]; then
+    # a link that lands outside the destination once B's own folders are in the picture is taken back out
+    local rr; rr="$(realpath -m -- "$root")"; p="$(realpath -m -- "$dest")"
+    if [[ "$p" != "$rr"/* ]]; then rm -f -- "$dest"; copy_res refused "$rel" "a symlink that points outside the folder"; return 0; fi
+  else
     if ((secret == 1)); then chmod 600 "$dest"
-    elif [[ "$mode" =~ ^[0-7]{3,4}$ ]]; then chmod "${mode: -3}" "$dest"; fi
+    elif [[ "$mode" =~ ^[0-7]{3,4}$ ]]; then chmod "$(printf '%o' $((8#${mode: -3} & 8#755)))" "$dest"; fi
   fi
   copy_res copied "$rel"
 }
@@ -6923,13 +6933,16 @@ copy_env_merge() {
   while IFS= read -r line; do
     [[ "$line" =~ ^export\ ([A-Z_][A-Z0-9_]*)=\'(.*)\'$ ]] || continue
     n="${BASH_REMATCH[1]}"; v="${BASH_REMATCH[2]}"
-    [[ "$v" != *"'"* && -n "$v" ]] || continue
-    if [[ "$n" =~ $COPY_ENV_DENY_RE ]]; then copy_res refused "env/$n" "this name can't be copied"; continue; fi
+    if [[ "$n" == GOOGLE_APPLICATION_CREDENTIALS ]] || ! { custom_name_ok "$n" || service_var_name "$n"; }; then
+      copy_res refused "env/$n" "this name can't be copied"; continue
+    fi
+    if [[ -z "$v" || ${#v} -gt 4000 || "$v" == *"'"* ]]; then copy_res refused "env/$n" "the value is empty, too long, or has a single quote"; continue; fi
     if grep -q "^export $n=" "$SERVICES_ENV" 2>/dev/null; then
       cur="$(sed -n "s/^export $n='\\(.*\\)'\$/\\1/p" "$SERVICES_ENV" | head -n 1)"
       if [[ "$cur" == "$v" ]]; then copy_res skipped "env/$n" "same"; else copy_res env_conflict "$n"; fi
     else
-      set_env "$n" "$v"; copy_res env_added "$n"; added=1
+      set_env "$n" "$v"; service_var_name "$n" || custom_names_edit add "$n"
+      copy_res env_added "$n"; added=1
     fi
   done <"$f"
   if ((added == 1)); then ensure_env_hook; fi
@@ -6947,20 +6960,20 @@ copy_apply_bundle() {
   done < <(jq -r '.branches[].name' "$manifest")
   ((${#names[@]} > 0)) || copy_fail "The copy names no branch."
   if [[ -d "$root" ]]; then
-    git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || copy_fail "$proj is a folder here but not a git repository: copy the project instead."
+    [[ "$("${COPY_GIT[@]}" -C "$root" rev-parse --show-toplevel 2>/dev/null)" == "$(realpath -- "$root")" ]] || copy_fail "$proj is a folder here but not a git repository: copy the project instead."
   else
     mkdir -p "$PROJECTS_DIR" && git init -q "$root" || copy_fail "Couldn't create the repository."
     made=1
   fi
   # fetch only writes refs/remotes/from-<source>/…: no local branch moves. Hooks off.
-  git -c core.hooksPath=/dev/null -C "$root" fetch -q --no-tags "$x/bundle" "${refs[@]}" 2>"$COPY_STAGE/giterr"; rc=$?
+  "${COPY_GIT[@]}" -C "$root" fetch -q --no-tags "$x/bundle" "${refs[@]}" 2>"$COPY_STAGE/giterr"; rc=$?
   if ((rc != 0)); then
     ((made == 0)) || rm -rf -- "$root"   # a repository this job just made, still empty
     copy_fail "git couldn't take the bundle (copy the project first if the repository is missing here): $(migrate_last_lines "$COPY_STAGE/giterr")"
   fi
   # a repository made just now has no branch: the first one becomes the local branch
-  if ! git -C "$root" rev-parse -q --verify HEAD >/dev/null 2>&1; then
-    git -C "$root" checkout -q -b "${names[0]}" "refs/remotes/from-$src/${names[0]}" 2>/dev/null || true
+  if ! "${COPY_GIT[@]}" -C "$root" rev-parse -q --verify HEAD >/dev/null 2>&1; then
+    "${COPY_GIT[@]}" -C "$root" checkout -q -b "${names[0]}" "refs/remotes/from-$src/${names[0]}" 2>/dev/null || true
   fi
   for b in "${names[@]}"; do copy_res fetched "$b" "refs/remotes/from-$src/$b"; done
 }
@@ -6976,7 +6989,7 @@ copy_worker_apply() {
   MIGRATE_RMDIRS=("$st"); MIGRATE_ALWAYS=("$owf")   # the copy file stays after a failure so a retry works
   x="$st/x"; mkdir -p "$x"
   migrate_progress apply "Checking the file" 2 0
-  tar -xzOf "$file" manifest.json >"$st/manifest.json" 2>/dev/null || copy_fail "The copy file has no manifest."
+  tar -xzOf "$file" .clauderc-copy.json >"$st/manifest.json" 2>/dev/null || copy_fail "The copy file has no manifest."
   jq -e 'type == "object" and .version == 1 and (.kind | IN("project", "secrets", "bundle")) and (.files | type == "array") and (.branches | type == "array")' \
     "$st/manifest.json" >/dev/null 2>&1 || copy_fail "The manifest isn't valid."
   kind="$(jq -r .kind "$st/manifest.json")"; proj="$(jq -r '.project // ""' "$st/manifest.json")"; src="$(jq -r '.source // ""' "$st/manifest.json")"
@@ -7000,11 +7013,11 @@ copy_worker_apply() {
   fi
   [[ -z "$(find "$x" ! -type f ! -type d ! -type l -print -quit)" ]] || copy_fail "Unpacking made something that isn't a file, folder or link: refused."
   # a symlink must resolve to somewhere inside the unpacked tree (real resolution, so ".." after a link can't climb out)
-  local xr
+  local xr l
   xr="$(realpath -- "$x")"
   while IFS= read -r -d '' rel; do
-    n="$(realpath -m -- "$x/$rel")"
-    if [[ "$n" != "$xr" && "$n" != "$xr"/* ]]; then
+    n="$(realpath -m -- "$x/$rel")"; l="$(realpath -m -s -- "$x/$(dirname -- "$rel")/$(readlink -- "$x/$rel")")"
+    if [[ "$n" != "$xr" && "$n" != "$xr"/* ]] || [[ "$l" != "$x" && "$l" != "$x"/* ]]; then
       rm -f -- "$x/$rel"; copy_res refused "$rel" "a symlink that points outside the folder"
     fi
   done < <(cd "$x" && find . -type l -printf '%P\0')

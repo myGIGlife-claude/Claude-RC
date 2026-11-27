@@ -3110,10 +3110,10 @@ rm -f "$HOME/projects/linked"
 # secrets: A's env, files and the optional ones
 mkdir -p "$WORK/a-save"; for d in secret-files keystores apple; do [[ -e "$CA/$d" ]] && mv "$CA/$d" "$WORK/a-save/$d"; done
 [[ -e "$CA/env" ]] && cp -p "$CA/env" "$WORK/a-save/env"
-printf "export AAA_TOKEN='a1-secret-value'\nexport BBB_KEY='b1-secret-value'\nexport SAME_KEY='s'\nexport PATH='/evil'\n" >"$CA/env"; chmod 600 "$CA/env"
+printf "export AAA_TOKEN='a1-secret-value'\nexport BBB_KEY='b1-secret-value'\nexport SAME_KEY='s'\nexport PATH='/evil'\nexport ANTHROPIC_BASE_URL='x'\nexport HTTPS_PROXY='x'\nexport NODE_OPTIONS='x'\nexport GIT_CONFIG_COUNT='x'\nexport SUDO_ASKPASS='x'\nexport PYTHONPATH='x'\nexport JAVA_TOOL_OPTIONS='x'\nexport GOOGLE_APPLICATION_CREDENTIALS='x'\nexport FOO_API_KEY='foo1'\n" >"$CA/env"; chmod 600 "$CA/env"
 mkdir -p "$CA/secret-files" "$CA/keystores" "$CA/apple"; echo 'file-secret-content' >"$CA/secret-files/X_FILE"; echo ks >"$CA/keystores/up.jks"; echo p8 >"$CA/apple/AuthKey.p8"
 api "copy-list secrets"
-check "list secrets: env names, secret files, optional keystore and apple key" "$(jqt '.ok and ([.data.entries[] | select(.optional != true) | .path] | sort) == ["env/AAA_TOKEN","env/BBB_KEY","env/PATH","env/SAME_KEY","secret-files/X_FILE"] and ([.data.entries[] | select(.optional == true) | .path] | sort) == ["apple/AuthKey.p8","keystores/up.jks"]')"
+check "list secrets: env names, secret files, optional keystore and apple key" "$(jqt '.ok and ([.data.entries[] | select(.optional != true) | .path] | sort) == ["env/AAA_TOKEN","env/ANTHROPIC_BASE_URL","env/BBB_KEY","env/FOO_API_KEY","env/GIT_CONFIG_COUNT","env/GOOGLE_APPLICATION_CREDENTIALS","env/HTTPS_PROXY","env/JAVA_TOOL_OPTIONS","env/NODE_OPTIONS","env/PATH","env/PYTHONPATH","env/SAME_KEY","env/SUDO_ASKPASS","secret-files/X_FILE"] and ([.data.entries[] | select(.optional == true) | .path] | sort) == ["apple/AuthKey.p8","keystores/up.jks"]')"
 [[ "$OUT" != *a1-secret-value* && "$OUT" != *file-secret-content* && "$OUT" != *b1-secret-value* ]]; check "list secrets: never a value" $?
 # bundle list: A has a repo with no remote
 rm -rf "$HOME/projects/demo2"; mkdir -p "$HOME/projects/demo2"
@@ -3171,7 +3171,7 @@ out, proj, spec = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
 files = [{"path": m["name"], "size": 1, "mtime": 1, "mode": "644"} for m in spec if m["type"] in ("file", "sym")]
 man = json.dumps({"version": 1, "kind": "project", "project": proj, "source": "a", "files": files, "branches": []}).encode()
 with tarfile.open(out, "w:gz") as t:
-    ti = tarfile.TarInfo("manifest.json"); ti.size = len(man); t.addfile(ti, io.BytesIO(man))
+    ti = tarfile.TarInfo(".clauderc-copy.json"); ti.size = len(man); t.addfile(ti, io.BytesIO(man))
     for m in spec:
         ti = tarfile.TarInfo(m["name"])
         if m["type"] == "file":
@@ -3207,7 +3207,7 @@ python3 -I - "$CB/copy/copy-20260202-000001.tgz" <<'PY'
 import io, json, sys, tarfile
 man = json.dumps({"version": 1, "kind": "project", "project": "evil", "source": "a", "files": [], "branches": []}).encode()
 with tarfile.open(sys.argv[1], "w:gz") as t:
-    ti = tarfile.TarInfo("manifest.json"); ti.size = len(man); t.addfile(ti, io.BytesIO(man))
+    ti = tarfile.TarInfo(".clauderc-copy.json"); ti.size = len(man); t.addfile(ti, io.BytesIO(man))
     ti = tarfile.TarInfo("unlisted.txt"); ti.size = 1; t.addfile(ti, io.BytesIO(b"x"))
 PY
 apiB "copy-apply copy-20260202-000001.tgz" "new-only"; cstat B "$DONE" 100
@@ -3216,6 +3216,12 @@ rm -f "$CB/copy/copy-20260202-000001.tgz"; rm -rf "$HB/projects/evil"
 bad_apply "tar: a symlink that points outside is listed as refused, never placed" evil '[{"name":"ok.txt","type":"file"},{"name":"out","type":"sym","target":"../../../etc"},{"name":"abs","type":"sym","target":"/etc/passwd"},{"name":"fine","type":"sym","target":"ok.txt"}]' \
   '.data.phase=="done" and ([.data.result.refused[].path] | sort) == ["abs","out"] and (.data.result.copied | sort) == ["fine","ok.txt"]'
 [[ ! -e "$HB/projects/evil/out" && ! -L "$HB/projects/evil/out" && ! -L "$HB/projects/evil/abs" && -L "$HB/projects/evil/fine" ]]; check "...only the safe symlink is in place" $?
+# a link that is only inside the archive's own tree because of another link: B's real folder d makes it climb out
+rm -rf "$HB/projects/evil"; mkdir -p "$HB/projects/evil/d"
+bad_apply "tar: a link that climbs out through B's real folder is refused" evil '[{"name":"d","type":"sym","target":"a/b/c/d"},{"name":"esc","type":"sym","target":"d/../../../../.ssh/authorized_keys"}]' \
+  '.data.phase=="done" and ([.data.result.refused[].path] | index("esc")) != null'
+[[ ! -L "$HB/projects/evil/esc" ]]; check "...(no such link was placed)" $?
+rm -rf "$HB/projects/evil"
 # a link already in B's tree: a file may not be written through it
 rm -rf "$HB/projects/evil"; mkdir -p "$HB/projects/evil"; ln -s "$WORK/outside" "$HB/projects/evil/viaB"
 bad_apply "a symlink already on B in the way: the file is refused, not written through it" evil '[{"name":"viaB/x.txt","type":"file"},{"name":"y.txt","type":"file"}]' \
@@ -3234,8 +3240,9 @@ rm -f "$CB/copy/"*
 echo "copy: secrets (env merged by name, files 600/700, optional ones separate)"
 printf "export BBB_KEY='different-on-B'\nexport SAME_KEY='s'\n" >"$CB/env"; chmod 600 "$CB/env"
 copy_flow secrets - "" new-only ""
-check "secrets: done; AAA_TOKEN added, BBB_KEY a conflict, PATH refused" "$(jqt '.data.phase=="done" and .data.result.env_added == ["AAA_TOKEN"] and .data.result.env_conflicts == ["BBB_KEY"] and ([.data.result.refused[].path] == ["env/PATH"]) and (.data.result.copied == ["secret-files/X_FILE"])')"
-[[ "$(grep -c "^export AAA_TOKEN='a1-secret-value'$" "$CB/env")" == 1 && "$(grep -c "^export BBB_KEY='different-on-B'$" "$CB/env")" == 1 && "$(grep -c '^export SAME_KEY' "$CB/env")" == 1 && -z "$(grep -E '^export PATH=' "$CB/env")" ]]; check "env: a missing name is added, an existing value is never changed" $?
+check "secrets: done; AAA_TOKEN added, BBB_KEY a conflict, PATH refused" "$(jqt '.data.phase=="done" and (.data.result.env_added | sort) == ["AAA_TOKEN","FOO_API_KEY"] and .data.result.env_conflicts == ["BBB_KEY"] and ([.data.result.refused[].path] | sort) == ["env/ANTHROPIC_BASE_URL","env/GIT_CONFIG_COUNT","env/GOOGLE_APPLICATION_CREDENTIALS","env/HTTPS_PROXY","env/JAVA_TOOL_OPTIONS","env/NODE_OPTIONS","env/PATH","env/PYTHONPATH","env/SUDO_ASKPASS"] and (.data.result.copied == ["secret-files/X_FILE"])')"
+[[ "$(grep -c "^export AAA_TOKEN='a1-secret-value'$" "$CB/env")" == 1 && "$(grep -c "^export BBB_KEY='different-on-B'$" "$CB/env")" == 1 && "$(grep -c '^export SAME_KEY' "$CB/env")" == 1 && -z "$(grep -E '^export (PATH|ANTHROPIC_BASE_URL|HTTPS_PROXY|NODE_OPTIONS|GIT_CONFIG_COUNT|SUDO_ASKPASS|PYTHONPATH|JAVA_TOOL_OPTIONS|GOOGLE_APPLICATION_CREDENTIALS)=' "$CB/env")" && "$(grep -c "^export FOO_API_KEY='foo1'$" "$CB/env")" == 1 ]]; check "env: a missing name is added, an existing value is never changed, behaviour-changing names are never written" $?
+grep -qx FOO_API_KEY "$CB/custom-names"; check "env: a copied custom name is listed in custom-names" $?
 [[ "$(stat -c %a "$CB/env")" == 600 && "$(stat -c %a "$CB/secret-files")" == 700 && "$(stat -c %a "$CB/secret-files/X_FILE")" == 600 && "$(cat "$CB/secret-files/X_FILE")" == file-secret-content ]]; check "modes: env 600, secret-files 700, the file 600" $?
 [[ ! -e "$CB/keystores/up.jks" && ! -e "$CB/apple/AuthKey.p8" ]]; check "the optional keystore and Apple key are not copied unless ticked" $?
 jq -e '.env.AAA_TOKEN == "a1-secret-value" and .env.BBB_KEY == "different-on-B"' "$HB/.claude/settings.json" >/dev/null 2>&1; check "ensure_env_hook ran: Claude's settings have the new name" $?
