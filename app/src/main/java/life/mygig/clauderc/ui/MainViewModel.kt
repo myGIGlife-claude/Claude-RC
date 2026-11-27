@@ -137,7 +137,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Google Drive backup. */
     val drive = DriveController(api, tools)
     /** In-app chat: polling, pending messages, drafts, files. */
-    val chats: ChatController = ChatController(app, api, tools) { team.clearChat(); webHosts.clearChatHosts() }
+    val chats: ChatController = ChatController(app, api, tools, { _status.value?.scriptApi ?: 0 }) { team.clearChat(); webHosts.clearChatHosts() }
     /** General chats (not tied to a repo): the Sessions screen's General chat tab. */
     val general = GeneralChatsController(api, tools, { _status.value?.scriptApi }, { chats.openChat(it) }) { refreshSessions() }
     /** Auto-continue queue: kill switch, stars, log (docs/queue-design.md). */
@@ -894,6 +894,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** What a server is for: stored on the phone only, no connection needed. */
     fun setServerPurpose(id: String, text: String) = viewModelScope.launch { store.setPurpose(id, text) }
+
+    /**
+     * Purpose and Tailscale address, both phone-only. A changed address is part of the connection key, so the
+     * next call opens a fresh connection that tries it; the old one is swept once idle.
+     */
+    fun setServerDetails(id: String, purpose: String, tailnetHost: String) = viewModelScope.launch {
+        store.setPurpose(id, purpose)
+        store.setTailnetHost(id, tailnetHost)
+    }
 
     fun switchServer(id: String) = viewModelScope.launch {
         if (id == store.current().activeId) return@launch

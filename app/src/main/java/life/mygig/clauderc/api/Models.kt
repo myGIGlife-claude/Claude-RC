@@ -353,6 +353,12 @@ data class ChatData(
     val ask: List<AskQuestion>? = null,
     /** The question on screen when [waiting]. */
     val screen: String? = null,
+    /** chat-watch: what the app last saw changed (empty from older servers). */
+    val token: String = "",
+    /** chat-watch: false = nothing new yet, the other fields are empty. Older servers always send full data. */
+    val changed: Boolean = true,
+    /** chat-watch: the server's watcher slots are busy; ask again in a few seconds. */
+    val retry: Boolean = false,
 )
 
 @Serializable

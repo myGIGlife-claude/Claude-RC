@@ -19,7 +19,7 @@ set -uo pipefail
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
 # 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id), 50 = grok worker kind, 51 = grok account sign-in (device code; worker-login-cancel), 52 = gemini account sign-in, fail-fast quota errors, 53 = starred-chat queue (queue-status/-on/-off/-star/-log, sessions.starred), 54 = worker-rename, 55 = inbox (inbox, inbox-dismiss)
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=56
+SCRIPT_API=57
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 CLAUDERC_API="${CLAUDERC_API:-https://api.github.com}"
@@ -2291,6 +2291,7 @@ conn_port="${CLAUDERC_CONN:-}"; conn_port="${conn_port##* }"
 add_sshd_port "$conn_port"
 while read -r p; do add_sshd_port "$p"; done < <(sshd -T 2>/dev/null | awk '/^port /{print $2}')
 # This server's address (first field of SSH_CONNECTION) is never banned by fail2ban; used only when it is a plain IP.
+# Tailscale addresses (100.64.0.0/10, fd7a:115c:a1e0::/48) are never banned either: retries from your own devices on the tailnet.
 client_ip="${CLAUDERC_CONN:-}"; client_ip="${client_ip%% *}"
 if ! [[ "$client_ip" =~ ^(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])){3}$ ||
   ("$client_ip" == *:* && "$client_ip" =~ ^[0-9A-Fa-f:.]{2,45}$) ]]; then client_ip=""; fi
@@ -2335,7 +2336,7 @@ if has harden && ((pkgs_ok)); then
 enabled = true
 backend = systemd
 port = $f2b_ports
-ignoreip = 127.0.0.1/8 ::1${client_ip:+ $client_ip}
+ignoreip = 127.0.0.1/8 ::1 100.64.0.0/10 fd7a:115c:a1e0::/48${client_ip:+ $client_ip}
 maxretry = 4
 findtime = 10m
 bantime = 1h
@@ -4470,15 +4471,49 @@ do_chat_open() {
 # whether it's working or waiting on a question (with that screen).
 do_chat_history() {
   [[ $# -eq 1 ]] || bad_args "usage: chat-history <session>"
-  local pin sess f screen waiting=false busy=false tmp mode model="" ask=null
-  pin="$(read_secret_line)"; exec 0</dev/null
+  local pin sess tmp; pin="$(read_secret_line)"; exec 0</dev/null
   chat_session "$1"; sess="$CHAT_SESS"
   check_pin "$pin"
+  tmp="$(mktemp)"
+  chat_history_json "$sess" "$tmp"
+  api_ok_file "$tmp"
+}
+
+# chat_screen <sess>: the last 15 lines of the session's screen.
+chat_screen() {
+  tmux capture-pane -p -J -t "=$1:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15
+}
+
+# chat_mode <screen>: the permission mode Claude's status line shows (none shown = default).
+chat_mode() {
+  local mode
+  mode="$(grep -oE '(auto mode|plan mode|accept edits|bypass permissions) on' <<<"$1" | tail -n 1)"
+  case "$mode" in "auto mode"*) echo auto ;; "plan mode"*) echo plan ;; "accept edits"*) echo edits ;; "bypass"*) echo bypass ;; *) echo default ;; esac
+}
+
+# chat_token <sess>: changes whenever what the app shows changes. Transcript identity + size + mtime, waiting/busy,
+# the mode, and a checksum of the screen only while waiting (while busy the spinner changes every second).
+chat_token() {
+  local sess="$1" f screen w=0 b=0 mode m=0 ck=0 st
+  tmux has-session -t "=$sess" 2>/dev/null || { echo gone; return; }
   f="$(chat_transcript "$sess")"
-  screen="$(tmux capture-pane -p -J -t "=$sess:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15)"
-  # The permission mode Claude's status line shows (none shown = default).
-  mode="$(grep -oE '(auto mode|plan mode|accept edits|bypass permissions) on' <<<"$screen" | tail -n 1)"
-  case "$mode" in "auto mode"*) mode=auto ;; "plan mode"*) mode=plan ;; "accept edits"*) mode=edits ;; "bypass"*) mode=bypass ;; *) mode=default ;; esac
+  st="$({ [[ -n "$f" ]] && stat -c '%i.%s.%Y' "$f"; } 2>/dev/null)"
+  screen="$(chat_screen "$sess")"
+  grep -qE "$WAIT_RE" <<<"$screen" && w=1
+  grep -q "esc to interrupt" <<<"$screen" && b=1
+  mode="$(chat_mode "$screen")"
+  case "$mode" in auto) m=1 ;; plan) m=2 ;; edits) m=3 ;; bypass) m=4 ;; esac
+  ((w)) && ck="$(printf '%s' "$screen" | cksum | cut -d' ' -f1)"
+  echo "v1.${st:-0.0.0}.$w$b$m.$ck"
+}
+
+# chat_history_json <sess> <out>: writes the chat-history answer (with its token) to <out>.
+chat_history_json() {
+  local sess="$1" out="$2" f screen waiting=false busy=false tmp mode model="" ask=null tok
+  tok="$(chat_token "$sess")"
+  f="$(chat_transcript "$sess")"
+  screen="$(chat_screen "$sess")"
+  mode="$(chat_mode "$screen")"
   grep -qE "$WAIT_RE" <<<"$screen" && waiting=true
   grep -q "esc to interrupt" <<<"$screen" && busy=true
   # Claude's multiple-choice question (AskUserQuestion) still waiting for an answer, as data for the app.
@@ -4531,10 +4566,44 @@ do_chat_history() {
       # The last 60 of your messages and Claude replies, with the tool steps between them.
       ([to_entries[] | select(.value.role != "tool") | .key] | .[-60] // 0) as $from | .[$from:]' >"$tmp"
   jq -e . "$tmp" >/dev/null 2>&1 || echo '[]' >"$tmp"
-  jq -c --arg s "$sess" --argjson w "$waiting" --argjson b "$busy" --arg sc "$screen" --arg mo "$mode" --arg md "$model" --argjson ak "$ask" \
-    '{session:$s, messages:., waiting:$w, busy:$b, mode:$mo, model:$md, ask:$ak, screen:(if $w then $sc else null end)}' "$tmp" >"$tmp.out"
+  jq -c --arg s "$sess" --argjson w "$waiting" --argjson b "$busy" --arg sc "$screen" --arg mo "$mode" --arg md "$model" --argjson ak "$ask" --arg tk "$tok" \
+    '{session:$s, messages:., waiting:$w, busy:$b, mode:$mo, model:$md, ask:$ak, screen:(if $w then $sc else null end), token:$tk}' "$tmp" >"$out"
   rm -f "$tmp"
-  api_ok_file "$tmp.out"
+}
+
+# chat-watch <session>: stdin = PIN line, then the app's last token (empty = none). Answers like chat-history,
+# plus changed:true, as soon as the token differs; else {changed:false, token} after CLAUDERC_WATCH_SECS.
+# Polls with stat once a second (no inotify). Two watchers per session at most (flock slots); no shared lock,
+# so chat-send is never blocked. A bare newline every CLAUDERC_WATCH_BEAT ticks to the answer stream: when the
+# client has gone the write fails and we leave (the launcher execs us, so the pipe is the client's own).
+do_chat_watch() {
+  [[ $# -eq 1 ]] || bad_args "usage: chat-watch <session>"
+  local pin have sess tok fd="" i n=0 end tmp d="$LAUNCHER_CONFIG_DIR/watch"
+  pin="$(read_secret_line)"; have="$(read_secret_line)"; exec 0</dev/null
+  chat_session "$1"; sess="$CHAT_SESS"
+  check_pin "$pin"
+  [[ "$have" =~ ^[A-Za-z0-9.:-]{0,120}$ ]] || have=""
+  mkdir -p "$d" && chmod 700 "$d"
+  for i in 1 2; do
+    exec {fd}>>"$d/$sess.$i"
+    flock -n "$fd" && break
+    exec {fd}>&-; fd=""
+  done
+  [[ -n "$fd" ]] || api_ok "$(jq -cn --arg s "$sess" '{session:$s,changed:false,token:"",retry:true}')"
+  end=$((SECONDS + ${CLAUDERC_WATCH_SECS:-25}))
+  while :; do
+    tok="$(chat_token "$sess")"
+    [[ "$tok" != gone ]] || api_err invalid_name "No running session named '$1'."
+    if [[ "$tok" != "$have" ]]; then
+      tmp="$(mktemp)"
+      chat_history_json "$sess" "$tmp"
+      jq -c '. + {changed:true}' "$tmp" >"$tmp.out" 2>/dev/null; rm -f "$tmp"
+      api_ok_file "$tmp.out"
+    fi
+    ((SECONDS < end)) || api_ok "$(jq -cn --arg s "$sess" --arg t "$tok" '{session:$s,changed:false,token:$t}')"
+    sleep 1
+    ((++n % ${CLAUDERC_WATCH_BEAT:-5})) || printf '\n' >&3 2>/dev/null || exit 0
+  done
 }
 
 # chat_paste <session> <message> [guard]: paste the message into the session's box (bracketed paste) and press Enter.
@@ -4544,11 +4613,11 @@ chat_paste() {
   local sess="$1" msg="$2" guard="${3:-}" scr
   chat_guard() {   # 0 = safe to go on
     [[ -n "$guard" ]] || return 0
-    scr="$(tmux capture-pane -p -J -t "=$sess:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15)"
+    scr="$(chat_screen "$sess")"
     ! grep -qE "$WAIT_RE" <<<"$scr"
   }
   if [[ -n "$guard" ]]; then
-    scr="$(tmux capture-pane -p -J -t "=$sess:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15)"
+    scr="$(chat_screen "$sess")"
     ! grep -qE "$WAIT_RE|esc to interrupt" <<<"$scr" || api_err internal "The session is busy or waiting for you."
   fi
   printf '%s' "$msg" | tmux load-buffer -b "clauderc-chat-$$" - || api_err internal "Couldn't hand the message to tmux."
@@ -6306,7 +6375,7 @@ api_main() {
   shift || true
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | set-secret-file | login-keystore | login-apple | youtube-login-start | \
-      chat-pin-set | queue-on | queue-star | chat-open | chat-history | general-rename | chat-send | chat-interrupt | chat-commands | permissions-get | permissions-set | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
+      chat-pin-set | queue-on | queue-star | chat-open | chat-history | chat-watch | general-rename | chat-send | chat-interrupt | chat-commands | permissions-get | permissions-set | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
       migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | host-probe | host-add | host-keyimport | host-authorize | host-harden | drive-passphrase) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
@@ -6432,6 +6501,7 @@ api_main() {
     chat-pin-set)        do_chat_pin_set "$@" ;;
     chat-open)           do_chat_open "$@" ;;
     chat-history)        do_chat_history "$@" ;;
+    chat-watch)          do_chat_watch "$@" ;;
     chat-send)           do_chat_send "$@" ;;
     chat-interrupt)      do_chat_interrupt "$@" ;;
     chat-commands)       do_chat_commands "$@" ;;
