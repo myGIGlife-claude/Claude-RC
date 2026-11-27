@@ -10,6 +10,9 @@ import kotlinx.serialization.Serializable
 /** Queue actions arrived with server script API 53; older servers get no queue UI. */
 const val QUEUE_MIN_SCRIPT_API = 53
 
+/** chat-watch (long-poll for the open chat) arrived with server script API 57; older servers are polled with chat-history. */
+const val CHAT_WATCH_MIN_SCRIPT_API = 57
+
 /** Usage of the owner's account as the server last saw it (null = unknown). */
 @Serializable
 data class QueueUsage(

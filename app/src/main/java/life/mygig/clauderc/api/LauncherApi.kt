@@ -350,6 +350,11 @@ class LauncherApi(
     /** Logs "open" in the server's chat log: the queue backs off a chat the owner is looking at. */
     suspend fun chatOpen(session: String): JsonObject { requireName(session); return call("chat-open $session", stdin = NO_PIN) }
     suspend fun chatHistory(session: String): ChatData { requireName(session); return call("chat-history $session", stdin = NO_PIN) }
+    /** Long-poll (SCRIPT_API 57): answers when [token] (the last one seen, "" = none) is out of date, else after ~25 s with changed=false. */
+    suspend fun chatWatch(session: String, token: String): ChatData {
+        requireName(session)
+        return call("chat-watch $session", stdin = NO_PIN + "\n" + token, timeoutMs = 45_000)
+    }
     suspend fun chatSend(session: String, text: String): JsonObject {
         requireName(session)
         return call("chat-send $session", stdin = NO_PIN + "\n" + text)
@@ -486,7 +491,9 @@ class LauncherApi(
     private suspend fun run(command: String, stdin: String?, timeoutMs: Long): String {
         val cfg = config()
         if (!coalescable(command, stdin)) {
-            try { return exec(cfg, command, stdin, timeoutMs) } finally { synchronized(inFlight) { writes++ } }
+            // A watch is a read that lasts: counting it would stop reads from sharing for the whole watch.
+            val watch = command.startsWith("chat-watch ")
+            try { return exec(cfg, command, stdin, timeoutMs) } finally { if (!watch) synchronized(inFlight) { writes++ } }
         }
         val key = cfg to command
         while (true) {

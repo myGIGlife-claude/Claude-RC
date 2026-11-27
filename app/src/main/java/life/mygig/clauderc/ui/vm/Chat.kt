@@ -14,6 +14,8 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import life.mygig.clauderc.api.ApiException
 import life.mygig.clauderc.api.AskQuestion
+import life.mygig.clauderc.api.CHAT_WATCH_MIN_SCRIPT_API
+import life.mygig.clauderc.api.Codes
 import life.mygig.clauderc.api.ChatCommand
 import life.mygig.clauderc.api.ChatData
 import life.mygig.clauderc.api.ChatLogEntry
@@ -36,6 +38,7 @@ class ChatController(
     app: Application,
     private val api: LauncherApi,
     private val tools: VmTools,
+    private val scriptApi: () -> Int,
     private val onClose: () -> Unit,
 ) {
     init {
@@ -141,15 +144,30 @@ class ChatController(
             runCatching { api.chatCommands(s0).commands }.getOrNull()?.let { if (_chatSession.value == s0) _chatCommands.value = it }
         }
         chatPoller = tools.scope.launch {
+            var token = ""
+            var legacy = scriptApi() < CHAT_WATCH_MIN_SCRIPT_API
             while (true) {
                 val session = _chatSession.value ?: break
+                var pause = 4_000L
                 try {
-                    setChat(session, api.chatHistory(session))
-                    _chatError.value = null
+                    if (legacy) {
+                        setChat(session, api.chatHistory(session))
+                        _chatError.value = null
+                    } else {
+                        val d = api.chatWatch(session, token)
+                        _chatError.value = null
+                        if (!d.retry) {
+                            token = d.token
+                            if (d.changed) setChat(session, d)
+                        }
+                        pause = watchDelayMs(d)
+                    }
                 } catch (e: ApiException) {
                     _chatError.value = friendly(e).first
+                    // A server that doesn't know chat-watch refuses it: poll that chat the old way.
+                    if (!legacy && e.code == Codes.FORBIDDEN) legacy = true
                 }
-                delay(if (_chat.value?.busy == true) 2_000 else 4_000)   // busy: 2 s; idle or waiting: 4 s
+                delay(if (legacy) (if (_chat.value?.busy == true) 2_000 else 4_000) else pause)   // old way: busy 2 s, else 4 s
             }
         }
     }
@@ -403,3 +421,6 @@ internal fun ChatData.withoutCleared(marks: MutableMap<String, String>, session:
     if (i < 0) { marks.remove(session); return this }
     return copy(messages = messages.drop(i + 1))
 }
+
+/** Pause after a chat-watch answer: slots busy = 4 s; a change = 1.5 s before the next watch; nothing new = straight back. */
+internal fun watchDelayMs(d: ChatData): Long = if (d.retry) 4_000 else if (d.changed) 1_500 else 0

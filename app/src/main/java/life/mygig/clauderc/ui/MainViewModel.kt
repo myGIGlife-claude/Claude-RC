@@ -137,7 +137,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Google Drive backup. */
     val drive = DriveController(api, tools)
     /** In-app chat: polling, pending messages, drafts, files. */
-    val chats: ChatController = ChatController(app, api, tools) { team.clearChat(); webHosts.clearChatHosts() }
+    val chats: ChatController = ChatController(app, api, tools, { _status.value?.scriptApi ?: 0 }) { team.clearChat(); webHosts.clearChatHosts() }
     /** General chats (not tied to a repo): the Sessions screen's General chat tab. */
     val general = GeneralChatsController(api, tools, { _status.value?.scriptApi }, { chats.openChat(it) }) { refreshSessions() }
     /** Auto-continue queue: kill switch, stars, log (docs/queue-design.md). */

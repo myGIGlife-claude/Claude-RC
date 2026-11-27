@@ -825,6 +825,48 @@ check "a pending AskUserQuestion comes back as data" "$(jqt '.data.waiting and (
 echo '{"type":"user","uuid":"q10","timestamp":"2026-09-29T10:02:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ask","content":"ok"}]}}' >>"$TF"
 api "chat-history demo-app2" "482913"; check "an answered question is gone" "$(jqt '.data.ask == null')"
 tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "clear"; tmux send-keys -t "=demo-app2:" Enter; sleep 0.3
+# chat-watch: long-poll on a token. wapi <session> <token> [seconds]; sets OUT and WSECS (elapsed).
+wapi() { local t0=$SECONDS; OUT="$(CLAUDERC_WATCH_SECS="${3:-2}" SSH_ORIGINAL_COMMAND="chat-watch $1" "$HOME/bin/claude-launcher-api" <<<"$(printf '0\n%s' "$2")")"; RC=$?; WSECS=$((SECONDS - t0)); }
+api "chat-history demo-app2" "0"; WH="$OUT"; WTOK="$(jq -r '.data.token' <<<"$WH")"
+check "chat-history carries a token" "$([[ "$WTOK" =~ ^v1\.[0-9.]+\.[01]{2}[0-4]\.[0-9]+$ ]]; echo $?)"
+wapi demo-app2 ""
+check "chat-watch with no token answers at once like chat-history, with changed:true and the same token" "$(jqt '.ok and .data.changed==true and .data.token=="'"$WTOK"'"')"
+check "...and the same messages as chat-history" "$([[ "$(jq -c '.data.messages' <<<"$OUT")" == "$(jq -c '.data.messages' <<<"$WH")" ]]; echo $?)"
+wapi demo-app2 "$WTOK" 2
+check "chat-watch with the current token waits, then answers changed:false" "$(jqt '.ok and .data.changed==false and .data.token=="'"$WTOK"'" and (.data|has("messages")|not)')"
+check "...after the wait time (2-4 s)" "$([[ $WSECS -ge 2 && $WSECS -le 4 ]]; echo $?)"
+( sleep 1; echo '{"type":"assistant","uuid":"w1","timestamp":"2026-09-29T10:03:00Z","message":{"role":"assistant","content":[{"type":"text","text":"watched reply"}]}}' >>"$TF" ) &
+wapi demo-app2 "$WTOK" 10; wait
+check "a new transcript line ends the wait with the new message within 4 s" "$(jqt '.data.changed==true and .data.messages[-1].text=="watched reply" and .data.token!="'"$WTOK"'"')"
+check "...the wait was short" "$([[ $WSECS -le 4 ]]; echo $?)"
+WTOK="$(jq -r '.data.token' <<<"$OUT")"
+( sleep 1; tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "❯ 1. Red" ) &
+wapi demo-app2 "$WTOK" 10; wait
+check "the pane turning into a numbered menu ends the wait with waiting:true" "$(jqt '.data.changed==true and .data.waiting==true')"
+tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "clear"; tmux send-keys -t "=demo-app2:" Enter; sleep 0.3
+wapi demo-app2 'bad token; $(id)' 2
+check "a token with odd characters is treated as empty" "$(jqt '.ok and .data.changed==true')"
+api "chat-history demo-app2" "0"; WTOK="$(jq -r '.data.token' <<<"$OUT")"
+for i in 1 2; do ( CLAUDERC_WATCH_SECS=6 SSH_ORIGINAL_COMMAND="chat-watch demo-app2" "$HOME/bin/claude-launcher-api" <<<"$(printf '0\n%s' "$WTOK")" >"$WORK/watch$i.out" ) & done
+sleep 2; wapi demo-app2 "$WTOK" 6
+check "a third watcher on one session gets retry:true at once" "$(jqt '.ok and .data.retry==true and .data.changed==false and .data.token==""')"
+check "...without waiting" "$([[ $WSECS -le 2 ]]; echo $?)"
+wait
+check "the two watchers in the slots finish normally" "$(jq -s -e 'all(.[]; .ok and .data.changed==false)' "$WORK/watch1.out" "$WORK/watch2.out" >/dev/null 2>&1; echo $?)"
+wapi demo-app2 "$WTOK" 2
+check "a slot is free again afterwards" "$(jqt '.ok and (.data.retry|not)')"
+api "chat-watch demo-app2 extra" "0"; check "chat-watch takes one session" "$(jqt '.error.code=="forbidden"')"
+api "chat-watch ../x" "0"; check "chat-watch refuses ../x" "$(jqt '.error.code=="forbidden"')"
+# A reader that has gone away: the heartbeat write fails and the watcher leaves, freeing its slot.
+( CLAUDERC_WATCH_SECS=30 CLAUDERC_WATCH_BEAT=1 SSH_ORIGINAL_COMMAND="chat-watch demo-app2" "$HOME/bin/claude-launcher-api" <<<"$(printf '0\n%s' "$WTOK")" | true )
+sleep 3
+pgrep -f -- '--api chat-watch demo-app2' >/dev/null; [[ $? -ne 0 ]]; check "a watcher whose reader closed the pipe is gone within 3 s" $?
+tmux new-session -d -s wkill -x 100 -y 30 cat; sleep 0.5
+wapi wkill ""; KT="$(jq -r '.data.token' <<<"$OUT")"
+( sleep 1; tmux kill-session -t =wkill ) &
+wapi wkill "$KT" 20; wait
+check "a killed session ends the watch with an error" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+check "...within 3 s" "$([[ $WSECS -le 3 ]]; echo $?)"
 # Over 20,000 bytes is refused, never cut short and sent.
 CLOG="$HOME/.local/state/claude-launcher/chat.log"; csent() { grep -c $'\tsend$' "$CLOG" 2>/dev/null || true; }
 n0="$(csent)"
