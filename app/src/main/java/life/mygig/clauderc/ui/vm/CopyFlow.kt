@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 import life.mygig.clauderc.api.ApiException
 import life.mygig.clauderc.api.COPY_MIN_SCRIPT_API
 import life.mygig.clauderc.api.Codes
+import life.mygig.clauderc.api.COPY_WHOLE_FOLDER
 import life.mygig.clauderc.api.CopyDiff
 import life.mygig.clauderc.api.CopyEntry
 import life.mygig.clauderc.api.CopyKind
@@ -43,6 +44,8 @@ data class CopyUi(
     val truncated: Boolean = false,
     /** Paths that were not offered because they can't travel safely (a line break in the name). */
     val unsendable: Int = 0,
+    /** A plain heads-up for the pick step (empty = none). */
+    val notice: String = "",
     val ticked: Set<String> = emptySet(),
     /** "Tailnet" or "Public route"; empty until chosen. */
     val route: String = "",
@@ -79,6 +82,8 @@ class CopyController(
     private var retryBlock: (suspend () -> Unit)? = null
     /** The file the To server received (set once the send finished). */
     private var sentFile: String? = null
+    /** copy-apply was started on the To server for [sentFile] (it isn't started twice; a failed apply clears it). */
+    private var applyStarted = false
 
     // ---- Machinery ---------------------------------------------------------------
 
@@ -149,6 +154,7 @@ class CopyController(
         job = null
         retryBlock = null
         sentFile = null
+        applyStarted = false
         _ui.value = CopyUi(open = open)
     }
 
@@ -184,7 +190,7 @@ class CopyController(
     /** Back to the first step. */
     fun edit() {
         if (job?.isActive == true) return
-        if (_ui.value.step == CopyStep.CHOOSE || _ui.value.step == CopyStep.CHECK) _ui.update { it.copy(step = CopyStep.PICK, diff = null, ticked = emptySet(), error = null) }
+        if (_ui.value.step == CopyStep.CHOOSE || _ui.value.step == CopyStep.CHECK) _ui.update { it.copy(step = CopyStep.PICK, diff = null, ticked = emptySet(), notice = "", error = null) }
     }
 
     fun toggle(path: String) = _ui.update { it.copy(ticked = if (path in it.ticked) it.ticked - path else it.ticked + path) }
@@ -216,11 +222,17 @@ class CopyController(
         }
         log("Reading ${f.host}…")
         val a = apiFor(f).copyList(cur.kind, project)
+        if (a.exists == false) throw ApiException(Codes.INVALID_NAME, "${f.host} has no project folder \"$project\".")
         val offered = a.entries.filter { copyPathOk(it.path) }
         log("Reading ${t.host}…")
-        val bundleAsk = if (cur.kind == CopyKind.BUNDLE) offered.filter { it.sha.isNotBlank() }.map { "${it.path} ${it.sha}" } else emptyList()
+        // Bundle entries carry the commit's sha in `mode`; the To server answers for the commits it already has.
+        val bundleAsk = if (cur.kind == CopyKind.BUNDLE) offered.filter { it.mode.isNotBlank() }.map { "${it.path} ${it.mode}" } else emptyList()
         val b = apiFor(t).copyList(cur.kind, project, bundleAsk)
-        val diff = if (cur.kind == CopyKind.BUNDLE) {
+        val missingThere = b.exists == false
+        val diff = if (cur.kind == CopyKind.PROJECT && missingThere) {
+            // The folder isn't on the To server: send it whole, .git included (the server's "." path).
+            CopyDiff(missingOnTo = listOf(CopyEntry(path = COPY_WHOLE_FOLDER)))
+        } else if (cur.kind == CopyKind.BUNDLE) {
             // The To server lists the branches whose commit it already has: only the others are offered.
             val has = b.entries.map { it.path }.toSet()
             CopyDiff(missingOnTo = offered.filter { it.path !in has }.sortedBy { it.path })
@@ -231,6 +243,11 @@ class CopyController(
             it.copy(
                 step = CopyStep.CHOOSE, diff = diff, ticked = defaultCopyTicks(diff), truncated = a.truncated || b.truncated,
                 unsendable = a.entries.size - offered.size, route = "", status = null, result = null,
+                notice = if (cur.kind == CopyKind.BUNDLE && missingThere) {
+                    "${t.host} doesn't have this project yet. Branches can only go into a missing project if the project has no remote; otherwise copy the project first."
+                } else {
+                    ""
+                },
             )
         }
         log("Found ${diff.all.size} difference(s).")
@@ -299,7 +316,7 @@ class CopyController(
             // 5. Send: a fresh key for this copy; only its public half crosses the phone.
             setStep(CopyStep.SEND)
             val before = fromApi.copyStatus()
-            if (before.job == "send" && before.phase == "transfer") {
+            if (before.job == "send" && (before.phase == "pack" || before.phase == "transfer")) {
                 throw ApiException(CODE_FAILED, "A copy is already running on ${f.host}. Wait for it to finish.")
             }
             val key = fromApi.copyKeygen()
@@ -316,19 +333,20 @@ class CopyController(
         val file = sentFile ?: throw ApiException(CODE_STEP, "Send first.")
         setStep(CopyStep.APPLY)
         val before = toApi.copyStatus()
-        val sameFile = before.file == file
-        val running = before.job == "apply" && before.phase == "apply" && sameFile
-        val alreadyDone = before.job == "apply" && before.phase == "done" && sameFile
-        val done = if (alreadyDone) {
-            before
-        } else {
-            if (!running) {
-                toApi.copyApply(file, copyApplyLines(diff, s.ticked))
-                log("Applying on ${t.host}.")
-            }
-            poll(toApi, t.host, "apply", if (running) null else before.started)
+        // Once started, the job reports on its own (its file name is gone from the status when it ends): just wait for it.
+        val resume = applyStarted
+        if (!resume) {
+            toApi.copyApply(file, copyApplyLines(diff, s.ticked))
+            applyStarted = true
+            log("Applying on ${t.host}.")
         }
-        _ui.update { it.copy(step = CopyStep.DONE, result = done, keyOnTo = !done.keyRemoved && it.keyOnTo) }
+        val done = try {
+            poll(toApi, t.host, "apply", if (resume) null else before.started)
+        } catch (e: ApiException) {
+            if (e.code == CODE_FAILED) applyStarted = false   // the file stays on the server: Try again applies it again
+            throw e
+        }
+        _ui.update { it.copy(step = CopyStep.DONE, result = done, keyOnTo = done.result?.keyRemoved != true && it.keyOnTo) }
         log("Done.")
     }
 
@@ -341,6 +359,7 @@ class CopyController(
             try {
                 apiFor(t).copyCancel()
                 sentFile = null
+                applyStarted = false
                 _ui.update { it.copy(keyOnTo = false, busy = false, error = null, step = if (it.step == CopyStep.DONE) it.step else CopyStep.CHOOSE) }
                 log("Cancelled: the key on ${t.host} is removed.")
             } catch (e: ApiException) {

@@ -20,7 +20,7 @@ import org.junit.Test
 
 class CopyTest {
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
-    private fun e(path: String, mtime: Long = 100, size: Long = 5, optional: Boolean = false) = CopyEntry(path, size, mtime, 420, optional)
+    private fun e(path: String, mtime: Long = 100, size: Long = 5, optional: Boolean = false) = CopyEntry(path, size, mtime, "644", optional)
 
     @Test fun diffSortsIntoThreeLists() {
         val from = listOf(e("only-a"), e("same"), e("a-newer", 200), e("b-newer", 100), e("same-time-other-size", 100, 9))
@@ -87,20 +87,64 @@ class CopyTest {
 
     @Test fun copyFileNames() {
         assertTrue(COPY_FILE_RE.matches("copy-20261127-101500.tgz"))
-        assertFalse(COPY_FILE_RE.matches("../copy-1.tgz"))
-        assertFalse(COPY_FILE_RE.matches("copy-1.tgz; rm"))
+        assertTrue(COPY_FILE_RE.matches("copy-20261127-101500-7.tgz"))
+        assertFalse(COPY_FILE_RE.matches("copy-1.tgz"))
+        assertFalse(COPY_FILE_RE.matches("../copy-20261127-101500.tgz"))
+        assertFalse(COPY_FILE_RE.matches("copy-20261127-101500.tgz; rm"))
+    }
+
+    @Test fun parsesProjectListAnswers() {
+        val l = json.decodeFromString<CopyList>(
+            """{"entries":[{"path":"a/b.txt","size":3,"mtime":9,"mode":"644"},{"path":".env","size":12,"mtime":10,"mode":"600"}],"truncated":false,"exists":true}""",
+        )
+        assertEquals(listOf("644", "600"), l.entries.map { it.mode })
+        assertEquals(true, l.exists)
+        val missing = json.decodeFromString<CopyList>("""{"entries":[],"truncated":false,"exists":false}""")
+        assertEquals(false, missing.exists)
+        // secrets lists have no `exists`
+        assertEquals(null, json.decodeFromString<CopyList>("""{"entries":[],"truncated":true}""").exists)
+    }
+
+    @Test fun parsesSecretsAndBundleLists() {
+        val s = json.decodeFromString<CopyList>(
+            """{"entries":[{"path":"env/FOO_KEY","size":0,"mtime":5,"mode":"600"},{"path":"keystores/a.jks","size":2048,"mtime":6,"mode":"600","optional":true}],"truncated":false}""",
+        )
+        assertFalse(s.entries[0].optional)
+        assertTrue(s.entries[1].optional)
+        val sha = "0123456789abcdef0123456789abcdef01234567"
+        val b = json.decodeFromString<CopyList>("""{"entries":[{"path":"feature/x","size":3,"mtime":1700000000,"mode":"$sha"}],"truncated":false,"exists":true}""")
+        assertEquals(sha, b.entries[0].mode)
+        assertEquals(3L, b.entries[0].size)
     }
 
     @Test fun parsesAnswers() {
-        val l = json.decodeFromString<CopyList>("""{"entries":[{"path":"a/b","size":3,"mtime":9,"mode":420,"extra":1},{"path":"E","optional":true}],"truncated":true}""")
-        assertEquals(2, l.entries.size)
-        assertTrue(l.truncated)
-        assertTrue(l.entries[1].optional)
-        val k = json.decodeFromString<CopyKey>("""{"public_key":"ssh-ed25519 AAAA","tailnet_ip":""}""")
+        val k = json.decodeFromString<CopyKey>("""{"public_key":"ssh-ed25519 AAAA clauderc-copy","tailnet_ip":""}""")
         assertEquals("", k.tailnetIp)
-        val st = json.decodeFromString<CopyStatus>("""{"job":"apply","phase":"done","skipped":["x"],"key_removed":true}""")
-        assertEquals(listOf("x"), st.skipped)
-        assertTrue(st.keyRemoved)
-        assertFalse(json.decodeFromString<CopyStatus>("""{"job":"none"}""").keyRemoved)
+        val p = json.decodeFromString<CopyProbe>("""{"reachable":true,"hostkey_ok":false}""")
+        assertTrue(p.reachable)
+        assertFalse(p.hostkeyOk)
+    }
+
+    @Test fun parsesStatusAndResult() {
+        val sending = json.decodeFromString<CopyStatus>(
+            """{"job":"send","phase":"transfer","message":"Sending to the other server","pct":60,"bytes":0,"file":"","started":1,"updated":2,"error":""}""",
+        )
+        assertEquals("transfer", sending.phase)
+        assertEquals(null, sending.result)
+        val done = json.decodeFromString<CopyStatus>(
+            """{"job":"apply","phase":"done","message":"Copied","pct":100,"bytes":0,"file":"","started":1,"updated":2,"error":"",
+              "result":{"copied":["a.txt"],"skipped":[{"path":"b.txt","reason":"exists"}],"refused":[{"path":"env/PATH","reason":"this name can't be copied"}],
+              "env_added":["NEW_KEY"],"env_conflicts":["OLD_KEY"],"fetched":["feature/x"],"backup":"/home/u/backups/pre-copy-20261127-101500","key_removed":true}}""",
+        )
+        val r = done.result!!
+        assertEquals(listOf("a.txt"), r.copied)
+        assertEquals("exists", r.skipped.single().reason)
+        assertEquals("env/PATH", r.refused.single().path)
+        assertEquals(listOf("NEW_KEY"), r.envAdded)
+        assertEquals(listOf("OLD_KEY"), r.envConflicts)
+        assertEquals(listOf("feature/x"), r.fetched)
+        assertTrue(r.backup.endsWith("pre-copy-20261127-101500"))
+        assertTrue(r.keyRemoved)
+        assertFalse(json.decodeFromString<CopyStatus>("""{"job":"none","phase":"none","message":"","pct":0,"bytes":0}""").result != null)
     }
 }

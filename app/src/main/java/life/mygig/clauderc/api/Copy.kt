@@ -12,21 +12,27 @@ enum class CopyKind(val wire: String, val label: String) {
     BUNDLE("bundle", "Unpushed git work"),
 }
 
-/** One file (or env name, or branch) in a `copy-list` answer. Names and sizes only, never values. */
+/**
+ * One entry of a `copy-list` answer. Names and sizes only, never values.
+ * Files: size, mtime, [mode] = octal permissions as text ("644"). Secrets: `env/NAME`, `secret-files/x`, `keystores/x.jks`,
+ * `apple/AuthKey.p8`. Bundle: path = branch, size = commits a remote lacks, mtime = commit time, [mode] = the commit's sha.
+ */
 @Serializable
 data class CopyEntry(
     val path: String,
     val size: Long = 0,
     val mtime: Long = 0,
-    val mode: Int = 0,
+    val mode: String = "",
     /** Secrets: a keystore or Apple key file, only copied when the owner ticks it. */
     val optional: Boolean = false,
-    /** Bundle: the branch's commit, sent back to the other server to ask which ones it already has. */
-    val sha: String = "",
 )
 
+/** [exists] is only there for project and bundle lists: false = that project folder is missing on the server. */
 @Serializable
-data class CopyList(val entries: List<CopyEntry> = emptyList(), val truncated: Boolean = false)
+data class CopyList(val entries: List<CopyEntry> = emptyList(), val truncated: Boolean = false, val exists: Boolean? = null)
+
+/** The `copy-send` path that means "the whole folder, .git included" (the folder is missing on the other server). */
+const val COPY_WHOLE_FOLDER = "."
 
 @Serializable
 data class CopyKey(
@@ -37,27 +43,46 @@ data class CopyKey(
 @Serializable
 data class CopyProbe(val reachable: Boolean = false, @SerialName("hostkey_ok") val hostkeyOk: Boolean = false)
 
-/** `copy-status`: the migrate-status shape plus what the apply step reports (paths only). */
+/** A path with the reason the server gave. */
+@Serializable
+data class CopyReason(val path: String, val reason: String = "")
+
+/** `copy-status`'s `result`, written when copy-apply ends. Paths and names only. */
+@Serializable
+data class CopyResult(
+    val copied: List<String> = emptyList(),
+    val skipped: List<CopyReason> = emptyList(),
+    val refused: List<CopyReason> = emptyList(),
+    @SerialName("env_added") val envAdded: List<String> = emptyList(),
+    /** Names that exist on the target with another value: never overwritten. */
+    @SerialName("env_conflicts") val envConflicts: List<String> = emptyList(),
+    /** Bundle branches now under refs/remotes/from-<source>/. */
+    val fetched: List<String> = emptyList(),
+    /** Folder on the target holding what was overwritten ("" = nothing was). */
+    val backup: String = "",
+    @SerialName("key_removed") val keyRemoved: Boolean = false,
+)
+
+/** `copy-status`: the migrate-status shape, plus [result] once copy-apply has ended. */
 @Serializable
 data class CopyStatus(
     /** send, apply or none. */
     val job: String = "none",
-    /** transfer, apply, done or failed. */
+    /** pack, transfer (send); apply (apply); done or failed; none. */
     val phase: String = "",
     val message: String = "",
     val pct: Int = 0,
     val bytes: Long = 0,
-    /** The copy file's name on the receiving server. */
+    /** The copy file's name on the receiving server (set when the send is done and while the apply runs). */
     val file: String = "",
     val started: JsonElement = JsonNull,
     val updated: JsonElement = JsonNull,
     val error: String? = null,
-    val skipped: List<String> = emptyList(),
-    val refused: List<String> = emptyList(),
-    @SerialName("key_removed") val keyRemoved: Boolean = false,
+    val result: CopyResult? = null,
 )
 
-val COPY_FILE_RE = Regex("^copy-[A-Za-z0-9._-]{1,80}\\.tgz$")
+/** Same pattern the server accepts (claude-setup.sh COPY_FILE_RE). */
+val COPY_FILE_RE = Regex("^copy-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\\.tgz$")
 
 /** Which way the copy goes: the tailnet, the public address, or nowhere. */
 sealed interface CopyRoute {

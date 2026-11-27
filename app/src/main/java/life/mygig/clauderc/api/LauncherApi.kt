@@ -97,6 +97,8 @@ val MIGRATE_FILE_RE = Regex("^incoming-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\\.gpg$")
 private val MIGRATE_ITEMS = setOf("claude", "workers", "github", "autostart")
 private val MIGRATE_HOST_RE = Regex("^[A-Za-z0-9._:-]{1,253}$")
 private val MIGRATE_SSH_USER_RE = Regex("^[A-Za-z0-9._][A-Za-z0-9._-]{0,63}$")
+/** The server's MIGRATE_USER_RE (copy-send refuses anything else). */
+private val COPY_SSH_USER_RE = Regex("^[A-Za-z_][A-Za-z0-9_.-]{0,31}$")
 private val MIGRATE_KEY_TYPE_RE = Regex("^[A-Za-z0-9@.-]{1,64}$")
 private val MIGRATE_KEY_BLOB_RE = Regex("^[A-Za-z0-9+/=]{1,8192}$")
 private val MIGRATE_MANIFEST_RE = Regex("^[A-Za-z0-9._-]{1,100}$")
@@ -457,9 +459,12 @@ class LauncherApi(
         return kind.wire + if (kind == CopyKind.PROJECT) " $project" else ""
     }
 
-    /** [stdin] is only for the bundle kind on the target: the source's `name sha` lines. */
+    /**
+     * [stdin] is only for the bundle kind on the target: the source's `name sha` lines. A bundle list always gets stdin
+     * (possibly empty) so it isn't left waiting up to 5 s for lines that never come.
+     */
     suspend fun copyList(kind: CopyKind, project: String?, stdin: List<String> = emptyList()): CopyList =
-        call("copy-list " + copyArgs(kind, project), stdin = stdin.joinToString("\n").ifEmpty { null }, timeoutMs = 180_000)
+        call("copy-list " + copyArgs(kind, project), stdin = if (kind == CopyKind.BUNDLE) stdin.joinToString("\n") else null, timeoutMs = 180_000)
     suspend fun copyKeygen(): CopyKey = call("copy-keygen")
     /** On the target: [fromAddress] (the source's tailnet IP, or "" on the public route) and minutes to live. */
     suspend fun copyAuthorize(publicKey: String, fromAddress: String, minutes: Int = 120): JsonObject {
@@ -478,12 +483,17 @@ class LauncherApi(
     /** On the source: can it reach [host] and does it show the pinned key? */
     suspend fun copyProbe(host: String, port: Int, hostKeyType: String, hostKeyBlob: String): CopyProbe =
         call("copy-probe", stdin = pinnedLines(host, port, hostKeyType, hostKeyBlob).joinToString("\n"), timeoutMs = 60_000)
-    /** On the source: starts the send (same five stdin lines as migrate-send, then the chosen paths); returns at once. */
+    /**
+     * On the source: starts the send; returns at once. Stdin = host, port, user, host-key type, host-key base64 (as
+     * migrate-send), then the chosen paths one per line (secrets: env/NAME, secret-files/x; bundle: branch names; project:
+     * relative paths, or the single line "." for the whole folder). The server would send everything for no path lines; the app
+     * always names what was ticked.
+     */
     suspend fun copySend(
         kind: CopyKind, project: String?, host: String, port: Int, user: String, hostKeyType: String, hostKeyBlob: String,
         paths: List<String>,
     ): JsonObject {
-        requireMigrate(MIGRATE_SSH_USER_RE, user, "Bad user name")
+        requireMigrate(COPY_SSH_USER_RE, user, "Bad user name")
         if (paths.isEmpty() || paths.any { !copyPathOk(it) }) throw ApiException(Codes.INVALID_NAME, "Bad file list")
         val head = pinnedLines(host, port, hostKeyType, hostKeyBlob)
         return call("copy-send " + copyArgs(kind, project), stdin = (listOf(head[0], head[1], user, head[2], head[3]) + paths).joinToString("\n"))

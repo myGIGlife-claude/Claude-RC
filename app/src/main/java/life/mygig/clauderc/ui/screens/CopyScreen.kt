@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import life.mygig.clauderc.api.COPY_WHOLE_FOLDER
 import life.mygig.clauderc.api.CopyEntry
 import life.mygig.clauderc.api.CopyKind
 import life.mygig.clauderc.data.Server
@@ -231,6 +232,7 @@ private fun CopyChoose(vm: MainViewModel, ui: CopyUi, modifier: Modifier) {
                 Column(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("${ui.from?.let { copyServerLabel(it) }.orEmpty()}  →  ${ui.to?.let { copyServerLabel(it) }.orEmpty()}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                     if (diff.isEmpty) Text("Nothing to copy: the second server already has everything.", style = MaterialTheme.typography.bodyMedium)
+                    if (ui.notice.isNotEmpty()) CopyHint(ui.notice)
                     if (ui.truncated) CopyHint("The list was cut at 20,000 entries. Run the copy again afterwards to catch the rest.")
                     if (ui.unsendable > 0) CopyHint("${ui.unsendable} item(s) with a line break in the name were left out.")
                 }
@@ -265,7 +267,10 @@ private fun CopyRow(e: CopyEntry, ticked: Boolean, onToggle: () -> Unit) {
         Row(Modifier.fillMaxWidth().padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = ticked, onCheckedChange = { onToggle() })
             Column(Modifier.weight(1f)) {
-                Text(e.path, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
+                Text(
+                    if (e.path == COPY_WHOLE_FOLDER) "The whole project folder, including its git history" else e.path,
+                    style = MaterialTheme.typography.bodyMedium, maxLines = 2,
+                )
                 if (e.optional) Text("Signing key: only copied when ticked", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
             }
             val size = sizeText(e.size)
@@ -306,12 +311,28 @@ private fun CopyProgress(vm: MainViewModel, ui: CopyUi) {
 
 @Composable
 private fun CopyDone(vm: MainViewModel, ui: CopyUi) {
-    val r = ui.result
+    val r = ui.result?.result
     Text("Copy finished", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
     if (ui.route.isNotEmpty()) Text("Route: ${ui.route}", style = MaterialTheme.typography.bodyMedium)
-    if (r != null && r.message.isNotBlank()) Text(r.message, style = MaterialTheme.typography.bodyMedium)
-    if (r != null && r.skipped.isNotEmpty()) CopyPathList("Skipped (kept as they were)", r.skipped)
-    if (r != null && r.refused.isNotEmpty()) CopyPathList("Refused (unsafe paths)", r.refused)
+    if (r != null) {
+        val counts = listOfNotNull(
+            "${r.copied.size} copied".takeIf { r.copied.isNotEmpty() },
+            "${r.envAdded.size} key name(s) added".takeIf { r.envAdded.isNotEmpty() },
+            "${r.fetched.size} branch(es) fetched".takeIf { r.fetched.isNotEmpty() },
+        )
+        Text(counts.joinToString(", ").ifEmpty { "Nothing needed copying." }, style = MaterialTheme.typography.bodyMedium)
+        if (r.fetched.isNotEmpty()) {
+            CopyPathList("Branches fetched (kept under their own names, your branches didn't move)", r.fetched)
+        }
+        if (r.envConflicts.isNotEmpty()) {
+            CopyPathList("Not changed: these names already exist there with another value", r.envConflicts)
+        }
+        if (r.skipped.isNotEmpty()) CopyPathList("Skipped (kept as they were)", r.skipped.map { reasonLine(it.path, it.reason) })
+        if (r.refused.isNotEmpty()) CopyPathList("Refused", r.refused.map { reasonLine(it.path, it.reason) })
+        if (r.backup.isNotBlank()) {
+            Text("Replaced files were first saved in ${r.backup} on ${ui.to?.host.orEmpty()}.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
     if (r?.keyRemoved == true) {
         Text("The copy key was removed from ${ui.to?.host.orEmpty()}.", style = MaterialTheme.typography.bodyMedium)
     } else {
@@ -322,6 +343,8 @@ private fun CopyDone(vm: MainViewModel, ui: CopyUi) {
     }
     Button(onClick = { vm.copy.reset(open = false) }, modifier = Modifier.fillMaxWidth()) { Text("Close") }
 }
+
+private fun reasonLine(path: String, reason: String) = if (reason.isBlank()) path else "$path: $reason"
 
 @Composable
 private fun CopyPathList(title: String, paths: List<String>) {
