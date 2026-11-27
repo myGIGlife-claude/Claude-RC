@@ -233,6 +233,19 @@ Also: **servers** (add as many as you like, they all use this phone's key), **pl
 
 <p align="center"><img src="docs/screens/demo.gif" width="300" alt="Illustrative mock-up: the Claude tab, attaching workers to a chat with the 👥 button, tasks finishing on their own branches and being merged"></p>
 
+## Screens
+
+Design mock-ups with made-up data, in the same calm look as the app (light and dark PNGs; the HTML sources in [docs/mockups](docs/mockups) take `?theme=light` or `?theme=dark`).
+
+| Screen | Light | Dark | Source |
+|---|---|---|---|
+| General chat | [png](docs/screens/mock-general-chat-light.png) | [png](docs/screens/mock-general-chat-dark.png) | [html](docs/mockups/general-chat.html) |
+| Permissions sheet | [png](docs/screens/mock-permissions-light.png) | [png](docs/screens/mock-permissions-dark.png) | [html](docs/mockups/permissions.html) |
+| Home-screen widgets | [png](docs/screens/mock-widgets-light.png) | [png](docs/screens/mock-widgets-dark.png) | [html](docs/mockups/widgets.html) |
+| Natural voice | [png](docs/screens/mock-natural-voice-light.png) | [png](docs/screens/mock-natural-voice-dark.png) | [html](docs/mockups/natural-voice.html) |
+| Add a server with a password | [png](docs/screens/mock-add-server-password-light.png) | [png](docs/screens/mock-add-server-password-dark.png) | [html](docs/mockups/add-server-password.html) |
+| Copy between servers | [png](docs/screens/mock-copy-between-servers-light.png) | [png](docs/screens/mock-copy-between-servers-dark.png) | [html](docs/mockups/copy-between-servers.html) |
+
 ## How it works
 
 ```
