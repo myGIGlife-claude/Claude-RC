@@ -6841,16 +6841,16 @@ copy_fail() { migrate_fail "$1"; }
 # copy_scan_archive <file>: every member must be a plain file, folder or symlink with a safe unique name, none under a symlink.
 # Writes names.nul (files) and links.nul (symlinks) into the staging folder and members.txt (names, one per line).
 copy_scan_archive() {
-  local f="$1" st="$COPY_STAGE" line type rest nm p n_plain n_verbose=0
+  local f="$1" st="$COPY_STAGE" line type rest nm p n_plain n_verbose=0 total=0 avail
   local -A seen=() lset=()
   local -a names=() lnames=()
-  local re='^(.)[-rwxsStT]{9} [^ ]+ +[0-9]+ [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}(:[0-9]{2})? (.*)$'
+  local re='^(.)[-rwxsStT]{9} [^ ]+ +([0-9]+) [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}(:[0-9]{2})? (.*)$'
   n_plain="$(LC_ALL=C.UTF-8 tar --quoting-style=escape -tzf "$f" 2>/dev/null | wc -l)"
   LC_ALL=C.UTF-8 tar --quoting-style=escape --numeric-owner -tvzf "$f" >"$st/verbose" 2>/dev/null || copy_fail "That isn't a readable copy file."
   while IFS= read -r line; do
     n_verbose=$((n_verbose + 1))
     [[ "$line" =~ $re ]] || copy_fail "The copy file has a member line I can't read: refused."
-    type="${BASH_REMATCH[1]}"; rest="${BASH_REMATCH[3]}"
+    type="${BASH_REMATCH[1]}"; total=$((total + 10#${BASH_REMATCH[2]})); rest="${BASH_REMATCH[4]}"
     case "$type" in
       -) nm="$rest" ;;
       d) nm="${rest%/}" ;;
@@ -6866,6 +6866,10 @@ copy_scan_archive() {
     esac
   done <"$st/verbose"
   ((n_plain == n_verbose)) || copy_fail "The copy file's member list doesn't add up: refused."
+  # the unpacked size (a gzip bomb) must fit on this disk with 1 GB to spare
+  avail="$(df -Pk -- "$COPY_CFG" 2>/dev/null | awk 'NR == 2 { printf "%.0f\n", $4 * 1024 }')"
+  [[ "$avail" =~ ^[0-9]+$ ]] || avail=0
+  ((total + 1073741824 <= avail)) || copy_fail "Not enough free disk space to unpack the copy ($((total / 1048576)) MB needed): refused."
   # no member may sit below a member that is a symlink
   for nm in "${names[@]}" "${lnames[@]}"; do
     p="$nm"
@@ -6987,11 +6991,11 @@ copy_worker_apply() {
   migrate_progress apply "Unpacking" 10 0
   # files first, then the symlinks: nothing can be written through a link, because none exists while files are written
   if [[ -s "$st/names.nul" ]]; then
-    tar -xzf "$file" -C "$x" --no-same-owner --no-same-permissions --no-overwrite-dir --null --verbatim-files-from -T "$st/names.nul" \
+    tar -xzf "$file" -C "$x" --no-same-owner --no-same-permissions --no-overwrite-dir --no-wildcards --null --verbatim-files-from -T "$st/names.nul" \
       2>"$st/tarerr" || copy_fail "Unpacking failed: $(migrate_last_lines "$st/tarerr")"
   fi
   if [[ -s "$st/links.nul" ]]; then
-    tar -xzf "$file" -C "$x" --no-same-owner --null --verbatim-files-from -T "$st/links.nul" 2>"$st/tarerr" ||
+    tar -xzf "$file" -C "$x" --no-same-owner --no-wildcards --null --verbatim-files-from -T "$st/links.nul" 2>"$st/tarerr" ||
       copy_fail "Unpacking failed: $(migrate_last_lines "$st/tarerr")"
   fi
   [[ -z "$(find "$x" ! -type f ! -type d ! -type l -print -quit)" ]] || copy_fail "Unpacking made something that isn't a file, folder or link: refused."
