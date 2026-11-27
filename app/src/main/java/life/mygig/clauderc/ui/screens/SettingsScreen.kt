@@ -371,7 +371,7 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                 Column(Modifier.weight(1f)) {
                     Text("App lock")
                     Text(
-                        "Required: to open the app, Settings and Run a command. Chat also needs its own PIN.",
+                        "Required: to open the app, Settings and Run a command. It also protects your chats.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
