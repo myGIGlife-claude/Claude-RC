@@ -58,7 +58,13 @@ ID_RE = re.compile(r"^[0-9a-f]{8}$")
 SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 LIMIT_RE = re.compile(r"usage limit|limit (reached|exceeded)|rate.?limit", re.I)
 fin_lock = threading.Lock()
-WAIT_SLICE = 60           # one wait call returns after this long so the request loop is never stuck
+WAIT_MAX = 900            # longest one wait call blocks; each wait runs in its own thread, so the request loop is never stuck
+WAIT_POLL = 1             # how often a wait looks at the task's file (a run another process left behind finishes unseen)
+WAIT_PROGRESS_S = 20      # a wait sends a progress notification this often when the client gave a progressToken
+task_done = threading.Condition()   # notified by finalize: a wait on a run of this process wakes at once
+out_lock = threading.Lock()         # one JSON-RPC line at a time on stdout (waits answer from their own threads)
+req = threading.local()             # the request a wait thread serves: .stop (cancelled), .progress (send one)
+pending = {}                        # request id -> threading.Event of waits in flight, set by notifications/cancelled
 # Runs are detached (own process group, output in tasks/<id>.out), so they survive this process; whoever calls wait next finalizes them.
 # Hosts (docs/hosts-design.md): servers the owner added in the app (hosts/<name>/{meta.json,key,known_hosts}); a chat uses the
 # ones attached to its project (attach/<slug>.hosts.json). ssh runs from argv lists with a pinned host key, key login only.
@@ -97,7 +103,7 @@ TOOLS = [
          "repo": {"type": "string", "description": "Optional: a checkout or git worktree of this project to branch from (and merge back into), e.g. the worktree you're working in. Default: the folder this session started in."}}}},
     {"name": "wait", "description": "Wait for a task and return the worker's final reply.",
      "inputSchema": {"type": "object", "required": ["task_id"], "properties": {
-         "task_id": {"type": "string"}, "timeout_s": {"type": "integer", "description": "Default 600, max 900; each call returns after about a minute (call again if still running)."}}}},
+         "task_id": {"type": "string"}, "timeout_s": {"type": "integer", "description": "Default 600, max 900. Returns as soon as the task ends, or with 'Still running' at the timeout (call again). Several waits can run at once."}}}},
     {"name": "reply", "description": "Send a follow-up to a finished task's worker (same conversation). Returns a new task_id.",
      "inputSchema": {"type": "object", "required": ["task_id", "message"], "properties": {
          "task_id": {"type": "string"}, "message": {"type": "string"}}}},
@@ -1016,6 +1022,8 @@ def finalize(tid):
     with open(d / f"{tid}.lock", "a+") as lockf:
         fcntl.flock(lockf, fcntl.LOCK_EX)
         _finalize_unlocked(tid)
+    with task_done:
+        task_done.notify_all()
 
 
 def _finalize_unlocked(tid):
@@ -1170,7 +1178,11 @@ def is_queued(t):
 
 
 def wait(tid, timeout_s=600):
-    deadline = time.time() + min(int(timeout_s or 600), 900, WAIT_SLICE)
+    """Until the task ends or timeout_s passes. Wakes at once when finalize runs in this process (the run's supervise
+    thread), else sees the task's file within WAIT_POLL; sleeps in between, never spins."""
+    deadline = time.time() + min(int(timeout_s or 600), WAIT_MAX)
+    stop, progress = getattr(req, "stop", None), getattr(req, "progress", None)
+    beat = time.time() + WAIT_PROGRESS_S
     while True:
         t = find_task(tid)
         require_project(t)
@@ -1186,7 +1198,13 @@ def wait(tid, timeout_s=600):
                 return (f"Queued: worker {t['worker']} is busy with another task (maybe from another chat), so this one hasn't started. "
                         f"Call wait again with task_id {tid}.")
             return f"Still running. Call wait again with task_id {tid}."
-        time.sleep(1)
+        if stop is not None and stop.is_set():
+            return "Cancelled."   # the client gave up on this call; answer_wait sends nothing for it
+        if progress and time.time() >= beat:
+            beat = time.time() + WAIT_PROGRESS_S
+            progress()
+        with task_done:
+            task_done.wait(max(0.05, min(WAIT_POLL, deadline - time.time())))
 
 
 def attached_hosts():
@@ -1482,6 +1500,37 @@ def handle(msg):
     return {"jsonrpc": "2.0", "id": mid, "result": res}
 
 
+def send(out):
+    with out_lock:
+        print(json.dumps(out), flush=True)
+
+
+def answer_wait(msg):
+    """A wait call in its own thread: it may block for minutes while other calls (and other waits) go on."""
+    mid = msg.get("id")
+    stop = pending.setdefault(mid, threading.Event())
+    meta = msg["params"].get("_meta")   # is_wait checked params is a dict
+    tok = meta.get("progressToken") if isinstance(meta, dict) else None
+    n = [0]
+
+    def progress():   # lets a client that resets its timeout on progress keep a long wait open
+        n[0] += 1
+        send({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": tok, "progress": n[0], "message": "Still running"}})
+
+    req.stop, req.progress = stop, (progress if isinstance(tok, (str, int)) and not isinstance(tok, bool) else None)
+    try:
+        out = handle(msg)
+    finally:
+        pending.pop(mid, None)
+    if out and not stop.is_set():
+        send(out)
+
+
+def is_wait(msg):
+    p = msg.get("params")
+    return msg.get("method") == "tools/call" and msg.get("id") is not None and isinstance(p, dict) and p.get("name") == "wait"
+
+
 def main():
     if sys.argv[1:] != ["mcp"]:
         sys.exit("usage: clauderc-team mcp")
@@ -1489,11 +1538,23 @@ def main():
     signal.signal(signal.SIGTERM, lambda *_: os._exit(0))   # runs are detached: they keep going and are collected by the next wait
     for line in sys.stdin:
         try:
-            out = handle(json.loads(line)) if line.strip() else None
+            msg = json.loads(line) if line.strip() else None
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("method") == "notifications/cancelled":
+                ev = pending.get((msg.get("params") or {}).get("requestId"))
+                if ev:
+                    ev.set()
+                continue
+            if is_wait(msg):   # only wait gets a thread: every other tool still runs one at a time, in order
+                pending[msg["id"]] = threading.Event()   # before the thread starts, so an early cancel isn't lost
+                threading.Thread(target=answer_wait, args=(msg,), daemon=True).start()
+                continue
+            out = handle(msg)
         except Exception:
             continue  # not JSON, or not a request object: skip it rather than die
         if out:
-            print(json.dumps(out), flush=True)
+            send(out)
 
 
 if __name__ == "__main__":
