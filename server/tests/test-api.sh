@@ -979,6 +979,15 @@ qusage 10; qtick 200; [[ "$(qsent qb)" == 2 ]]; check "...and skipped while PLAN
 echo "- [ ] new task" >"$QT/repoB/PLAN.md"; qusage 10; qtick 200
 [[ "$(qsent qb)" == 3 ]]; check "...until PLAN.md changes" $?
 
+# Push alert on a change to question: the stub claude-push records its args (background call: wait for it).
+cp "$HOME/.local/bin/claude-push" "$WORK/claude-push.real"
+printf '#!/bin/sh\necho "$*" >>"%s/push-args"\n' "$WORK" >"$HOME/.local/bin/claude-push"; chmod +x "$HOME/.local/bin/claude-push"
+rm -f "$WORK/push-args"
+qreset; qconf '["qb"]' 1; qusage 10
+qtick 200; qfinish qb end_turn $'Stopped here.\nQUESTION: Which colour?'; qusage 10; qtick 200; qusage 10; qtick 200
+sleep 1; qusage 10; qtick 200; qusage 10; qtick 200; sleep 1
+[[ "$(cat "$WORK/push-args" 2>/dev/null)" == "--alert qb question" ]]; check "moving to question calls claude-push --alert once, not on every tick" $?
+cp "$WORK/claude-push.real" "$HOME/.local/bin/claude-push"; chmod +x "$HOME/.local/bin/claude-push"
 echo "queue tick: usage and limits (test 7)"
 qreset; qconf '["qb"]' 1; X=$((NOW + 3600)); qusage 91 10 "$(date -u -d "@$X" +%Y-%m-%dT%H:%M:%SZ)"
 qtick 60

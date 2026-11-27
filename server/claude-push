@@ -4,6 +4,8 @@
 Runs as a Claude Code hook (Notification / Stop; the hook JSON is on stdin) and
 sends a Firebase Cloud Messaging push to every registered phone. Also:
   claude-push --test   send a test push, print {"sent": N}
+  claude-push --alert <session> <question|needs_you|error>
+                       tell the phone a queued chat stopped (names only, never chat text)
   claude-push --setup  with fcm-key.json saved: register the Android app in that
                        Firebase project, fetch its public ids into push.json
 Config lives in ~/.config/claude-launcher/: push.json (public Firebase ids),
@@ -144,6 +146,16 @@ def main():
         return
     if "--test" in sys.argv:
         print(json.dumps({"sent": send("cLaudeRC test", "Push works: this reached your phone right away.", "alerts", "test", "test")}))
+        return
+    if "--alert" in sys.argv:
+        i = sys.argv.index("--alert")
+        name, kind = (sys.argv[i + 1:i + 3] + ["", ""])[:2]
+        text = {"question": ("%s has a question", "Claude asked a question in %s."),
+                "needs_you": ("%s needs you", "Session %s is waiting for you."),
+                "error": ("%s hit an error", "Session %s stopped with an error.")}.get(kind)
+        # Same rule as the hook's "needs you" alert: always on; the app's notifications switch decides what shows.
+        if text and NAME_RE.match(name):
+            send(text[0] % name, text[1] % name, "alerts", name, kind)
         return
     ev = json.load(sys.stdin)
     name = session_name()

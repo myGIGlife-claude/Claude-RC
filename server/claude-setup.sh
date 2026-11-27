@@ -4792,11 +4792,18 @@ QUEUE_LIMIT_RE='usage limit|limit reached|resets [0-9]'
 # qmod <session> <jq filter on that session's entry> [jq args]: update the in-memory state ($QST).
 qmod() { local s="$1" f="$2"; shift 2; QST="$(jq -c --arg s "$s" --argjson now "$QNOW" "$@" ".[\$s] = ((.[\$s] // {}) | $f)" <<<"$QST")"; }
 qget() { jq -r --arg s "$1" "(.[\$s] // {}) | $2" <<<"$QST"; }
+# queue_alert <session> <kind>: push to the phone in the background (claude-push knows the opt-in rules; names only, no chat text).
+queue_alert() {
+  local bin="$HOME/.local/bin/claude-push"
+  [[ -x "$bin" ]] || return 0
+  ( timeout 30 "$bin" --alert "$1" "$2" </dev/null >/dev/null 2>&1 3>&- 6>&- 7>&- 8>&- 9>&- & ) || true
+}
 # qstate <session> <state> [note]: set the state (log only a change; names and states, never chat text).
 qstate() {
   local old; old="$(qget "$1" '.state // ""')"
   qmod "$1" '(if .state != $st then .since = $now else . end) | .state = $st | .note = $n' --arg st "$2" --arg n "${3:-}"
   [[ "$old" == "$2" ]] && return 0
+  case "$2" in question | needs_you | error) queue_alert "$1" "$2" ;; esac
   case "$2" in
     idle | running) ;;
     stopped | unsafe) queue_log_add "$1" skip "$2 ${3:-}" ;;
