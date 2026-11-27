@@ -107,6 +107,7 @@ import life.mygig.clauderc.ui.screens.KeystoresDialog
 import life.mygig.clauderc.ui.screens.AddServerScreen
 import life.mygig.clauderc.ui.screens.HostKeyDialog
 import life.mygig.clauderc.ui.screens.LoginDialog
+import life.mygig.clauderc.ui.screens.CopyScreen
 import life.mygig.clauderc.ui.screens.MigrateScreen
 import life.mygig.clauderc.ui.screens.NewProjectScreen
 import life.mygig.clauderc.ui.screens.ProjectsScreen
@@ -183,6 +184,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             val showApple by vm.services.showApple.collectAsStateWithLifecycle()
             // Only the open flag: the wizard screen follows the rest of its state itself.
             val showMigrate by remember(vm) { vm.migrate.map { it.open }.distinctUntilChanged() }.collectAsStateWithLifecycle(vm.migrate.value.open)
+            val showCopy by remember(vm) { vm.copy.ui.map { it.open }.distinctUntilChanged() }.collectAsStateWithLifecycle(vm.copy.ui.value.open)
             val tokenService by vm.services.tokenService.collectAsStateWithLifecycle()
             val tail by vm.tail.collectAsStateWithLifecycle()
             val pendingKey by vm.pendingHostKey.collectAsStateWithLifecycle()
@@ -412,6 +414,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             tail?.let { TailScreen(vm, it) }
             if (showRun) RunScreen(vm)
             if (showMigrate) MigrateScreen(vm)
+            if (showCopy) CopyScreen(vm)
             chatSession?.let { ChatScreen(vm, it) }
             clusterOffer?.let { o ->
                 AlertDialog(

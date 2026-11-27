@@ -54,6 +54,7 @@ import life.mygig.clauderc.ssh.SshRunner
 import life.mygig.clauderc.ui.vm.AddServerController
 import life.mygig.clauderc.ui.vm.ChatController
 import life.mygig.clauderc.ui.vm.ConnectionsController
+import life.mygig.clauderc.ui.vm.CopyController
 import life.mygig.clauderc.ui.vm.DriveController
 import life.mygig.clauderc.ui.vm.HostsController
 import life.mygig.clauderc.ui.vm.KnowledgeController
@@ -142,6 +143,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val general = GeneralChatsController(api, tools, { _status.value?.scriptApi }, { chats.openChat(it) }) { refreshSessions() }
     /** Auto-continue queue: kill switch, stars, log (docs/queue-design.md). */
     val queue = QueueController(api, tools, { _status.value?.scriptApi ?: 0 }) { edit -> _sessions.value = edit(_sessions.value) }
+    /** Settings › Connection › Copy: files and secrets from one server to another (docs/copy-design.md). */
+    val copy = CopyController(tools, store) { apiFor(it) }
     /** Team (extra Claude accounts), cluster settings and the open chat's workers. */
     val team: TeamController = TeamController(api, store, tools, { apiFor(it) }) { chats.chatSession.value }
     /** Hosts: web servers chats can work on (docs/hosts-design.md). */
