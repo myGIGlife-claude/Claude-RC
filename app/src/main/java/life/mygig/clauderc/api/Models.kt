@@ -356,9 +356,6 @@ data class ChatData(
 )
 
 @Serializable
-data class PinStatus(val set: Boolean = false, @SerialName("locked_until") val lockedUntil: Long? = null)
-
-@Serializable
 data class ChatLogEntry(val ts: String = "", val session: String = "", val action: String = "")
 
 @Serializable

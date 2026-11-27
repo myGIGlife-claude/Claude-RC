@@ -1,7 +1,11 @@
 package life.mygig.clauderc.api
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runInterruptible
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -96,6 +100,19 @@ private val MIGRATE_SSH_USER_RE = Regex("^[A-Za-z0-9._][A-Za-z0-9._-]{0,63}$")
 private val MIGRATE_KEY_TYPE_RE = Regex("^[A-Za-z0-9@.-]{1,64}$")
 private val MIGRATE_KEY_BLOB_RE = Regex("^[A-Za-z0-9+/=]{1,8192}$")
 private val MIGRATE_MANIFEST_RE = Regex("^[A-Za-z0-9._-]{1,100}$")
+
+/** The first stdin line every chat action reads: once the chat PIN, now always empty (the server ignores it). */
+internal const val NO_PIN = ""
+
+/**
+ * Read-only actions whose identical in-flight calls may share one SSH call (see LauncherApi.run).
+ * Never add an action that changes anything: a second caller would silently not run it.
+ */
+internal val COALESCED = setOf("status", "sessions", "general-list", "queue-status", "chat-history", "chat-commands", "cluster", "mcp")
+
+/** A [COALESCED] action with no stdin, or only the empty PIN line. */
+internal fun coalescable(command: String, stdin: String?): Boolean =
+    (stdin == null || stdin == NO_PIN) && command.substringBefore(' ') in COALESCED
 
 /** Typed calls to `claude-launcher-api` on the server. */
 class LauncherApi(
@@ -328,39 +345,39 @@ class LauncherApi(
     }
     suspend fun disconnect(service: String): JsonObject = call("disconnect $service")
 
-    // In-app chat: every call carries the PIN on stdin; the server checks it.
-    suspend fun chatPinStatus(): PinStatus = call("chat-pin-status")
-    suspend fun chatPinSet(newPin: String, oldPin: String = ""): JsonObject = call("chat-pin-set", stdin = newPin + "\n" + oldPin)
-    suspend fun chatOpen(session: String, pin: String): JsonObject { requireName(session); return call("chat-open $session", stdin = pin) }
-    suspend fun chatHistory(session: String, pin: String): ChatData { requireName(session); return call("chat-history $session", stdin = pin) }
-    suspend fun chatSend(session: String, pin: String, text: String): JsonObject {
+    // In-app chat. Every chat action still reads one PIN line first and ignores it (SCRIPT_API 56):
+    // NO_PIN is that line, always empty. Keep the order: that line, then the action's own lines.
+    /** Logs "open" in the server's chat log: the queue backs off a chat the owner is looking at. */
+    suspend fun chatOpen(session: String): JsonObject { requireName(session); return call("chat-open $session", stdin = NO_PIN) }
+    suspend fun chatHistory(session: String): ChatData { requireName(session); return call("chat-history $session", stdin = NO_PIN) }
+    suspend fun chatSend(session: String, text: String): JsonObject {
         requireName(session)
-        return call("chat-send $session", stdin = pin + "\n" + text)
+        return call("chat-send $session", stdin = NO_PIN + "\n" + text)
     }
-    /** Sends a file into the session's project (uploads/<name>); PIN-protected like chat. */
-    suspend fun upload(session: String, pin: String, name: String, base64: String): UploadResult {
+    /** Sends a file into the session's project (uploads/<name>). */
+    suspend fun upload(session: String, name: String, base64: String): UploadResult {
         requireName(session)
-        return call("upload $session", stdin = pin + "\n" + name + "\n" + base64, timeoutMs = 240_000)
+        return call("upload $session", stdin = NO_PIN + "\n" + name + "\n" + base64, timeoutMs = 240_000)
     }
-    suspend fun chatFile(session: String, pin: String, path: String): ChatFile {
+    suspend fun chatFile(session: String, path: String): ChatFile {
         requireName(session)
-        return call("chat-file $session", stdin = pin + "\n" + path, timeoutMs = 120_000)
+        return call("chat-file $session", stdin = NO_PIN + "\n" + path, timeoutMs = 120_000)
     }
     suspend fun chatLog(): List<ChatLogEntry> = call("chat-log")
-    suspend fun chatCommands(session: String, pin: String): ChatCommands { requireName(session); return call("chat-commands $session", stdin = pin) }
-    suspend fun permissionsGet(session: String, pin: String): Permissions { requireName(session); return call("permissions-get $session", stdin = pin) }
+    suspend fun chatCommands(session: String): ChatCommands { requireName(session); return call("chat-commands $session", stdin = NO_PIN) }
+    suspend fun permissionsGet(session: String): Permissions { requireName(session); return call("permissions-get $session", stdin = NO_PIN) }
     /** One change to a settings file's permissions; [json] is {scope, op, list, rule, new, mode} (see permissionChange). */
-    suspend fun permissionsSet(session: String, pin: String, json: String): JsonObject { requireName(session); return call("permissions-set $session", stdin = pin + "\n" + json) }
+    suspend fun permissionsSet(session: String, json: String): JsonObject { requireName(session); return call("permissions-set $session", stdin = NO_PIN + "\n" + json) }
     suspend fun queueStatus(): QueueStatus = call("queue-status")
-    suspend fun queueOn(pin: String): QueueStatus = call("queue-on", stdin = pin)
+    suspend fun queueOn(): QueueStatus = call("queue-on", stdin = NO_PIN)
     suspend fun queueOff(): QueueStatus = call("queue-off")
-    /** Turning a star on needs the chat PIN (the server then types into that chat unattended); off needs none. */
-    suspend fun queueStar(session: String, on: Boolean, pin: String?): QueueStarResult {
+    /** "on" reads the (empty) PIN line first; "off" reads no stdin. */
+    suspend fun queueStar(session: String, on: Boolean): QueueStarResult {
         requireName(session)
-        return call("queue-star $session ${if (on) "on" else "off"}", stdin = if (on) pin else null)
+        return call("queue-star $session ${if (on) "on" else "off"}", stdin = if (on) NO_PIN else null)
     }
     suspend fun queueLog(lines: Int = 100): QueueLog = call("queue-log --lines ${lines.coerceIn(1, 500)}")
-    suspend fun chatInterrupt(session: String, pin: String): JsonObject { requireName(session); return call("chat-interrupt $session", stdin = pin) }
+    suspend fun chatInterrupt(session: String): JsonObject { requireName(session); return call("chat-interrupt $session", stdin = NO_PIN) }
     suspend fun loginKeystore(name: String, alias: String, storePassword: String, keyPassword: String, fileBase64: String): JsonObject =
         call("login-keystore $name", stdin = listOf(alias.trim(), storePassword, keyPassword, fileBase64).joinToString("\n"))
     /** Saves an App Store Connect API key: key ID, issuer ID, team ID and the .p8 (base64) go on stdin. */
@@ -455,8 +472,49 @@ class LauncherApi(
         }
     }
 
+    /**
+     * Identical read calls share one SSH call: a second caller of the same [COALESCED] action+args
+     * (no stdin other than the empty PIN line) awaits the call already running. A call joins only one
+     * that started after the last other call finished ([writes]), so a read issued right after a write
+     * never gets an answer from before it.
+     */
+    private class InFlight(val writes: Long, val result: CompletableDeferred<String>)
+    /** Keyed by server and command: after a server switch, a call to the old one is never shared. */
+    private val inFlight = HashMap<Pair<ServerConfig, String>, InFlight>()
+    private var writes = 0L   // guarded by inFlight
+
     private suspend fun run(command: String, stdin: String?, timeoutMs: Long): String {
         val cfg = config()
+        if (!coalescable(command, stdin)) {
+            try { return exec(cfg, command, stdin, timeoutMs) } finally { synchronized(inFlight) { writes++ } }
+        }
+        val key = cfg to command
+        while (true) {
+            val mine = CompletableDeferred<String>()
+            val joined = synchronized(inFlight) {
+                val cur = inFlight[key]
+                if (cur != null && cur.writes == writes) cur.result else { inFlight[key] = InFlight(writes, mine); null }
+            }
+            if (joined != null) {
+                try { return joined.await() } catch (e: Exception) {
+                    // The first caller was cancelled (left its screen): not our failure, so run it ourselves.
+                    if (e !is CancellationException && e !is InterruptedException) throw e
+                    currentCoroutineContext().ensureActive()
+                    continue
+                }
+            }
+            try {
+                return exec(cfg, command, stdin, timeoutMs).also { mine.complete(it) }
+            } catch (e: Throwable) {
+                mine.completeExceptionally(e)
+                throw e
+            } finally {
+                synchronized(inFlight) { if (inFlight[key]?.result === mine) inFlight.remove(key) }
+            }
+        }
+    }
+
+    private suspend fun exec(cfg: ServerConfig, command: String, stdin: String?, timeoutMs: Long): String {
         val id = withContext(Dispatchers.Default) {
             try {
                 identity()

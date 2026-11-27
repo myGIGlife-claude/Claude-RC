@@ -101,7 +101,7 @@ fun AppBackupSection(vm: MainViewModel, restoreOnly: Boolean = false) {
             FilledTonalButton(modifier = Modifier.fillMaxWidth(), onClick = { importPicker.launch(arrayOf("application/octet-stream", "application/*", "*/*")) }) { Text("Restore from a file") }
           } else {
             Text("Back up this app", style = MaterialTheme.typography.titleMedium)
-            Text("Encrypted copy of your servers, app settings and phone key. Chat PIN is excluded.", style = MaterialTheme.typography.bodySmall)
+            Text("Encrypted copy of your servers, app settings and phone key.", style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { exportToDrive = false; dialog = "export" }) { Text("Export encrypted file") }
                 OutlinedButton(onClick = { importPicker.launch(arrayOf("application/octet-stream", "application/*", "*/*")) }) { Text("Import") }

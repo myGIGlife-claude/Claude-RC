@@ -136,12 +136,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Google Drive backup. */
     val drive = DriveController(api, tools)
-    /** In-app chat: PIN, polling, pending messages, drafts, files. */
+    /** In-app chat: polling, pending messages, drafts, files. */
     val chats: ChatController = ChatController(app, api, tools) { team.clearChat(); webHosts.clearChatHosts() }
     /** General chats (not tied to a repo): the Sessions screen's General chat tab. */
     val general = GeneralChatsController(api, tools, { _status.value?.scriptApi }, { chats.openChat(it) }) { refreshSessions() }
     /** Auto-continue queue: kill switch, stars, log (docs/queue-design.md). */
-    val queue = QueueController(api, tools, { _status.value?.scriptApi ?: 0 }, { chats.savedPin() }) { edit -> _sessions.value = edit(_sessions.value) }
+    val queue = QueueController(api, tools, { _status.value?.scriptApi ?: 0 }) { edit -> _sessions.value = edit(_sessions.value) }
     /** Team (extra Claude accounts), cluster settings and the open chat's workers. */
     val team: TeamController = TeamController(api, store, tools, { apiFor(it) }) { chats.chatSession.value }
     /** Hosts: web servers chats can work on (docs/hosts-design.md). */
@@ -245,7 +245,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         viewModelScope.launch {
-            // Only once unlocked: App lock first, and a chat still asks for its PIN.
+            // Only once unlocked: App lock is what protects the chats.
             combine(unlocked, widgetTap) { u, t -> t.takeIf { u } }.filterNotNull().collect { t ->
                 widgetTap.value = null
                 handleWidgetTap(t)
@@ -842,7 +842,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         connections.clearServerState()
         general.clearServerState()
         queue.clearServerState()
-        chats.clearServerState()   // chat log, open chat, queued messages, drafts, PIN (session names repeat across servers)
+        chats.clearServerState()   // chat log, open chat, queued messages, drafts (session names repeat across servers)
+        SshRunner.closeAll()   // a removed or changed server's connection must not linger
     }
 
     fun acceptHostKey(accept: Boolean) {
