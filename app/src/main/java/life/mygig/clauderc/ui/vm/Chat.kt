@@ -134,6 +134,8 @@ class ChatController(
     private fun startChatPolling() {
         chatPoller?.cancel()
         val s0 = _chatSession.value
+        // Opening or returning to a chat tells the queue the owner is here (it backs off that chat).
+        if (s0 != null) tools.scope.launch { runCatching { api.chatOpen(s0) } }
         // Slash commands once per opened chat (openChat empties them), not on every return to the app.
         if (s0 != null && _chatCommands.value.isEmpty()) tools.scope.launch {
             runCatching { api.chatCommands(s0).commands }.getOrNull()?.let { if (_chatSession.value == s0) _chatCommands.value = it }

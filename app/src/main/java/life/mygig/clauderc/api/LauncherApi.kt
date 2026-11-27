@@ -347,6 +347,8 @@ class LauncherApi(
 
     // In-app chat. Every chat action still reads one PIN line first and ignores it (SCRIPT_API 56):
     // NO_PIN is that line, always empty. Keep the order: that line, then the action's own lines.
+    /** Logs "open" in the server's chat log: the queue backs off a chat the owner is looking at. */
+    suspend fun chatOpen(session: String): JsonObject { requireName(session); return call("chat-open $session", stdin = NO_PIN) }
     suspend fun chatHistory(session: String): ChatData { requireName(session); return call("chat-history $session", stdin = NO_PIN) }
     suspend fun chatSend(session: String, text: String): JsonObject {
         requireName(session)
