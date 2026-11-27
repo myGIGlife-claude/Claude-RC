@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id), 50 = grok worker kind, 51 = grok account sign-in (device code; worker-login-cancel), 52 = gemini account sign-in, fail-fast quota errors, 53 = starred-chat queue (queue-status/-on/-off/-star/-log, sessions.starred), 54 = worker-rename, 55 = inbox (inbox, inbox-dismiss)
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id), 50 = grok worker kind, 51 = grok account sign-in (device code; worker-login-cancel), 52 = gemini account sign-in, fail-fast quota errors, 53 = starred-chat queue (queue-status/-on/-off/-star/-log, sessions.starred), 54 = worker-rename, 55 = inbox (inbox, inbox-dismiss), 56 = no chat PIN, 58 = copy between servers (copy-list/-keygen/-authorize/-probe/-send/-status/-apply/-cancel)
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=57
+SCRIPT_API=58
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 CLAUDERC_API="${CLAUDERC_API:-https://api.github.com}"
@@ -781,6 +781,7 @@ api_start_session() {
 
 do_status() {
   ensure_env_hook   # keeps Claude's settings in step with the saved tokens
+  copy_prune        # an expired copy key and day-old copy leftovers go
   ensure_push_hook
   local claude_ok=false gh_ok=false gh_user="" scopes="[]" aws_ok=false aws_json="null" ident
   claude_logged_in && claude_ok=true
@@ -5611,7 +5612,7 @@ migrate_job_alive() {
 migrate_job_active() {
   [[ -s "$MIGRATE_STATUS" ]] || return 1
   case "$(jq -r '.phase // ""' "$MIGRATE_STATUS" 2>/dev/null)" in
-    export | transfer | restore) migrate_job_alive ;;
+    export | transfer | restore | pack | apply) migrate_job_alive ;;
     *) return 1 ;;
   esac
 }
@@ -5661,7 +5662,7 @@ do_migrate_keygen() {
 # The key may only run `claude-backup receive`; an older clauderc-migrate line is replaced.
 do_migrate_authorize() {
   [[ $# -eq 0 ]] || bad_args "migrate-authorize reads the key on stdin"
-  local key addr blob opts tmp ak="$HOME/.ssh/authorized_keys"
+  local key addr blob opts
   key="$(read_secret_line)"; addr="$(read_secret_line)"
   exec 0</dev/null
   migrate_need_run   # it lets another key push a backup here that migrate-restore unpacks: never from a lost phone alone
@@ -5675,17 +5676,24 @@ do_migrate_authorize() {
   # from= only for a literal IP (sshd compares it with the client's IP, it doesn't resolve names): a host name would lock the sender out.
   addr="${addr,,}"
   if migrate_is_ip "$addr"; then opts+=",from=\"$addr\""; fi
+  migrate_ak_put clauderc-migrate "$opts" "$blob"
+}
+
+# migrate_ak_put <marker> <options> <blob>: the one authorized_keys line carrying <marker> (the key's comment) becomes
+# "<options> ssh-ed25519 <blob> <marker>"; other lines, including the other marker's, stay. Answers and exits.
+migrate_ak_put() {
+  local marker="$1" opts="$2" blob="$3" tmp ak="$HOME/.ssh/authorized_keys"
   [[ -d "$HOME/.ssh" ]] || mkdir -m 700 "$HOME/.ssh" || api_err internal "Couldn't create ~/.ssh."
-  # An existing file is copied first (minus the older clauderc-migrate line); if that fails it is left exactly as it was.
+  # An existing file is copied first (minus the older line of this marker); if that fails it is left exactly as it was.
   if [[ -e "$ak" && ( ! -f "$ak" || ! -r "$ak" ) ]]; then
     api_err internal "Your authorized_keys file can't be read: left as it is."
   fi
   tmp="$(mktemp "$HOME/.ssh/authorized_keys.XXXXXX")" || api_err internal "Couldn't write ~/.ssh/authorized_keys."
-  if [[ -f "$ak" ]] && ! awk '$NF != "clauderc-migrate"' "$ak" >"$tmp"; then
+  if [[ -f "$ak" ]] && ! awk -v m="$marker" '$NF != m' "$ak" >"$tmp"; then
     rm -f "$tmp"
     api_err internal "Couldn't read ~/.ssh/authorized_keys: left as it is."
   fi
-  if printf '%s ssh-ed25519 %s clauderc-migrate\n' "$opts" "$blob" >>"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$ak"; then
+  if printf '%s ssh-ed25519 %s %s\n' "$opts" "$blob" "$marker" >>"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$ak"; then
     api_ok '{"authorized":true}'
   fi
   rm -f "$tmp"
@@ -5701,8 +5709,8 @@ migrate_is_ip() {
 
 # ---- the detached jobs (internal: started as `claude-setup.sh --migrate-worker`, not reachable through the runner)
 
-MIGRATE_JOB="" MIGRATE_STARTED=0 MIGRATE_FILE="" MIGRATE_FINISHED=0 MIGRATE_CHILD=""
-MIGRATE_ON_FAIL=() MIGRATE_ALWAYS=()   # files removed when the job fails / whenever it ends
+MIGRATE_JOB="" MIGRATE_STARTED=0 MIGRATE_FILE="" MIGRATE_FINISHED=0 MIGRATE_CHILD="" MIGRATE_FAIL_HOOK="" MIGRATE_RESULT_FILE=""
+MIGRATE_ON_FAIL=() MIGRATE_ALWAYS=() MIGRATE_RMDIRS=()   # files removed when the job fails / whenever it ends; folders removed either way
 
 migrate_progress() { migrate_status_write "$MIGRATE_JOB" "$1" "$2" "$3" "$4" "$MIGRATE_FILE" "$MIGRATE_STARTED" ""; }
 
@@ -5710,6 +5718,8 @@ migrate_fail() {
   local f pct=0 bytes=0
   read -r pct bytes < <(jq -r '[(.pct // 0), (.bytes // 0)] | @tsv' "$MIGRATE_STATUS" 2>/dev/null) || true
   for f in "${MIGRATE_ON_FAIL[@]}" "${MIGRATE_ALWAYS[@]}"; do rm -f -- "$f"; done
+  for f in "${MIGRATE_RMDIRS[@]}"; do rm -rf -- "$f"; done
+  [[ -z "$MIGRATE_FAIL_HOOK" ]] || "$MIGRATE_FAIL_HOOK" || true   # copy-apply closes its key line
   MIGRATE_FINISHED=1
   migrate_status_write "$MIGRATE_JOB" failed "Failed" "${pct:-0}" "${bytes:-0}" "$MIGRATE_FILE" "$MIGRATE_STARTED" "$1"
   exit 1
@@ -5720,6 +5730,7 @@ migrate_worker_exit() {
   [[ -z "$MIGRATE_CHILD" ]] || kill "$MIGRATE_CHILD" 2>/dev/null
   ((MIGRATE_FINISHED == 1)) || migrate_fail "The job stopped unexpectedly"
   for f in "${MIGRATE_ALWAYS[@]}"; do rm -f -- "$f"; done
+  for f in "${MIGRATE_RMDIRS[@]}"; do rm -rf -- "$f"; done
 }
 
 # PROGRESS lines (CLAUDE_BACKUP_PROGRESS=1) on stdin; anything else is kept in $1 for the error text.
@@ -5747,26 +5758,14 @@ migrate_read_progress() {
   done
 }
 
-# migrate_worker_send <host> <port> <user> <host-key type> <known_hosts file> <out file> <started>
-migrate_worker_send() {
-  local host="$1" port="$2" user="$3" ktype="$4" kh="$5" out="$6" started="$7"
-  local pf="$MIGRATE_CFG/passphrase" errlog sshout rc size pos pct msg name hostalg="$4" t0
-  MIGRATE_JOB=send MIGRATE_STARTED="$started"
-  errlog="$(mktemp "$MIGRATE_STATE/err.XXXXXX")"; sshout="$(mktemp "$MIGRATE_STATE/out.XXXXXX")"
-  MIGRATE_ON_FAIL=("$out"); MIGRATE_ALWAYS=("$kh" "$errlog" "$sshout")
-  migrate_progress export "Packing up this server" 0 0
-
-  CLAUDE_BACKUP_PROGRESS=1 "$(migrate_backup_bin)" export --no-claude-login --pass-file "$pf" --out "$out" </dev/null 2>&1 >/dev/null |
-    migrate_read_progress "$errlog" send
-  rc="${PIPESTATUS[0]}"
-  ((rc == 0)) || migrate_fail "The export failed: $(migrate_last_lines "$errlog")"
-  [[ -s "$out" ]] || migrate_fail "The export produced no file."
-  size="$(stat -c %s "$out")"
-
-  : >"$errlog"
-  migrate_progress transfer "Sending to the new server" 60 0
+# migrate_ssh_push <host> <port> <user> <host-key type> <known_hosts file> <key> <file to send> <stdout file> <stderr file> <size>
+# Streams the file to `receive` on the other server over ssh (pinned host key) and reports 60-99% from the stream's position.
+# A failure ends the job (migrate_fail).
+migrate_ssh_push() {
+  local host="$1" port="$2" user="$3" ktype="$4" kh="$5" key="$6" out="$7" sshout="$8" errlog="$9" size="${10}"
+  local hostalg="$4" rc pos pct msg t0
   [[ "$ktype" == ssh-rsa ]] && hostalg="rsa-sha2-512,rsa-sha2-256,ssh-rsa"
-  ssh -F /dev/null -i "$MIGRATE_CFG/key" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none \
+  ssh -F /dev/null -i "$key" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none \
     -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$kh" -o GlobalKnownHostsFile=/dev/null -o UpdateHostKeys=no \
     -o "HostKeyAlgorithms=$hostalg" -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
     -o ForwardAgent=no -o LogLevel=ERROR -T -p "$port" "$user@$host" receive <"$out" >"$sshout" 2>"$errlog" &
@@ -5787,6 +5786,27 @@ migrate_worker_send() {
   wait "$MIGRATE_CHILD"; rc=$?
   MIGRATE_CHILD=""
   ((rc == 0)) || migrate_fail "Couldn't send the file: $(migrate_last_lines "$errlog")"
+}
+
+# migrate_worker_send <host> <port> <user> <host-key type> <known_hosts file> <out file> <started>
+migrate_worker_send() {
+  local host="$1" port="$2" user="$3" ktype="$4" kh="$5" out="$6" started="$7"
+  local pf="$MIGRATE_CFG/passphrase" errlog sshout rc size name
+  MIGRATE_JOB=send MIGRATE_STARTED="$started"
+  errlog="$(mktemp "$MIGRATE_STATE/err.XXXXXX")"; sshout="$(mktemp "$MIGRATE_STATE/out.XXXXXX")"
+  MIGRATE_ON_FAIL=("$out"); MIGRATE_ALWAYS=("$kh" "$errlog" "$sshout")
+  migrate_progress export "Packing up this server" 0 0
+
+  CLAUDE_BACKUP_PROGRESS=1 "$(migrate_backup_bin)" export --no-claude-login --pass-file "$pf" --out "$out" </dev/null 2>&1 >/dev/null |
+    migrate_read_progress "$errlog" send
+  rc="${PIPESTATUS[0]}"
+  ((rc == 0)) || migrate_fail "The export failed: $(migrate_last_lines "$errlog")"
+  [[ -s "$out" ]] || migrate_fail "The export produced no file."
+  size="$(stat -c %s "$out")"
+
+  : >"$errlog"
+  migrate_progress transfer "Sending to the new server" 60 0
+  migrate_ssh_push "$host" "$port" "$user" "$ktype" "$kh" "$MIGRATE_CFG/key" "$out" "$sshout" "$errlog" "$size"
   name="$(grep -oE 'incoming-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\.gpg' "$sshout" | head -n 1 || true)"
   [[ -n "$name" ]] || migrate_fail "The new server didn't confirm that it got the file."
   MIGRATE_FINISHED=1
@@ -5827,6 +5847,8 @@ migrate_worker() {
   case "$kind" in
     send) migrate_worker_send "$@" ;;
     restore) migrate_worker_restore "$@" ;;
+    copy-send) copy_ctx; copy_worker_send "$@" ;;
+    copy-apply) copy_ctx; copy_worker_apply "$@" ;;
     *) MIGRATE_FINISHED=1; exit 2 ;;
   esac
 }
@@ -5884,9 +5906,10 @@ do_migrate_passphrase() {
 # migrate-status: where the current job is. A job whose worker died without finishing is reported (and recorded) as failed.
 do_migrate_status() {
   [[ $# -eq 0 ]] || bad_args "migrate-status takes no arguments"
+  local out
   if [[ -s "$MIGRATE_STATUS" ]] && jq -e 'type == "object" and has("phase")' "$MIGRATE_STATUS" >/dev/null 2>&1; then
     case "$(jq -r '.phase' "$MIGRATE_STATUS")" in
-      export | transfer | restore)
+      export | transfer | restore | pack | apply)
         if ! migrate_job_alive; then
           rm -f "$MIGRATE_STATE"/restore-pass.*   # a dead restore leaves its passphrase file behind
           jq -c '.phase = "failed" | .message = "Failed" | .error = "The job stopped unexpectedly" | .updated = (now | floor) | .pid = null' \
@@ -5894,7 +5917,10 @@ do_migrate_status() {
         fi
         ;;
     esac
-    api_ok "$(jq -c 'del(.pid)' "$MIGRATE_STATUS")"
+    # copy jobs keep what they skipped or refused in result.json
+    out="$(jq -c 'del(.pid)' "$MIGRATE_STATUS")"
+    [[ ! -s "${MIGRATE_RESULT_FILE:-}" ]] || out="$(jq -c --slurpfile r "$MIGRATE_RESULT_FILE" '. + {result:$r[0]}' <<<"$out")"
+    api_ok "$out"
   fi
   api_ok '{"job":"none","phase":"none","message":"","pct":0,"bytes":0}'
 }
@@ -6362,6 +6388,671 @@ do_migrate_reboot() {
   api_ok '{"rebooting":true}'
 }
 
+# ======================================================================
+# Copy between servers (the contract is docs/copy-design.md). Same machinery as Migrate, with its own marker
+# (clauderc-copy), folders and status file: copy_ctx points the migrate helpers at them.
+#   COPY_CFG   ~/.config/claude-launcher/copy: the one-time key, the copy files B receives, staging folders
+#   COPY_STATE ~/.local/state/claude-launcher/copy: status.json, result.json, the job lock
+# Nothing here deletes anything on the source. Secret values never leave a server except inside the tar.gz that goes
+# straight to the other server over the pinned SSH key.
+# ======================================================================
+COPY_CFG="$LAUNCHER_CONFIG_DIR/copy"
+COPY_STATE="$API_STATE_DIR/copy"
+COPY_FILE_RE='^copy-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\.tgz$'
+COPY_PROJECT_RE='^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$'   # no leading dot or dash
+COPY_BRANCH_RE='^[A-Za-z0-9._/@+-]{1,200}$'
+COPY_MAX_LIST=20000
+COPY_JUNK_RE='(^|/)(node_modules|build|\.gradle|target|\.cache|__pycache__)(/|$)'
+# Names that change how programs run: never merged from another server's env file.
+COPY_ENV_DENY_RE='^(PATH|LD_[A-Z_]*|BASH_ENV|ENV|IFS|SHELL|HOME|PS4|PROMPT_COMMAND|GIT_SSH|GIT_SSH_COMMAND|SSH_ASKPASS|CLAUDE_CONFIG_DIR|CLAUDERC_[A-Z_]*)$'
+COPY_ROOT=""   # set by copy_project_root / the secrets kind
+
+copy_ctx() {
+  MIGRATE_CFG="$COPY_CFG"; MIGRATE_STATE="$COPY_STATE"; MIGRATE_STATUS="$COPY_STATE/status.json"
+  MIGRATE_RESULT_FILE="$COPY_STATE/result.json"
+}
+
+# A relative path with no .., no leading / and no control characters or backslashes.
+copy_rel_ok() {
+  local r="$1"
+  [[ -n "$r" && "$r" != /* && ! "$r" =~ [[:cntrl:]] && "$r" != *'\'* ]] || return 1
+  case "/$r/" in */../* | */./* | *//*) return 1 ;; esac
+  return 0
+}
+
+# No folder on the way from <root> to <rel> is a link (or a file).
+copy_parents_ok() {
+  local p="$1" c
+  local -a parts
+  [[ "$2" == */* ]] || return 0
+  IFS=/ read -ra parts <<<"${2%/*}"
+  for c in "${parts[@]}"; do
+    p="$p/$c"
+    if [[ -L "$p" || ( -e "$p" && ! -d "$p" ) ]]; then return 1; fi
+  done
+  return 0
+}
+
+# copy_project_root <name>: sets COPY_ROOT; the folder must resolve to <projects dir>/<name>, inside the home folder.
+copy_project_root() {
+  local pd hd
+  [[ "$1" =~ $COPY_PROJECT_RE ]] || return 1
+  pd="$(realpath -m -- "$PROJECTS_DIR")"; hd="$(realpath -m -- "$HOME")"
+  [[ "$pd" == "$hd"/* ]] || return 1
+  COPY_ROOT="$PROJECTS_DIR/$1"
+  [[ "$(realpath -m -- "$COPY_ROOT")" == "$pd/$1" ]]
+}
+
+# copy_ak_drop all|expired: remove the clauderc-copy line(s) of authorized_keys (a line without a readable expiry counts as
+# expired). Other lines, the migrate line included, are never touched. Run it through with_state_lock.
+copy_ak_drop() {
+  local ak="$HOME/.ssh/authorized_keys" tmp
+  [[ -f "$ak" ]] && grep -q ' clauderc-copy$' "$ak" 2>/dev/null || return 0
+  tmp="$(mktemp "$ak.XXXXXX")" || return 1
+  if awk -v mode="$1" -v now="$(date -u +%Y%m%d%H%M)" '
+      $NF == "clauderc-copy" { if (mode == "all") next; i = index($0, "expiry-time=\""); if (i == 0 || substr($0, i + 13, 12) + 0 < now + 0) next }
+      { print }' "$ak" >"$tmp"; then
+    if cmp -s "$tmp" "$ak"; then rm -f "$tmp"; else chmod 600 "$tmp" && mv -f "$tmp" "$ak"; fi
+  else
+    rm -f "$tmp"; return 1
+  fi
+}
+copy_drop_key() { with_state_lock copy_ak_drop all; }
+
+# Called by do_status (every app poll): expired keys and leftovers older than a day go.
+copy_prune() {
+  if [[ -f "$HOME/.ssh/authorized_keys" ]] && grep -q ' clauderc-copy$' "$HOME/.ssh/authorized_keys" 2>/dev/null; then
+    with_state_lock copy_ak_drop expired
+  fi
+  [[ -d "$COPY_CFG" ]] || return 0
+  find "$COPY_CFG" -maxdepth 1 \( -name 'copy-*.tgz' -o -name 'copy-*.tgz.part' -o -name 'stage.*' -o -name 'send.*' \) -mmin +1440 \
+    -exec rm -rf -- {} + 2>/dev/null
+  return 0
+}
+
+# ---- copy-list
+
+# Relative paths (NUL-separated) on stdin -> "size<TAB>mtime<TAB>mode<TAB>path" lines; junk, odd names and vanished files dropped.
+copy_files_tsv() {
+  LC_ALL=C grep -zvE "$COPY_JUNK_RE|[[:cntrl:]]" | (cd "$1" && xargs -0 -r stat --printf='%s\t%Y\t%a\t%n\n' --) 2>/dev/null
+}
+
+# The files of project folder $1 that are worth copying: a git repo = untracked and ignored files only (the rest comes from git),
+# anything else = every file. $2 = all: the whole folder, .git included.
+copy_project_nul() {
+  if [[ "${2:-}" != all && -d "$1/.git" && "$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" == "$(realpath -- "$1")" ]]; then
+    git -C "$1" ls-files -z --others 2>/dev/null | grep -zv '/$'
+  else
+    (cd "$1" && find . \( -name node_modules -o -name build -o -name .gradle -o -name target -o -name .cache -o -name __pycache__ \) -prune \
+      -o \( -type f -o -type l \) -printf '%P\0')
+  fi
+}
+
+copy_secrets_tsv() {
+  local m n
+  if [[ -f "$SERVICES_ENV" ]]; then
+    m="$(stat -c %Y "$SERVICES_ENV")"
+    sed -nE 's/^export ([A-Z_][A-Z0-9_]*)=.*/\1/p' "$SERVICES_ENV" | while IFS= read -r n; do printf '0\t%s\t600\tenv/%s\n' "$m" "$n"; done
+  fi
+  find "$SECRET_FILES_DIR" -maxdepth 1 -type f -printf 'secret-files/%f\0' 2>/dev/null | copy_files_tsv "$LAUNCHER_CONFIG_DIR"
+  { find "$KEYSTORE_DIR" -maxdepth 1 -type f -name '*.jks' -printf 'keystores/%f\0' 2>/dev/null
+    [[ ! -f "$APPLE_DIR/AuthKey.p8" ]] || printf 'apple/AuthKey.p8\0'; } | copy_files_tsv "$LAUNCHER_CONFIG_DIR" | sed 's/$/\t1/'
+}
+
+# Local branches of repo $1 that some commit no remote has: "commits<TAB>time<TAB>sha<TAB>name" (what a bundle would carry).
+copy_bundle_tsv() {
+  local b sha ts n
+  git -C "$1" for-each-ref --format='%(refname:short)%09%(objectname)%09%(committerdate:unix)' refs/heads 2>/dev/null |
+    while IFS=$'\t' read -r b sha ts; do
+      [[ "$b" =~ $COPY_BRANCH_RE && "$b" != -* ]] || continue
+      n="$(git -C "$1" rev-list --count "$sha" --not --remotes 2>/dev/null)" || continue
+      if [[ "$n" =~ ^[0-9]+$ ]] && ((n > 0)); then printf '%s\t%s\t%s\t%s\n' "$n" "$ts" "$sha" "$b"; fi
+    done
+}
+
+# copy-list <project|secrets|bundle> [project]: what this server has, names and sizes only. A bundle list on a server that is
+# sent "name sha" lines on stdin answers which of those commits it already has.
+do_copy_list() {
+  local kind="${1:-}" proj="${2:-}" tsv="" exists=null line n sha
+  case "$kind" in
+    secrets) [[ $# -eq 1 ]] ;;
+    project | bundle) [[ $# -eq 2 ]] ;;
+    *) false ;;
+  esac || bad_args "usage: copy-list <project|secrets|bundle> [project]"
+  local -a have=()
+  if [[ "$kind" == bundle ]]; then
+    while IFS= read -r -t 5 line; do
+      line="${line//$'\r'/}"
+      [[ -z "$line" ]] || have+=("$line")
+      ((${#have[@]} <= COPY_MAX_LIST)) || break
+    done
+  fi
+  exec 0</dev/null
+  if [[ "$kind" == secrets ]]; then
+    tsv="$(copy_secrets_tsv | head -n $((COPY_MAX_LIST + 1)))"
+  else
+    copy_project_root "$proj" || api_err invalid_name "That isn't a project folder name."
+    if [[ -d "$COPY_ROOT" ]]; then
+      exists=true
+      if [[ "$kind" == project ]]; then
+        tsv="$(copy_project_nul "$COPY_ROOT" | head -z -n $((COPY_MAX_LIST + 1)) | copy_files_tsv "$COPY_ROOT")"
+      elif ((${#have[@]} == 0)); then
+        tsv="$(copy_bundle_tsv "$COPY_ROOT" | head -n $((COPY_MAX_LIST + 1)))"
+      else
+        for line in "${have[@]}"; do
+          n="${line%% *}"; sha="${line#* }"
+          [[ "$n" =~ $COPY_BRANCH_RE && "$n" != -* && "$sha" =~ ^[0-9a-f]{40,64}$ ]] || continue
+          git -C "$COPY_ROOT" cat-file -e "$sha^{commit}" 2>/dev/null && tsv+="0"$'\t'"0"$'\t'"$sha"$'\t'"$n"$'\n'
+        done
+      fi
+    else
+      exists=false
+    fi
+  fi
+  api_ok "$(jq -Rn --argjson cap "$COPY_MAX_LIST" --argjson ex "$exists" '
+    [inputs | select(length > 0) | split("\t") | {path:.[3], size:(.[0] | tonumber), mtime:(.[1] | tonumber), mode:.[2]}
+      + (if .[4] == "1" then {optional:true} else {} end)] as $e
+    | {entries:$e[:$cap], truncated:($e | length > $cap)} + (if $ex == null then {} else {exists:$ex} end)' <<<"$tsv")"
+}
+
+# ---- copy-keygen / copy-authorize / copy-probe
+
+# copy-keygen: a NEW key for this copy (the old one is deleted), and this server's Tailscale IPv4 if it has one.
+do_copy_keygen() {
+  [[ $# -eq 0 ]] || bad_args "copy-keygen takes no arguments"
+  umask 077
+  need ssh-keygen
+  copy_ctx
+  local key="$COPY_CFG/key" pub tip=""
+  mkdir -p "$COPY_CFG" "$COPY_STATE" && chmod 700 "$COPY_CFG" "$COPY_STATE" || api_err internal "Couldn't create $COPY_CFG."
+  migrate_job_active && api_err busy "A copy is running."
+  rm -f "$key" "$key.pub"
+  ssh-keygen -q -t ed25519 -N '' -C clauderc-copy -f "$key" </dev/null >/dev/null 2>&1 || api_err internal "Couldn't create the copy key."
+  chmod 600 "$key"
+  pub="$(awk 'NR == 1 {print $1, $2, "clauderc-copy"}' "$key.pub")"
+  [[ "$pub" =~ ^ssh-ed25519\ [A-Za-z0-9+/]+=*\ clauderc-copy$ ]] || api_err internal "The copy key is unreadable."
+  if command -v tailscale >/dev/null 2>&1; then
+    tip="$(t 5 tailscale ip -4 2>/dev/null </dev/null | head -n 1)" || tip=""
+    migrate_is_ip "$tip" || tip=""
+  fi
+  api_ok "$(jq -cn --arg k "$pub" --arg ip "$tip" '{public_key:$k, tailnet_ip:$ip}')"
+}
+
+# copy-authorize: stdin = the source's public key line, its address (optional), minutes to live (default 120, max 720).
+# One line, forced to `claude-backup receive --copy`, that sshd itself stops honouring at expiry-time.
+do_copy_authorize() {
+  [[ $# -eq 0 ]] || bad_args "copy-authorize reads the key on stdin"
+  local key addr mins blob opts exp
+  key="$(read_secret_line)"; addr="$(read_secret_line)"; mins="$(read_secret_line)"
+  exec 0</dev/null
+  migrate_need_run   # it lets another key push files here that copy-apply unpacks: never from a lost phone alone
+  umask 077
+  [[ "$key" =~ $MIGRATE_PUBKEY_RE && ${#key} -le 300 ]] || api_err invalid_name "That isn't a public key line (ssh-ed25519 AAAA…)."
+  [[ -z "$addr" || "$addr" =~ $MIGRATE_ADDR_RE ]] || api_err invalid_name "That isn't a host name or IP address."
+  [[ -z "$mins" ]] && mins=120
+  [[ "$mins" =~ ^[0-9]{1,4}$ ]] && ((10#$mins >= 1 && 10#$mins <= 720)) || api_err invalid_name "The minutes must be 1-720."
+  [[ "$HOME" =~ ^/[A-Za-z0-9._/-]+$ ]] || api_err internal "The home folder name can't be put in an authorized_keys option."
+  [[ -x "$HOME/.local/bin/claude-backup" ]] || api_err not_configured "claude-backup is missing: run Update now"
+  blob="$(awk '{print $2}' <<<"$key")"
+  opts="restrict,command=\"$HOME/.local/bin/claude-backup receive --copy\""
+  addr="${addr,,}"
+  if migrate_is_ip "$addr"; then opts+=",from=\"$addr\""; fi
+  exp="$(date -u -d "+$((10#$mins)) minutes" +%Y%m%d%H%M)Z"
+  opts+=",expiry-time=\"$exp\""
+  mkdir -p "$COPY_CFG" && chmod 700 "$COPY_CFG"
+  with_state_lock migrate_ak_put clauderc-copy "$opts" "$blob"
+}
+
+# copy-probe: stdin = host, port, host-key type, host-key base64. Does that server answer with exactly that host key?
+# (No identity at all: "Permission denied" means the SSH door is there and the pinned key matched.)
+do_copy_probe() {
+  [[ $# -eq 0 ]] || bad_args "copy-probe reads the target on stdin"
+  local host port ktype blob d kh out hostalg reach=false ok=false
+  host="$(read_secret_line)"; port="$(read_secret_line)"; ktype="$(read_secret_line)"; blob="$(read_secret_line)"
+  exec 0</dev/null
+  umask 077
+  [[ "$host" =~ $MIGRATE_HOST_RE ]] || api_err invalid_name "That isn't a host name or IP address."
+  [[ "$port" =~ ^[0-9]{1,5}$ ]] && ((10#$port >= 1 && 10#$port <= 65535)) || api_err invalid_name "The port must be 1-65535."
+  port=$((10#$port))
+  [[ "$ktype" =~ $MIGRATE_HOSTKEY_TYPE_RE ]] || api_err invalid_name "That host key type isn't supported."
+  [[ "$blob" =~ $MIGRATE_BLOB_RE ]] || api_err invalid_name "That host key isn't valid base64."
+  need ssh
+  host="${host,,}"; hostalg="$ktype"
+  [[ "$ktype" == ssh-rsa ]] && hostalg="rsa-sha2-512,rsa-sha2-256,ssh-rsa"
+  d="$(mktemp -d)" || api_err internal "Couldn't make a temporary folder."
+  kh="$d/known_hosts"
+  if ((port == 22)); then printf '%s %s %s\n' "$host" "$ktype" "$blob" >"$kh"; else printf '[%s]:%s %s %s\n' "$host" "$port" "$ktype" "$blob" >"$kh"; fi
+  # -i names a file that doesn't exist: an explicit identity switches the default ~/.ssh/id_* keys off.
+  out="$(t 25 ssh -F /dev/null -i "$d/none" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o PreferredAuthentications=publickey \
+    -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$kh" -o GlobalKnownHostsFile=/dev/null -o UpdateHostKeys=no \
+    -o "HostKeyAlgorithms=$hostalg" -o ConnectTimeout=8 -o LogLevel=ERROR -T -p "$port" "clauderc-probe@$host" true </dev/null 2>&1)" || true
+  rm -rf "$d"
+  case "$out" in
+    *"Permission denied"*) reach=true ok=true ;;
+    *"Host key verification failed"* | *"REMOTE HOST IDENTIFICATION HAS CHANGED"*) reach=true ;;
+  esac
+  api_ok "$(jq -cn --argjson r "$reach" --argjson k "$ok" '{reachable:$r, hostkey_ok:$k}')"
+}
+
+# ---- copy-send
+
+# copy-send <secrets | project NAME | bundle NAME>: stdin = host, port, user, host-key type, host-key base64 (as migrate-send), then
+# optionally the chosen relative paths (secrets: env/NAME, secret-files/…; bundle: branch names) one per line. No line = everything
+# listed. For a project, the single line "." means the whole folder including .git (the folder is missing on the other server).
+do_copy_send() {
+  local kind="${1:-}" proj="${2:-}" host port user ktype blob kh started hostpat line n=0 p
+  case "$kind" in
+    secrets) [[ $# -eq 1 ]] ;;
+    project | bundle) [[ $# -eq 2 ]] ;;
+    *) false ;;
+  esac || bad_args "usage: copy-send <secrets|project|bundle> [project] (the target on stdin)"
+  migrate_need_run
+  host="$(read_secret_line)"; port="$(read_secret_line)"; user="$(read_secret_line)"
+  ktype="$(read_secret_line)"; blob="$(read_secret_line)"
+  local -a chosen=()
+  while IFS= read -r -t 15 line; do
+    line="${line//$'\r'/}"
+    [[ -z "$line" ]] && continue
+    chosen+=("$line")
+    ((${#chosen[@]} <= COPY_MAX_LIST)) || api_err invalid_name "Too many paths (the limit is $COPY_MAX_LIST)."
+  done
+  exec 0</dev/null
+  umask 077
+  [[ "$host" =~ $MIGRATE_HOST_RE ]] || api_err invalid_name "That isn't a host name or IP address."
+  [[ "$port" =~ ^[0-9]{1,5}$ ]] && ((10#$port >= 1 && 10#$port <= 65535)) || api_err invalid_name "The port must be 1-65535."
+  port=$((10#$port))
+  [[ "$user" =~ $MIGRATE_USER_RE ]] || api_err invalid_name "That isn't a valid user name."
+  [[ "$ktype" =~ $MIGRATE_HOSTKEY_TYPE_RE ]] || api_err invalid_name "That host key type isn't supported."
+  [[ "$blob" =~ $MIGRATE_BLOB_RE ]] || api_err invalid_name "That host key isn't valid base64."
+  if [[ "$kind" != secrets ]]; then
+    copy_project_root "$proj" || api_err invalid_name "That isn't a project folder name."
+    [[ -d "$COPY_ROOT" && ! -L "$COPY_ROOT" ]] || api_err invalid_name "There is no project folder $proj."
+  fi
+  for p in "${chosen[@]}"; do
+    case "$kind" in
+      bundle) [[ "$p" =~ $COPY_BRANCH_RE && "$p" != -* ]] ;;
+      project) [[ "$p" == . ]] || copy_rel_ok "$p" ;;
+      secrets) [[ "$p" =~ ^(secret-files/[^/]+|keystores/[^/]+\.jks|apple/AuthKey\.p8|env/[A-Z_][A-Z0-9_]*)$ ]] && copy_rel_ok "$p" ;;
+    esac || api_err invalid_name "That path can't be copied: ${p:0:60}"
+  done
+  need ssh; need tar
+  copy_ctx
+  migrate_take_job
+  [[ -s "$COPY_CFG/key" ]] || api_err not_ready "The copy key doesn't exist yet (copy-keygen)."
+  rm -f "$COPY_STATE/result.json"
+  host="${host,,}"
+  if ((port == 22)); then hostpat="$host"; else hostpat="[$host]:$port"; fi
+  kh="$COPY_CFG/known_hosts"
+  printf '%s %s %s\n' "$hostpat" "$ktype" "$blob" >"$kh" || api_err internal "Couldn't write the pinned host key."
+  : >"$COPY_CFG/chosen"
+  for p in "${chosen[@]}"; do printf '%s\n' "$p" >>"$COPY_CFG/chosen"; done
+  started="$(date +%s)"
+  migrate_status_write send pack "Packing the files" 0 0 "" "$started" "" || api_err internal "Couldn't write the status."
+  setsid "$SCRIPT_PATH" --migrate-worker copy-send "$kind" "${proj:--}" "$host" "$port" "$user" "$ktype" "$kh" "$started" \
+    </dev/null >/dev/null 2>&1 3>&- 8>&- 9>&- &
+  api_ok '{"started":true}'
+}
+
+# Packs the chosen files into $1/out.tgz (manifest.json first) and sends it. Everything it made, and the private key, goes at the end.
+copy_worker_send() {
+  local kind="$1" proj="$2" host="$3" port="$4" user="$5" ktype="$6" kh="$7" started="$8"
+  local tmpd root="" list p tsv size name src rc line
+  local -a chosen=() tarargs
+  MIGRATE_JOB=send MIGRATE_STARTED="$started"
+  tmpd="$(mktemp -d "$COPY_CFG/send.XXXXXX")" || migrate_fail "Couldn't make a working folder."
+  MIGRATE_RMDIRS=("$tmpd"); MIGRATE_ALWAYS=("$kh" "$COPY_CFG/key" "$COPY_CFG/key.pub" "$COPY_CFG/chosen")
+  list="$tmpd/list.nul"; tsv="$tmpd/files.tsv"
+  while IFS= read -r line; do chosen+=("$line"); done <"$COPY_CFG/chosen"
+  src="$(hostname -s 2>/dev/null | tr -cd 'A-Za-z0-9-' | cut -c1-40)"; [[ -n "$src" ]] || src=other
+  migrate_progress pack "Looking at the files" 5 0
+  : >"$list"; : >"$tsv"
+  case "$kind" in
+    project)
+      copy_project_root "$proj" || migrate_fail "That isn't a project folder."
+      root="$COPY_ROOT"
+      if ((${#chosen[@]} == 1)) && [[ "${chosen[0]}" == . ]]; then copy_project_nul "$root" all >"$list"
+      elif ((${#chosen[@]} > 0)); then for p in "${chosen[@]}"; do printf '%s\0' "$p"; done >"$list"
+      else copy_project_nul "$root" >"$list"; fi
+      # a link on the way would let a chosen name reach outside the folder; what isn't there any more is dropped
+      for p in "${chosen[@]}"; do
+        [[ "$p" == . ]] || copy_parents_ok "$root" "$p" || migrate_fail "A folder on the way to $p is a link."
+      done
+      copy_files_tsv "$root" <"$list" >"$tsv"
+      # the manifest lists exactly what is packed: the stat'ed names (junk-free, still there)
+      awk -F'\t' '{ printf "%s\0", substr($0, length($1 $2 $3) + 4) }' "$tsv" >"$list"
+      ;;
+    secrets)
+      root="$LAUNCHER_CONFIG_DIR"
+      local env_names=() entry opt
+      if ((${#chosen[@]} == 0)); then
+        while IFS=$'\t' read -r _ _ _ entry opt; do [[ "$opt" == 1 ]] || chosen+=("$entry"); done < <(copy_secrets_tsv)
+      fi
+      for p in "${chosen[@]}"; do
+        case "$p" in env/*) env_names+=("${p#env/}") ;; *) printf '%s\0' "$p" ;; esac
+      done >"$list"
+      if ((${#env_names[@]} > 0)) && [[ -f "$SERVICES_ENV" ]]; then
+        # only the chosen names go into the copy of the env file
+        for p in "${env_names[@]}"; do grep -E "^export ${p}=" "$SERVICES_ENV" || true; done >"$tmpd/env"
+        chmod 600 "$tmpd/env"
+        [[ ! -s "$tmpd/env" ]] || printf '%s\t%s\t600\tenv\n' "$(stat -c %s "$tmpd/env")" "$(stat -c %Y "$tmpd/env")" >"$tsv"
+      fi
+      copy_files_tsv "$root" <"$list" >>"$tsv"
+      ;;
+    bundle)
+      copy_project_root "$proj" || migrate_fail "That isn't a project folder."
+      root="$COPY_ROOT"
+      local -a want=() b
+      copy_bundle_tsv "$root" >"$tmpd/branches.tsv"
+      if ((${#chosen[@]} == 0)); then while IFS=$'\t' read -r _ _ _ b; do want+=("$b"); done <"$tmpd/branches.tsv"; else want=("${chosen[@]}"); fi
+      ((${#want[@]} > 0)) || migrate_fail "There is no commit here that a remote lacks."
+      for b in "${want[@]}"; do
+        awk -F'\t' -v b="$b" '$4 == b {f = 1} END {exit !f}' "$tmpd/branches.tsv" || migrate_fail "Branch $b has nothing to bundle."
+      done
+      git -C "$root" bundle create "$tmpd/bundle" "${want[@]}" --not --remotes >/dev/null 2>"$tmpd/err" ||
+        migrate_fail "git couldn't make the bundle: $(migrate_last_lines "$tmpd/err")"
+      ;;
+  esac
+  migrate_progress pack "Packing the files" 20 0
+  jq -n --arg kind "$kind" --arg project "$([[ "$kind" == secrets ]] && echo "" || echo "$proj")" --arg source "$src" --argjson now "$(date +%s)" \
+    --rawfile tsv "$tsv" --rawfile br "$([[ -f "$tmpd/branches.tsv" ]] && echo "$tmpd/branches.tsv" || echo /dev/null)" '
+    {version:1, kind:$kind, project:$project, source:$source, created:$now,
+     files:[$tsv | split("\n")[] | select(length > 0) | split("\t") | {path:.[3], size:(.[0] | tonumber), mtime:(.[1] | tonumber), mode:.[2]}],
+     branches:[$br | split("\n")[] | select(length > 0) | split("\t") | {name:.[3], sha:.[2]}]}' >"$tmpd/manifest.json" ||
+    migrate_fail "Couldn't write the manifest."
+  if [[ "$kind" == bundle ]]; then
+    # only the asked-for branches are named in the manifest
+    jq -c --argjson w "$(printf '%s\n' "${want[@]}" | jq -R . | jq -sc .)" '.branches |= map(select(.name as $n | $w | index($n)))' "$tmpd/manifest.json" >"$tmpd/m2" &&
+      mv -f "$tmpd/m2" "$tmpd/manifest.json"
+  fi
+  tarargs=(-czf "$tmpd/out.tgz" --numeric-owner --no-recursion --null --verbatim-files-from -C "$tmpd" manifest.json)
+  [[ "$kind" != bundle ]] || tarargs+=(bundle)
+  [[ ! -f "$tmpd/env" || "$kind" != secrets ]] || tarargs+=(env)
+  [[ "$kind" == bundle ]] || tarargs+=(-C "$root" -T "$list")
+  tar "${tarargs[@]}" 2>"$tmpd/err"; rc=$?
+  ((rc <= 1)) || migrate_fail "Packing failed: $(migrate_last_lines "$tmpd/err")"
+  size="$(stat -c %s "$tmpd/out.tgz")"
+  : >"$tmpd/err"
+  migrate_progress transfer "Sending to the other server" 60 0
+  migrate_ssh_push "$host" "$port" "$user" "$ktype" "$kh" "$COPY_CFG/key" "$tmpd/out.tgz" "$tmpd/out" "$tmpd/err" "$size"
+  name="$(grep -oE 'copy-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\.tgz' "$tmpd/out" | head -n 1 || true)"
+  [[ -n "$name" ]] || migrate_fail "The other server didn't confirm that it got the file."
+  MIGRATE_FINISHED=1
+  migrate_status_write send "done" "Sent to the other server" 100 "$size" "$name" "$started" ""
+}
+
+# ---- copy-status / copy-cancel
+
+do_copy_status() {
+  [[ $# -eq 0 ]] || bad_args "copy-status takes no arguments"
+  copy_ctx
+  do_migrate_status
+}
+
+# copy-cancel: close the door and tidy up (this server's key line, the received copy files, a stopped job's leftovers, the key).
+do_copy_cancel() {
+  [[ $# -eq 0 ]] || bad_args "copy-cancel takes no arguments"
+  copy_ctx
+  migrate_job_active && api_err busy "A copy is running: wait for it to end."
+  copy_drop_key || api_err internal "Couldn't update ~/.ssh/authorized_keys."
+  if [[ -d "$COPY_CFG" ]]; then
+    rm -rf -- "$COPY_CFG"/copy-*.tgz "$COPY_CFG"/copy-*.tgz.part "$COPY_CFG"/stage.* "$COPY_CFG"/send.* "$COPY_CFG/key" "$COPY_CFG/key.pub" \
+      "$COPY_CFG/known_hosts" "$COPY_CFG/chosen"
+  fi
+  api_ok '{"cancelled":true}'
+}
+
+# ---- copy-apply
+
+# copy-apply <copy file>: stdin = the policy (new-only | newer), then the relative paths the owner agreed to overwrite.
+do_copy_apply() {
+  [[ $# -eq 1 && "$1" =~ $COPY_FILE_RE ]] || bad_args "usage: copy-apply <copy-….tgz> (policy and overwrite list on stdin)"
+  local name="$1" policy line started p
+  local -a ow=()
+  policy="$(read_secret_line)"
+  while IFS= read -r -t 15 line; do
+    line="${line//$'\r'/}"
+    [[ -z "$line" ]] && continue
+    ow+=("$line")
+    ((${#ow[@]} <= COPY_MAX_LIST)) || api_err invalid_name "Too many paths (the limit is $COPY_MAX_LIST)."
+  done
+  exec 0</dev/null
+  migrate_need_run   # it unpacks into projects and the secrets folder
+  umask 077
+  [[ "$policy" == new-only || "$policy" == newer ]] || api_err invalid_name "The policy must be new-only or newer."
+  for p in "${ow[@]}"; do copy_rel_ok "$p" || api_err invalid_name "That path can't be overwritten: ${p:0:60}"; done
+  need tar
+  copy_ctx
+  [[ -f "$COPY_CFG/$name" && ! -L "$COPY_CFG/$name" ]] || api_err invalid_name "There is no $name here."
+  migrate_take_job
+  rm -f "$COPY_STATE/result.json"
+  for p in "${ow[@]}"; do printf '%s\n' "$p"; done >"$COPY_STATE/overwrite" || api_err internal "Couldn't save the list."
+  started="$(date +%s)"
+  migrate_status_write apply apply "Checking the file" 0 0 "$name" "$started" "" || api_err internal "Couldn't write the status."
+  setsid "$SCRIPT_PATH" --migrate-worker copy-apply "$name" "$policy" "$COPY_STATE/overwrite" "$started" </dev/null >/dev/null 2>&1 3>&- 8>&- 9>&- &
+  api_ok '{"started":true}'
+}
+
+COPY_STAGE="" COPY_BACKUP="" COPY_POLICY="" COPY_RES=""
+COPY_OW=()
+
+copy_res() { printf '%s\t%s\t%s\n' "$1" "$2" "${3:-}" >>"$COPY_RES"; }
+copy_fail() { migrate_fail "$1"; }
+
+# copy_scan_archive <file>: every member must be a plain file, folder or symlink with a safe unique name, none under a symlink.
+# Writes names.nul (files) and links.nul (symlinks) into the staging folder and members.txt (names, one per line).
+copy_scan_archive() {
+  local f="$1" st="$COPY_STAGE" line type rest nm p n_plain n_verbose=0
+  local -A seen=() lset=()
+  local -a names=() lnames=()
+  local re='^(.)[-rwxsStT]{9} [^ ]+ +[0-9]+ [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}(:[0-9]{2})? (.*)$'
+  n_plain="$(LC_ALL=C.UTF-8 tar --quoting-style=escape -tzf "$f" 2>/dev/null | wc -l)"
+  LC_ALL=C.UTF-8 tar --quoting-style=escape --numeric-owner -tvzf "$f" >"$st/verbose" 2>/dev/null || copy_fail "That isn't a readable copy file."
+  while IFS= read -r line; do
+    n_verbose=$((n_verbose + 1))
+    [[ "$line" =~ $re ]] || copy_fail "The copy file has a member line I can't read: refused."
+    type="${BASH_REMATCH[1]}"; rest="${BASH_REMATCH[3]}"
+    case "$type" in
+      -) nm="$rest" ;;
+      d) nm="${rest%/}" ;;
+      l) nm="${rest%% -> *}" ;;
+      *) copy_fail "The copy file has a member that isn't a plain file, folder or link: refused." ;;
+    esac
+    copy_rel_ok "$nm" || copy_fail "The copy file has an unsafe member name: refused."
+    [[ -z "${seen[k$nm]:-}" ]] || copy_fail "The copy file lists $nm twice: refused."
+    seen[k$nm]=1
+    case "$type" in
+      l) lset["k$nm"]=1; lnames+=("$nm") ;;
+      -) [[ "$nm" == manifest.json ]] || names+=("$nm") ;;
+    esac
+  done <"$st/verbose"
+  ((n_plain == n_verbose)) || copy_fail "The copy file's member list doesn't add up: refused."
+  # no member may sit below a member that is a symlink
+  for nm in "${names[@]}" "${lnames[@]}"; do
+    p="$nm"
+    while [[ "$p" == */* ]]; do
+      p="${p%/*}"
+      [[ -z "${lset[k$p]:-}" ]] || copy_fail "The copy file writes below a symlink ($p): refused."
+    done
+  done
+  for nm in "${names[@]}"; do printf '%s\0' "$nm"; done >"$st/names.nul"
+  for nm in "${lnames[@]}"; do printf '%s\0' "$nm"; done >"$st/links.nul"
+  printf '%s\n' "${names[@]}" "${lnames[@]}" | LC_ALL=C sort >"$st/members.txt"
+}
+
+# copy_backup <root> <rel>: B's version is kept in ~/backups/pre-copy-<time>/ before anything overwrites it.
+copy_backup() {
+  if [[ -z "$COPY_BACKUP" ]]; then
+    COPY_BACKUP="$HOME/backups/pre-copy-$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$HOME/backups" "$COPY_BACKUP" && chmod 700 "$HOME/backups" "$COPY_BACKUP" || copy_fail "Couldn't create $COPY_BACKUP."
+  fi
+  mkdir -p "$COPY_BACKUP/$(dirname -- "$2")" && cp -a --no-dereference -- "$1/$2" "$COPY_BACKUP/$2" || copy_fail "Couldn't back up $2 first."
+}
+
+# copy_place <staged root> <dest root> <rel> <secret 0|1> <mode>: policy, backup, move.
+copy_place() {
+  local x="$1" root="$2" rel="$3" secret="$4" mode="$5" src dest named=0 p am bm
+  src="$x/$rel"; dest="$root/$rel"
+  copy_parents_ok "$root" "$rel" || { copy_res refused "$rel" "a folder on the way is a link or a file"; return 0; }
+  for p in "${COPY_OW[@]}"; do [[ "$p" == "$rel" ]] && named=1; done
+  if [[ -e "$dest" || -L "$dest" ]]; then
+    if [[ -d "$dest" && ! -L "$dest" ]]; then copy_res refused "$rel" "a folder is in the way"; return 0; fi
+    if [[ -f "$src" && ! -L "$src" && -f "$dest" && ! -L "$dest" ]] && cmp -s "$src" "$dest"; then copy_res skipped "$rel" "same"; return 0; fi
+    am="$(stat -c %Y "$src")"; bm="$(stat -c %Y "$dest")"
+    if ((named == 0)); then
+      if [[ "$COPY_POLICY" == newer ]] && ((am > bm)); then :; else copy_res skipped "$rel" "exists"; return 0; fi
+    fi
+    copy_backup "$root" "$rel"
+  fi
+  mkdir -p "$(dirname -- "$dest")" && mv -f -T -- "$src" "$dest" || { copy_res refused "$rel" "couldn't move it into place"; return 0; }
+  if [[ ! -L "$dest" ]]; then
+    if ((secret == 1)); then chmod 600 "$dest"
+    elif [[ "$mode" =~ ^[0-7]{3,4}$ ]]; then chmod "${mode: -3}" "$dest"; fi
+  fi
+  copy_res copied "$rel"
+}
+
+# The other server's env file names merged into this one: only names this server lacks; another value = a conflict, never written.
+copy_env_merge() {
+  local f="$1" line n v cur added=0
+  [[ -f "$f" ]] || return 0
+  [[ ! -f "$SERVICES_ENV" ]] || { copy_backup "$LAUNCHER_CONFIG_DIR" env 2>/dev/null || true; }
+  while IFS= read -r line; do
+    [[ "$line" =~ ^export\ ([A-Z_][A-Z0-9_]*)=\'(.*)\'$ ]] || continue
+    n="${BASH_REMATCH[1]}"; v="${BASH_REMATCH[2]}"
+    [[ "$v" != *"'"* && -n "$v" ]] || continue
+    if [[ "$n" =~ $COPY_ENV_DENY_RE ]]; then copy_res refused "env/$n" "this name can't be copied"; continue; fi
+    if grep -q "^export $n=" "$SERVICES_ENV" 2>/dev/null; then
+      cur="$(sed -n "s/^export $n='\\(.*\\)'\$/\\1/p" "$SERVICES_ENV" | head -n 1)"
+      if [[ "$cur" == "$v" ]]; then copy_res skipped "env/$n" "same"; else copy_res env_conflict "$n"; fi
+    else
+      set_env "$n" "$v"; copy_res env_added "$n"; added=1
+    fi
+  done <"$f"
+  if ((added == 1)); then ensure_env_hook; fi
+}
+
+copy_apply_bundle() {
+  local x="$1" proj="$2" src="$3" manifest="$4" b root rc made=0
+  local -a refs=() names=()
+  copy_project_root "$proj" || copy_fail "The copy names a project folder that isn't allowed."
+  root="$COPY_ROOT"
+  [[ -f "$x/bundle" && ! -L "$x/bundle" ]] || copy_fail "The copy has no bundle in it."
+  while IFS= read -r b; do
+    [[ "$b" =~ $COPY_BRANCH_RE && "$b" != -* ]] || copy_fail "The copy names a branch that isn't allowed."
+    names+=("$b"); refs+=("+refs/heads/$b:refs/remotes/from-$src/$b")
+  done < <(jq -r '.branches[].name' "$manifest")
+  ((${#names[@]} > 0)) || copy_fail "The copy names no branch."
+  if [[ -d "$root" ]]; then
+    git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || copy_fail "$proj is a folder here but not a git repository: copy the project instead."
+  else
+    mkdir -p "$PROJECTS_DIR" && git init -q "$root" || copy_fail "Couldn't create the repository."
+    made=1
+  fi
+  # fetch only writes refs/remotes/from-<source>/…: no local branch moves. Hooks off.
+  git -c core.hooksPath=/dev/null -C "$root" fetch -q --no-tags "$x/bundle" "${refs[@]}" 2>"$COPY_STAGE/giterr"; rc=$?
+  if ((rc != 0)); then
+    ((made == 0)) || rm -rf -- "$root"   # a repository this job just made, still empty
+    copy_fail "git couldn't take the bundle (copy the project first if the repository is missing here): $(migrate_last_lines "$COPY_STAGE/giterr")"
+  fi
+  # a repository made just now has no branch: the first one becomes the local branch
+  if ! git -C "$root" rev-parse -q --verify HEAD >/dev/null 2>&1; then
+    git -C "$root" checkout -q -b "${names[0]}" "refs/remotes/from-$src/${names[0]}" 2>/dev/null || true
+  fi
+  for b in "${names[@]}"; do copy_res fetched "$b" "refs/remotes/from-$src/$b"; done
+}
+
+# The detached apply job: check, stage, place file by file, close the door.
+copy_worker_apply() {
+  local name="$1" policy="$2" owf="$3" started="$4" file="$COPY_CFG/$1" st x kind proj src root secret rel mode n total i line rc
+  MIGRATE_JOB=apply MIGRATE_STARTED="$started" MIGRATE_FILE="$name" MIGRATE_FAIL_HOOK=copy_drop_key
+  COPY_POLICY="$policy"; COPY_OW=()
+  while IFS= read -r line; do COPY_OW+=("$line"); done <"$owf"
+  st="$(mktemp -d "$COPY_CFG/stage.XXXXXX")" || copy_fail "Couldn't make a staging folder."
+  COPY_STAGE="$st"; COPY_RES="$st/res.tsv"; : >"$COPY_RES"
+  MIGRATE_RMDIRS=("$st"); MIGRATE_ALWAYS=("$owf")   # the copy file stays after a failure so a retry works
+  x="$st/x"; mkdir -p "$x"
+  migrate_progress apply "Checking the file" 2 0
+  tar -xzOf "$file" manifest.json >"$st/manifest.json" 2>/dev/null || copy_fail "The copy file has no manifest."
+  jq -e 'type == "object" and .version == 1 and (.kind | IN("project", "secrets", "bundle")) and (.files | type == "array") and (.branches | type == "array")' \
+    "$st/manifest.json" >/dev/null 2>&1 || copy_fail "The manifest isn't valid."
+  kind="$(jq -r .kind "$st/manifest.json")"; proj="$(jq -r '.project // ""' "$st/manifest.json")"; src="$(jq -r '.source // ""' "$st/manifest.json")"
+  [[ "$src" =~ ^[A-Za-z0-9-]{1,40}$ ]] || src=other
+  copy_scan_archive "$file"
+  if [[ "$kind" == bundle ]]; then
+    [[ "$(cat "$st/members.txt")" == bundle ]] || copy_fail "The copy has members a bundle doesn't have: refused."
+  else
+    jq -r '.files[].path' "$st/manifest.json" | LC_ALL=C sort >"$st/listed.txt"
+    [[ -z "$(LC_ALL=C comm -13 "$st/listed.txt" "$st/members.txt" | head -n 1)" ]] || copy_fail "The copy has files its manifest doesn't list: refused."
+  fi
+  migrate_progress apply "Unpacking" 10 0
+  # files first, then the symlinks: nothing can be written through a link, because none exists while files are written
+  if [[ -s "$st/names.nul" ]]; then
+    tar -xzf "$file" -C "$x" --no-same-owner --no-same-permissions --no-overwrite-dir --null --verbatim-files-from -T "$st/names.nul" \
+      2>"$st/tarerr" || copy_fail "Unpacking failed: $(migrate_last_lines "$st/tarerr")"
+  fi
+  if [[ -s "$st/links.nul" ]]; then
+    tar -xzf "$file" -C "$x" --no-same-owner --null --verbatim-files-from -T "$st/links.nul" 2>"$st/tarerr" ||
+      copy_fail "Unpacking failed: $(migrate_last_lines "$st/tarerr")"
+  fi
+  [[ -z "$(find "$x" ! -type f ! -type d ! -type l -print -quit)" ]] || copy_fail "Unpacking made something that isn't a file, folder or link: refused."
+  # a symlink must resolve to somewhere inside the unpacked tree (real resolution, so ".." after a link can't climb out)
+  local xr
+  xr="$(realpath -- "$x")"
+  while IFS= read -r -d '' rel; do
+    n="$(realpath -m -- "$x/$rel")"
+    if [[ "$n" != "$xr" && "$n" != "$xr"/* ]]; then
+      rm -f -- "$x/$rel"; copy_res refused "$rel" "a symlink that points outside the folder"
+    fi
+  done < <(cd "$x" && find . -type l -printf '%P\0')
+  case "$kind" in
+    bundle)
+      migrate_progress apply "Fetching the branches" 60 0
+      copy_apply_bundle "$x" "$proj" "$src" "$st/manifest.json"
+      ;;
+    *)
+      secret=0
+      if [[ "$kind" == project ]]; then
+        copy_project_root "$proj" || copy_fail "The copy names a project folder that isn't allowed."
+        root="$COPY_ROOT"
+        mkdir -p "$PROJECTS_DIR" || copy_fail "Couldn't create the projects folder."
+        if [[ -d "$root" ]]; then COPY_OW_GIT=0; else COPY_OW_GIT=1; mkdir -p "$root" || copy_fail "Couldn't create $root."; fi
+      else
+        secret=1; root="$LAUNCHER_CONFIG_DIR"; COPY_OW_GIT=0
+        mkdir -p "$root" && chmod 700 "$root" || copy_fail "Couldn't create $root."
+        # the env file is merged by name below, never placed as a file
+        [[ ! -f "$x/env" ]] || { copy_env_merge "$x/env"; rm -f -- "$x/env"; }
+      fi
+      total="$(cd "$x" && find . \( -type f -o -type l \) | wc -l)"; i=0
+      while IFS= read -r -d '' rel; do
+        i=$((i + 1))
+        ((total > 0 && i % 50 == 0)) && migrate_progress apply "Placing the files ($i of $total)" $((20 + 78 * i / total)) 0
+        if [[ "$kind" == project && "$COPY_OW_GIT" == 0 ]] && [[ "/$rel/" == */.git/* ]]; then
+          copy_res refused "$rel" "the .git folder is never overwritten"; continue
+        fi
+        if [[ "$kind" == secrets ]] && ! [[ "$rel" =~ ^(secret-files/[^/]+|keystores/[^/]+\.jks|apple/AuthKey\.p8)$ ]]; then
+          copy_res refused "$rel" "not a secrets file"; continue
+        fi
+        mode="$(jq -r --arg p "$rel" '[.files[] | select(.path == $p) | .mode][0] // ""' "$st/manifest.json")"
+        copy_place "$x" "$root" "$rel" "$secret" "$mode"
+      done < <(cd "$x" && find . \( -type f -o -type l \) -printf '%P\0' | LC_ALL=C sort -z)
+      ;;
+  esac
+  migrate_progress apply "Closing the door" 99 0
+  copy_drop_key
+  rm -f -- "$file"
+  jq -Rn --arg bk "$COPY_BACKUP" --argjson kr "$(grep -q ' clauderc-copy$' "$HOME/.ssh/authorized_keys" 2>/dev/null && echo false || echo true)" '
+    [inputs | split("\t")] as $r
+    | {copied:[$r[] | select(.[0] == "copied") | .[1]],
+       skipped:[$r[] | select(.[0] == "skipped") | {path:.[1], reason:.[2]}],
+       refused:[$r[] | select(.[0] == "refused") | {path:.[1], reason:.[2]}],
+       env_added:[$r[] | select(.[0] == "env_added") | .[1]],
+       env_conflicts:[$r[] | select(.[0] == "env_conflict") | .[1]],
+       fetched:[$r[] | select(.[0] == "fetched") | .[1]],
+       backup:$bk, key_removed:$kr}' "$COPY_RES" >"$COPY_STATE/result.json" || copy_fail "Couldn't write the result."
+  MIGRATE_FINISHED=1
+  migrate_status_write apply "done" "Copied" 100 0 "" "$started" ""
+}
+
 api_main() {
   # fd 3 = the one JSON object; everything else goes to stderr.
   exec 3>&1 1>&2
@@ -6376,7 +7067,7 @@ api_main() {
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | set-secret-file | login-keystore | login-apple | youtube-login-start | \
       chat-pin-set | queue-on | queue-star | chat-open | chat-history | chat-watch | general-rename | chat-send | chat-interrupt | chat-commands | permissions-get | permissions-set | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
-      migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | host-probe | host-add | host-keyimport | host-authorize | host-harden | drive-passphrase) ;;  # these read stdin
+      migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | copy-list | copy-authorize | copy-probe | copy-send | copy-apply | host-probe | host-add | host-keyimport | host-authorize | host-harden | drive-passphrase) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -6496,6 +7187,14 @@ api_main() {
     migrate-clone)       do_migrate_clone "$@" ;;
     migrate-signout-old) do_migrate_signout_old "$@" ;;
     migrate-reboot)      do_migrate_reboot "$@" ;;
+    copy-list)           do_copy_list "$@" ;;
+    copy-keygen)         do_copy_keygen "$@" ;;
+    copy-authorize)      do_copy_authorize "$@" ;;
+    copy-probe)          do_copy_probe "$@" ;;
+    copy-send)           do_copy_send "$@" ;;
+    copy-status)         do_copy_status "$@" ;;
+    copy-apply)          do_copy_apply "$@" ;;
+    copy-cancel)         do_copy_cancel "$@" ;;
     disconnect)         do_disconnect "$@" ;;
     chat-pin-status)     do_chat_pin_status "$@" ;;
     chat-pin-set)        do_chat_pin_set "$@" ;;

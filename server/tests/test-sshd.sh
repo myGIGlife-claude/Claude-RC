@@ -76,6 +76,22 @@ check "ssh ... status works" '[[ "$OUT" == "{\"ok\":true"* ]]'
 OUT="$(cat "$THOME/.ssh/authorized_keys")"
 check "authorized_keys: restrict + forced runner" '[[ "$OUT" == "restrict,command=\"$THOME/bin/claude-launcher-api\" ssh-ed25519 "* ]]'
 
+echo "Copy between servers: sshd honours the forced command and expiry-time (OpenSSH >= 7.7)"
+ssh-keygen -q -t ed25519 -N '' -C clauderc-copy -f "$WORK/copykey"
+ssh-keygen -q -t ed25519 -N '' -C clauderc-copy -f "$WORK/copykey-old"
+cp "$THOME/.ssh/authorized_keys" "$WORK/ak.saved"
+{
+  cat "$WORK/ak.saved"
+  printf 'restrict,command="echo copy-ran",from="127.0.0.1",expiry-time="%s" %s\n' "$(date -u -d '+1 hour' +%Y%m%d%H%MZ)" "$(cut -d' ' -f1,2,3 "$WORK/copykey.pub")"
+  printf 'restrict,command="echo copy-ran",expiry-time="200001010000Z" %s\n' "$(cut -d' ' -f1,2,3 "$WORK/copykey-old.pub")"
+} >"$THOME/.ssh/authorized_keys"
+SSHC=(ssh -p "$PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
+OUT="$("${SSHC[@]}" -i "$WORK/copykey" "$TUSER@127.0.0.1" 'cat /etc/passwd' </dev/null 2>&1 || true)"
+check "a live copy key runs only its forced command" '[[ "$OUT" == "copy-ran" ]]'
+OUT="$("${SSHC[@]}" -i "$WORK/copykey-old" "$TUSER@127.0.0.1" 'cat /etc/passwd' </dev/null 2>&1 || true)"
+check "an expired copy key is refused by sshd itself" '[[ "$OUT" == *"Permission denied"* && "$OUT" != *copy-ran* ]]'
+cp "$WORK/ak.saved" "$THOME/.ssh/authorized_keys"
+
 if [[ "${1:-}" == "--app" ]]; then
   echo "App SSH code (SshIntegrationTest)"
   cat >"$WORK/install-key" <<EOF
