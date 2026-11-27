@@ -2921,7 +2921,7 @@ chmod +x "$HB/bin/"* "$HB/.local/bin/"*
 apiB() { OUT="$(HOME="$HB" STUB_STATE="$SB" PATH="$HB/.local/bin:$PATH" SSH_ORIGINAL_COMMAND="$1" "$HB/bin/claude-launcher-api" <<<"${2:-}")"; RC=$?; }
 apiB status
 echo 'ALLOW_RUN=1' >>"$HB/.config/claude-launcher/config"
-CA="$HOME/.config/claude-launcher"; CB="$HB/.config/claude-launcher"; AKB="$HB/.ssh/authorized_keys"; CASTATE="$HOME/.local/state/claude-launcher/copy"
+CA="$HOME/.config/claude-launcher"; CB="$HB/.config/claude-launcher"; AKB="$HB/.ssh/authorized_keys"
 HOST_SRC="$(hostname -s 2>/dev/null | tr -cd 'A-Za-z0-9-' | cut -c1-40)"; [[ -n "$HOST_SRC" ]] || HOST_SRC=other
 # the stub ssh: a probe (user clauderc-probe) or a send into B's receive --copy
 cat >"$HOME/.local/bin/ssh" <<'EOF'
@@ -3032,6 +3032,8 @@ apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBA" 203.0.113.9 5)"
 check "copy-authorize ok" "$(jqt '.ok and .data.authorized')"
 EXP_GLOB="restrict,command=\"$HB/.local/bin/claude-backup receive --copy\",from=\"203.0.113.9\",expiry-time=\"????????????Z\" ssh-ed25519 $BLOBA clauderc-copy"
 OUT="$(cat "$AKB")"
+# EXP_GLOB is a glob on purpose.
+# shellcheck disable=SC2053
 [[ "$(grep -c ' clauderc-copy$' "$AKB")" == 1 && "$(grep ' clauderc-copy$' "$AKB")" == $EXP_GLOB ]]; check "copy-authorize writes exactly one restrict/command/from/expiry-time line" $?
 EXPV="$(sed -nE 's/.*expiry-time="([0-9]{12})Z".*/\1/p' "$AKB")"
 [[ "$EXPV" -ge "$(date -u -d '+4 minutes' +%Y%m%d%H%M)" && "$EXPV" -le "$(date -u -d '+6 minutes' +%Y%m%d%H%M)" ]]; check "...the expiry is 5 minutes ahead" $?

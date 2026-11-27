@@ -470,7 +470,7 @@ N0="$(rxcount)"
 rxcopy "$WORK/stream.bin" --copy
 [[ "$RC" -eq 0 && "$RXOUT" =~ ^copy-[0-9]{8}-[0-9]{6}(-[0-9]+)?\.tgz$ ]]; check "receive --copy prints copy-<time>.tgz" $?
 [[ -f "$CPDIR/$RXOUT" && "$(mode "$CPDIR/$RXOUT")" == 600 && "$(mode "$CPDIR")" == 700 ]] && cmp -s "$CPDIR/$RXOUT" "$WORK/stream.bin"; check "the stream is kept intact in the copy folder: file 600, folder 700" $?
-[[ "$(rxcount)" == "$N0" && ! -e "$WORK/pwned2" ]]; check "~/backups is not used, SSH_ORIGINAL_COMMAND ignored" $?
+[[ "$(rxcount)" == "$N0" && ! -e "$WORK/pwned2" ]]; check "the home backups folder is not used, SSH_ORIGINAL_COMMAND ignored" $?
 rxcopy "$WORK/stream.bin" --copy
 [[ "$RC" -eq 0 && "$(find "$CPDIR" -type f | wc -l)" == 2 ]]; check "a second copy in the same second gets its own name" $?
 rxcopy "$WORK/stream2m.bin" --copy
