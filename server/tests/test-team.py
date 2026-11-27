@@ -32,6 +32,9 @@ test_home = tmp / "home"; test_home.mkdir()
 claude_stub = tmp / "claude-stub"
 stub_text = (HERE / "stubs" / "claude").read_text()
 stub_text = stub_text.replace("svc=${CLAUDERC_TEST_SECRET:-unset} args=", "svc=${CLAUDERC_TEST_SECRET:-unset} ssh=${SSH_AUTH_SOCK:-unset} gh=${GH_TOKEN:-unset} ghub=${GITHUB_TOKEN:-unset} settings=${SETTINGS_ONLY_SECRET:-unset} args=")
+stub_text = stub_text.replace('    [[ "$prompt" == *SLOW* ]] && sleep 3\n',   # NAP<n> in a task: the run takes n seconds
+                              '    [[ "$prompt" == *SLOW* ]] && sleep 3\n    [[ "$prompt" =~ NAP([0-9]+) ]] && sleep "${BASH_REMATCH[1]}"\n')
+assert "NAP" in stub_text
 claude_stub.write_text(stub_text); claude_stub.chmod(0o755)
 env = {**os.environ, "HOME": str(test_home), "CLAUDERC_SANDBOX": "off", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t", "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(claude_stub), "CLAUDERC_CODEX": str(HERE / "stubs" / "codex"), "CLAUDERC_GEMINI": str(HERE / "stubs" / "gemini"), "CLAUDERC_GROK": str(HERE / "stubs" / "grok"),
        "ANTHROPIC_API_KEY": "secret-should-not-leak", "CLAUDE_CODE_OAUTH_TOKEN": "main-token", "CLAUDECODE": "1", "CLAUDERC_TEST_STUB_STATE": str(tmp / "stub"), "STUB_STATE": str(tmp / "stub"),
@@ -132,6 +135,48 @@ assert not err and "resume=sess-1" in text and "and the tests" in text, text
 err, tid3 = tool("delegate", worker="research", task="please FAIL")
 err, text = tool("wait", task_id=tid3, timeout_s=30)
 assert err and "stub failure" in text and "not instructions" in text, text   # failed output is marked as worker data
+
+# wait returns as soon as the run ends (not after a fixed slice), and at its own timeout while it still runs.
+err, tid = tool("delegate", worker="research", task="NAP2 quick")
+t0 = time.time(); err, text = tool("wait", task_id=tid, timeout_s=600)
+assert not err and "NAP2 quick" in text and 1.5 < time.time() - t0 < 3.5, (time.time() - t0, text)
+err, tid = tool("delegate", worker="research", task="NAP4 still going")
+t0 = time.time(); err, text = tool("wait", task_id=tid, timeout_s=2)
+assert not err and text == f"Still running. Call wait again with task_id {tid}." and 1.8 < time.time() - t0 < 3, (time.time() - t0, text)
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "NAP4 still going" in text, text
+
+
+def send_raw(m):
+    proc.stdin.write(json.dumps(m) + "\n"); proc.stdin.flush()
+
+
+# Several waits at once: each answers when its own task ends, and other tools keep answering meanwhile.
+_, slow = tool("delegate", worker="research", task="NAP5 long one")
+_, fast = tool("delegate", worker="research", task="NAP1 short one")
+send_raw({"jsonrpc": "2.0", "id": "w-slow", "method": "tools/call", "params": {"name": "wait", "arguments": {"task_id": slow, "timeout_s": 60}}})
+send_raw({"jsonrpc": "2.0", "id": "w-fast", "method": "tools/call", "params": {"name": "wait", "arguments": {"task_id": fast, "timeout_s": 60}}})
+send_raw({"jsonrpc": "2.0", "id": "list", "method": "tools/call", "params": {"name": "list_workers", "arguments": {}}})
+order = []
+got, t0 = {}, time.time()
+while len(got) < 3:
+    m = json.loads(proc.stdout.readline())
+    got[m["id"]] = (m, time.time() - t0); order.append(m["id"])
+assert order[0] == "list" and order.index("w-fast") < order.index("w-slow"), order
+assert "NAP1 short one" in got["w-fast"][0]["result"]["content"][0]["text"] and got["w-fast"][1] < 3, got["w-fast"]
+assert "NAP5 long one" in got["w-slow"][0]["result"]["content"][0]["text"] and got["w-slow"][1] < 7, got["w-slow"]
+
+# A cancelled wait sends no answer; a progressToken gets progress notifications while it waits.
+_, tid = tool("delegate", worker="research", task="NAP3 cancel me")
+send_raw({"jsonrpc": "2.0", "id": "w-c", "method": "tools/call", "params": {"name": "wait", "arguments": {"task_id": tid, "timeout_s": 60}}})
+send_raw({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": "w-c"}})
+err, text = tool("list_workers")                                  # the next answer on stdout is this one, not the wait's
+assert not err and json.loads(text), text
+assert "NAP3 cancel me" in tool("wait", task_id=tid, timeout_s=30)[1]   # a stray answer to w-c would be read here instead
+_, tid = tool("delegate", worker="research", task="NAP2 with progress")
+send_raw({"jsonrpc": "2.0", "id": "w-p", "method": "tools/call", "params": {"name": "wait", "arguments": {"task_id": tid, "timeout_s": 60}, "_meta": {"progressToken": "pt"}}})
+m = json.loads(proc.stdout.readline())
+assert m.get("id") == "w-p" and "NAP2 with progress" in m["result"]["content"][0]["text"], m   # short wait: no progress line before it
 
 # A task left 'running' by a previous server process is reported lost, never waited on forever.
 (cfg / "research" / "tasks" / "dead0000.json").write_text(json.dumps(
