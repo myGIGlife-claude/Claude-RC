@@ -283,6 +283,16 @@ class ChatController(
         }
     }
 
+    /** Asks session [to] a question through this chat: Claude here relays it (ListAgents + SendMessage). False when nothing was sent. */
+    fun askSession(to: String, question: String, onSent: () -> Unit = {}): Boolean {
+        val from = _chatSession.value ?: return false
+        if (to == from) return false
+        val msg = askMessage(from, to, question)
+        if (msg.isEmpty()) return false
+        sendChat(msg, onSent)
+        return true
+    }
+
     /** Drops a message stuck as "queued" (it only hides it here; nothing is unsent). */
     fun dismissPending(text: String) { _chatPending.value = _chatPending.value.toMutableList().also { it.remove(text) } }
 
@@ -424,3 +434,19 @@ internal fun ChatData.withoutCleared(marks: MutableMap<String, String>, session:
 
 /** Pause after a chat-watch answer: slots busy = 4 s; a change = 1.5 s before the next watch; nothing new = straight back. */
 internal fun watchDelayMs(d: ChatData): Long = if (d.retry) 4_000 else if (d.changed) 1_500 else 0
+
+/** The longest chat message the app sends. */
+private const val ASK_MAX = 20000
+
+/** The message that makes Claude in session [from] relay [question] to session [to]. Empty when the question is blank; the whole text stays under [ASK_MAX]. */
+internal fun askMessage(from: String, to: String, question: String): String {
+    val q = question.trim()
+    if (q.isEmpty()) return ""
+    fun build(text: String) = "Ask the session \"$to\" this on my behalf. " +
+        "Use ListAgents to find the live session whose tmux session or project is \"$to\" (not this one), then SendMessage it. " +
+        "First line of the message: \"Question from Jonathan via session $from\". " +
+        "Second line: \"Reason: Jonathan asked me to relay this question.\" Then the question. " +
+        "If it isn't listed, or the send is held for approval, tell me that and stop. " +
+        "When the reply arrives, show it to me in full.\nQuestion: $text"
+    return build(q.take(ASK_MAX - build("").length))
+}
