@@ -843,6 +843,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         general.clearServerState()
         queue.clearServerState()
         chats.clearServerState()   // chat log, open chat, queued messages, drafts, PIN (session names repeat across servers)
+        SshRunner.closeAll()   // a removed or changed server's connection must not linger
     }
 
     fun acceptHostKey(accept: Boolean) {
