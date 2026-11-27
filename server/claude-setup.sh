@@ -2291,6 +2291,7 @@ conn_port="${CLAUDERC_CONN:-}"; conn_port="${conn_port##* }"
 add_sshd_port "$conn_port"
 while read -r p; do add_sshd_port "$p"; done < <(sshd -T 2>/dev/null | awk '/^port /{print $2}')
 # This server's address (first field of SSH_CONNECTION) is never banned by fail2ban; used only when it is a plain IP.
+# Tailscale addresses (100.64.0.0/10, fd7a:115c:a1e0::/48) are never banned either: retries from your own devices on the tailnet.
 client_ip="${CLAUDERC_CONN:-}"; client_ip="${client_ip%% *}"
 if ! [[ "$client_ip" =~ ^(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])){3}$ ||
   ("$client_ip" == *:* && "$client_ip" =~ ^[0-9A-Fa-f:.]{2,45}$) ]]; then client_ip=""; fi
@@ -2335,7 +2336,7 @@ if has harden && ((pkgs_ok)); then
 enabled = true
 backend = systemd
 port = $f2b_ports
-ignoreip = 127.0.0.1/8 ::1${client_ip:+ $client_ip}
+ignoreip = 127.0.0.1/8 ::1 100.64.0.0/10 fd7a:115c:a1e0::/48${client_ip:+ $client_ip}
 maxretry = 4
 findtime = 10m
 bantime = 1h

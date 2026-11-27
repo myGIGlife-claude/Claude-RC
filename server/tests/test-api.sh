@@ -2153,8 +2153,8 @@ bash -n "$RS"; check "harden: the remote script parses (bash -n)" $?
 if command -v shellcheck >/dev/null; then shellcheck -s bash -S warning - <"$RS"; check "harden: the remote script is shellcheck clean" $?; fi
 # Safety-audit fixes (the script only runs as root on a host, so these check its text).
 ! grep -q 'ufw_do limit' "$RS"; check "harden: ssh ports are allowed, never rate-limited (would drop this server)" $?
-grep -q '^ignoreip = 127.0.0.1/8 ::1${client_ip:+ $client_ip}$' "$RS" && grep -q 'client_ip="${client_ip%% \*}"' "$RS"
-check "harden: fail2ban ignores this server's address" $?
+grep -q '^ignoreip = 127.0.0.1/8 ::1 100.64.0.0/10 fd7a:115c:a1e0::/48${client_ip:+ $client_ip}$' "$RS" && grep -q 'client_ip="${client_ip%% \*}"' "$RS"
+check "harden: fail2ban ignores this server's address and the tailnet" $?
 grep -q "ufw status 2>/dev/null | grep -q '^Status: active' && ufw_was=active" "$RS" &&
   grep -q "\[\[ \"\$ufw_was\" == inactive \]\] && revert+=' ufw disable;'" "$RS" && ! grep -q "^revert=.*ufw disable" "$RS"
 check "harden: the undo turns ufw off only when it was off before" $?

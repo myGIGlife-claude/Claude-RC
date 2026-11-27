@@ -183,6 +183,19 @@ object SshRunner {
         }
     }
 
+    /**
+     * The phone changed networks: stop handing out cached connections (their socket may be on the old network)
+     * so the next call opens a fresh one. Calls still running on them finish or fail on their own.
+     */
+    fun retireAll() {
+        val idle = synchronized(poolLock) {
+            generation++   // a connect in progress may be on the old network too: use it for its own call only
+            pool.entries.toList().filter { (k, p) -> retireLocked(k, p) }.map { it.value }
+        }
+        if (idle.isEmpty()) return
+        Thread { idle.forEach { runCatching { it.session.disconnect() } } }.apply { isDaemon = true; start() }
+    }
+
     /** Close every cached connection (server switched, removed or changed). Calls still on them fail. */
     fun closeAll() {
         val all = synchronized(poolLock) {
@@ -312,6 +325,9 @@ object SshRunner {
             if (config.hostKeyType == "ssh-rsa") "rsa-sha2-512,rsa-sha2-256" else config.hostKeyType,
         )
         session.userInfo = SilentUserInfo
+        // Chat histories are large, repetitive JSON: compress when the server agrees (after auth, OpenSSH's default).
+        session.setConfig("compression.s2c", "zlib@openssh.com,none")
+        session.setConfig("compression.c2s", "zlib@openssh.com,none")
         // This is also the socket read timeout once connected (JSch's setTimeout): each quiet 15 s sends a
         // keepalive, and two unanswered in a row drop the session, so a dead link is noticed in ~45 s.
         session.setServerAliveInterval(KEEPALIVE_MS)
