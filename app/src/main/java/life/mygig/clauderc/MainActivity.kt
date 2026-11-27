@@ -1,5 +1,6 @@
 package life.mygig.clauderc
 
+import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
 import androidx.activity.compose.setContent
@@ -16,6 +17,9 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import life.mygig.clauderc.ui.AppLock
 import life.mygig.clauderc.ui.AppRoot
 import life.mygig.clauderc.ui.MainViewModel
+import life.mygig.clauderc.widget.WidgetLink
+import life.mygig.clauderc.widget.WidgetTap
+import life.mygig.clauderc.widget.parseWidgetTap
 
 class MainActivity : FragmentActivity(), AppLock {
 
@@ -24,19 +28,45 @@ class MainActivity : FragmentActivity(), AppLock {
     /** When the app last went to the background; null while it's in front. */
     private var backgroundedAt: Long? = null
 
+    /** A widget tap not handed to the view model yet (that happens in onResume, after onStart's lock check). */
+    private var widgetTap: WidgetTap? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // A recreated activity (rotation, restore) gets its launch intent again: that tap was handled.
+        if (savedInstanceState == null) widgetTap = takeWidgetTap(intent)
         setContent { AppRoot(vm = vm, lock = this) }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        widgetTap = takeWidgetTap(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // The view model waits for the app to be unlocked before acting on it.
+        widgetTap?.let { vm.openFromWidget(it) }
+        widgetTap = null
+    }
+
+    /** Reads the widget extras and removes them, so nothing acts on them twice. */
+    private fun takeWidgetTap(intent: Intent): WidgetTap? = runCatching {
+        val tap = parseWidgetTap(intent.getStringExtra(WidgetLink.EXTRA_OPEN), intent.getStringExtra(WidgetLink.EXTRA_SESSION))
+        intent.removeExtra(WidgetLink.EXTRA_OPEN)
+        intent.removeExtra(WidgetLink.EXTRA_SESSION)
+        tap
+    }.getOrNull()   // a malformed extras bundle (any app can start this activity): ignored
 
     override fun onStart() {
         super.onStart()
         vm.setForeground(true)
         vm.chats.resumeChat()
         // Lock again after a while in the background. The short grace period
-        // covers the PIN screen (its own activity) and quick trips to the
-        // browser during a login.
+        // covers the system's lock prompt (its own activity) and quick trips to
+        // the browser during a login or to a file picker.
         val since = backgroundedAt
         if (since != null && SystemClock.elapsedRealtime() - since > RELOCK_AFTER_MS) vm.lockApp()
         backgroundedAt = null
@@ -45,10 +75,8 @@ class MainActivity : FragmentActivity(), AppLock {
     override fun onStop() {
         super.onStop()
         vm.setForeground(false)
-        if (!isChangingConfigurations) {
-            backgroundedAt = SystemClock.elapsedRealtime()
-            vm.chats.lockChat()   // chat needs the PIN again after any trip away from the app
-        }
+        vm.chats.pauseChat()   // no chat polling while the app isn't in front
+        if (!isChangingConfigurations) backgroundedAt = SystemClock.elapsedRealtime()
     }
 
     override fun canAuthenticate(): Boolean =

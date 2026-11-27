@@ -6,6 +6,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PUSH = os.path.join(os.path.dirname(HERE), "claude-push")
 sent = []
 created = []
+tokens_file = None
 
 
 class H(http.server.BaseHTTPRequestHandler):
@@ -30,7 +31,14 @@ class H(http.server.BaseHTTPRequestHandler):
             assert self.headers["Authorization"] == "Bearer tok"
             m = json.loads(body)["message"]
             if m["token"] == "dead":
-                self.send_response(404); self.end_headers(); self.wfile.write(b'{"error":{"status":"NOT_FOUND"}}'); return
+                self.send_response(404); self.end_headers()
+                self.wfile.write(b'{"error":{"status":"NOT_FOUND","details":[{"errorCode":"UNREGISTERED"}]}}'); return
+            if m["token"] == "wrong-project":
+                self.send_response(404); self.end_headers()
+                self.wfile.write(b'{"error":{"status":"NOT_FOUND","message":"project not found"}}'); return
+            if m["token"] == "append-trigger":
+                with open(tokens_file, "a") as f:
+                    f.write("added-during-send\n")
             sent.append(m)
             out = b"{}"
         self.send_response(200); self.end_headers(); self.wfile.write(out)
@@ -46,11 +54,12 @@ base = "http://127.0.0.1:%d" % srv.server_port
 home = tempfile.mkdtemp()
 cfg = os.path.join(home, "claude-launcher")
 os.makedirs(os.path.join(cfg, "push-done"))
+tokens_file = os.path.join(cfg, "push-tokens")
 pem = os.path.join(home, "k.pem")
 subprocess.run(["openssl", "genrsa", "-out", pem, "2048"], check=True, capture_output=True)
 json.dump({"project_id": "p1"}, open(os.path.join(cfg, "push.json"), "w"))
 json.dump({"project_id": "p1", "client_email": "a@b.c", "private_key": open(pem).read()}, open(os.path.join(cfg, "fcm-key.json"), "w"))
-open(os.path.join(cfg, "push-tokens"), "w").write("dead\nphone1\n")
+open(tokens_file, "w").write("dead\nphone1\n")
 fake = os.path.join(home, "bin"); os.makedirs(fake)
 open(os.path.join(fake, "tmux"), "w").write("#!/bin/sh\necho demo\n"); os.chmod(os.path.join(fake, "tmux"), 0o755)
 env = dict(os.environ, CLAUDE_PUSH_DEBUG="1", XDG_CONFIG_HOME=home, TMUX_PANE="%1", PATH=fake + ":" + os.environ["PATH"],
@@ -73,7 +82,16 @@ assert json.loads(run("--setup"))["project_id"] == "other-proj", "push-project o
 os.remove(os.path.join(cfg, "push-project"))
 json.dump({"project_id": "p1"}, open(os.path.join(cfg, "push.json"), "w"))
 assert json.loads(run("--test"))["sent"] == 1
-assert open(os.path.join(cfg, "push-tokens")).read() == "phone1\n", "dead token dropped"
+assert open(tokens_file).read() == "phone1\n", "dead token dropped"
+# A non-registration 404 must leave every token untouched.
+open(tokens_file, "w").write("phone1\nwrong-project\n")
+assert json.loads(run("--test"))["sent"] == 1
+assert open(tokens_file).read() == "phone1\nwrong-project\n", "unrelated 404 preserves tokens"
+# A token registered during sends must survive dead-token cleanup.
+open(tokens_file, "w").write("dead\nappend-trigger\n")
+assert json.loads(run("--test"))["sent"] == 1
+assert open(tokens_file).read() == "append-trigger\nadded-during-send\n", "new registration survives cleanup"
+open(tokens_file, "w").write("phone1\n")
 run(ev={"hook_event_name": "Notification", "notification_type": "permission_prompt"})
 n = sent[0]["data"]
 assert len(sent) == 1 and n["channel"] == "alerts" and "demo" in n["title"] and "awaiting a response" in n["body"], sent

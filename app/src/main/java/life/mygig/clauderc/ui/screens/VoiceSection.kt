@@ -10,6 +10,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import life.mygig.clauderc.ui.components.tabular
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -61,7 +62,7 @@ fun VoiceSection(vm: MainViewModel) {
                 download is NaturalDownload.Running -> {
                     val pct = (download as NaturalDownload.Running).percent
                     LinearProgressIndicator(progress = { pct / 100f }, modifier = Modifier.fillMaxWidth())
-                    Text("Downloading… $pct%", style = MaterialTheme.typography.bodySmall)
+                    Text("Downloading… $pct%", style = MaterialTheme.typography.bodySmall.tabular())
                 }
                 installed == true -> {
                     Row(verticalAlignment = Alignment.CenterVertically) {

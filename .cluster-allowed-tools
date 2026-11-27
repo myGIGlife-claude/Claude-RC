@@ -12,3 +12,4 @@ Bash(shellcheck:*)
 Bash(bash -n:*)
 WebSearch
 WebFetch
+Bash(python3 server/tests/test-push.py:*)

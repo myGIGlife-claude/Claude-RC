@@ -1,7 +1,7 @@
 ---
 name: rc-american-english-writing
 kind: process
-description: Write, edit and proofread natural American English: emails, complaints, website/app/UI copy, release notes, docs, replies. Use for any prose a person will read, "make this sound natural/human", proofreading, tone, UI strings, AI-sounding or over-formatted text. Not for code.
+description: "Write, edit and proofread natural American English: emails, complaints, website/app/UI copy, release notes, docs, replies. Use for any prose a person will read, \"make this sound natural/human\", proofreading, tone, UI strings, AI-sounding or over-formatted text. Not for code."
 ---
 # American English writing and editing (process, not facts)
 

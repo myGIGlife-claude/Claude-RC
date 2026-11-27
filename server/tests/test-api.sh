@@ -128,7 +128,9 @@ check "new ok + started" "$(jqt '.ok and .data.session=="demo-app2" and .data.ur
 tmux has-session -t "=demo-app2" 2>/dev/null; check "tmux session exists" $?
 [[ -f "$STUB_STATE/rc_enabled" && -f "$HOME/.config/claude-setup/remote-control-confirmed" ]]; check "Enable Remote Control answered y" $?
 jq -e --arg d "$HOME/projects/demo-app2" '.projects[$d].hasTrustDialogAccepted' "$HOME/.claude.json" >/dev/null; check "folder pre-trusted" $?
-grep -q "^demo-app2	$HOME/projects/demo-app2$" "$LIST"; check "claude-autostart list updated" $?
+grep -q "^demo-app2	$HOME/projects/demo-app2$" "$LIST"; rc=$?
+[[ $rc -eq 0 ]] || { echo "DEBUG list:"; cat "$LIST" 2>&1; echo "DEBUG panes:"; tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}' 2>&1; echo "DEBUG tmux: $(tmux -V)"; }
+check "claude-autostart list updated" $rc
 api "new demo-app2 --owner demo-user --visibility private"
 check "new again -> repo_exists" "$(jqt '.error.code=="repo_exists"')"
 api "new my.dotted --owner example-org --visibility public --start"
@@ -306,6 +308,7 @@ touch -d '+1 minute' "$GSL/$GSID.jsonl"
 api "general-list"
 check "general-list: both, newest updated first" "$(jqa --arg a "$GID" --arg b "$GID2" '.ok and (.data.chats | map(.id)) == [$a, $b]')"
 check "general-list: title from the first message (one line, 60)" "$(jqa --arg a "$GID" '.data.chats[0].title == ("Help me plan a trip to the mountains next spring, with a budget and a packing list" | .[0:60])')"
+[[ "$(cat "$GDIR/.title")" == "$(jq -r '.data.chats[0].title' <<<"$OUT")" && ! -e "$HOME/Chat/$GID2/.title" ]]; check "general-list: the derived title is cached in .title (not \"New chat\")" $?
 check "general-list: fields" "$(jqa --arg b "$GID2" --arg h "$HOME" '.data.chats[1] | .title == "New chat" and .running and .session == ("chat-" + $b) and .dir == ($h + "/Chat/" + $b)
   and (.created_at | type) == "number" and .created_at > 1700000000 and .updated_at >= .created_at and (.preview | type) == "string" and .busy == false and .waiting == false')"
 api "general-rename $GID" $'  My\ttrip\nplan \x01  '
@@ -334,6 +337,15 @@ api "general-open $GID"
 check "general-open again: already running" "$(jqt '.ok and .data.already_running == true')"
 api "general-stop $GID2"; api "general-open $GID2"
 tmux list-panes -t "=chat-$GID2" -F '#{pane_start_command}' | grep -q -- "--resume"; [[ $? -ne 0 ]]; check "a chat with no conversation starts fresh" $?
+# Two opens racing on one stopped chat: both succeed, exactly one starts it, the session survives.
+api "general-stop $GID2"
+R1="$(mktemp)"; R2="$(mktemp)"
+SSH_ORIGINAL_COMMAND="general-open $GID2" "$HOME/bin/claude-launcher-api" </dev/null >"$R1" &
+SSH_ORIGINAL_COMMAND="general-open $GID2" "$HOME/bin/claude-launcher-api" </dev/null >"$R2" &
+wait
+[[ "$(cat "$R1" "$R2" | jq -s '[.[] | select(.ok and .data.already_running == false)] | length')" == 1 && "$(cat "$R1" "$R2" | jq -s '[.[] | select(.ok)] | length')" == 2 ]]; check "two racing general-open: one starts it, none fails" $?
+tmux has-session -t "=chat-$GID2" 2>/dev/null; check "...and the session is still running" $?
+rm -f "$R1" "$R2"
 api "restart chat-$GID"
 check "restart keeps the chat-<id> name and resumes" "$(jqa --arg a "$GID" --arg s "$GSID" '.ok and .data.session == ("chat-" + $a) and .data.resumed and .data.conversation == $s')"
 tmux has-session -t "=$GID" 2>/dev/null; [[ $? -ne 0 ]]; check "...no session named after the bare folder" $?
@@ -349,6 +361,22 @@ tmux has-session -t "=chat-$GID" 2>/dev/null; [[ $? -ne 0 ]]; check "deleted cha
 [[ ! -e "$HOME/.config/claude-launcher/push-done/chat-$GID" ]]; check "its push setting dropped" $?
 api "general-list"
 check "deleted chat gone from the list (.deleted not listed)" "$(jqa --arg b "$GID2" '.ok and (.data.chats | map(.id)) == [$b]')"
+# Many chats: only the newest 100 folders (and running chats) get the full look; older ones come from the folder alone.
+for i in $(seq 1 120); do
+  d="$HOME/Chat/$(printf '20250101-%06d-%04x' "$i" "$i")"; mkdir -p "$d"
+  touch -d "@$((1735689600 + i * 60))" "$d"
+done
+printf 'Old cached title\n' >"$HOME/Chat/20250101-000003-0003/.title"; touch -d "@$((1735689600 + 3 * 60))" "$HOME/Chat/20250101-000003-0003"
+touch -d '2001-01-01' "$HOME/Chat/$GID2"   # the running chat's folder is the oldest of all
+t0=$SECONDS; api "general-list"; took=$((SECONDS - t0))
+check "general-list: 120 old chats + the running one, all listed" "$(jqt '.ok and (.data.chats | length) == 121 and (.data.chats | map(.id) | unique | length) == 121')"
+check "general-list: every entry has the full shape" "$(jqt '.data.chats | all(has("id") and has("title") and has("dir") and has("running") and has("session") and has("created_at") and has("updated_at") and has("preview") and has("waiting") and has("busy"))')"
+check "general-list: an old chat uses its cached .title, not running" "$(jqt '[.data.chats[] | select(.id == "20250101-000003-0003")][0] | .title == "Old cached title" and .running == false and .session == "" and .created_at == 1735689603 and .updated_at == (1735689600 + 180) and .dir == ("'"$HOME"'/Chat/" + .id)')"
+check "general-list: an old chat without .title has an empty title" "$(jqt '[.data.chats[] | select(.id == "20250101-000001-0001")][0] | .title == "" and .busy == false and .waiting == false and .preview == ""')"
+check "general-list: a newer one is looked at in full" "$(jqt '[.data.chats[] | select(.id == "20250101-000120-0078")][0] | .title == "New chat" and .created_at == 1735689680')"
+check "general-list: a running chat in an old folder is still running" "$(jqa --arg b "$GID2" '[.data.chats[] | select(.id == $b)][0] | .running and .session == ("chat-" + $b)')"
+((took <= 20)); check "general-list with 121 chats took ${took}s (at most 20)" $?
+rm -rf "$HOME"/Chat/20250101-*
 api "general-delete $GID"
 check "delete again -> invalid_name" "$(jqt '.ok==false and .error.code=="invalid_name"')"
 api "general-delete $GID2"
@@ -448,24 +476,46 @@ api "set-secret ACME_ENDPOINT" "https://api.acme.example"; check "set-secret sti
 api "remove-secret ACME_ENDPOINT"
 api "set-secret TS_AUTHKEY" "tskey-auth-abc"; check "TS_AUTHKEY accepted" "$(jqt '.ok and .data.saved=="TS_AUTHKEY"')"
 api "remove-secret TS_AUTHKEY"; check "TS_AUTHKEY removed" "$(jqt '.ok')"
+for bad in PIP_TRUSTED_HOST PIP_FIND_LINKS HF_ENDPOINT; do
+  api "set-secret $bad" "http://evil.example"; check "set-secret refuses the behaviour-changing name $bad" "$(jqt '.ok==false')"
+done
+# A built-in service's variable is never a custom key: remove-secret would wipe that service's login.
+printf "export HF_TOKEN='hf_servicelogin'\n" >>"$HOME/.config/claude-launcher/env"
+for bad in HF_TOKEN VERCEL_TOKEN STRIPE_API_KEY CLOUDFLARE_ACCOUNT_ID MXROUTE_SERVER OVH_APPLICATION_KEY YOUTUBE_CLIENT_ID GOOGLE_APPLICATION_CREDENTIALS; do
+  api "set-secret $bad" "x1"; check "set-secret refuses the service variable $bad" "$(jqt '.ok==false and .error.code=="invalid_name" and (.error.message | contains("built-in service"))')"
+done
+api "set-secret-file GOOGLE_APPLICATION_CREDENTIALS" "$(printf '{}' | base64)"; check "set-secret-file refuses a service variable" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "remove-secret HF_TOKEN"; check "remove-secret refuses a service variable" "$(jqt '.ok==false')"
+grep -q "^export HF_TOKEN='hf_servicelogin'$" "$HOME/.config/claude-launcher/env"; check "...and the service login stays" $?
+sed -i '/^export HF_TOKEN=/d' "$HOME/.config/claude-launcher/env"
+# Two overlapping set-secret calls: each rewrites the env file and the name list, and neither write may be lost.
+for _ in 1 2 3; do
+  api "set-secret RACE_A_KEY" "aaa" & api "set-secret RACE_B_KEY" "bbb" & wait
+  grep -q "^export RACE_A_KEY='aaa'$" "$HOME/.config/claude-launcher/env" && grep -q "^export RACE_B_KEY='bbb'$" "$HOME/.config/claude-launcher/env" &&
+    grep -qx RACE_A_KEY "$HOME/.config/claude-launcher/custom-names" && grep -qx RACE_B_KEY "$HOME/.config/claude-launcher/custom-names"
+  check "parallel set-secret: both names saved" $?
+  api "remove-secret RACE_A_KEY" & api "remove-secret RACE_B_KEY" & wait
+  ! grep -q RACE_ "$HOME/.config/claude-launcher/env" "$HOME/.config/claude-launcher/custom-names"; check "parallel remove-secret: both gone" $?
+done
+[[ -z "$(compgen -G "$HOME/.config/claude-launcher/custom-names.*")" ]]; check "no temp name list left behind" $?
 grep -q ACME_API_KEY "$HOME/.config/claude-launcher/env" "$HOME/.claude/settings.json"; [[ $? -ne 0 ]]; check "removed from env file and settings" $?
 grep -q abc123 "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "custom key value never logged" $?
-SF="$HOME/.config/claude-launcher/secret-files/GOOGLE_APPLICATION_CREDENTIALS.json"
-api "set-secret-file GOOGLE_APPLICATION_CREDENTIALS" "$(printf '{"type":"service_account","private_key":"sf-secret-xyz"}' | base64 -w 76)"
-check "set-secret-file saves a JSON file" "$(jqt '.ok and .data.saved=="GOOGLE_APPLICATION_CREDENTIALS" and .data.file')"
+SF="$HOME/.config/claude-launcher/secret-files/ACME_SA_CREDENTIALS.json"
+api "set-secret-file ACME_SA_CREDENTIALS" "$(printf '{"type":"service_account","private_key":"sf-secret-xyz"}' | base64 -w 76)"
+check "set-secret-file saves a JSON file" "$(jqt '.ok and .data.saved=="ACME_SA_CREDENTIALS" and .data.file')"
 [[ "$(stat -c %a "$SF")" == 600 && "$(jq -r .private_key "$SF")" == sf-secret-xyz ]]; check "secret file saved, mode 600" $?
 [[ "$(stat -c %a "${SF%/*}")" == 700 ]]; check "secret-files dir is 700" $?
-jq -e --arg p "$SF" '.env.GOOGLE_APPLICATION_CREDENTIALS==$p' "$HOME/.claude/settings.json" >/dev/null; check "env var holds the file's path" $?
-api "status"; check "status lists the file key with custom keys" "$(jqt '.data.custom|index("GOOGLE_APPLICATION_CREDENTIALS")')"
+jq -e --arg p "$SF" '.env.ACME_SA_CREDENTIALS==$p' "$HOME/.claude/settings.json" >/dev/null; check "env var holds the file's path" $?
+api "status"; check "status lists the file key with custom keys" "$(jqt '.data.custom|index("ACME_SA_CREDENTIALS")')"
 api "set-secret-file ACME_KEY_FILE" "$(printf 'not json' | base64)"; check "set-secret-file refuses non-JSON" "$(jqt '.ok==false and .error.code=="invalid_name"')"
 [[ ! -e "$HOME/.config/claude-launcher/secret-files/ACME_KEY_FILE.json" ]]; check "refused file not saved" $?
 api "set-secret-file ACME_KEY_FILE" ""; check "set-secret-file refuses an empty file" "$(jqt '.ok==false')"
 for bad in "set-secret-file CLAUDE_X_FILE" "set-secret-file acme_key_file" "set-secret-file PATH" "set-secret-file"; do
   api "$bad" "$(printf '{}' | base64)"; check "set-secret-file refuses '$bad'" "$(jqt '.ok==false')"
 done
-api "remove-secret GOOGLE_APPLICATION_CREDENTIALS"; check "file key removed" "$(jqt '.ok')"
+api "remove-secret ACME_SA_CREDENTIALS"; check "file key removed" "$(jqt '.ok')"
 [[ ! -e "$SF" ]]; check "remove-secret deletes the saved file" $?
-grep -q GOOGLE_APPLICATION_CREDENTIALS "$HOME/.config/claude-launcher/env"; [[ $? -ne 0 ]]; check "file key removed from env file" $?
+grep -q ACME_SA_CREDENTIALS "$HOME/.config/claude-launcher/env"; [[ $? -ne 0 ]]; check "file key removed from env file" $?
 grep -q sf-secret-xyz "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "secret file contents never logged" $?
 rm -f "$HOME/.config/claude-launcher/env"
 
@@ -541,6 +591,8 @@ check "drive: status before setup" "$(jqt '.ok and .data == {configured:false, c
 # Sending backups to a Google account / choosing their passphrase is as strong as `run`: it needs ALLOW_RUN=1.
 api "drive-login-start"; check "drive: sign-in refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
 api "drive-passphrase" "a long passphrase here"; check "drive: setting a passphrase refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+api "drive-delete abcdefghij"; check "drive: delete refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+api "drive-logout"; check "drive: logout refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
 echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
 api "drive-login-start"
 check "drive: not configured names both variables" "$(jqt '.error.code=="not_configured" and (.error.message | contains("GOOGLE_DRIVE_CLIENT_ID") and contains("GOOGLE_DRIVE_CLIENT_SECRET")) and .error.variables==["GOOGLE_DRIVE_CLIENT_ID","GOOGLE_DRIVE_CLIENT_SECRET"]')"
@@ -643,6 +695,9 @@ rm -f "$STUB_STATE/crontab"
 api "drive-schedule off"; check "drive: off without a crontab" "$(jqt '.ok and .data.schedule=="off"')"
 [[ ! -e "$STUB_STATE/crontab" ]]; check "drive: ...doesn't create one" $?
 api "drive-schedule on"; [[ "$(grep -c clauderc-drive-backup "$STUB_STATE/crontab")" == 1 ]]; check "drive: on creates a missing crontab" $?
+api "drive-logout"; check "drive: logout refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+[[ -f "$DCFG/drive-token.json" ]]; check "drive: ...token kept" $?
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
 api "drive-logout"; check "drive: logout" "$(jqt '.ok and .data.disconnected')"
 [[ "$(cat "$DS/revoked")" == "1//stub-refresh-SECRET" && ! -e "$DCFG/drive-token.json" ]]; check "drive: token revoked and removed" $?
 ! grep -q clauderc-drive-backup "$STUB_STATE/crontab"; check "drive: logout turns the schedule off" $?
@@ -650,8 +705,16 @@ api "drive-status"; check "drive: disconnected, passphrase kept" "$(jqt '(.data.
 echo '{"refresh_token":"1//revoked-one"}' >"$DCFG/drive-token.json"
 api "drive-list"; check "drive: a revoked login asks to connect again" "$(jqt '.error.code=="not_logged_in" and (.error.message | contains("connect Google Drive again"))')"
 rm -f "$DCFG/drive-token.json"
-api "drive-passphrase" ""; check "drive: empty passphrase forgets it" "$(jqt '.ok and .data.removed')"
+api "drive-passphrase" ""; check "drive: an empty passphrase alone is refused" "$(jqt '.ok==false and .error.code=="bad_args"')"
+[[ "$(cat "$DCFG/drive-backup-pass")" == "$DPASS" ]]; check "drive: ...and the saved one stays" $?
+api "drive-passphrase" $'\nforget please'; check "drive: only the exact line forget removes it" "$(jqt '.ok==false and .error.code=="bad_args"')"
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
+api "drive-passphrase" $'\nforget'; check "drive: forgetting refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+[[ -s "$DCFG/drive-backup-pass" ]]; check "drive: ...file kept" $?
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
+api "drive-passphrase" $'\nforget'; check "drive: an empty line then forget removes it" "$(jqt '.ok and .data.removed')"
 [[ ! -e "$DCFG/drive-backup-pass" ]]; check "drive: ...file deleted" $?
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
 api "remove-secret GOOGLE_DRIVE_CLIENT_ID"; api "remove-secret GOOGLE_DRIVE_CLIENT_SECRET"
 unset CLAUDERC_DRIVE_RETRY_WAIT
 
@@ -703,13 +766,9 @@ api "login-token youtube" "x"; check "youtube can't be set with login-token" "$(
 rm -f "$HOME/.config/claude-launcher/env" "$HOME/.claude.json"
 
 echo "in-app chat"
-api "chat-pin-status"; check "chat PIN not set yet" "$(jqt '.ok and (.data.set|not)')"
-api "chat-open demo-app2" "123456"; check "chat needs a PIN first" "$(jqt '.error.code=="pin_not_set"')"
-api "chat-pin-set" "12ab"; check "PIN must be 6-12 digits" "$(jqt '.error.code=="invalid_name"')"
-api "chat-pin-set" "482913"; check "PIN set" "$(jqt '.ok and .data.set')"
-[[ "$(stat -c %a "$HOME/.config/claude-launcher/chat-pin")" == 600 ]] && grep -q '^PIN=482913$' "$HOME/.config/claude-launcher/chat-pin"; check "PIN file readable only on the server (600)" $?
-api "chat-pin-set" $'111111\n000000'; check "changing the PIN needs the current one" "$(jqt '.error.code=="wrong_pin"')"
-rm -f "$HOME/.local/state/claude-launcher/chat-pin-fails"
+api "chat-pin-status"; check "chat PIN gone: older apps see one set, not required" "$(jqt '.ok and .data.set and .data.required==false')"
+api "chat-pin-set" "12ab"; check "chat-pin-set is a harmless no-op for older apps" "$(jqt '.ok')"
+[[ ! -e "$HOME/.config/claude-launcher/chat-pin" ]]; check "...and stores nothing" $?
 D2="$(tmux display-message -p -t "=demo-app2:" '#{pane_current_path}')"; TD="$HOME/.claude/projects/${D2//[\/.]/-}"; mkdir -p "$TD"
 cat >"$TD/99999999-0000-0000-0000-000000000000.jsonl" <<'JL'
 {"type":"user","uuid":"u1","timestamp":"2026-09-29T10:00:00Z","message":{"role":"user","content":"Add a forecast screen"}}
@@ -729,7 +788,6 @@ PD="$(tmux display-message -p -t "=demo-app2:" '#{pane_current_path}')"; mkdir -
 printf '{"env":{"KEEP":"1"},"hooks":{"Stop":[]},"permissions":{"allow":["Read"]}}\n' >"$HOME/.claude/settings.json"; chmod 600 "$HOME/.claude/settings.json"
 rm -f "$PD/.claude/settings.local.json" "$PD/.claude/settings.json"
 api "permissions-get demo-app2" "482913"; check "permissions-get reads each scope; a missing file is empty" "$(jqt '.ok and .data.scopes.user.allow==["Read"] and .data.scopes.local.exists==false and .data.scopes.project.deny==[]')"
-api "permissions-get demo-app2" "000000"; check "permissions-get needs the PIN" "$(jqt '.ok==false')"
 perm() { api "permissions-set demo-app2" "$(printf '482913\n%s' "$1")"; }
 perm '{"scope":"local","op":"add","list":"allow","rule":"Bash(git status:*)"}'; check "permissions-set add creates the local file" "$(jqt '.ok')"
 perm '{"scope":"local","op":"add","list":"allow","rule":"Bash(git status:*)"}'
@@ -767,21 +825,494 @@ check "a pending AskUserQuestion comes back as data" "$(jqt '.data.waiting and (
 echo '{"type":"user","uuid":"q10","timestamp":"2026-09-29T10:02:05Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ask","content":"ok"}]}}' >>"$TF"
 api "chat-history demo-app2" "482913"; check "an answered question is gone" "$(jqt '.data.ask == null')"
 tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "clear"; tmux send-keys -t "=demo-app2:" Enter; sleep 0.3
+# chat-watch: long-poll on a token. wapi <session> <token> [seconds]; sets OUT and WSECS (elapsed).
+wapi() { local t0=$SECONDS; OUT="$(CLAUDERC_WATCH_SECS="${3:-2}" SSH_ORIGINAL_COMMAND="chat-watch $1" "$HOME/bin/claude-launcher-api" <<<"$(printf '0\n%s' "$2")")"; RC=$?; WSECS=$((SECONDS - t0)); }
+api "chat-history demo-app2" "0"; WH="$OUT"; WTOK="$(jq -r '.data.token' <<<"$WH")"
+check "chat-history carries a token" "$([[ "$WTOK" =~ ^v1\.[0-9.]+\.[01]{2}[0-4]\.[0-9]+$ ]]; echo $?)"
+wapi demo-app2 ""
+check "chat-watch with no token answers at once like chat-history, with changed:true and the same token" "$(jqt '.ok and .data.changed==true and .data.token=="'"$WTOK"'"')"
+check "...and the same messages as chat-history" "$([[ "$(jq -c '.data.messages' <<<"$OUT")" == "$(jq -c '.data.messages' <<<"$WH")" ]]; echo $?)"
+wapi demo-app2 "$WTOK" 2
+check "chat-watch with the current token waits, then answers changed:false" "$(jqt '.ok and .data.changed==false and .data.token=="'"$WTOK"'" and (.data|has("messages")|not)')"
+check "...after the wait time (2-4 s)" "$([[ $WSECS -ge 2 && $WSECS -le 4 ]]; echo $?)"
+( sleep 1; echo '{"type":"assistant","uuid":"w1","timestamp":"2026-09-29T10:03:00Z","message":{"role":"assistant","content":[{"type":"text","text":"watched reply"}]}}' >>"$TF" ) &
+wapi demo-app2 "$WTOK" 10; wait
+check "a new transcript line ends the wait with the new message within 4 s" "$(jqt '.data.changed==true and .data.messages[-1].text=="watched reply" and .data.token!="'"$WTOK"'"')"
+check "...the wait was short" "$([[ $WSECS -le 4 ]]; echo $?)"
+WTOK="$(jq -r '.data.token' <<<"$OUT")"
+( sleep 1; tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "❯ 1. Red" ) &
+wapi demo-app2 "$WTOK" 10; wait
+check "the pane turning into a numbered menu ends the wait with waiting:true" "$(jqt '.data.changed==true and .data.waiting==true')"
+tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "clear"; tmux send-keys -t "=demo-app2:" Enter; sleep 0.3
+wapi demo-app2 'bad token; $(id)' 2
+check "a token with odd characters is treated as empty" "$(jqt '.ok and .data.changed==true')"
+api "chat-history demo-app2" "0"; WTOK="$(jq -r '.data.token' <<<"$OUT")"
+for i in 1 2; do ( CLAUDERC_WATCH_SECS=6 SSH_ORIGINAL_COMMAND="chat-watch demo-app2" "$HOME/bin/claude-launcher-api" <<<"$(printf '0\n%s' "$WTOK")" >"$WORK/watch$i.out" ) & done
+sleep 2; wapi demo-app2 "$WTOK" 6
+check "a third watcher on one session gets retry:true at once" "$(jqt '.ok and .data.retry==true and .data.changed==false and .data.token==""')"
+check "...without waiting" "$([[ $WSECS -le 2 ]]; echo $?)"
+wait
+check "the two watchers in the slots finish normally" "$(jq -s -e 'all(.[]; .ok and .data.changed==false)' "$WORK/watch1.out" "$WORK/watch2.out" >/dev/null 2>&1; echo $?)"
+wapi demo-app2 "$WTOK" 2
+check "a slot is free again afterwards" "$(jqt '.ok and (.data.retry|not)')"
+api "chat-watch demo-app2 extra" "0"; check "chat-watch takes one session" "$(jqt '.error.code=="forbidden"')"
+api "chat-watch ../x" "0"; check "chat-watch refuses ../x" "$(jqt '.error.code=="forbidden"')"
+# A reader that has gone away: the heartbeat write fails and the watcher leaves, freeing its slot.
+( CLAUDERC_WATCH_SECS=30 CLAUDERC_WATCH_BEAT=1 SSH_ORIGINAL_COMMAND="chat-watch demo-app2" "$HOME/bin/claude-launcher-api" <<<"$(printf '0\n%s' "$WTOK")" | true )
+sleep 3
+pgrep -f -- '--api chat-watch demo-app2' >/dev/null; [[ $? -ne 0 ]]; check "a watcher whose reader closed the pipe is gone within 3 s" $?
+tmux new-session -d -s wkill -x 100 -y 30 cat; sleep 0.5
+wapi wkill ""; KT="$(jq -r '.data.token' <<<"$OUT")"
+( sleep 1; tmux kill-session -t =wkill ) &
+wapi wkill "$KT" 20; wait
+check "a killed session ends the watch with an error" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+check "...within 3 s" "$([[ $WSECS -le 3 ]]; echo $?)"
+# Over 20,000 bytes is refused, never cut short and sent.
+CLOG="$HOME/.local/state/claude-launcher/chat.log"; csent() { grep -c $'\tsend$' "$CLOG" 2>/dev/null || true; }
+n0="$(csent)"
+api "chat-send demo-app2" $'482913\n'"$(head -c 20001 /dev/zero | tr '\0' a)"
+check "chat send: 20,001 bytes refused" "$(jqt '.ok==false and .error.code=="invalid_name" and (.error.message | contains("too long"))')"
+[[ "$(csent)" == "$n0" ]]; check "chat send: ...and nothing sent" $?
+api "chat-send demo-app2" $'482913\n'"$(head -c 20000 /dev/zero | tr '\0' a)"
+check "chat send: exactly 20,000 bytes accepted" "$(jqt '.ok and .data.sent')"
+tmux send-keys -t "=demo-app2:" C-u; tmux send-keys -t "=demo-app2:" -l "clear"; tmux send-keys -t "=demo-app2:" Enter; sleep 0.3
 api "chat-send no-such-proj" $'482913\nhi'; check "chat send to a stopped session fails once, with one JSON line" "$([[ "$(wc -l <<<"$OUT")" == 1 ]] && jqt '.ok==false' || echo 1)"
-api "chat-send demo-app2" $'000000\nhi'; check "chat send with a wrong PIN refused" "$(jqt '.error.code=="wrong_pin"')"
-for _ in 1 2 3 4; do api "chat-open demo-app2" "000000"; done
-check "5 wrong PINs lock chat" "$(jqt '.error.code=="chat_locked"')"
-api "chat-open demo-app2" "482913"; check "locked even with the right PIN" "$(jqt '.error.code=="chat_locked"')"
-rm -f "$HOME/.config/claude-launcher/chat-locked"
-api "chat-open demo-app2" "482913"; check "deleting the lock file on the server unlocks" "$(jqt '.ok')"
+echo "queue actions"
+echo "0 1 * * * echo mine" >"$STUB_STATE/crontab"
+QD="$HOME/.config/claude-launcher/queue"
+for bad in "queue-star" "queue-star demo-app2" "queue-star demo-app2 maybe" "queue-star demo-app2 on extra" "queue-star demo-app2;id on" "queue-star -x on" \
+  "queue-status x" "queue-on x" "queue-off x" "queue-log x" "queue-log --lines" "queue-log --lines 1000" "queue-log --lines x" "queue-log --lines 5 5" "queue-log --count 5"; do
+  api "$bad"; check "runner refuses '$bad'" "$(jqt '.ok == false')"
+done
+api "queue-status"; check "queue-status: off by default, no chats" "$(jqt '.ok and .data.enabled==false and .data.parallel==1 and .data.max_5h==90 and .data.max_7d==95 and .data.chats==[]')"
+api "queue-star demo-app2 on" "482913"; check "queue-star on with the PIN" "$(jqt '.ok and .data.starred==true and .data.session=="demo-app2"')"
+api "sessions"; check "sessions carries the star" "$(jqt '(.data.sessions | map(select(.name=="demo-app2" and .starred==true)) | length)==1 and (.data.sessions | map(select(.name!="demo-app2" and .starred==true)) | length)==0')"
+grep -q "^\* \* \* \* \* '$HOME/.local/bin/claude-queue' >/dev/null 2>&1 # clauderc-queue$" "$STUB_STATE/crontab"
+check "first star adds the one-minute crontab line" $?
+api "queue-star demo-app2 on" "482913"; [[ "$(grep -c '# clauderc-queue$' "$STUB_STATE/crontab")" == 1 ]] && jq -e '.stars==["demo-app2"]' "$QD/queue.json" >/dev/null 2>&1; check "starring twice keeps one line and one star" $?
+[[ "$(stat -c %a "$QD")" == 700 && "$(stat -c %a "$QD/queue.json")" == 600 ]]; check "queue dir 700, files 600" $?
+tmux new-session -d -s chat-20260101-000000-abcd sleep 600
+api "queue-star chat-20260101-000000-abcd on" "482913"; check "queue-star: a general chat is refused" "$(jqt '.error.code=="invalid_name"')"
+tmux kill-session -t "=chat-20260101-000000-abcd"
+api "queue-star no-such-proj on" "482913"; check "queue-star: no such session refused" "$(jqt '.error.code=="invalid_name"')"
+tmux new-session -d -s qbypass -x 100 -y 30 cat; sleep 0.3; tmux send-keys -t "=qbypass:" -l "⏵⏵ bypass permissions on (shift+tab to cycle)"; sleep 0.3
+api "queue-star qbypass on" "482913"; check "queue-star: bypass permissions mode refused" "$(jqt '.error.code=="unsafe_mode"')"
+tmux kill-session -t "=qbypass"
+api "queue-on" "482913"; check "queue-on with the PIN" "$(jqt '.ok and .data.enabled==true and (.data.chats | map(.session)==["demo-app2"]) and .data.chats[0].state=="idle"')"
+api "queue-off"; check "queue-off needs no PIN" "$(jqt '.ok and .data.enabled==false')"
+api "queue-star demo-app2 off"; check "un-star needs no PIN" "$(jqt '.ok and .data.starred==false')"
+api "queue-status"; check "...and the chat is gone from the list" "$(jqt '.data.chats==[]')"
+grep -q '# clauderc-queue' "$STUB_STATE/crontab"; [[ $? -ne 0 ]]; check "last un-star removes the crontab line" $?
+grep -q "^0 1 \* \* \* echo mine$" "$STUB_STATE/crontab"; check "...and leaves the owner's other lines" $?
+api "sessions"; check "sessions: nothing starred any more" "$(jqt '(.data.sessions | map(select(.starred==true)) | length)==0 and (.data.sessions | map(has("starred")) | all)')"
+# Log: names and events only, no chat text; rotation.
+echo '{"type":"assistant","uuid":"qm1","timestamp":"2026-09-29T10:03:00Z","message":{"role":"assistant","content":[{"type":"text","text":"QUESTION: SECRETMARKERWORD"}]}}' >>"$TF"
+api "queue-star demo-app2 on" "482913"; api "queue-log"
+check "queue-log lists star/unstar/on/off events" "$(jqt '.ok and ([.data.lines[].event] | index("on") != null and index("off") != null and index("star") != null and index("unstar") != null) and (.data.lines[0] | has("ts") and has("session") and has("detail"))')"
+api "queue-log --lines 2"; check "queue-log --lines 2 gives two" "$(jqt '.ok and (.data.lines | length)==2')"
+api "queue-status"; ST_OUT="$OUT"; api "queue-log"
+[[ "$ST_OUT$OUT" != *SECRETMARKERWORD* ]] && ! grep -rq SECRETMARKERWORD "$QD"; check "no transcript text in the log, the state or queue-status" $?
+export CLAUDERC_QUEUE_LOG_MAX=200; api "queue-star demo-app2 on" "482913"; api "queue-star demo-app2 on" "482913"; unset CLAUDERC_QUEUE_LOG_MAX
+[[ -s "$QD/log.1" && -s "$QD/log" && "$(stat -c %a "$QD/log")" == 600 ]]; check "log rotates to log.1 at the size limit (files stay 600)" $?
+api "queue-star demo-app2 off"
+# ---- Queue tick (tests 4-9 of docs/queue-design.md): private tmux sessions running `cat`, hand-written transcripts, fake clock. ----
+echo "queue tick"
+QT="$WORK/qt"; mkdir -p "$QT/repoA/a1" "$QT/repoA/a2" "$QT/repoB"; git -C "$QT/repoA" init -q; git -C "$QT/repoB" init -q
+QSTATE="$QD/state.json"; QUC="$HOME/.config/claude-launcher/usage-cache/_main.json"; mkdir -p "$QD" "${QUC%/*}"; chmod 700 "$QD"
+qtick() { CLAUDERC_NOW="$NOW" "$HOME/bin/claude-setup.sh" --queue-tick >/dev/null 2>&1; NOW=$((NOW + ${1:-200})); }   # tick at NOW, then move the clock on
+qs() { jq -r ".\"$1\".$2 // empty" "$QSTATE" 2>/dev/null; }
+qdir() { tmux display-message -p -t "=$1:" '#{pane_current_path}'; }
+qtr() { echo "$HOME/.claude/projects/$(qdir "$1" | sed 's/[^A-Za-z0-9]/-/g')/$1.jsonl"; }
+qsent() { local n; n="$(tmux capture-pane -p -J -S -200 -t "=$1:" | grep -c 'cLaudeRC queue\] Automatic turn' || true)"; echo $((n / 2)); }   # `cat` shows each paste twice (tty echo + its output)
+qconf() { jq -nc --argjson st "$1" --argjson p "${2:-1}" '{enabled:true, parallel:$p, stars:$st}' >"$QD/queue.json"; }
+qusage() { jq -nc --argjson ts "$NOW" --argjson f "$1" --argjson s "${2:-10}" --arg fr "${3:-}" '{ts:$ts, retry_until:0, five:$f, seven:$s, five_resets:(if $fr == "" then null else $fr end), seven_resets:null}' >"$QUC"; }
+qfinish() { # qfinish <session> <stop_reason> <text>: Claude's reply lands, the file goes quiet
+  jq -nc --arg t "$3" --arg st "$2" '{type:"assistant",uuid:"r",message:{role:"assistant",stop_reason:$st,content:[{type:"text",text:$t}]}}' >>"$(qtr "$1")"
+  touch -d "@$((NOW - 150))" "$(qtr "$1")"
+}
+qreset() { # fresh sessions, transcripts and state
+  tmux kill-session -t =qa1 2>/dev/null; tmux kill-session -t =qa2 2>/dev/null; tmux kill-session -t =qb 2>/dev/null
+  rm -f "$QSTATE" "$QD/log" "$QD/log.1" "$QT/repoB/PLAN.md"
+  for x in qa1:repoA/a1 qa2:repoA/a2 qb:repoB; do
+    tmux new-session -d -s "${x%%:*}" -x 100 -y 30 -c "$QT/${x#*:}" cat
+  done
+  sleep 0.6
+  for x in qa1 qa2 qb; do mkdir -p "$(dirname "$(qtr $x)")"; echo '{"type":"user","uuid":"u","message":{"role":"user","content":"hi"}}' >"$(qtr $x)"; done
+}
+qlog() { grep -c "	$1	$2" "$QD/log" 2>/dev/null || true; }
+NOW=$(date +%s)
+
+echo "queue tick: sends, parallel, same repo (test 4)"
+qreset; qconf '["qa1","qa2","qb"]' 1; qusage 10
+qtick 10; qtick 10
+[[ "$(qsent qa1)" == 1 && "$(qsent qa2)" == 0 && "$(qsent qb)" == 0 && "$(qs qa1 state)" == running ]]; check "parallel 1: the first chat gets the fixed text once, the others nothing" $?
+qconf '["qa1","qa2","qb"]' 2; qtick 10
+[[ "$(qsent qa2)" == 0 && "$(qsent qb)" == 1 && "$(qsent qa1)" == 1 ]]; check "parallel 2: the chat in the same checkout is skipped, the one in another repo goes" $?
+[[ "$(qs qa1 repo)" == "$QT/repoA" && "$(qs qb repo)" == "$QT/repoB" ]]; check "the repo is the git top level (a1 and a2 share one)" $?
+[[ "$(grep -h "QUEUE_MSG=" "$HOME/bin/claude-setup.sh")" != *@* && "$(grep -h "QUEUE_MSG=" "$HOME/bin/claude-setup.sh")" != */home/* ]]; check "the turn text carries no address or path" $?
+
+echo "queue tick: completion and round-robin (test 5)"
+qreset; qconf '["qa1","qa2","qb"]' 1; qusage 10
+qtick 200
+qfinish qa1 end_turn "All done."; qusage 10; qtick 200
+[[ "$(qs qa1 state)" == running ]]; check "one tick of quiet is not enough" $?
+qusage 10; qtick 200
+[[ "$(qs qa1 state)" == idle && "$(qs qa1 turns)" == 1 && "$(qlog qa1 "done")" == 1 && "$(qs qa2 state)" == running ]]; check "two quiet ticks with end_turn: done, turns 1, the next chat (round-robin) starts" $?
+qfinish qa2 end_turn "ok"; qusage 10; qtick 200; qusage 10; qtick 200
+qfinish qb end_turn "ok"; qusage 10; qtick 200; qusage 10; qtick 200
+[[ "$(awk -F'\t' '$3 == "sent" {printf "%s ", $2}' "$QD/log")" == "qa1 qa2 qb qa1 " ]]; check "send order over four turns: qa1 qa2 qb qa1" $?
+qfinish qa1 tool_use "still working"; qusage 10; qtick 200; qusage 10; qtick 200
+[[ "$(qs qa1 state)" == running ]]; check "a reply that is not end_turn does not finish the turn" $?
+
+echo "queue tick: markers (test 6)"
+qreset; qconf '["qb"]' 1; qusage 10
+qtick 200; qfinish qb end_turn $'Stopped here.\nQUESTION: Which colour?'; qusage 10; qtick 200; qusage 10; qtick 200
+[[ "$(qs qb state)" == question && "$(qsent qb)" == 1 ]]; check "a QUESTION: line parks the chat" $?
+qusage 10; qtick 200; qusage 10; qtick 200
+[[ "$(qsent qb)" == 1 ]]; check "...and it is skipped on later ticks" $?
+jq -nc '{type:"assistant",uuid:"r2",message:{role:"assistant",stop_reason:"end_turn",content:[{type:"text",text:"Thanks, carrying on."}]}}' >>"$(qtr qb)"
+qusage 10; qtick 200
+[[ "$(qsent qb)" == 2 ]]; check "a newer reply without the marker makes it eligible again" $?
+qfinish qb end_turn $'Plan is empty.\nQUEUE: nothing to do'; qusage 10; qtick 200; qusage 10; qtick 200
+[[ "$(qs qb state)" == nothing ]]; check "QUEUE: nothing to do is recorded" $?
+qusage 10; qtick 200; [[ "$(qsent qb)" == 2 ]]; check "...and skipped while PLAN.md is unchanged" $?
+echo "- [ ] new task" >"$QT/repoB/PLAN.md"; qusage 10; qtick 200
+[[ "$(qsent qb)" == 3 ]]; check "...until PLAN.md changes" $?
+
+echo "queue tick: usage and limits (test 7)"
+qreset; qconf '["qb"]' 1; X=$((NOW + 3600)); qusage 91 10 "$(date -u -d "@$X" +%Y-%m-%dT%H:%M:%SZ)"
+qtick 60
+[[ "$(qsent qb)" == 0 && "$(qlog - limited)" == 1 && "$(jq -r ._limited_until "$QSTATE")" == $((X + 120)) ]]; check "5-hour at 91%: nothing sent, limited_until = reset + 120 s" $?
+api "queue-status"; check "queue-status reports limited_until and the usage numbers" "$(jqt '.data.limited_until=='$((X + 120))' and .data.usage.five==91')"
+NOW=$((X + 130)); qusage 20; qtick 10
+[[ "$(qsent qb)" == 1 && "$(qlog - resumed)" == 1 ]]; check "clock past the reset with room: the turn goes out" $?
+qreset; qconf '["qb"]' 1; qusage 20 96
+qtick 10; [[ "$(qsent qb)" == 0 ]]; check "weekly at 96%: nothing sent" $?
+qreset; qconf '["qb"]' 1; qusage 20; qtick 60
+tmux send-keys -t "=qb:" -l "5-hour limit reached - resets 3pm"; sleep 0.3
+qusage 20; qtick 10
+[[ "$(qs qb state)" == limited && "$(qs qb resume)" == true ]]; check "usage-limit banner mid-turn: the chat is limited with resume set" $?
+NOW=$((NOW + 1000)); qusage 20; qtick 10
+[[ "$(tmux capture-pane -p -J -S -200 -t =qb: | grep -c 'Usage window reset: continue')" == 2 && "$(qsent qb)" == 1 && "$(qs qb state)" == running ]]; check "after the reset the chat gets the resume text, not the turn text" $?
+
+echo "queue tick: owner activity (test 8)"
+qreset; qconf '["qb"]' 1; qusage 10; CL="$HOME/.local/state/claude-launcher/chat.log"
+printf '%s\tqb\tsend\n' "$(date -u -d "@$((NOW - 60))" +%Y-%m-%dT%H:%M:%SZ)" >>"$CL"
+qtick 10; [[ "$(qsent qb)" == 0 ]]; check "a chat-send in the last 20 minutes: skipped" $?
+(sleep 6) | tmux -C attach -t =qb >/dev/null 2>&1 &
+sleep 1; NOW=$((NOW + 2000)); qusage 10; qtick 10
+[[ "$(qsent qb)" == 0 ]]; check "an attached terminal: skipped" $?
+wait; sleep 0.5; qusage 10; qtick 10
+[[ "$(qsent qb)" == 1 ]]; check "old send and no terminal: goes" $?
+
+echo "queue tick: failures (test 9)"
+qreset; qconf '["qb"]' 1; qusage 10; NOW=$((NOW + 5000))
+qusage 10; qtick 100; qusage 10; qtick 100   # sent, then 100 s with no new transcript line and an idle pane
+[[ "$(qs qb state)" == backoff && "$(qs qb fails)" == 1 && "$(qs qb next_try)" -gt "$NOW" ]]; check "paste that never lands: backoff after the first failure" $?
+[[ "$(qs qb next_try)" -gt "$NOW" && "$(qsent qb)" == 1 ]]; check "...and nothing is sent during the backoff" $?
+NOW=$(( $(qs qb next_try) + 1 )); qusage 10; qtick 100; qusage 10; qtick 100
+[[ "$(qsent qb)" == 2 && "$(qs qb fails)" == 2 && "$(qs qb state)" == backoff ]]; check "second failure: 60 minute backoff" $?
+[[ "$(qs qb next_try)" -ge $((NOW - 100 + 3500)) ]]; check "...really about an hour" $?
+NOW=$(( $(qs qb next_try) + 1 )); qusage 10; qtick 100; qusage 10; qtick 100
+[[ "$(qs qb state)" == error && "$(qsent qb)" == 3 ]]; check "third failure: error" $?
+NOW=$((NOW + 90000)); qusage 10; qtick 100; [[ "$(qsent qb)" == 3 ]]; check "an error chat is left alone" $?
+api "queue-star qb off"; api "queue-star qb on" "482913"; qusage 10; qtick 100
+[[ "$(qsent qb)" == 4 ]]; check "star off and on resets it" $?
+api "queue-star qb off"
+
+echo "queue tick: prompts, interrupts, errors, limits in replies, overrun (review fixes)"
+qclear() { tmux kill-session -t =qb 2>/dev/null; tmux new-session -d -s qb -x 100 -y 30 -c "$QT/repoB" cat; sleep 0.6; }
+qstat() { api "queue-status"; jq -r ".data.chats[] | select(.session==\"$1\") | .state" <<<"$OUT"; }
+qevent() { printf '%s\t%s\t%s\n' "$(date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ)" "$2" "$3" >>"$CL"; }   # a chat.log line at a fake time
+CL="$HOME/.local/state/claude-launcher/chat.log"
+# 1. A prompt keeps the turn running (slot held), shows as needs_you, and the reply is read once it is answered.
+qreset; qconf '["qb"]' 1; qusage 10; T0=$NOW
+qtick 10
+tmux send-keys -t "=qb:" -l "Do you want to proceed? (y/n)"; sleep 0.3
+qusage 10; qtick 10
+[[ "$(qs qb state)" == running && "$(qs qb waiting)" == true && "$(qstat qb)" == needs_you && "$(qlog qb needs_you)" == 1 ]]; check "a permission prompt: still running, flagged waiting, shown as needs_you, logged once" $?
+qusage 10; qtick 10; [[ "$(qsent qb)" == 1 && "$(qlog qb needs_you)" == 1 ]]; check "...and no new turn goes in over it" $?
+qclear; qusage 10; qtick 10
+[[ "$(qsent qb)" == 0 && "$(qs qb state)" == running && -z "$(qs qb waiting)" ]]; check "answered 'No' (pane idle, no reply yet): the same turn goes on, no fresh turn is sent" $?
+qfinish qb end_turn $'Asked and answered.\nQUESTION: Anything else?'; qusage 10; qtick 200; qusage 10; qtick 200
+[[ "$(qs qb state)" == question ]]; check "approved, then the turn ends with QUESTION: it is parsed, not talked over" $?
+# 2. A chat parked on a prompt while idle stays parked until the owner does something there.
+qreset; qconf '["qb"]' 1; qusage 10
+tmux send-keys -t "=qb:" -l "Continue? (y/n)"; sleep 0.3
+qtick 10; [[ "$(qs qb state)" == needs_you && "$(qsent qb)" == 0 ]]; check "an idle chat showing a prompt is parked as needs_you" $?
+SINCE="$(qs qb since)"; qclear; NOW=$((NOW + 3000)); qusage 10; qtick 10
+[[ "$(qsent qb)" == 0 && "$(qs qb state)" == needs_you ]]; check "the prompt going away is not enough: still parked" $?
+qevent $((SINCE + 5)) qb keys; NOW=$((NOW + 100)); qusage 10; qtick 10
+[[ "$(qsent qb)" == 1 ]]; check "an owner event (keys) after it was parked frees it" $?
+nk="$(grep -c $'\tkeys$' "$CL" || true)"; api "keys demo-app2 Enter"; [[ "$(grep -c $'\tkeys$' "$CL")" -gt "$nk" ]]; check "keys is written to the chat log" $?
+# 3. Interrupt, API errors, rate limit error record, overrun: the turn ends; nothing is sent over it.
+qreset; qconf '["qb"]' 1; qusage 10; qtick 100; T0=$((NOW - 100))
+qevent $((T0 + 5)) qb interrupt; qusage 10; qtick 100
+[[ "$(qs qb state)" == needs_you && -z "$(qs qb turn)" && "$(qsent qb)" == 1 ]]; check "owner pressed Esc (interrupt in chat.log): the turn ends and the chat is parked" $?
+qusage 10; qtick 100; NOW=$((NOW + 5000)); qusage 10; qtick 100; [[ "$(qsent qb)" == 1 ]]; check "...and no new turn follows" $?
+qreset; qconf '["qb"]' 1; qusage 10; qtick 100
+jq -nc '{type:"assistant",uuid:"e1",isApiErrorMessage:true,error:"server_error",message:{role:"assistant",model:"<synthetic>",stop_reason:"stop_sequence",content:[{type:"text",text:"API Error: Connection lost mid-response."}]}}' >>"$(qtr qb)"
+qusage 10; qtick 100
+[[ "$(qs qb state)" == backoff && -z "$(qs qb turn)" ]]; check "Claude Code's API error record ends the turn (backoff)" $?
+qreset; qconf '["qb"]' 1; qusage 10; qtick 100
+jq -nc '{type:"assistant",uuid:"e2",isApiErrorMessage:true,error:"rate_limit",message:{role:"assistant",model:"<synthetic>",stop_reason:"stop_sequence",content:[{type:"text",text:"Limit reached"}]}}' >>"$(qtr qb)"
+qusage 10; qtick 100
+[[ "$(qs qb state)" == limited && "$(qs qb resume)" == true ]]; check "an API error record of kind rate_limit means limited, resume set" $?
+qreset; qconf '["qb"]' 1; qusage 10; qtick 100
+qfinish qb tool_use "still going"; NOW=$((NOW + 240 * 60 + 100)); qusage 10; qtick 100
+[[ "$(qs qb state)" == needs_you && -z "$(qs qb turn)" && "$(qlog qb fail)" == 1 ]]; check "idle pane and no finished reply past max_turn_min: the turn is cut loose and parked" $?
+qusage 10; qtick 100; [[ "$(qsent qb)" == 1 ]]; check "...and no turn is sent on top" $?
+# 4. Limit words in Claude's own reply are not a limit.
+qreset; qconf '["qb"]' 1; qusage 10; qtick 200
+tmux send-keys -t "=qb:" -l "usage limit reached - resets 5pm"; sleep 0.3
+qfinish qb end_turn $'We should say "usage limit reached" in the docs.\nQUESTION: Is that wording right?'; qusage 10; qtick 200; qusage 10; qtick 200
+[[ "$(qs qb state)" == question && "$(qlog qb limited)" == 0 && "$(qs qb turns)" == 1 ]]; check "limit words in a finished reply: not limited, the QUESTION is kept" $?
+# 5. A busy pane in the same checkout holds the repo and a slot.
+qreset; qconf '["qa1","qa2","qb"]' 2; qusage 10
+tmux send-keys -t "=qa1:" -l "working... (esc to interrupt)"; sleep 0.3
+qtick 10; [[ "$(qsent qa2)" == 0 && "$(qsent qa1)" == 0 && "$(qsent qb)" == 1 ]]; check "owner working in qa1 (busy pane): qa2 in the same repo waits, qb goes, qa1 holds a slot" $?
+qusage 10; qtick 10; [[ "$(qsent qb)" == 1 && "$(qsent qa2)" == 0 ]]; check "...and parallel 2 is not exceeded" $?
+# 5b. Second review: reboots, marker spellings, flood guard, Esc record, resume reservation, waiting time, clock, transcript.
+# A missing session leaves every park alone (a reboot before claude-autostart restores the sessions).
+qreset; qconf '["qb"]' 1; qusage 10; qtick 200
+qfinish qb end_turn $'Waiting on you.\nQUESTION: Which one?'; qusage 10; qtick 200; qusage 10; qtick 200
+tmux kill-session -t =qb; qusage 10; qtick 100
+[[ "$(qs qb state)" == question && "$(qstat qb)" == stopped ]]; check "no session: a parked QUESTION stays parked, shown as stopped" $?
+qclear; qusage 10; qtick 100
+[[ "$(qs qb state)" == question && "$(qsent qb)" == 0 && "$(qstat qb)" == question ]]; check "...and when the session is back it is still parked, no turn" $?
+rm -f "$QSTATE"; qusage 10; qtick 100
+[[ "$(qs qb state)" == question && "$(qsent qb)" == 0 ]]; check "a lost state file: the question in the newest reply still parks it" $?
+qreset; qconf '["qb"]' 1; qusage 10; qtick 100
+tmux kill-session -t =qb; qusage 10; qtick 100
+[[ "$(qs qb state)" == needs_you && -z "$(qs qb turn)" ]]; check "session gone while a turn runs: parked, not forgotten" $?
+qclear; NOW=$((NOW + 4000)); qusage 10; qtick 100
+[[ "$(qsent qb)" == 0 ]]; check "...and no fresh turn after the session returns" $?
+# Marker spellings.
+for t in '`QUEUE: nothing to do`' 'QUEUE: nothing to do.' '**QUEUE: nothing to do**' '> QUEUE: nothing to do'; do
+  qreset; qconf '["qb"]' 1; qusage 10; qtick 200; qfinish qb end_turn "Plan is done.
+$t"; qusage 10; qtick 200; qusage 10; qtick 200
+  [[ "$(qs qb state)" == nothing ]]; check "nothing-to-do spelled $t" $?
+done
+for t in '**QUESTION:** Which one?' '> QUESTION: Which one?' '`QUESTION: Which one?`'; do
+  qreset; qconf '["qb"]' 1; qusage 10; qtick 200; qfinish qb end_turn "Stuck.
+$t"; qusage 10; qtick 200; qusage 10; qtick 200
+  [[ "$(qs qb state)" == question ]]; check "question spelled $t" $?
+done
+# Flood guard: three quick turns in a row with PLAN.md unchanged park the chat.
+qreset; qconf '["qb"]' 1; qusage 10; qtick 60
+for _ in 1 2 3; do qfinish qb end_turn "Checked, all fine."; qusage 10; qtick 60; qusage 10; qtick 60; done
+[[ "$(qs qb state)" == nothing && "$(qsent qb)" == 3 ]]; check "three quick turns, PLAN.md unchanged: parked as nothing" $?
+# Esc / "No" on a tool prompt: the real record shape ends the turn at once.
+qreset; qconf '["qb"]' 1; qusage 10; qtick 100
+jq -nc '{type:"assistant",uuid:"x1",message:{role:"assistant",stop_reason:"tool_use",content:[{type:"tool_use",id:"t1",name:"Bash",input:{command:"ls"}}]}}' >>"$(qtr qb)"
+jq -nc '{type:"user",uuid:"x2",message:{role:"user",content:[{type:"text",text:"[Request interrupted by user for tool use]"}]}}' >>"$(qtr qb)"
+# Real Claude Code appends bookkeeping records after it (seen on a real run): the interrupt record is not the last line.
+for t in system last-prompt ai-title mode permission-mode session-owner; do jq -nc --arg t "$t" '{type:$t}' >>"$(qtr qb)"; done
+qusage 10; qtick 100
+[[ "$(qs qb state)" == needs_you && -z "$(qs qb turn)" ]]; check "the '[Request interrupted by user' record ends the turn and parks the chat" $?
+qusage 10; qtick 100; [[ "$(qsent qb)" == 1 ]]; check "...with no new turn" $?
+# A chat that will resume keeps its checkout reserved.
+qreset; qconf '["qa1","qa2"]' 1; qusage 10; qtick 60
+tmux send-keys -t "=qa1:" -l "5-hour limit reached - resets 3pm"; sleep 0.3
+qusage 10; qtick 10
+NOW=$((NOW + 1000)); qconf '["qa1","qa2"]' 2; qusage 10; qtick 10
+[[ "$(qsent qa2)" == 0 && "$(tmux capture-pane -p -J -S -200 -t =qa1: | grep -c 'Usage window reset: continue')" == 2 ]]; check "limited with resume: the other chat in the same repo waits, the resumer goes first" $?
+# Time spent waiting on a prompt does not count towards max_turn_min.
+qreset; qconf '["qb"]' 1; qusage 10; qtick 10
+tmux send-keys -t "=qb:" -l "Proceed? (y/n)"; sleep 0.3
+qusage 10; qtick $((5 * 3600)); qusage 10; qtick 10
+qclear; qusage 10; qtick 10
+[[ "$(qs qb state)" == running && -n "$(qs qb turn)" ]]; check "five hours spent on a prompt: not an overrun once answered" $?
+# The clock going backwards.
+qreset; qconf '["qb"]' 1; NOW=$((NOW + 99999)); qusage 99; NOW=$((NOW - 99999)); qtick 10
+[[ "$(qsent qb)" == 1 ]]; check "a usage cache stamped in the future is stale, not a limit" $?
+qreset; qconf '["qb"]' 1; qusage 10; jq -nc --argjson t "$((NOW + 1000000000))" '{_limited_until:$t}' >"$QSTATE"; qtick 10
+[[ "$(jq -r ._limited_until "$QSTATE")" -le $((NOW + 8 * 86400)) && "$(qsent qb)" == 0 ]]; check "a limited_until far in the future is clamped to a window" $?
+qreset; qconf '["qb"]' 1; qusage 10; jq -nc --argjson t "$((NOW + 1000000000))" '{qb:{state:"backoff",fails:1,next_try:$t}}' >"$QSTATE"; qtick 10
+[[ "$(qs qb next_try)" -le $((NOW + 3600)) && "$(qsent qb)" == 0 ]]; check "a backoff time far in the future is clamped to an hour" $?
+# The turn's own transcript, not the newest file in the folder.
+qreset; qconf '["qb"]' 1; qusage 10; qtick 200
+jq -nc '{type:"assistant",uuid:"o1",message:{role:"assistant",stop_reason:"tool_use",content:[{type:"text",text:"other conversation"}]}}' >"$(dirname "$(qtr qb)")/other.jsonl"
+qfinish qb end_turn "All done."; qusage 10; qtick 200; qusage 10; qtick 200
+[[ "$(qlog qb "done")" == 1 ]]; check "a newer transcript file in the folder does not hide the turn's own reply" $?
+rm -f "$(dirname "$(qtr qb)")/other.jsonl"
+grep -q 'timeout 55 ' "$SERVER/claude-queue"; check "claude-queue gives a tick at most 55 seconds" $?
+# 6. queue-off while a tick holds the lock answers at once; a tick sees the switch before it pastes.
+qreset; qconf '["qb"]' 1
+flock "$QD/lock" sleep 8 & HOLD=$!
+sleep 0.3; t0=$(date +%s); api "queue-off"; t1=$(date +%s)
+check "queue-off while a tick holds the lock: answers, not 'busy'" "$(jqt '.ok and .data.enabled==false')"
+((t1 - t0 < 6)); check "...within a few seconds" $?
+kill $HOLD 2>/dev/null; wait $HOLD 2>/dev/null
+qusage 10; qtick 10; [[ "$(qsent qb)" == 0 ]]; check "a switched-off queue sends nothing" $?
+# 7. The usage fetch: one call, cached 120 s, token only on stdin, nulls tolerated.
+mkdir -p "$HOME/.claude"; printf '{"claudeAiOauth":{"accessToken":"tok-SECRETUSAGE","expiresAt":99999999999999}}' >"$HOME/.claude/.credentials.json"
+rm -f "$QUC" "$STUB_STATE/usage-config" "$STUB_STATE/usage-argv"; qreset; qconf '["qb"]' 1
+qtick 10
+[[ "$(wc -l <"$STUB_STATE/usage-argv")" == 1 ]] && jq -e '.five==42 and .seven==7.5 and .five_resets=="2026-10-01T22:00:00Z"' "$QUC" >/dev/null; check "no cache: one call, five/seven and the reset times cached" $?
+! grep -q SECRETUSAGE "$STUB_STATE/usage-argv" && grep -q SECRETUSAGE "$STUB_STATE/usage-config"; check "...the token went through curl's stdin config, not argv" $?
+qtick 10; [[ "$(wc -l <"$STUB_STATE/usage-argv")" == 1 ]]; check "a second tick inside 120 s does not call again" $?
+rm -f "$HOME/.claude/.credentials.json" "$STUB_STATE/usage-config" "$STUB_STATE/usage-argv"
+tmux kill-session -t =qa1 2>/dev/null; tmux kill-session -t =qa2 2>/dev/null; tmux kill-session -t =qb 2>/dev/null
+rm -f "$QD/queue.json" "$QSTATE" "$QUC"
+
+# ---- Inbox (tests 1-5 of docs/ultimate-design.md): fake panes (`cat`, started as "cat # claude" so they count as Claude
+# sessions), hand-written transcripts, a hand-written queue state, gh stub fixtures, a fake clock (CLAUDERC_NOW). ----
+echo "inbox: runner (test 1)"
+for bad in "inbox x" "inbox --refresh" "inbox-dismiss" "inbox-dismiss pr-zz 123" "inbox-dismiss pr-3f9a0c1d2e4b" \
+  "inbox-dismiss PR-3f9a0c1d2e4b a1b2c3d4e5f6" "inbox-dismiss pr-3f9a0c1d2e4b A1B2C3D4E5F6" "inbox-dismiss pr-3f9a0c1d2e4b a1b2c3d4e5f6 x" \
+  "inbox-dismiss pr-3f9a0c1d2e4b a1b2c3d4e5f;" "inbox-dismiss -pr-3f9a0c1d2e4b a1b2c3d4e5f6" "inbox-dismiss toolongkindx-3f9a0c1d2e4b a1b2c3d4e5f6" \
+  "act pr-3f9a0c1d2e4b approve a1b2c3d4e5f6;id" "briefing-schedule 7:05 X" "briefing-schedule 07:10 America/Chicago"; do
+  api "$bad"; check "runner refuses '$bad'" "$(jqt '.ok == false and .error.code == "forbidden"')"
+done
+ID="$HOME/.config/claude-launcher/inbox"; P="$HOME/projects"; IBX="$WORK/ibx"
+export CLAUDERC_NOW; CLAUDERC_NOW=$(date +%s)
+ibx() { jq -c --arg k "$1" --arg s "$2" '[.data.items[] | select(.kind == $k and .scope == $s)]' <<<"$OUT"; }   # items of a kind and scope
+ibq() { jq -e --arg k "$1" --arg s "$2" "[.data.items[] | select(.kind == \$k and .scope == \$s)] | $3" >/dev/null 2>&1 <<<"$OUT"; echo $?; }
+ibperm() { # ibperm <session>: a fake permission prompt in the pane (cat echoes each line twice, which WAIT_RE doesn't mind)
+  local l
+  for l in "Bash command" "  echo SECRETINBOXWORD" "Do you want to proceed?" "❯ 1. Yes" "  2. Yes, and don't ask again" "  3. No"; do
+    tmux send-keys -t "=$1:" -l "$l"; tmux send-keys -t "=$1:" Enter
+  done
+  sleep 0.3
+}
+mkdir -p "$IBX/p1" "$IBX/p2" "$IBX/p3"
+for x in ibp1:p1 ibp2:p2 ibp3:p3; do tmux new-session -d -s "${x%%:*}" -x 200 -y 40 -c "$IBX/${x#*:}" "cat # claude"; done
+sleep 0.5
+for x in ibp1 ibp2 ibp3; do mkdir -p "$(dirname "$(qtr $x)")"; done
+# ibp1: one tool call answered, then a pending Bash call. ibp2: only the answered one. ibp3: not waiting.
+{ jq -nc '{type:"assistant",message:{content:[{type:"tool_use",id:"toolu_old",name:"Read",input:{file_path:"/x/SECRETINBOXWORD"}}]}}'
+  jq -nc '{type:"user",message:{content:[{type:"tool_result",tool_use_id:"toolu_old",content:"SECRETINBOXWORD"}]}}'
+  jq -nc '{type:"assistant",message:{content:[{type:"text",text:"SECRETINBOXWORD"},{type:"tool_use",id:"toolu_01pending",name:"Bash",input:{command:"echo SECRETINBOXWORD"}}]}}'
+} >"$(qtr ibp1)"
+head -n 2 "$(qtr ibp1)" >"$(qtr ibp2)"
+ibperm ibp1; ibperm ibp2; tmux send-keys -t "=ibp3:" -l "hello SECRETINBOXWORD"; tmux send-keys -t "=ibp3:" Enter; sleep 0.3
+api "inbox"
+check "inbox answers {now, gh_age, stale, count, items}" "$(jqt '.ok and (.data | keys) == ["count","gh_age","items","now","stale"] and .data.count == (.data.items | length) and .data.now == '"$CLAUDERC_NOW"'')"
+check "every item has exactly the doc's fields" "$(jqt '.data.items | all(keys == ["actions","fp","id","kind","number","run","scope","session","since","text","title"])')"
+echo "inbox: prompts (test 2)"
+check "a permission prompt with a pending tool_use: one prompt item, 'wants to use Bash', approve/deny offered" \
+  "$(ibq prompt ibp1 'length == 1 and .[0].text == "wants to use Bash" and .[0].actions == ["open","approve","deny","dismiss"] and .[0].session == "ibp1" and (.[0].id | test("^prompt-[0-9a-f]{12}$")) and (.[0].fp | test("^[0-9a-f]{12}$")) and .[0].since == '"$CLAUDERC_NOW"' and .[0].number == null and .[0].run == null and .[0].title == null')"
+check "...without a pending tool_use: open only" "$(ibq prompt ibp2 'length == 1 and .[0].text == "is waiting for an answer" and .[0].actions == ["open","dismiss"]')"
+check "...a pane that isn't waiting: no item" "$(ibq prompt ibp3 'length == 0')"
+[[ "$OUT" != *SECRETINBOXWORD* && "$OUT" != *echo* && "$OUT" != */x/* ]] && ! grep -rq SECRETINBOXWORD "$ID"; check "no pane text, tool input or reply text in the answer or the inbox files" $?
+P1="$(ibx prompt ibp1)"; T0=$CLAUDERC_NOW
+CLAUDERC_NOW=$((T0 + 60)); api "inbox"
+[[ "$(ibx prompt ibp1)" == "$P1" ]]; check "the same prompt a minute later: same id, fp and since (first seen)" $?
+jq -nc '{type:"assistant",message:{content:[{type:"tool_use",id:"toolu_02next",name:"Edit",input:{file_path:"/x/y"}}]}}' >>"$(qtr ibp1)"
+api "inbox"
+check "a new pending tool_use: same id, new fp, the new tool, since starts again" \
+  "$(ibq prompt ibp1 '.[0].id == '"$(jq '.[0].id' <<<"$P1")"' and .[0].fp != '"$(jq '.[0].fp' <<<"$P1")"' and .[0].text == "wants to use Edit" and .[0].since == '"$CLAUDERC_NOW"'')"
+cp "$(qtr ibp1)" "$(qtr ibp3)"; tmux send-keys -t "=ibp3:" -l "Continue? (y/n)"; tmux send-keys -t "=ibp3:" Enter; sleep 0.3
+api "inbox"
+check "a y/n question that isn't a permission prompt: open only, even with a pending tool_use" "$(ibq prompt ibp3 'length == 1 and .[0].actions == ["open","dismiss"] and .[0].text == "is waiting for an answer"')"
+[[ "$(stat -c %a "$ID")" == 700 && "$(stat -c %a "$ID/seen")" == 600 && "$(stat -c %a "$ID/gh.json")" == 600 ]]; check "inbox dir 700, files 600" $?
+
+echo "inbox: queue states (test 3)"
+jq -nc '{enabled:true, stars:["iqq","iqn","iqe","iqs","iqi"]}' >"$QD/queue.json"
+jq -nc '{iqq:{state:"question",since:1000,note:"asked you"}, iqn:{state:"needs_you",since:1001,note:"interrupted"},
+  iqe:{state:"error",since:1002,note:"paste failed"}, iqs:{state:"question",since:1003,note:"asked you",gone:true}, iqi:{state:"idle",since:1004}}' >"$QSTATE"
+tmux new-session -d -s iqn sleep 600
+api "inbox"
+check "queue question -> question item 'asked you a question', no session to open" "$(ibq question iqq 'length == 1 and .[0].text == "asked you a question" and .[0].session == null and .[0].since == 1000 and .[0].actions == ["open","dismiss"] and (.[0].id | test("^question-[0-9a-f]{12}$"))')"
+check "needs_you -> parked with the queue note, session when it runs" "$(ibq parked iqn 'length == 1 and .[0].text == "interrupted" and .[0].session == "iqn" and (.[0].id | test("^parked-[0-9a-f]{12}$"))')"
+check "error -> parked with the note" "$(ibq parked iqe 'length == 1 and .[0].text == "paste failed"')"
+check "a gone session -> parked 'session not running'" "$(ibq parked iqs 'length == 1 and .[0].text == "session not running" and .[0].session == null')"
+check "an idle chat -> nothing" "$(jqt '[.data.items[] | select(.scope == "iqi")] | length == 0')"
+check "sorted: prompt, question, parked, then oldest first" "$(jqt '[.data.items[] | {k:({"prompt":0,"question":1,"parked":2,"pr":3,"build":4,"login":5}[.kind]), s:.since}] | . == sort_by([.k, .s])')"
+check "...parked in since order" "$(jqt '[.data.items[] | select(.kind == "parked") | .scope] == ["iqn","iqe","iqs"]')"
+tmux kill-session -t =iqn
+
+echo "inbox: PRs, builds, cache, logins (test 4)"
+while read -r n u; do mkdir -p "$P/$n"; git -C "$P/$n" init -q; git -C "$P/$n" remote add origin "$u"; done <<'EOF'
+ia https://github.com/demo-user/inbox-a.git
+ib git@github.com:demo-user/inbox-b.git
+ic https://github.com/other-owner/inbox-c.git
+id https://gitlab.com/demo-user/inbox-d.git
+EOF
+git -C "$P/ib" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+GS="$STUB_STATE"
+jq -nc '{number:0, title:"t", headRefOid:"h", isDraft:false, mergeable:"MERGEABLE", isCrossRepository:false, baseRefName:"main", updatedAt:"2026-11-20T10:00:00Z",
+  statusCheckRollup:[{__typename:"CheckRun",name:"build",status:"COMPLETED",conclusion:"SUCCESS"},{__typename:"StatusContext",context:"ci",state:"SUCCESS"}]} as $b
+  | [$b + {number:1, title:"Green one", headRefOid:"aaa1"}, $b + {number:2, isDraft:true}, $b + {number:3, isCrossRepository:true},
+     $b + {number:4, mergeable:"UNKNOWN"}, $b + {number:5, statusCheckRollup:[{__typename:"CheckRun",conclusion:"SUCCESS"},{__typename:"CheckRun",conclusion:"FAILURE"}]},
+     $b + {number:6, statusCheckRollup:[]}, $b + {number:7, baseRefName:"dev"}, $b + {number:8, statusCheckRollup:[{__typename:"CheckRun",status:"IN_PROGRESS",conclusion:""}]},
+     $b + {number:10, updatedAt:"2026-11-21T10:00:00Z", statusCheckRollup:[{__typename:"CheckRun",conclusion:"SKIPPED"},{__typename:"CheckRun",conclusion:"NEUTRAL"},{__typename:"CheckRun",conclusion:"SUCCESS"}]}]' >"$GS/gh-prs-demo-user_inbox-a.json"
+ibruns() { jq -nc '[{databaseId:101,workflowName:"build",status:"completed",conclusion:"failure",headSha:"x",createdAt:"2026-11-20T12:00:00Z"},
+  {databaseId:100,workflowName:"build",status:"completed",conclusion:"success",headSha:"x",createdAt:"2026-11-20T11:00:00Z"},
+  {databaseId:201,workflowName:"lint",status:"completed",conclusion:"success",headSha:"x",createdAt:"2026-11-20T12:00:00Z"},
+  {databaseId:200,workflowName:"lint",status:"completed",conclusion:"failure",headSha:"x",createdAt:"2026-11-20T11:00:00Z"},
+  {databaseId:301,workflowName:"deploy",status:"in_progress",conclusion:"",headSha:"x",createdAt:"2026-11-20T13:00:00Z"},
+  {databaseId:300,workflowName:"deploy",status:"completed",conclusion:"timed_out",headSha:"x",createdAt:"2026-11-20T10:00:00Z"}]' | jq -c "$1"; }
+ibruns . >"$GS/gh-runs-demo-user_inbox-a.json"
+jq -nc '[{number:9, title:"On trunk", headRefOid:"bbb9", isDraft:false, mergeable:"MERGEABLE", isCrossRepository:false, baseRefName:"trunk",
+  updatedAt:"2026-11-20T09:00:00Z", statusCheckRollup:[{__typename:"CheckRun",conclusion:"SUCCESS"}]}]' >"$GS/gh-prs-demo-user_inbox-b.json"
+cp "$GS/gh-prs-demo-user_inbox-b.json" "$GS/gh-prs-other-owner_inbox-c.json"
+mkdir -p "$HOME/.config/claude-launcher/workers/iw/home"; echo '{"kind":"claude"}' >"$HOME/.config/claude-launcher/workers/iw/meta.json"
+tmux new-session -d -s ia sleep 600
+rm -f "$GS/gh-calls"; CLAUDERC_NOW=$((CLAUDERC_NOW + 301)); api "inbox"
+check "a green own PR -> pr item with the doc's text, title, since, session and actions" \
+  "$(ibq pr demo-user/inbox-a '(map(.number) | sort) == [1,10] and ((.[] | select(.number == 1)) as $p | $p.text == "#1 ready to merge · 2 checks green" and $p.title == "Green one" and $p.since == '"$(date -u -d 2026-11-20T10:00:00Z +%s)"' and $p.session == "ia" and $p.actions == ["merge","open","dismiss"] and $p.run == null and ($p.id | test("^pr-[0-9a-f]{12}$")))')"
+check "...draft, fork, UNKNOWN mergeable, a FAILURE check, empty rollup, other base, a pending check -> none" "$(ibq pr demo-user/inbox-a 'map(.number) | (index(2), index(3), index(4), index(5), index(6), index(7), index(8)) == null')"
+check "SKIPPED and NEUTRAL checks count as green" "$(ibq pr demo-user/inbox-a 'map(select(.number == 10)) | .[0].text == "#10 ready to merge · 3 checks green"')"
+check "another owner's repo -> nothing, not even a gh call" "$([[ "$(ibx pr other-owner/inbox-c)" == "[]" ]] && ! grep -q 'other-owner\|gitlab\|inbox-d' "$GS/gh-calls"; echo $?)"
+grep -q -- 'run list -R demo-user/inbox-b -b trunk ' "$GS/gh-calls" && grep -q -- 'run list -R demo-user/inbox-a -b main ' "$GS/gh-calls" && [[ "$(ibq pr demo-user/inbox-b 'length == 1 and .[0].session == null')" == 0 ]]
+check "the default branch comes from origin/HEAD (trunk), else main" $?
+check "newest completed run failed -> build item; an older failure under a newer green -> none" \
+  "$(ibq build demo-user/inbox-a '(map(.text) | sort) == ["build failed on main","deploy failed on main"] and (map(select(.text | startswith("build"))) | .[0].run == 101 and .[0].number == null and .[0].actions == ["open","dismiss"] and (.[0].id | test("^build-[0-9a-f]{12}$")))')"
+check "Claude signed out and a worker without a login -> login items" \
+  "$(ibq login claude 'length == 1 and .[0].text == "Claude sign-in failed" and .[0].session == null')"
+check "...the worker" "$(ibq login iw 'length == 1 and .[0].text == "worker sign-in failed" and (.[0].id | test("^login-[0-9a-f]{12}$"))')"
+check "...GitHub signed in: no GitHub item, gh_age 0, not stale" "$(jqt '([.data.items[] | select(.kind == "login" and .scope == "github")] | length == 0) and .data.gh_age == 0 and .data.stale == false')"
+check "items sorted by kind, then oldest first" "$(jqt '[.data.items[] | {k:({"prompt":0,"question":1,"parked":2,"pr":3,"build":4,"login":5}[.kind]), s:.since}] | . == sort_by([.k, .s])')"
+NC="$(wc -l <"$GS/gh-calls")"
+CLAUDERC_NOW=$((CLAUDERC_NOW + 200)); api "inbox"
+[[ "$(wc -l <"$GS/gh-calls")" == "$NC" ]] && [[ "$(jqt '.data.gh_age == 200')" == 0 ]]; check "a second call within 5 minutes makes no gh call (gh_age 200)" $?
+ibruns '[{databaseId:102,workflowName:"build",status:"completed",conclusion:"success",headSha:"y",createdAt:"2026-11-20T14:00:00Z"}] + .' >"$GS/gh-runs-demo-user_inbox-a.json"
+CLAUDERC_NOW=$((CLAUDERC_NOW + 101)); api "inbox"
+[[ "$(wc -l <"$GS/gh-calls")" -gt "$NC" ]]; check "after 5 minutes it calls gh again" $?
+check "a newer green run of the workflow clears its build item" "$(ibq build demo-user/inbox-a 'map(.text) == ["deploy failed on main"]')"
+echo 3 >"$GS/gh-sleep-demo-user_inbox-b"; CLAUDERC_NOW=$((CLAUDERC_NOW + 301))
+CLAUDERC_INBOX_GH_TIMEOUT=1 api "inbox"
+[[ "$(ibq pr demo-user/inbox-b 'length == 1 and .[0].number == 9')" == 0 && "$(jqt '.data.stale == true')" == 0 ]]
+check "a repo that times out keeps its old entry and marks the answer stale" $?
+jq -e '.repos["demo-user/inbox-b"].stale == true and .repos["demo-user/inbox-a"].stale == false' "$ID/gh.json" >/dev/null; check "...only that repo is stale in gh.json" $?
+rm -f "$GS/gh-sleep-demo-user_inbox-b"
+mv "$GS/gh_token" "$WORK/gh_token.inbox"; CLAUDERC_NOW=$((CLAUDERC_NOW + 301)); api "inbox"
+[[ "$(ibq login github 'length == 1 and .[0].text == "GitHub sign-in failed"')" == 0 && "$(jqt '[.data.items[] | select(.kind == "pr" or .kind == "build")] | length == 0')" == 0 ]]
+check "GitHub signed out -> 'GitHub sign-in failed', and no PR items from old data" $?
+mv "$WORK/gh_token.inbox" "$GS/gh_token"; CLAUDERC_NOW=$((CLAUDERC_NOW + 301)); api "inbox"
+
+echo "inbox: dismiss (test 5)"
+PR1="$(jq -c '[.data.items[] | select(.kind == "pr" and .number == 1)][0]' <<<"$OUT")"
+I1="$(jq -r .id <<<"$PR1")"; F1="$(jq -r .fp <<<"$PR1")"; C0="$(jq .data.count <<<"$OUT")"
+api "inbox-dismiss $I1 $F1"
+check "inbox-dismiss answers {count}, one less" "$(jqt '.ok and (.data | keys) == ["count"] and .data.count == '"$((C0 - 1))"'')"
+api "inbox"; check "...and the item is hidden" "$(ibq pr demo-user/inbox-a 'map(.number) == [10]')"
+api "inbox-dismiss $I1 $F1"; [[ "$(grep -c "^$I1" "$ID/dismissed")" == 1 && "$(stat -c %a "$ID/dismissed")" == 600 ]]; check "dismissing twice keeps one line (file 600)" $?
+api "inbox-dismiss prompt-000000000000 000000000000"; check "an unknown id can be dismissed (harmless)" "$(jqt '.ok and .data.count == '"$((C0 - 1))"'')"
+jq -c 'map(if .number == 1 then .headRefOid = "aaa2" else . end)' "$GS/gh-prs-demo-user_inbox-a.json" >"$GS/x.json" && mv "$GS/x.json" "$GS/gh-prs-demo-user_inbox-a.json"
+CLAUDERC_NOW=$((CLAUDERC_NOW + 301)); api "inbox"
+check "a new head commit (new fp) shows it again, same id" "$(ibq pr demo-user/inbox-a 'map(select(.number == 1)) | length == 1 and .[0].id == "'"$I1"'" and .[0].fp != "'"$F1"'"')"
+P3I="$(jq -r '[.data.items[] | select(.kind == "prompt" and .scope == "ibp1")][0] | "\(.id) \(.fp)"' <<<"$OUT")"
+api "inbox-dismiss $P3I"; api "inbox"; check "a dismissed prompt is hidden" "$(ibq prompt ibp1 'length == 0')"
+jq -nc '{type:"assistant",message:{content:[{type:"tool_use",id:"toolu_03",name:"Write",input:{}}]}}' >>"$(qtr ibp1)"
+api "inbox"; check "...a new prompt in that chat shows again" "$(ibq prompt ibp1 'length == 1 and .[0].text == "wants to use Write"')"
+CLAUDERC_NOW=$((CLAUDERC_NOW + 8 * 86400)); api "inbox"
+! grep -q "^$I1" "$ID/dismissed" && ! grep -q "^prompt-000000000000" "$ID/dismissed"; check "dismissals are pruned after 7 days" $?
+
+for x in ibp1 ibp2 ibp3 ia; do tmux kill-session -t "=$x" 2>/dev/null; done
+rm -rf "$P/ia" "$P/ib" "$P/ic" "$P/id" "$IBX" "$HOME/.config/claude-launcher/workers/iw" "$ID" "$GS"/gh-prs-* "$GS"/gh-runs-* "$GS/gh-calls"
+rm -f "$QD/queue.json" "$QSTATE"
+unset CLAUDERC_NOW
+
+api "chat-open demo-app2" "000000"; check "any PIN line is accepted (PIN removed)" "$(jqt '.ok')"
 grep -q "482913\|line one" "$HOME/.local/state/claude-launcher/api.log" "$HOME/.local/state/claude-launcher/chat.log"; [[ $? -ne 0 ]]; check "PIN and message text never logged" $?
 grep -q "send" "$HOME/.local/state/claude-launcher/chat.log"; check "chat access log records opens and sends" $?
 api "chat-history demo-app2 extra"; check "chat-history takes one session" "$(jqt '.error.code=="forbidden"')"
 api "upload demo-app2" "$(printf '482913\n../../etc/pass wd.png\n'; printf 'hello image' | base64 -w0)"
 check "upload lands in <project>/uploads with a safe name" "$(jqt '.ok and .data.path=="uploads/pass_wd.png" and .data.bytes==11')"
 [[ "$(cat "$D2/uploads/pass_wd.png")" == "hello image" ]]; check "uploaded bytes intact" $?
-api "upload demo-app2" "$(printf '000000\nx.png\n'; printf 'x' | base64 -w0)"; check "upload needs the PIN" "$(jqt '.error.code=="wrong_pin"')"
-rm -f "$HOME/.local/state/claude-launcher/chat-pin-fails"
 api "chat-log"; check "chat log lists opens/sends/uploads, newest first" "$(jqt '.ok and .data[0].action=="upload" and any(.data[]; .action=="send")')"
 printf '%s\n' '{"type":"assistant","uuid":"a9","timestamp":"2026-09-29T10:01:00Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t9","name":"SendUserFile","input":{"files":["'"$D2"'/uploads/pass_wd.png"],"caption":"the shot"}}]}}' >>"$TD/99999999-0000-0000-0000-000000000000.jsonl"
 api "chat-history demo-app2" "482913"
@@ -792,6 +1323,10 @@ head -c 300000 /dev/urandom >"$D2/uploads/big.bin"
 api "chat-file demo-app2" "$(printf '482913\n%s' "$D2/uploads/big.bin")"
 check "chat-file serves a file over the 128 KB argument limit" "$(jqt '.ok and .data.bytes==300000 and (.data.data|length)==400000')"
 rm -f "$D2/uploads/big.bin"
+api "chat-file demo-app2" "$(printf '482913\nuploads/pass_wd.png')"
+check "chat-file resolves a relative path against the project folder" "$(jqt '.ok and .data.name=="pass_wd.png"')"
+api "chat-file demo-app2" "$(printf '482913\nuploads/../../../../../etc/hostname')"
+check "chat-file refuses a relative path out of the project" "$(jqt ".ok | not")"
 api "chat-file demo-app2" "$(printf '482913\n%s' "$D2/uploads/../../../../etc/hostname")"
 check "chat-file refuses files outside the project" "$(jqt ".ok | not")"
 api "chat-file demo-app2" "$(printf '482913\n/etc/hostname')"
@@ -804,10 +1339,6 @@ api "chat-file demo-app2" "$(printf '482913\n%s' "$HOME/sent-by-claude.txt")"; c
 echo '{"type":"assistant","uuid":"a10","timestamp":"2026-09-29T10:03:00Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t10","name":"SendUserFile","input":{"files":["'"$HOME"'/sent-by-claude.txt"],"caption":"x"}}]}}' >>"$TD/99999999-0000-0000-0000-000000000000.jsonl"
 api "chat-file demo-app2" "$(printf '482913\n%s' "$HOME/sent-by-claude.txt")"; check "chat-file serves an outside file Claude sent in this conversation" "$(jqt '.ok and .data.name=="sent-by-claude.txt"')"
 rm -f "$HOME/sent-by-claude.txt"
-api "chat-file demo-app2" "$(printf '000000\n%s' "$D2/uploads/pass_wd.png")"
-check "chat-file needs the PIN" "$(jqt '.error.code=="wrong_pin"')"
-rm -f "$HOME/.local/state/claude-launcher/chat-pin-fails"
-rm -f "$HOME/.config/claude-launcher/chat-pin"
 
 echo "token services"
 api "status"
@@ -947,6 +1478,60 @@ bash "$SERVER/knowledge/make-manifest.sh" --check >/dev/null 2>&1; check "knowle
 KS="$(HOME="$IH" "$IH/claude-setup.sh" --api status </dev/null 2>/dev/null | jq -c '.data.knowledge')"
 [[ "$(jq -r .skills <<<"$KS")" -ge 12 && "$(jq -r .version <<<"$KS")" == "$(head -n 1 "$SERVER/knowledge/VERSION")" ]]; check "status reports the installed pack (version and skill count)" $?
 
+echo "install.sh with SUDO_ASKPASS (the app's password setup)"
+AH="$WORK/askhome" AS="$WORK/askstate"; mkdir -p "$AH/.local/bin" "$AS"
+# A sudo that only records its arguments and never runs anything (the real autostart install writes /etc/systemd).
+cat >"$AH/.local/bin/sudo" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >>"$ASK_STATE/sudo-argv"
+cat >/dev/null 2>&1 || true
+if [[ "${1:-}" == -A ]]; then [[ "$("$SUDO_ASKPASS")" == "$(cat "$ASK_STATE/pw")" ]] || exit 1; echo askpass-ok >>"$ASK_STATE/sudo-auth"; exit 0; fi
+echo "sudo: a terminal is required to read the password"; exit 1
+EOF
+printf '#!/bin/sh\nexit 0\n' >"$AH/.local/bin/bun"   # so install.sh doesn't go and fetch Bun
+chmod +x "$AH/.local/bin/sudo" "$AH/.local/bin/bun"
+printf '%s\n' "S3cret-askpass-PW" >"$AS/pw"; chmod 600 "$AS/pw"
+printf '#!/bin/sh\ncat %q\n' "$AS/pw" >"$AS/askpass"; chmod 700 "$AS/askpass"
+OUT="$(HOME="$AH" ASK_STATE="$AS" SUDO_ASKPASS="$AS/askpass" PATH="$AH/.local/bin:/usr/local/bin:/usr/bin:/bin" CLAUDERC_BASE="file://$SERVER" \
+  bash -s -- "$(cat "$WORK/phone.pub")" <"$SERVER/install.sh" 2>&1)"
+[[ -s "$AS/sudo-argv" ]] && ! grep -qv '^-A ' "$AS/sudo-argv"; check "askpass: claude-autostart's every sudo call is sudo -A" $?
+grep -q "^-A systemctl enable --now claude-sessions.service" "$AS/sudo-argv" && [[ -s "$AS/sudo-auth" ]]; check "askpass: the boot service is enabled through the helper" $?
+[[ "$OUT" != *"wasn't set up"* ]]; check "askpass: autostart set up without a terminal" $?
+! grep -rq "S3cret-askpass-PW" "$AS/sudo-argv" "$AH/.config" "$AH/.local/state" 2>/dev/null && [[ "$OUT" != *S3cret-askpass-PW* ]]; check "askpass: the password is in no argv, log or output" $?
+rm -f "$AS/sudo-argv" "$AS/sudo-auth" "$AH/.local/bin/claude-autostart"
+OUT="$(HOME="$AH" ASK_STATE="$AS" PATH="$AH/.local/bin:/usr/local/bin:/usr/bin:/bin" CLAUDERC_BASE="file://$SERVER" \
+  bash -s <"$SERVER/install.sh" 2>&1)"
+[[ -s "$AS/sudo-argv" ]] && ! grep -q '^-A' "$AS/sudo-argv"; check "no askpass: plain sudo, as before" $?
+[[ "$OUT" == *"claude-autostart wasn't set up"* ]]; check "no askpass: a failed sudo still only skips autostart" $?
+
+echo "the app's password setup script (app/.../api/ServerSetup.kt), run as the app runs it: bash -s"
+PS="$WORK/pwsetup"; mkdir -p "$PS/home/.local/bin"
+cp "$AH/.local/bin/sudo" "$PS/home/.local/bin/sudo"   # the recording sudo from above: runs nothing
+printf '#!/bin/sh\nexit 0\n' >"$PS/home/.local/bin/claude"; cp "$PS/home/.local/bin/claude" "$PS/home/.local/bin/bun"
+chmod +x "$PS/home/.local/bin/"*
+python3 -I -c 'import sys; s = open(sys.argv[1]).read(); print(s.split("$$\"\"\"", 1)[1].split("\"\"\"", 1)[0], end="")' \
+  "$(dirname "$SERVER")/app/src/main/java/life/mygig/clauderc/api/ServerSetup.kt" >"$PS/body.sh"
+bash -n "$PS/body.sh"; check "setup script: valid bash" $?
+# The app's header is SUDO_PW=… and INSTALL=…; here INSTALL runs the local install.sh instead of the download.
+pwsetup() {  # pwsetup <sudo password>
+  rm -f "$AS/sudo-argv" "$AS/sudo-auth" "$PS/home/.local/bin/claude-autostart"
+  OUT="$({ printf 'SUDO_PW=%q\nINSTALL=%q\n' "$1" "CLAUDERC_BASE=$(printf %q "file://$SERVER") bash -s -- $(printf %q "$(cat "$WORK/phone.pub")") <$(printf %q "$SERVER/install.sh")"
+    cat "$PS/body.sh"; } | HOME="$PS/home" ASK_STATE="$AS" PATH=/usr/local/bin:/usr/bin:/bin bash -s 2>&1)"
+  RC=$?
+}
+pwsetup "S3cret-askpass-PW"
+[[ $RC == 0 && "$OUT" == *"@@clauderc sudo=ok"* && "$OUT" == *"@@clauderc install=ok"* && "$OUT" == *"@@clauderc claude=present"* ]]; check "setup script: sudo checked, scripts installed" $?
+grep -q "^restrict,command=\"$PS/home/bin/claude-launcher-api\" ssh-ed25519 " "$PS/home/.ssh/authorized_keys"; check "setup script: the phone key is authorized" $?
+grep -q "^-A true$" "$AS/sudo-argv" && grep -q "^-A systemctl enable --now claude-sessions" "$AS/sudo-argv"; check "setup script: install.sh's autostart gets sudo -A" $?
+[[ -z "$(find "$PS/home" -maxdepth 1 -name '.clauderc-setup.*')" ]]; check "setup script: the password file and helper are removed" $?
+! grep -rq "S3cret-askpass-PW" "$AS/sudo-argv" "$PS/home" 2>/dev/null && [[ "$OUT" != *S3cret-askpass-PW* ]]; check "setup script: the password is in no argv, file or output" $?
+echo "DEBUG: $(grep -rl "S3cret-askpass-PW" "$AS/sudo-argv" "$PS/home" 2>&1 | head -5) OUT=$([[ "$OUT" == *S3cret-askpass-PW* ]] && echo yes)"
+pwsetup "wrong-PW"
+[[ $RC == 0 && "$OUT" == *"@@clauderc sudo=denied"* && "$OUT" == *"@@clauderc install=ok"* && ! -s "$AS/sudo-auth" ]]; check "setup script: a wrong sudo password still installs, without sudo" $?
+[[ "$(grep -c '^-A' "$AS/sudo-argv")" == 1 ]]; check "setup script: a wrong sudo password is tried once" $?
+pwsetup ""
+[[ $RC == 0 && "$OUT" == *"@@clauderc sudo=no"* && "$OUT" == *"@@clauderc install=ok"* ]] && ! grep -q '^-A' "$AS/sudo-argv"; check "setup script: no sudo password, no askpass" $?
+
 # ---- the monthly knowledge refresh: schedule actions and the refresh script (stub claude/gh, a local bare repo as "origin") ----
 for bad in "knowledge-status x" "knowledge-refresh x" "knowledge-schedule" "knowledge-schedule maybe" "knowledge-schedule on off" "knowledge-schedule ON"; do
   api "$bad"; check "knowledge forbidden: '$bad'" "$(jqt '.ok==false and .error.code=="forbidden"')"
@@ -1036,7 +1621,7 @@ grep -q '^FAIL: ' "$WORK/evout/ts-tsconfig.without.1.result" && [[ "$(cat "$WORK
 echo "team workers"
 for bad in "worker-add" "worker-add ../x" "worker-add -x" "worker-add .x" "worker-add a b" "worker-set a" \
   "worker-set a color" "worker-remove" "worker-remove a/b" "worker-list extra" "worker-runs" "worker-login-start" \
-  "worker-login-code a b" "worker-add a other" "worker-add a codex x"; do
+  "worker-login-code a b" "worker-login-cancel" "worker-login-cancel a/b" "worker-add a other" "worker-add a codex x"; do
   api "$bad"
   check "runner rejects: $bad" "$(jqt '.ok == false')"
 done
@@ -1057,8 +1642,6 @@ api "worker-login-code gpt" "http://localhost:1455/auth/callback?code=good&state
 check "codex login finishes after the pasted address" "$(jqt '.ok and .data.logged_in')"
 api "worker-list"
 check "codex worker signed in" "$(jqt '.data.workers[] | select(.name=="gpt") | .signed_in')"
-api "worker-login-start gem"
-check "gemini has no browser sign-in" "$(jqt '.ok == false')"
 api "worker-set-key gpt" "AIzaSyDemoDemoDemoDemoDemo1234567890"
 check "key refused for a non-Gemini worker" "$(jqt '.ok == false')"
 api "worker-set-key gem" "AQ.Ab8RNDemoDemoDemoDemoDemo-1234567890_x"
@@ -1069,11 +1652,188 @@ mkdir -p "$HOME/.config/claude-launcher/workers/gem/home/.gemini"; echo '{"x":1}
 api "worker-set-key gem" "AIzaSyDemoDemoDemoDemoDemo1234567890"
 check "gemini API key saved" "$(jqt '.ok and .data.saved == "gem"')"
 [[ "$(stat -c %a "$HOME/.config/claude-launcher/workers/gem/home/gemini-api-key")" == 600 ]]; check "key file is mode 600" $?
-[[ ! -e "$HOME/.config/claude-launcher/workers/gem/home/.gemini/oauth_creds.json" ]]; check "old Google login removed" $?
+[[ -s "$HOME/.config/claude-launcher/workers/gem/home/.gemini/oauth_creds.json" ]]; check "saving a key keeps the Google login" $?
 api "worker-list"
-check "gemini worker signed in with the key" "$(jqt '.data.workers[] | select(.name=="gem") | .signed_in')"
+check "gemini worker signed in, the account wins" "$(jqt '.data.workers[] | select(.name=="gem") | .signed_in and .auth == "account"')"
+rm "$HOME/.config/claude-launcher/workers/gem/home/.gemini/oauth_creds.json"
+api "worker-set-key gem" "AIzaSyDemoDemoDemoDemoDemo1234567890"
+check "gemini key saved again" "$(jqt '.ok')"
+[[ "$(jq -r .security.auth.selectedType "$HOME/.config/claude-launcher/workers/gem/home/.gemini/settings.json")" == gemini-api-key ]]; check "with only a key, the settings pick the key" $?
+api "worker-list"
+check "gemini worker signed in with the key" "$(jqt '.data.workers[] | select(.name=="gem") | .signed_in and .auth == "key"')"
+check "other kinds have no auth field" "$(jqt '.data.workers[] | select(.name=="gpt") | has("auth") | not')"
+api "cluster"
+check "cluster says which login a gemini worker uses" "$(jqt '.data.accounts[] | select(.name=="gem") | .auth == "key"')"
+# A link planted in the worker's folder (it can write there) must not aim the settings at another file.
+GEM_HOME="$HOME/.config/claude-launcher/workers/gem/home"
+echo owner >"$STUB_STATE/owner-file"; rm -f "$GEM_HOME/.gemini/settings.json"; ln -s "$STUB_STATE/owner-file" "$GEM_HOME/.gemini/settings.json"
+api "worker-set-key gem" "AIzaSyDemoDemoDemoDemoDemo1234567890"
+[[ "$(cat "$STUB_STATE/owner-file")" == owner && ! -L "$GEM_HOME/.gemini/settings.json" ]]; check "a planted settings link is replaced, not followed" $?
+echo "gemini account sign-in"
+api "worker-add gac gemini" "Gemini account"
+GAC="$HOME/.config/claude-launcher/workers/gac/home"
+api "worker-login-code gac" "4/some-code-1234"
+check "no started sign-in: a clear failure" "$(jqt '.ok == false and .error.code == "login_failed"')"
+export GEMINI_API_KEY=owner-key-should-not-reach-the-login
+api "worker-login-start gac"
+unset GEMINI_API_KEY
+check "start gives Google's link and asks for the code" "$(jqt '.ok and (.data.url | startswith("https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=https%3A%2F%2Fcodeassist.google.com")) and .data.paste_code and .data.session == "worker-login-gac"')"
+grep -qx "home=$GAC/.gemini-signin HOME=$GAC/.gemini-signin nobrowser=true key=unset auth=oauth-personal cwd=$GAC/.gemini-signin args=--skip-trust" "$STUB_STATE/gemini-login-env"; check "the CLI runs interactively, in its own folder, no browser, no key" $?
+api "worker-list"
+check "not signed in before the code" "$(jqt '.data.workers[] | select(.name=="gac") | .signed_in == false and (has("auth") | not)')"
+api "worker-login-code gac" "x"
+check "a code that can't be right is refused at once" "$(jqt '.ok == false and .error.code == "invalid_name"')"
+api "worker-login-code gac" 'bad code;$(id)'
+check "odd characters in a code are refused" "$(jqt '.ok == false and .error.code == "invalid_name"')"
+api "worker-login-code gac" "4/WRONG-gemini-code"
+check "a wrong code is a retryable failure" "$(jqt '.ok == false and .error.code == "login_failed" and (.error.message | contains("code didn"))')"
+check "the code is not repeated back" "$(jqt 'tostring | contains("WRONG") | not')"
+tmux has-session -t "=worker-login-gac" 2>/dev/null; check "a wrong code leaves the sign-in running" $?
+api "worker-login-code gac" "4/WRONG-again-code"
+check "a second wrong code is noticed too" "$(jqt '.ok == false and .error.code == "login_failed"')"
+api "worker-login-code gac" "4/GOOD-gemini-code"
+check "the right code signs in" "$(jqt '.ok and .data.logged_in')"
+[[ "$(stat -c %a "$GAC/.gemini/oauth_creds.json")" == 600 ]]; check "the login is in the worker's home, mode 600" $?
+[[ -s "$GAC/.gemini/google_accounts.json" && ! -e "$GAC/.gemini-signin" ]]; check "the sign-in folder is gone" $?
+[[ "$(jq -r .security.auth.selectedType "$GAC/.gemini/settings.json")" == oauth-personal ]]; check "the settings pick the account" $?
+tmux has-session -t "=worker-login-gac" 2>/dev/null; [[ $? -ne 0 ]]; check "the sign-in session ended" $?
+[[ ! -e "$HOME/.gemini/oauth_creds.json" ]]; check "the owner's own Gemini login is not touched" $?
+api "worker-list"
+check "signed in with only the Google login" "$(jqt '.data.workers[] | select(.name=="gac") | .signed_in and .auth == "account"')"
+api "cluster"
+check "cluster says account" "$(jqt '.data.accounts[] | select(.name=="gac") | .auth == "account" and .signed_in')"
+api "worker-set-key gac" "AIzaSyDemoDemoDemoDemoDemo1234567890"
+check "a key can be added to it" "$(jqt '.ok')"
+[[ -s "$GAC/.gemini/oauth_creds.json" && "$(jq -r .security.auth.selectedType "$GAC/.gemini/settings.json")" == oauth-personal ]]; check "the new key leaves the account login and its setting alone" $?
+# Signing in again: a login already in use shows no link in the real CLI, so it mustn't be in the sign-in's folder, and it stays until a new one arrives.
+OLD_CREDS="$(cat "$GAC/.gemini/oauth_creds.json")"
+api "worker-login-start gac"
+check "re-sign-in still gets a link" "$(jqt '.ok and .data.paste_code')"
+[[ ! -e "$GAC/.gemini-signin/.gemini/oauth_creds.json" && "$(cat "$GAC/.gemini/oauth_creds.json")" == "$OLD_CREDS" ]]; check "the old login stays while signing in again" $?
+api "worker-login-cancel gac"
+check "cancel answers" "$(jqt '.ok and .data.cancelled')"
+tmux has-session -t "=worker-login-gac" 2>/dev/null; [[ $? -ne 0 ]]; check "cancel ends the session" $?
+[[ ! -e "$GAC/.gemini-signin" && -s "$GAC/.gemini/oauth_creds.json" ]]; check "cancel cleans up and keeps the login" $?
+api "worker-login-code gac" "4/GOOD-gemini-code"
+check "a code after a cancel is a real failure" "$(jqt '.ok == false and .error.code == "login_failed"')"
+# The CLI gives up after a wrong code: the session goes, only a new start helps.
+touch "$STUB_STATE/gemini-login-giveup"
+api "worker-add gac2 gemini" "Gives up"
+api "worker-login-start gac2"
+api "worker-login-code gac2" "4/WRONG-gemini-code"
+check "the CLI gave up: same plain answer" "$(jqt '.ok == false and .error.code == "login_failed"')"
+tmux has-session -t "=worker-login-gac2" 2>/dev/null; [[ $? -ne 0 ]]; check "its session is ended" $?
+api "worker-list"
+check "still not signed in" "$(jqt '.data.workers[] | select(.name=="gac2") | .signed_in == false')"
+rm "$STUB_STATE/gemini-login-giveup"
+api "worker-remove gac"; api "worker-remove gac2"   # the later tests count workers
 grep -q "AIzaSyDemo" "$HOME/.local/state/claude-launcher/api.log" 2>/dev/null; [[ $? -ne 0 ]]; check "key is not in the api log" $?
-api "worker-remove gpt"; api "worker-remove gem"
+echo "grok workers"
+api "worker-add gro grok" "Grok opinion"
+check "add grok worker" "$(jqt '.ok and .data.added == "gro"')"
+GROK_KEY_FILE="$HOME/.config/claude-launcher/workers/gro/home/xai-api-key"
+api "worker-list"
+check "grok listed, not signed in" "$(jqt '.data.workers[] | select(.name=="gro") | .kind=="grok" and .signed_in==false')"
+api "cluster"
+check "cluster lists grok without usage" "$(jqt '.data.accounts[] | select(.name=="gro") | .kind=="grok" and .usage==null')"
+api "worker-login-code gro"
+check "grok: nothing to wait for without a started sign-in" "$(jqt '.ok == false and .error.code == "login_failed"')"
+api "worker-set-key gro" "short"
+check "short xAI key refused" "$(jqt '.ok == false')"
+api "worker-set-key gro" 'xai-DemoDemo;DemoDemo'
+check "xAI key with odd characters refused" "$(jqt '.ok == false')"
+api "worker-set-key gro" 'abcd_1234567890abcd1234567890abcd'
+check "a key that does not start with xai- is refused" "$(jqt '.ok == false and (.error.message | contains("xai-"))')"
+[[ ! -e "$GROK_KEY_FILE" ]]; check "refused keys are not saved" $?
+# First key save with the CLI missing: the official installer runs, in a clean environment.
+# A real grok on the machine running the tests (the app installs one on first use) must not hide the "missing CLI" cases.
+OLD_PATH="$PATH"; PATH="$(tr ':' '\n' <<<"$PATH" | while read -r d; do [[ -x "$d/grok" && "$d" != "$HOME/.local/bin" ]] || echo "$d"; done | paste -sd: -)"
+mv "$HOME/.local/bin/grok" "$STUB_STATE/grok-real"
+touch "$STUB_STATE/grok-install-fail"
+api "worker-set-key gro" "xai-GrokDemoDemoDemoDemo1234567890"
+check "install failure is reported" "$(jqt '.ok == false and (tostring | contains("Grok CLI"))')"
+[[ ! -e "$GROK_KEY_FILE" ]]; check "no key saved when the CLI can't be installed" $?
+api "worker-login-start gro"
+check "account sign-in reports a failed install too" "$(jqt '.ok == false and (tostring | contains("Grok CLI"))')"
+rm "$STUB_STATE/grok-install-fail"
+OLD_ANTHROPIC="${ANTHROPIC_API_KEY:-}"; export ANTHROPIC_API_KEY=main-key-should-not-reach-the-installer
+api "worker-set-key gro" "xai-GrokDemoDemoDemoDemo1234567890"
+if [[ -n "$OLD_ANTHROPIC" ]]; then export ANTHROPIC_API_KEY="$OLD_ANTHROPIC"; else unset ANTHROPIC_API_KEY; fi
+check "grok key saved after the installer ran" "$(jqt '.ok and .data.saved == "gro"')"
+[[ -L "$HOME/.local/bin/grok" && -x "$HOME/.grok/downloads/v1/grok" ]]; check "installer linked grok into ~/.local/bin" $?
+grep -qx "anthropic=unset bin=$HOME/.local/bin" "$STUB_STATE/grok-install-log"; check "installer got a clean environment and GROK_BIN_DIR" $?
+[[ "$(stat -c %a "$GROK_KEY_FILE")" == 600 && "$(cat "$GROK_KEY_FILE")" == xai-GrokDemoDemoDemoDemo1234567890 ]]; check "grok key file is mode 600" $?
+[[ ! -e "$GROK_KEY_FILE.new" ]]; check "no temporary key file left" $?
+api "worker-list"
+check "grok worker signed in with the key" "$(jqt '.data.workers[] | select(.name=="gro") | .signed_in')"
+! grep -rq "xai-GrokDemo" "$HOME/.local/state/claude-launcher/" "$STUB_STATE" 2>/dev/null; check "grok key is not in the api log or any stub's argv" $?
+# Installed but broken: refused, the old key stays.
+touch "$STUB_STATE/grok-version-fail"
+api "worker-set-key gro" "xai-AnotherDemoDemoDemoDemo12345"
+check "a grok that won't run is reported" "$(jqt '.ok == false')"
+[[ "$(cat "$GROK_KEY_FILE")" == xai-GrokDemoDemoDemoDemo1234567890 ]]; check "old grok key kept" $?
+rm "$STUB_STATE/grok-version-fail"
+PATH="$OLD_PATH"
+echo "grok account sign-in"
+export CLAUDERC_GROK_LOGIN_WAIT=1   # a "still waiting" answer in 1 s, not 120
+api "worker-add acc grok" "Grok account"
+ACC_AUTH="$HOME/.config/claude-launcher/workers/acc/home/.grok/auth.json"
+echo "ZZ9Y-8X7W" >"$STUB_STATE/grok-login-code"
+api "worker-login-start acc"
+check "start gives the link, the code and the session" "$(jqt '.ok and .data.url == "https://accounts.x.ai/oauth2/device?user_code=ZZ9Y-8X7W" and .data.code == "ZZ9Y-8X7W" and .data.session == "worker-login-acc"')"
+api "worker-login-code acc"
+check "not approved yet = the retryable answer" "$(jqt '.ok == false and .error.code == "login_pending"')"
+tmux has-session -t "=worker-login-acc" 2>/dev/null; check "waiting leaves the sign-in running" $?
+api "worker-list"
+check "not signed in before approval" "$(jqt '.data.workers[] | select(.name=="acc") | .signed_in == false')"
+touch "$STUB_STATE/grok-login-approve"
+sleep 0.5
+api "worker-login-code acc"
+check "signed in after approval" "$(jqt '.ok and .data.logged_in')"
+[[ "$(stat -c %a "$ACC_AUTH")" == 600 ]]; check "the login is in the worker's home, mode 600" $?
+[[ ! -e "$HOME/.grok/auth.json" ]]; check "the owner's own Grok login is not touched" $?
+api "worker-login-code acc"
+check "a retry after a lost connection gets the same answer" "$(jqt '.ok and .data.logged_in')"
+api "worker-login-cancel acc"
+tmux has-session -t "=worker-login-acc" 2>/dev/null; [[ $? -ne 0 ]]; check "login session ended after the answer was read" $?
+[[ -s "$ACC_AUTH" ]]; check "ending the session keeps the login" $?
+[[ ! -e "$HOME/.config/claude-launcher/workers/acc/home/xai-api-key" ]]; check "no key involved" $?
+api "worker-list"
+check "signed in with only the account login" "$(jqt '.data.workers[] | select(.name=="acc") | .signed_in')"
+rm "$STUB_STATE/grok-login-approve" "$STUB_STATE/grok-login-code"
+# A key or an older login must not count as this sign-in being finished.
+api "worker-login-start gro"
+api "worker-login-code gro"
+check "a worker with a key still waits for the approval" "$(jqt '.ok == false and .error.code == "login_pending"')"
+api "worker-login-cancel gro"
+check "cancel answers" "$(jqt '.ok and .data.cancelled')"
+tmux has-session -t "=worker-login-gro" 2>/dev/null; [[ $? -ne 0 ]]; check "cancel ends the login session" $?
+api "worker-login-code gro"
+check "waiting after a cancel is a real failure" "$(jqt '.ok == false and .error.code == "login_failed"')"
+api "worker-list"
+check "cancelling keeps the key" "$(jqt '.data.workers[] | select(.name=="gro") | .signed_in')"
+api "worker-login-start acc"
+api "worker-login-code acc"
+check "re-sign-in waits although a login exists" "$(jqt '.ok == false and .error.code == "login_pending"')"
+touch "$STUB_STATE/grok-login-deny"; sleep 0.5
+api "worker-login-code acc"
+check "a refused sign-in is a real failure with the pane" "$(jqt '.ok == false and .error.code == "login_failed" and (.error.pane | contains("denied"))')"
+api "worker-login-code acc"
+check "a refused sign-in stays refused on a retry" "$(jqt '.ok == false and .error.code == "login_failed"')"
+[[ -s "$ACC_AUTH" ]]; check "a refused re-sign-in keeps the old login" $?
+rm "$STUB_STATE/grok-login-deny"
+api "worker-add acc2 grok" "No login file"
+api "worker-login-start acc2"
+touch "$STUB_STATE/grok-login-nofile"; sleep 0.5
+api "worker-login-code acc2"
+check "exit 0 without a login file is not success" "$(jqt '.ok == false and .error.code == "login_failed" and (.error.message | contains(".grok/auth.json"))')"
+rm "$STUB_STATE/grok-login-nofile"
+api "worker-remove acc2"
+api "worker-login-start acc"
+api "worker-remove acc"
+tmux has-session -t "=worker-login-acc" 2>/dev/null; [[ $? -ne 0 ]]; check "removing a worker ends its sign-in" $?
+unset CLAUDERC_GROK_LOGIN_WAIT
+api "worker-remove gro"; api "worker-remove gpt"; api "worker-remove gem"
 api "worker-list"
 check "no workers yet" "$(jqt '.ok and (.data.workers | length == 0)')"
 api "worker-add research" "Reads docs & \"quotes\", finds sources"
@@ -1144,6 +1904,27 @@ check "the worker's own role is untouched" "$(jqt '.data.workers[] | select(.nam
 api "cluster-assign demo-app2 ops role" ""
 api "cluster-session demo-app2"
 check "empty role goes back to the worker's own" "$(jqt '.data.workers[] | select(.name=="ops") | .role=="Ops" and .mode=="plan"')"
+echo "worker rename"
+for bad in "worker-rename" "worker-rename ops" "worker-rename ops ../x" "worker-rename a/b c" "worker-rename ops -x" "worker-rename ops a b"; do
+  api "$bad"; check "runner rejects: $bad" "$(jqt '.ok == false')"
+done
+api "worker-rename ops ops"; check "rename to the same name refused" "$(jqt '.ok == false')"
+api "worker-add dupw" "x"; api "worker-rename ops dupw"; check "rename onto an existing worker refused" "$(jqt '.ok == false')"; api "worker-remove dupw"
+api "worker-rename nobody x1"; check "rename of an unknown worker refused" "$(jqt '.ok == false')"
+printf '{"id":"dddd0001","worker":"ops","status":"done","wt":"%s/.config/claude-launcher/workers/ops/trees/dddd0001"}' "$HOME" >"$TD2/dddd0001.json"
+printf '{"id":"dddd0002","worker":"ops","status":"running"}' >"$TD2/dddd0002.json"
+api "worker-rename ops ops2"; check "rename refused while a task is running" "$(jqt '.ok == false')"
+[[ -f "$HOME/.config/claude-launcher/workers/ops/meta.json" ]]; check "refused rename leaves the worker where it was" $?
+rm -f "$TD2/dddd0002.json"
+api "worker-rename ops ops2"; check "rename works" "$(jqt '.ok and .data.renamed == "ops2"')"
+RW="$HOME/.config/claude-launcher/workers"
+[[ ! -e "$RW/ops" && -f "$RW/ops2/meta.json" ]]; check "folder moved" $?
+grep -q "workers/ops2/trees/dddd0001" "$RW/ops2/tasks/dddd0001.json" && ! grep -q "workers/ops/" "$RW/ops2/tasks/dddd0001.json"; check "task record paths updated" $?
+api "worker-list"; check "listed under the new name with its role" "$(jqt '(.data.workers | map(.name) | index("ops2")) != null and (.data.workers | map(.name) | index("ops")) == null')"
+api "cluster-session demo-app2"
+api "cluster-attach demo-app2 ops2 on"; api "worker-rename ops2 ops"; api "cluster-session demo-app2"
+check "attached list follows the rename" "$(jqt '.data.workers[] | select(.name=="ops") | .attached')"
+rm -f "$RW/ops/tasks/dddd0001.json"
 api "cluster-attach demo-app2 ops off"
 api "cluster-session demo-app2"
 check "detach" "$(jqt '.data.workers[] | select(.name=="ops") | .attached == false')"
@@ -1334,6 +2115,12 @@ check "host-test unknown host" "$(jqt '.ok==false and .error.code=="invalid_name
 # host-authorize: the owner's own public key (phone terminal app, PC) goes into the host account's authorized_keys, once.
 ssh-keygen -q -t ed25519 -N '' -C 'phone@term' -f "$WORK/phonekey" </dev/null
 PHONEPUB="$(cat "$WORK/phonekey.pub")"
+# It lets another key into the host account: like migrate-authorize, it needs ALLOW_RUN=1.
+api "host-authorize web" "$PHONEPUB"
+check "authorize: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+[[ ! -e "$STUB_STATE/remote/.ssh/authorized_keys" ]] || ! grep -qF "$(awk '{print $2}' "$WORK/phonekey.pub")" "$STUB_STATE/remote/.ssh/authorized_keys"
+check "authorize: ...and nothing reached the host" $?
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
 api "host-authorize web" "$PHONEPUB"
 check "authorize: key added" "$(jqt '.ok and .data.host=="web" and .data.added==true')"
 [[ "$(grep -cF "$(awk '{print $2}' "$WORK/phonekey.pub")" "$STUB_STATE/remote/.ssh/authorized_keys")" == 1 ]]; check "authorize: it is in authorized_keys once" $?
@@ -1353,6 +2140,7 @@ for bad in "host-authorize" "host-authorize Web" "host-authorize ../x" "host-aut
   api "$bad" "$PHONEPUB"; check "runner refuses '$bad'" "$(jqt '.ok == false')"
 done
 grep -qF "$(awk '{print $2}' "$WORK/phonekey.pub")" "$HOME/.local/state/claude-launcher/api.log"; [[ $? -ne 0 ]]; check "authorize: the key is not in api.log" $?
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
 # host-key-export: the key this server uses for a host, to use from another SSH program. A secret leaving the server: needs ALLOW_RUN=1.
 api "host-key-export web"; check "key export: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
 echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
@@ -1407,8 +2195,8 @@ bash -n "$RS"; check "harden: the remote script parses (bash -n)" $?
 if command -v shellcheck >/dev/null; then shellcheck -s bash -S warning - <"$RS"; check "harden: the remote script is shellcheck clean" $?; fi
 # Safety-audit fixes (the script only runs as root on a host, so these check its text).
 ! grep -q 'ufw_do limit' "$RS"; check "harden: ssh ports are allowed, never rate-limited (would drop this server)" $?
-grep -q '^ignoreip = 127.0.0.1/8 ::1${client_ip:+ $client_ip}$' "$RS" && grep -q 'client_ip="${client_ip%% \*}"' "$RS"
-check "harden: fail2ban ignores this server's address" $?
+grep -q '^ignoreip = 127.0.0.1/8 ::1 100.64.0.0/10 fd7a:115c:a1e0::/48${client_ip:+ $client_ip}$' "$RS" && grep -q 'client_ip="${client_ip%% \*}"' "$RS"
+check "harden: fail2ban ignores this server's address and the tailnet" $?
 grep -q "ufw status 2>/dev/null | grep -q '^Status: active' && ufw_was=active" "$RS" &&
   grep -q "\[\[ \"\$ufw_was\" == inactive \]\] && revert+=' ufw disable;'" "$RS" && ! grep -q "^revert=.*ufw disable" "$RS"
 check "harden: the undo turns ufw off only when it was off before" $?
@@ -2040,33 +2828,50 @@ fix_signout() {
   mkdir -p "$HOME/backups" "$MST"; touch "$HOME/backups/migrate-20260101-000000.gpg" "$HOME/backups/incoming-20260101-000000.gpg"
   tmux has-session -t "=mig-a" 2>/dev/null || tmux new-session -d -s mig-a -c "$HOME" "claude --remote-control mig-a; exec bash"
   printf 'mig-a\t%s\n' "$HOME" >"$LIST"
+  jq -cn '{job:"send",phase:"done",message:"x",pct:100,bytes:5,file:"",started:1,updated:1,error:"",pid:null}' >"$MST/status.json"
 }
 fix_signout
+# It deletes logins and the backups: like the other migrate actions that change this server, it needs ALLOW_RUN=1.
 api "migrate-signout-old claude"
-check "signout claude: done [claude]" "$(jqt '.ok and .data == {done:["claude"]}')"
+check "signout: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+[[ -e "$HOME/.claude/.credentials.json" && -e "$MIG/key" && -e "$HOME/backups/migrate-20260101-000000.gpg" ]]; check "signout: ...and nothing was deleted" $?
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
+# The send never finished: the exported backups and pass files are the only copy, so they stay (the transfer key still goes).
+jq -cn '{job:"send",phase:"failed",message:"x",pct:40,bytes:5,file:"",started:1,updated:1,error:"x",pid:null}' >"$MST/status.json"
+api "migrate-signout-old claude"
+check "signout before the send finished: done, backups kept and said so" "$(jqt '.ok and .data.done == ["claude"] and .data.kept_backups == true and (.data.message | contains("kept"))')"
+[[ ! -e "$MIG" && -e "$MST/restore-pass.abc" && -e "$HOME/backups/migrate-20260101-000000.gpg" ]]; check "signout before the send finished: ~/backups/migrate-*.gpg and pass files stay" $?
+rm -f "$MST/status.json"
+api "migrate-signout-old claude"
+check "signout with no send at all: backups kept" "$(jqt '.ok and .data.kept_backups == true')"
+[[ -e "$HOME/backups/migrate-20260101-000000.gpg" ]]; check "signout with no send at all: ...the backup is still there" $?
+fix_signout
+api "migrate-signout-old claude"
+check "signout claude: done [claude]" "$(jqt '.ok and .data == {done:["claude"], kept_backups:false}')"
 [[ ! -e "$HOME/.claude/.credentials.json" && -e "$HOME/.config/claude-launcher/workers/vw/home/.credentials.json" && -e "$MS/gh_token" ]] && tmux has-session -t "=mig-a" 2>/dev/null; check "signout claude: only ~/.claude/.credentials.json is gone" $?
-# Task 6: whatever is ticked, the transfer key folder, the pass files and the exported backups go (an incoming file is not ours to delete)
+# Task 6: once the send finished, the transfer key folder, the pass files and the exported backups go (an incoming file is not ours to delete)
 [[ ! -e "$MIG" && ! -e "$MST/restore-pass.abc" && ! -e "$HOME/backups/migrate-20260101-000000.gpg" && -e "$HOME/backups/incoming-20260101-000000.gpg" ]]; check "signout claude: ...and the migrate key folder, passphrase files and ~/backups/migrate-*.gpg are deleted too (incoming-*.gpg stays)" $?
 api "migrate-signout-old claude"
-check "signout claude: nothing left to do -> done []" "$(jqt '.ok and .data == {done:[]}')"
+check "signout claude: nothing left to do -> done []" "$(jqt '.ok and .data == {done:[], kept_backups:false}')"
 api "migrate-signout-old workers"
-check "signout workers: done [workers]" "$(jqt '.ok and .data == {done:["workers"]}')"
+check "signout workers: done [workers]" "$(jqt '.ok and .data.done == ["workers"]')"
 [[ ! -e "$HOME/.config/claude-launcher/workers/vw/home/.credentials.json" && ! -e "$HOME/.config/claude-launcher/workers/vx/home/.credentials.json" && -d "$HOME/.config/claude-launcher/workers/vw/home" ]]; check "signout workers: every worker's token file is gone, the folders stay" $?
 api "migrate-signout-old github"
-check "signout github: done [github]" "$(jqt '.ok and .data == {done:["github"]}')"
+check "signout github: done [github]" "$(jqt '.ok and .data.done == ["github"]')"
 [[ "$(cat "$MS/gh-logout-argv")" == "auth logout --hostname github.com" && ! -e "$MS/gh_token" ]]; check "signout github: gh auth logout --hostname github.com (local only)" $?
 api "migrate-signout-old github"
-check "signout github: not signed in -> done []" "$(jqt '.ok and .data == {done:[]}')"
+check "signout github: not signed in -> done []" "$(jqt '.ok and .data.done == []')"
 api "migrate-signout-old autostart"
-check "signout autostart: done [autostart]" "$(jqt '.ok and .data == {done:["autostart"]}')"
+check "signout autostart: done [autostart]" "$(jqt '.ok and .data.done == ["autostart"]')"
 tmux has-session -t "=mig-a" 2>/dev/null; [[ $? -ne 0 ]]; check "signout autostart: the managed tmux session was killed" $?
 [[ ! -e "$LIST" && "$(cat "$LIST.migrated")" == "mig-a	$HOME" ]]; check "signout autostart: the saved list is set aside (.migrated copy kept), so restore does nothing" $?
 [[ ! -e "$MIG" ]]; check "signout autostart: the migrate key and pass files are gone" $?
 OUT="$(claude-autostart restore 2>&1)"; [[ "$OUT" == *"no saved sessions"* ]] && ! tmux has-session -t "=mig-a" 2>/dev/null; check "signout autostart: claude-autostart restore is now a no-op" $?
 fix_signout
 api "migrate-signout-old claude workers github autostart"
-check "signout all four at once" "$(jqt '.ok and .data == {done:["claude","workers","github","autostart"]}')"
+check "signout all four at once" "$(jqt '.ok and .data == {done:["claude","workers","github","autostart"], kept_backups:false}')"
 [[ ! -e "$MS/claude-logout-called" ]]; check "signout: claude auth logout is never called" $?
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
 [[ "$(realsnap)" == "$REAL_BEFORE" ]]; check "signout / verify / create-user touched nothing outside the test HOME" $?
 
 echo "migrate (2): reboot"
@@ -2103,6 +2908,434 @@ sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
 unset CLAUDERC_REBOOT_DELAY TMPDIR
 rm -f "$MS/sudo-mode" "$HOME/claude-setup.sh"
 if [[ -f "$WORK/authorized_keys.orig2" ]]; then cp "$WORK/authorized_keys.orig2" "$AK"; else rm -f "$AK"; fi
+
+# ---- Copy between servers (docs/copy-design.md): A is this test HOME, B is a second HOME ($HB) with its own scripts and the REAL
+# claude-backup. A stub ssh plays B's sshd: it honours the clauderc-copy line (key, from=, expiry-time, forced command).
+echo "copy between servers"
+export HB="$WORK/homeB"; SB="$WORK/stubB"
+mkdir -p "$HB/bin" "$HB/.local/bin" "$HB/.ssh" "$SB"
+cp "$HERE"/stubs/* "$HB/.local/bin/"
+cp "$SERVER/claude-backup" "$HB/.local/bin/claude-backup"
+cp "$SERVER/claude-setup.sh" "$SERVER/claude-launcher-api" "$HB/bin/"
+chmod +x "$HB/bin/"* "$HB/.local/bin/"*
+apiB() { OUT="$(HOME="$HB" STUB_STATE="$SB" PATH="$HB/.local/bin:$PATH" SSH_ORIGINAL_COMMAND="$1" "$HB/bin/claude-launcher-api" <<<"${2:-}")"; RC=$?; }
+apiB status
+echo 'ALLOW_RUN=1' >>"$HB/.config/claude-launcher/config"
+CA="$HOME/.config/claude-launcher"; CB="$HB/.config/claude-launcher"; AKB="$HB/.ssh/authorized_keys"
+HOST_SRC="$(hostname -s 2>/dev/null | tr -cd 'A-Za-z0-9-' | cut -c1-40)"; [[ -n "$HOST_SRC" ]] || HOST_SRC=other
+# the stub ssh: a probe (user clauderc-probe) or a send into B's receive --copy
+cat >"$HOME/.local/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+S="$STUB_STATE"
+echo "$*" >"$S/ssh-argv"
+key="" kh="" user=""
+while (($#)); do
+  case "$1" in
+    -i) key="$2"; shift 2 ;;
+    -o) case "$2" in UserKnownHostsFile=*) kh="${2#*=}" ;; esac; shift 2 ;;
+    -p | -F) shift 2 ;;
+    -T) shift ;;
+    *@*) user="${1%@*}"; shift; break ;;
+    *) shift ;;
+  esac
+done
+[[ -n "$kh" && -f "$kh" ]] && cp "$kh" "$S/ssh-known-hosts"
+if [[ -e "$S/ssh-down" ]]; then echo "ssh: connect to host x port 22: Connection timed out" >&2; exit 255; fi
+if [[ -e "$S/ssh-wrongkey" ]]; then echo "Host key verification failed." >&2; exit 255; fi
+if [[ "$user" == clauderc-probe ]]; then echo "clauderc-probe@x: Permission denied (publickey)." >&2; exit 255; fi
+[[ -e "$S/ssh-fail" ]] && { echo "Host key verification failed." >&2; exit 255; }
+# play sshd on B: find the clauderc-copy line for this key
+pub="$(ssh-keygen -y -P '' -f "$key" 2>/dev/null | awk '{print $2}')"
+line="$(grep -F " $pub " "$HB/.ssh/authorized_keys" 2>/dev/null | grep ' clauderc-copy$' | head -n 1)"
+[[ -n "$line" ]] || { echo "Permission denied (publickey)." >&2; exit 255; }
+exp="$(sed -n 's/.*expiry-time="\([0-9]*\)Z".*/\1/p' <<<"$line")"
+[[ -z "$exp" || "$exp" -ge "$(date -u +%Y%m%d%H%M)" ]] || { echo "Permission denied (publickey)." >&2; exit 255; }
+from="$(sed -n 's/.*from="\([^"]*\)".*/\1/p' <<<"$line")"
+[[ -z "$from" || "$from" == "$(cat "$S/client-ip" 2>/dev/null)" ]] || { echo "Permission denied (publickey)." >&2; exit 255; }
+cmd="$(sed -n 's/^restrict,command="\([^"]*\)".*/\1/p' <<<"$line")"
+[[ -n "$cmd" ]] || { echo "no forced command" >&2; exit 255; }
+[[ -e "$S/ssh-sleep" ]] && sleep "$(cat "$S/ssh-sleep")"
+cd "$HB" && HOME="$HB" PATH="$HB/.local/bin:$PATH" SSH_ORIGINAL_COMMAND="${*:-}" exec $cmd
+EOF
+chmod +x "$HOME/.local/bin/ssh"
+echo 203.0.113.9 >"$STUB_STATE/client-ip"
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
+mkdir -p "$HOME/projects" "$HB/projects"
+cstat() { # cstat A|B <jq condition> [tries]
+  local i
+  for ((i = 0; i < ${3:-100}; i++)); do
+    if [[ "$1" == A ]]; then api "copy-status"; else apiB "copy-status"; fi
+    [[ "$(jqt "$2")" == 0 ]] && return 0
+    sleep 0.3
+  done
+  return 1
+}
+DONE='.data.phase=="done" or .data.phase=="failed"'
+cpub() { api "copy-keygen"; jq -r .data.public_key <<<"$OUT"; }
+# copy_flow <kind> <project|-> <A's chosen lines> <policy> <B's overwrite lines>: keygen, authorize, send, apply; leaves B's final status in OUT
+copy_flow() {
+  local pub args=() chosen="$3"
+  pub="$(cpub)"
+  apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$pub" 203.0.113.9 30)"
+  [[ "$(jqt '.ok')" == 0 ]] || return 1
+  [[ "$1" == secrets ]] && args=(secrets) || args=("$1" "$2")
+  api "copy-send ${args[*]}" "$(printf '%s\n%s\n%s\n%s\n%s%s' 192.0.2.20 2222 bob ssh-ed25519 "$KB" "${chosen:+$'\n'$chosen}")"
+  [[ "$(jqt '.ok and .data.started')" == 0 ]] || return 2
+  cstat A "$DONE" 150 || return 3
+  [[ "$(jqt '.data.phase=="done"')" == 0 ]] || return 4
+  CFILE="$(jq -r .data.file <<<"$OUT")"
+  apiB "copy-apply $CFILE" "$(printf '%s%s' "$4" "${5:+$'\n'$5}")"
+  [[ "$(jqt '.ok and .data.started')" == 0 ]] || return 5
+  cstat B "$DONE" 150 || return 6
+}
+
+echo "copy: runner allowlist"
+for bad in "copy-list" "copy-list x" "copy-list secrets x" "copy-list project" "copy-list project ../x" "copy-list project .hidden;id" "copy-list project a b" \
+  "copy-list bundle" "copy-list other demo" "copy-keygen x" "copy-authorize x" "copy-probe x" "copy-status x" "copy-cancel x" "copy-send" "copy-send secrets x" \
+  "copy-send project" "copy-send project a/b" "copy-send bundle a b" "copy-send everything x" "copy-apply" "copy-apply x" "copy-apply ../copy-20260101-000001.tgz" \
+  "copy-apply copy-20260101-000001.tgz x" "copy-apply copy-20260101-000001.tgzx" "copy-apply copy-1.tgz" "copy-apply -copy-20260101-000001.tgz" \
+  "copy-apply copy-20260101-000001.tgz;id" "copy-apply /etc/passwd"; do
+  api "$bad"
+  check "copy: runner refuses '${bad:0:40}'" "$(jqt '.ok==false and (.error.code=="forbidden" or .error.code=="bad_args")')"
+done
+for bad in "copy-list project a b" "copy-send project a b c"; do
+  api "$bad"; [[ "$(jqt '.ok==false')" == 0 ]]; check "copy: '$bad' is not run" $?
+done
+
+echo "copy: gating and keygen"
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
+api "copy-authorize" "$(printf '%s\n%s' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGatedGatedGatedGatedGatedGatedGatedGatedGatedGa gated' 203.0.113.5)"
+check "copy-authorize: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+api "copy-send secrets" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")"
+check "copy-send: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+api "copy-apply copy-20260101-000001.tgz" "new-only"
+check "copy-apply: refused while Run-a-command is off" "$(jqt '.ok==false and .error.code=="run_disabled"')"
+echo 'ALLOW_RUN=1' >>"$HOME/.config/claude-launcher/config"
+api "copy-keygen"
+check "copy-keygen: a clauderc-copy ed25519 key and a tailnet_ip string" "$(jqt '.ok and (.data.public_key | test("^ssh-ed25519 [A-Za-z0-9+/]+=* clauderc-copy$")) and (.data.tailnet_ip | type == "string")')"
+P1="$(jq -r .data.public_key <<<"$OUT")"
+[[ "$(stat -c %a "$CA/copy/key")" == 600 && "$(stat -c %a "$CA/copy")" == 700 ]]; check "copy-keygen: key 600, folder 700" $?
+api "copy-keygen"
+[[ "$(jq -r .data.public_key <<<"$OUT")" != "$P1" ]]; check "copy-keygen: a NEW key every time" $?
+printf '#!/bin/sh\necho 100.101.102.103\n' >"$HOME/.local/bin/tailscale"; chmod +x "$HOME/.local/bin/tailscale"
+api "copy-keygen"; check "copy-keygen: reports tailscale ip -4" "$(jqt '.data.tailnet_ip=="100.101.102.103"')"
+printf '#!/bin/sh\necho not-an-ip\n' >"$HOME/.local/bin/tailscale"
+api "copy-keygen"; check "copy-keygen: junk from tailscale becomes empty" "$(jqt '.data.tailnet_ip==""')"
+rm -f "$HOME/.local/bin/tailscale"
+
+echo "copy: authorize"
+PUBA="$(cpub)"; BLOBA="$(awk '{print $2}' <<<"$PUBA")"
+printf '%s\n' 'ssh-ed25519 AAAAOTHERKEY phone' >"$AKB"
+apiB "migrate-authorize" "$(printf '%s\n%s' "$PUB2" 198.51.100.7)"
+check "B: a migrate line first" "$(jqt '.ok')"
+apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBA" 203.0.113.9 5)"
+check "copy-authorize ok" "$(jqt '.ok and .data.authorized')"
+EXP_GLOB="restrict,command=\"$HB/.local/bin/claude-backup receive --copy\",from=\"203.0.113.9\",expiry-time=\"????????????Z\" ssh-ed25519 $BLOBA clauderc-copy"
+OUT="$(cat "$AKB")"
+# EXP_GLOB is a glob on purpose.
+# shellcheck disable=SC2053
+[[ "$(grep -c ' clauderc-copy$' "$AKB")" == 1 && "$(grep ' clauderc-copy$' "$AKB")" == $EXP_GLOB ]]; check "copy-authorize writes exactly one restrict/command/from/expiry-time line" $?
+EXPV="$(sed -nE 's/.*expiry-time="([0-9]{12})Z".*/\1/p' "$AKB")"
+[[ "$EXPV" -ge "$(date -u -d '+4 minutes' +%Y%m%d%H%M)" && "$EXPV" -le "$(date -u -d '+6 minutes' +%Y%m%d%H%M)" ]]; check "...the expiry is 5 minutes ahead" $?
+[[ "$(grep -c ' clauderc-migrate$' "$AKB")" == 1 && "$(head -n 1 "$AKB")" == 'ssh-ed25519 AAAAOTHERKEY phone' && "$(stat -c %a "$AKB")" == 600 ]]; check "...the migrate line and the phone key are left alone" $?
+PUBA2="$(cpub)"; BLOBA2="$(awk '{print $2}' <<<"$PUBA2")"
+apiB "copy-authorize" "$PUBA2"
+[[ "$(grep -c ' clauderc-copy$' "$AKB")" == 1 && "$(grep -c "$BLOBA2" "$AKB")" == 1 && -z "$(grep "$BLOBA " "$AKB")" ]]; check "an older clauderc-copy line is replaced (no address: no from=, default minutes)" $?
+[[ "$(grep ' clauderc-copy$' "$AKB")" != *from=* ]]; check "...a missing address gives no from=" $?
+EXPV="$(sed -nE 's/.*expiry-time="([0-9]{12})Z".*/\1/p' "$AKB")"
+[[ "$EXPV" -ge "$(date -u -d '+119 minutes' +%Y%m%d%H%M)" && "$EXPV" -le "$(date -u -d '+121 minutes' +%Y%m%d%H%M)" ]]; check "...default 120 minutes" $?
+apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBA2" backup.example.com 720)"
+[[ "$(grep ' clauderc-copy$' "$AKB")" != *from=* && "$(jqt '.ok')" == 0 ]]; check "a host name gets no from=; 720 minutes is allowed" $?
+SUMK="$(cksum <"$AKB")"
+for bad in "ssh-rsa AAAAB3NzaC1yc2E x" "ssh-ed25519 AAAA;id" 'ssh-ed25519 AAAA"x' "" "ssh-ed25519 AAAA x
+ssh-ed25519 BBBB"; do
+  apiB "copy-authorize" "$bad"; check "copy-authorize refuses key '${bad:0:20}'" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+for m in 0 721 abc -5 99999 "5 5"; do
+  apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBA2" 203.0.113.9 "$m")"; check "copy-authorize refuses $m minutes" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBA2" 'a"b' 5)"; check "copy-authorize refuses a bad address" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+[[ "$(cksum <"$AKB")" == "$SUMK" ]]; check "refused authorizations changed nothing" $?
+# the two kinds never touch each other's lines
+apiB "migrate-authorize" "$(printf '%s\n%s' "$PUB2" 198.51.100.7)"
+[[ "$(grep -c ' clauderc-copy$' "$AKB")" == 1 && "$(grep -c ' clauderc-migrate$' "$AKB")" == 1 ]]; check "migrate-authorize leaves the copy line" $?
+apiB "copy-cancel"
+check "copy-cancel ok" "$(jqt '.ok and .data.cancelled')"
+[[ "$(grep -c ' clauderc-copy$' "$AKB")" == 0 && "$(grep -c ' clauderc-migrate$' "$AKB")" == 1 && "$(head -n 1 "$AKB")" == 'ssh-ed25519 AAAAOTHERKEY phone' ]]; check "copy-cancel removes the copy line only" $?
+# expiry pruning in status: an expired line and day-old copy files go, a live line stays
+apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBA2" 203.0.113.9 30)"
+sed 's/expiry-time="[0-9]*Z"/expiry-time="200001010000Z"/; s/ssh-ed25519 [A-Za-z0-9+\/]* clauderc-copy/ssh-ed25519 AAAAEXPIRED clauderc-copy/' <(grep ' clauderc-copy$' "$AKB") >>"$AKB"
+mkdir -p "$CB/copy"; echo old >"$CB/copy/copy-20200101-000001.tgz"; echo new >"$CB/copy/copy-20260101-000002.tgz"; touch -d '3 days ago' "$CB/copy/copy-20200101-000001.tgz"
+apiB "status"
+[[ "$(grep -c ' clauderc-copy$' "$AKB")" == 1 && -z "$(grep AAAAEXPIRED "$AKB")" && "$(grep -c "$BLOBA2" "$AKB")" == 1 ]]; check "status prunes an expired copy line and keeps the live one" $?
+[[ ! -e "$CB/copy/copy-20200101-000001.tgz" && -e "$CB/copy/copy-20260101-000002.tgz" ]]; check "status removes copy files older than a day" $?
+[[ "$(grep -c ' clauderc-migrate$' "$AKB")" == 1 ]]; check "pruning leaves the migrate line" $?
+apiB "copy-cancel"; rm -f "$CB/copy/"*
+
+echo "copy: probe"
+probe_in() { printf '%s\n%s\n%s\n%s' "$1" "$2" "$3" "$4"; }
+api "copy-probe" "$(probe_in 192.0.2.20 2222 ssh-ed25519 "$KB")"
+check "probe: Permission denied = reachable and key ok" "$(jqt '.ok and .data == {reachable:true, hostkey_ok:true}')"
+[[ "$(cat "$STUB_STATE/ssh-argv")" == *"-o BatchMode=yes"* && "$(cat "$STUB_STATE/ssh-argv")" == *"-o IdentitiesOnly=yes"* && "$(cat "$STUB_STATE/ssh-argv")" == *"-o StrictHostKeyChecking=yes"* && "$(cat "$STUB_STATE/ssh-argv")" == *"-p 2222 clauderc-probe@192.0.2.20 true" ]]; check "probe: batch, pinned host key, no agent, dummy user" $?
+[[ "$(cat "$STUB_STATE/ssh-known-hosts")" == "[192.0.2.20]:2222 ssh-ed25519 $KB" ]]; check "probe: known_hosts holds exactly the pinned key" $?
+[[ "$(cat "$STUB_STATE/ssh-argv")" != *"-i $HOME/.ssh"* && "$(cat "$STUB_STATE/ssh-argv")" == *"-i /"*"/none "* ]]; check "probe: an explicit missing identity (default keys off)" $?
+touch "$STUB_STATE/ssh-wrongkey"
+api "copy-probe" "$(probe_in 192.0.2.20 22 ssh-ed25519 "$KB")"
+check "probe: a wrong host key is reachable but not ok" "$(jqt '.ok and .data == {reachable:true, hostkey_ok:false}')"
+rm -f "$STUB_STATE/ssh-wrongkey"; touch "$STUB_STATE/ssh-down"
+api "copy-probe" "$(probe_in 192.0.2.20 22 ssh-ed25519 "$KB")"
+check "probe: a dead address is unreachable" "$(jqt '.ok and .data == {reachable:false, hostkey_ok:false}')"
+rm -f "$STUB_STATE/ssh-down"
+for bad in "bad host|22|ssh-ed25519|$KB" "h.example.com|0|ssh-ed25519|$KB" "h.example.com|22|ssh-dss|$KB" "h.example.com|22|ssh-ed25519|AAAA" "-oProxyCommand=x|22|ssh-ed25519|$KB"; do
+  IFS='|' read -r h p ty bl <<<"$bad"
+  api "copy-probe" "$(probe_in "$h" "$p" "$ty" "$bl")"; check "probe refuses '${bad:0:30}'" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+done
+
+echo "copy: list"
+# A: a git project with a tracked, an untracked, an ignored and a junk file
+rm -rf "$HOME/projects/demo"; mkdir -p "$HOME/projects/demo"
+(cd "$HOME/projects/demo" && git init -q && printf 'tracked\n' >tracked.txt && printf '.env.local\nnode_modules/\n' >.gitignore &&
+  git add . && git commit -qm one && printf 'notes A\n' >notes.txt && printf 'SECRET=1\n' >.env.local && mkdir -p node_modules/x sub && echo j >node_modules/x/j.js && echo s >sub/deep.txt && echo u >"sub/my file é.txt")
+touch -d '2026-01-02 10:00' "$HOME/projects/demo/notes.txt"
+api "copy-list project demo"
+check "list project (git): untracked and ignored files only, junk excluded" "$(jqt '.ok and .data.exists==true and .data.truncated==false and ([.data.entries[].path] | sort) == [".env.local","notes.txt","sub/deep.txt","sub/my file é.txt"]')"
+check "list project: entries have path, size, mtime, mode" "$(jqt '(.data.entries | all((keys | sort) == ["mode","mtime","path","size"])) and (.data.entries[] | select(.path=="notes.txt") | .size==8 and .mtime>0)')"
+api "copy-list project nonesuch"
+check "list project: a missing folder is an empty list, exists false" "$(jqt '.ok and .data == {entries:[], truncated:false, exists:false}')"
+apiB "copy-list project demo"; check "list project on B: exists false" "$(jqt '.ok and .data.exists==false')"
+api "copy-list project ..hidden"; check "list project: a bad name is refused" "$(jqt '.ok==false')"
+mkdir -p "$HOME/projects/plain/a"; echo x >"$HOME/projects/plain/a/f.txt"; mkdir -p "$HOME/projects/plain/build"; echo y >"$HOME/projects/plain/build/o"
+api "copy-list project plain"; check "list project (no git): every file, junk excluded" "$(jqt '[.data.entries[].path] == ["a/f.txt"]')"
+ln -sfn "$WORK" "$HOME/projects/linked"
+api "copy-list project linked"; check "list project: a project folder that is a symlink out is refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+rm -f "$HOME/projects/linked"
+# secrets: A's env, files and the optional ones
+mkdir -p "$WORK/a-save"; for d in secret-files keystores apple; do [[ -e "$CA/$d" ]] && mv "$CA/$d" "$WORK/a-save/$d"; done
+[[ -e "$CA/env" ]] && cp -p "$CA/env" "$WORK/a-save/env"
+printf "export AAA_TOKEN='a1-secret-value'\nexport BBB_KEY='b1-secret-value'\nexport SAME_KEY='s'\nexport PATH='/evil'\nexport ANTHROPIC_BASE_URL='x'\nexport HTTPS_PROXY='x'\nexport NODE_OPTIONS='x'\nexport GIT_CONFIG_COUNT='x'\nexport SUDO_ASKPASS='x'\nexport PYTHONPATH='x'\nexport JAVA_TOOL_OPTIONS='x'\nexport GOOGLE_APPLICATION_CREDENTIALS='x'\nexport FOO_API_KEY='foo1'\n" >"$CA/env"; chmod 600 "$CA/env"
+mkdir -p "$CA/secret-files" "$CA/keystores" "$CA/apple"; echo 'file-secret-content' >"$CA/secret-files/X_FILE"; echo ks >"$CA/keystores/up.jks"; echo p8 >"$CA/apple/AuthKey.p8"
+api "copy-list secrets"
+check "list secrets: env names, secret files, optional keystore and apple key" "$(jqt '.ok and ([.data.entries[] | select(.optional != true) | .path] | sort) == ["env/AAA_TOKEN","env/ANTHROPIC_BASE_URL","env/BBB_KEY","env/FOO_API_KEY","env/GIT_CONFIG_COUNT","env/GOOGLE_APPLICATION_CREDENTIALS","env/HTTPS_PROXY","env/JAVA_TOOL_OPTIONS","env/NODE_OPTIONS","env/PATH","env/PYTHONPATH","env/SAME_KEY","env/SUDO_ASKPASS","secret-files/X_FILE"] and ([.data.entries[] | select(.optional == true) | .path] | sort) == ["apple/AuthKey.p8","keystores/up.jks"]')"
+[[ "$OUT" != *a1-secret-value* && "$OUT" != *file-secret-content* && "$OUT" != *b1-secret-value* ]]; check "list secrets: never a value" $?
+# bundle list: A has a repo with no remote
+rm -rf "$HOME/projects/demo2"; mkdir -p "$HOME/projects/demo2"
+(cd "$HOME/projects/demo2" && git init -q -b main && echo 1 >f && git add f && git commit -qm c1 && git branch base && echo 2 >f && git commit -qam c2 && git checkout -qb feat && echo 3 >f && git commit -qam c3 && git checkout -q main)
+api "copy-list bundle demo2"
+check "list bundle (source): the local branches, with commit counts and shas" "$(jqt '.ok and ([.data.entries[].path] | sort) == ["base","feat","main"] and (.data.entries[] | select(.path=="main") | .size==2 and (.mode | test("^[0-9a-f]{40}$")))')"
+SHA1="$(git -C "$HOME/projects/demo2" rev-parse base)"; SHAMAIN="$(git -C "$HOME/projects/demo2" rev-parse main)"
+# B has only the first commit (a repository of its own, fetched from A's branch base)
+git init -q -b main "$HB/projects/demo2" && git -C "$HB/projects/demo2" fetch -q "$HOME/projects/demo2" base && git -C "$HB/projects/demo2" update-ref refs/heads/main FETCH_HEAD && git -C "$HB/projects/demo2" reset -q --hard main
+apiB "copy-list bundle demo2" "$(printf 'main %s\nbase %s' "$SHAMAIN" "$SHA1")"
+check "list bundle (target, with name sha lines): only the commits it already has" "$(jqt '.ok and ([.data.entries[].path]) == ["base"]')"
+
+echo "copy: send and apply a project (missing on B = the whole folder)"
+copy_flow project demo "." new-only ""; echo "  (flow rc=$?)" >/dev/null
+check "copy flow: send then apply reach done" "$(jqt '.data.phase=="done"')"
+check "result: copied the files, no refusals" "$(jqt '(.data.result.copied | index("tracked.txt")) != null and (.data.result.copied | index(".git/HEAD")) != null and (.data.result.copied | index("notes.txt")) != null and .data.result.refused == [] and .data.result.key_removed==true')"
+[[ "$(cat "$HB/projects/demo/notes.txt")" == "notes A" && "$(cat "$HB/projects/demo/tracked.txt")" == tracked && "$(cat "$HB/projects/demo/sub/my file é.txt")" == u && -d "$HB/projects/demo/.git" && ! -e "$HB/projects/demo/node_modules" ]]; check "B has the project with .git, without junk" $?
+git -C "$HB/projects/demo" log --oneline | grep -q one; check "B's repo has the history" $?
+[[ "$(stat -c %Y "$HB/projects/demo/notes.txt")" == "$(stat -c %Y "$HOME/projects/demo/notes.txt")" ]]; check "mtimes are kept" $?
+[[ ! -e "$CA/copy/key" && ! -e "$CA/copy/key.pub" && ! -e "$CA/copy/known_hosts" && ! -e "$CA/copy/chosen" && -z "$(ls -d "$CA"/copy/send.* 2>/dev/null)" ]]; check "A: the private key, known_hosts and temp tarball are gone after a good send" $?
+[[ "$(cat "$STUB_STATE/ssh-known-hosts")" == "[192.0.2.20]:2222 ssh-ed25519 $KB" ]]; check "send: pinned host key in known_hosts" $?
+[[ "$(cat "$STUB_STATE/ssh-argv")" == *"-o BatchMode=yes"* && "$(cat "$STUB_STATE/ssh-argv")" == *"-o StrictHostKeyChecking=yes"* && "$(cat "$STUB_STATE/ssh-argv")" == *"-p 2222 bob@192.0.2.20 receive" ]]; check "send: same ssh options as migrate" $?
+[[ -z "$(grep ' clauderc-copy$' "$AKB")" && ! -e "$CB/copy/$CFILE" ]]; check "B: the key line and the copy file are gone after apply" $?
+[[ -z "$(ls -d "$CB"/copy/stage.* 2>/dev/null)" ]]; check "B: no staging folder is left" $?
+[[ -e "$HOME/projects/demo/tracked.txt" && -e "$HOME/projects/demo/notes.txt" ]]; check "A: nothing deleted" $?
+
+echo "copy: an existing project (untracked files only), policies and backups"
+printf 'notes B older\n' >"$HB/projects/demo/notes.txt"; touch -d '2026-01-01 10:00' "$HB/projects/demo/notes.txt"
+printf 'SECRET=B\n' >"$HB/projects/demo/.env.local"; touch -d '2026-03-01 10:00' "$HB/projects/demo/.env.local"
+touch -d '2026-02-01 10:00' "$HOME/projects/demo/.env.local"
+printf 'SECRET=1\n' >"$HOME/projects/demo/.env.local"; touch -d '2026-02-01 10:00' "$HOME/projects/demo/.env.local"
+copy_flow project demo "" new-only ""
+check "new-only: nothing existing is overwritten" "$(jqt '.data.phase=="done" and (.data.result.copied | index("sub/deep.txt")) == null and ([.data.result.skipped[].path] | index("notes.txt")) != null and ([.data.result.skipped[].path] | index(".env.local")) != null')"
+[[ "$(cat "$HB/projects/demo/notes.txt")" == "notes B older" && "$(cat "$HB/projects/demo/.env.local")" == "SECRET=B" ]]; check "new-only: B's files are as they were" $?
+[[ -z "$(ls -d "$HB"/backups/pre-copy-* 2>/dev/null)" ]]; check "new-only: nothing to back up" $?
+copy_flow project demo "" newer ""
+check "newer: A's newer file replaces B's older one; B's newer one stays" "$(jqt '.data.phase=="done" and (.data.result.copied | index("notes.txt")) != null and ([.data.result.skipped[] | select(.path==".env.local") | .reason] == ["exists"])')"
+[[ "$(cat "$HB/projects/demo/notes.txt")" == "notes A" && "$(cat "$HB/projects/demo/.env.local")" == "SECRET=B" ]]; check "newer: contents" $?
+BK="$(ls -d "$HB"/backups/pre-copy-* | head -n 1)"
+[[ "$(cat "$BK/notes.txt")" == "notes B older" && "$(stat -c %a "$BK")" == 700 ]]; check "B's version was kept in ~/backups/pre-copy-<time>/ (folder 700)" $?
+copy_flow project demo "" newer ".env.local"
+check "newer + a named path: B's newer file is overwritten when named" "$(jqt '.data.phase=="done" and (.data.result.copied | index(".env.local")) != null')"
+[[ "$(cat "$HB/projects/demo/.env.local")" == "SECRET=1" && "$(cat "$(ls -d "$HB"/backups/pre-copy-* | tail -n 1)/.env.local")" == "SECRET=B" ]]; check "...and backed up first" $?
+[[ -d "$HB/projects/demo/.git" && "$(git -C "$HB/projects/demo" log --oneline | wc -l)" == 1 ]]; check "an existing project's .git is never touched" $?
+printf 'notes B3\n' >"$HB/projects/demo/notes.txt"; touch -d '2026-01-02 10:00' "$HB/projects/demo/notes.txt"
+copy_flow project demo "notes.txt" newer ""
+check "same mtime but different content: skipped unless named" "$(jqt '.data.phase=="done" and ([.data.result.skipped[] | select(.path=="notes.txt") | .reason] == ["exists"])')"
+[[ "$(cat "$HB/projects/demo/notes.txt")" == "notes B3" ]]; check "...B's file kept" $?
+
+echo "copy: refused archives (crafted tar files put straight into B's copy folder)"
+mkcopy() { # mkcopy <name> <project> <spec json: [{name,type,target?,data?}]>: a copy file with a matching manifest
+  python3 -I - "$CB/copy/$1" "$2" "$3" <<'PY'
+import io, json, sys, tarfile
+out, proj, spec = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
+files = [{"path": m["name"], "size": 1, "mtime": 1, "mode": "644"} for m in spec if m["type"] in ("file", "sym")]
+man = json.dumps({"version": 1, "kind": "project", "project": proj, "source": "a", "files": files, "branches": []}).encode()
+with tarfile.open(out, "w:gz") as t:
+    ti = tarfile.TarInfo(".clauderc-copy.json"); ti.size = len(man); t.addfile(ti, io.BytesIO(man))
+    for m in spec:
+        ti = tarfile.TarInfo(m["name"])
+        if m["type"] == "file":
+            d = m.get("data", "x").encode(); ti.size = len(d); t.addfile(ti, io.BytesIO(d))
+        elif m["type"] == "sym":
+            ti.type = tarfile.SYMTYPE; ti.linkname = m["target"]; t.addfile(ti)
+        elif m["type"] == "hard":
+            ti.type = tarfile.LNKTYPE; ti.linkname = m["target"]; t.addfile(ti)
+        elif m["type"] == "dir":
+            ti.type = tarfile.DIRTYPE; t.addfile(ti)
+PY
+}
+bad_apply() { # bad_apply <label> <project> <spec> <jq condition on the final status>
+  mkdir -p "$CB/copy"; chmod 700 "$CB/copy"
+  mkcopy copy-20260202-000001.tgz "$2" "$3"
+  apiB "copy-apply copy-20260202-000001.tgz" "new-only"
+  cstat B "$DONE" 100
+  check "$1" "$(jqt "$4")"
+  rm -f "$CB/copy/copy-20260202-000001.tgz"
+}
+rm -rf "$WORK/outside"; mkdir -p "$WORK/outside"
+bad_apply "tar: a ../ member is refused, nothing written" evil '[{"name":"../escape.txt","type":"file"}]' '.data.phase=="failed" and (.data.error | test("unsafe member"))'
+[[ ! -e "$HB/projects/escape.txt" && ! -e "$HB/escape.txt" && ! -e "$HB/projects/evil" ]]; check "...(no file outside, no project folder made)" $?
+bad_apply "tar: a ./../ member is refused" evil '[{"name":"a/../../escape.txt","type":"file"}]' '.data.phase=="failed"'
+bad_apply "tar: an absolute member is refused" evil '[{"name":"/tmp/copy-abs-test.txt","type":"file"}]' '.data.phase=="failed" and (.data.error | test("unsafe member"))'
+[[ ! -e /tmp/copy-abs-test.txt ]]; check "...(nothing written to /tmp)" $?
+bad_apply "tar: a file below a symlink is refused" evil "[{\"name\":\"lnk\",\"type\":\"sym\",\"target\":\"$WORK/outside\"},{\"name\":\"lnk/pwned.txt\",\"type\":\"file\"}]" '.data.phase=="failed" and (.data.error | test("below a symlink"))'
+[[ -z "$(ls "$WORK/outside")" ]]; check "...(nothing reached the folder the link points to)" $?
+bad_apply "tar: a symlink then a file through it with ../ target is refused" evil '[{"name":"d","type":"sym","target":"../../.."},{"name":"d/pwned2.txt","type":"file"}]' '.data.phase=="failed"'
+bad_apply "tar: a hardlink member is refused" evil '[{"name":"h1","type":"file"},{"name":"h2","type":"hard","target":"h1"}]' '.data.phase=="failed" and (.data.error | test("plain file"))'
+bad_apply "tar: the same name twice is refused" evil '[{"name":"dup","type":"file"},{"name":"dup","type":"sym","target":"/etc"}]' '.data.phase=="failed" and (.data.error | test("twice"))'
+python3 -I - "$CB/copy/copy-20260202-000001.tgz" <<'PY'
+import io, json, sys, tarfile
+man = json.dumps({"version": 1, "kind": "project", "project": "evil", "source": "a", "files": [], "branches": []}).encode()
+with tarfile.open(sys.argv[1], "w:gz") as t:
+    ti = tarfile.TarInfo(".clauderc-copy.json"); ti.size = len(man); t.addfile(ti, io.BytesIO(man))
+    ti = tarfile.TarInfo("unlisted.txt"); ti.size = 1; t.addfile(ti, io.BytesIO(b"x"))
+PY
+apiB "copy-apply copy-20260202-000001.tgz" "new-only"; cstat B "$DONE" 100
+check "tar: a file the manifest doesn't list is refused" "$(jqt '.data.phase=="failed" and (.data.error | test("manifest doesn.t list"))')"
+rm -f "$CB/copy/copy-20260202-000001.tgz"; rm -rf "$HB/projects/evil"
+bad_apply "tar: a symlink that points outside is listed as refused, never placed" evil '[{"name":"ok.txt","type":"file"},{"name":"out","type":"sym","target":"../../../etc"},{"name":"abs","type":"sym","target":"/etc/passwd"},{"name":"fine","type":"sym","target":"ok.txt"}]' \
+  '.data.phase=="done" and ([.data.result.refused[].path] | sort) == ["abs","out"] and (.data.result.copied | sort) == ["fine","ok.txt"]'
+[[ ! -e "$HB/projects/evil/out" && ! -L "$HB/projects/evil/out" && ! -L "$HB/projects/evil/abs" && -L "$HB/projects/evil/fine" ]]; check "...only the safe symlink is in place" $?
+# a link that is only inside the archive's own tree because of another link: B's real folder d makes it climb out
+rm -rf "$HB/projects/evil"; mkdir -p "$HB/projects/evil/d"
+bad_apply "tar: a link that climbs out through B's real folder is refused" evil '[{"name":"d","type":"sym","target":"a/b/c/d"},{"name":"esc","type":"sym","target":"d/../../../../.ssh/authorized_keys"}]' \
+  '.data.phase=="done" and ([.data.result.refused[].path] | index("esc")) != null'
+[[ ! -L "$HB/projects/evil/esc" ]]; check "...(no such link was placed)" $?
+rm -rf "$HB/projects/evil"
+# a link already in B's tree: a file may not be written through it
+rm -rf "$HB/projects/evil"; mkdir -p "$HB/projects/evil"; ln -s "$WORK/outside" "$HB/projects/evil/viaB"
+bad_apply "a symlink already on B in the way: the file is refused, not written through it" evil '[{"name":"viaB/x.txt","type":"file"},{"name":"y.txt","type":"file"}]' \
+  '.data.phase=="done" and ([.data.result.refused[].path] == ["viaB/x.txt"]) and (.data.result.copied == ["y.txt"])'
+[[ -z "$(ls "$WORK/outside")" ]]; check "...(nothing in the folder the link points to)" $?
+rm -rf "$HB/projects/evil"
+mkdir -p "$CB/copy"; echo notatar >"$CB/copy/copy-20260202-000003.tgz"
+apiB "copy-apply copy-20260202-000003.tgz" "new-only"; cstat B "$DONE" 100
+check "a file that isn't an archive fails cleanly and stays for a retry" "$(jqt '.data.phase=="failed"')"
+[[ -e "$CB/copy/copy-20260202-000003.tgz" && -z "$(ls -d "$CB"/copy/stage.* 2>/dev/null)" ]]; check "...the copy file is kept, the staging folder is gone" $?
+apiB "copy-apply copy-20260202-000009.tgz" "new-only"; check "copy-apply: a file that isn't there" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+apiB "copy-apply copy-20260202-000003.tgz" "overwrite-all"; check "copy-apply: an unknown policy" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+apiB "copy-apply copy-20260202-000003.tgz" "$(printf 'new-only\n../x')"; check "copy-apply: an unsafe overwrite path" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+rm -f "$CB/copy/"*
+
+echo "copy: secrets (env merged by name, files 600/700, optional ones separate)"
+printf "export BBB_KEY='different-on-B'\nexport SAME_KEY='s'\n" >"$CB/env"; chmod 600 "$CB/env"
+copy_flow secrets - "" new-only ""
+check "secrets: done; AAA_TOKEN added, BBB_KEY a conflict, PATH refused" "$(jqt '.data.phase=="done" and (.data.result.env_added | sort) == ["AAA_TOKEN","FOO_API_KEY"] and .data.result.env_conflicts == ["BBB_KEY"] and ([.data.result.refused[].path] | sort) == ["env/ANTHROPIC_BASE_URL","env/GIT_CONFIG_COUNT","env/GOOGLE_APPLICATION_CREDENTIALS","env/HTTPS_PROXY","env/JAVA_TOOL_OPTIONS","env/NODE_OPTIONS","env/PATH","env/PYTHONPATH","env/SUDO_ASKPASS"] and (.data.result.copied == ["secret-files/X_FILE"])')"
+[[ "$(grep -c "^export AAA_TOKEN='a1-secret-value'$" "$CB/env")" == 1 && "$(grep -c "^export BBB_KEY='different-on-B'$" "$CB/env")" == 1 && "$(grep -c '^export SAME_KEY' "$CB/env")" == 1 && -z "$(grep -E '^export (PATH|ANTHROPIC_BASE_URL|HTTPS_PROXY|NODE_OPTIONS|GIT_CONFIG_COUNT|SUDO_ASKPASS|PYTHONPATH|JAVA_TOOL_OPTIONS|GOOGLE_APPLICATION_CREDENTIALS)=' "$CB/env")" && "$(grep -c "^export FOO_API_KEY='foo1'$" "$CB/env")" == 1 ]]; check "env: a missing name is added, an existing value is never changed, behaviour-changing names are never written" $?
+grep -qx FOO_API_KEY "$CB/custom-names"; check "env: a copied custom name is listed in custom-names" $?
+[[ "$(stat -c %a "$CB/env")" == 600 && "$(stat -c %a "$CB/secret-files")" == 700 && "$(stat -c %a "$CB/secret-files/X_FILE")" == 600 && "$(cat "$CB/secret-files/X_FILE")" == file-secret-content ]]; check "modes: env 600, secret-files 700, the file 600" $?
+[[ ! -e "$CB/keystores/up.jks" && ! -e "$CB/apple/AuthKey.p8" ]]; check "the optional keystore and Apple key are not copied unless ticked" $?
+jq -e '.env.AAA_TOKEN == "a1-secret-value" and .env.BBB_KEY == "different-on-B"' "$HB/.claude/settings.json" >/dev/null 2>&1; check "ensure_env_hook ran: Claude's settings have the new name" $?
+[[ -e "$(ls -d "$HB"/backups/pre-copy-* | tail -n 1)/env" ]]; check "B's env file was backed up before the merge" $?
+grep -rq "a1-secret-value" "$STUB_STATE/ssh-argv" "$CA/../claude-launcher/copy" "$HOME/.local/state/claude-launcher/api.log" "$HB/.local/state/claude-launcher/api.log" 2>/dev/null; [[ $? -ne 0 ]]; check "no secret value in argv, the api logs or a leftover file" $?
+copy_flow secrets - "keystores/up.jks
+apple/AuthKey.p8" new-only ""
+check "ticked optional files are copied" "$(jqt '.data.phase=="done" and (.data.result.copied | sort) == ["apple/AuthKey.p8","keystores/up.jks"]')"
+[[ "$(stat -c %a "$CB/keystores/up.jks")" == 600 && "$(stat -c %a "$CB/keystores")" == 700 && "$(stat -c %a "$CB/apple")" == 700 ]]; check "keystore 600 in a 700 folder" $?
+api "copy-send secrets" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+config"
+check "send: a path outside the secrets kinds is refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "copy-send secrets" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+secret-files/../../x"
+check "send: a ../ path is refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "copy-send secrets" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+migrate/key"
+check "send: migrate/ is never copyable" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+api "copy-send secrets" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+copy/key"
+check "send: copy/ is never copyable" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+rm -rf "$CA/secret-files" "$CA/keystores" "$CA/apple" "$CA/env"; for d in secret-files keystores apple env; do [[ -e "$WORK/a-save/$d" ]] && cp -a "$WORK/a-save/$d" "$CA/$d"; done
+
+echo "copy: bundle (B's local branches never move)"
+api "copy-send bundle demo2" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")"
+check "send before keygen: not_ready" "$(jqt '.ok==false and .error.code=="not_ready"')"
+MAINB="$(git -C "$HB/projects/demo2" rev-parse main)"
+copy_flow bundle demo2 "" new-only ""
+check "bundle: done, every branch fetched into from-<source>" "$(jqt '.data.phase=="done" and (.data.result.fetched | sort) == ["base","feat","main"]')"
+[[ "$(git -C "$HB/projects/demo2" rev-parse main)" == "$MAINB" && "$MAINB" == "$SHA1" ]]; check "B's local main did not move" $?
+[[ "$(git -C "$HB/projects/demo2" rev-parse "refs/remotes/from-$HOST_SRC/main")" == "$SHAMAIN" && "$(git -C "$HB/projects/demo2" rev-parse "refs/remotes/from-$HOST_SRC/feat")" == "$(git -C "$HOME/projects/demo2" rev-parse feat)" ]]; check "the branches are in refs/remotes/from-<source>/" $?
+copy_flow bundle demo2 "feat" new-only ""
+check "bundle with a chosen branch: only that one" "$(jqt '.data.result.fetched == ["feat"]')"
+rm -rf "$HB/projects/demo2"
+copy_flow bundle demo2 "main" new-only ""
+check "bundle into a missing repository: made, branch checked out" "$(jqt '.data.phase=="done" and .data.result.fetched == ["main"]')"
+[[ "$(git -C "$HB/projects/demo2" rev-parse HEAD)" == "$SHAMAIN" && "$(git -C "$HB/projects/demo2" rev-parse --abbrev-ref HEAD)" == main ]]; check "...with the commits" $?
+api "copy-send bundle demo2" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+bad;branch"
+check "send bundle: a bad branch name is refused" "$(jqt '.ok==false and .error.code=="invalid_name"')"
+
+echo "copy: failures, key cleanup and busy"
+PUBF="$(cpub)"
+apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBF" 203.0.113.9 30)"
+touch "$STUB_STATE/ssh-fail"
+api "copy-send project demo" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+."
+check "send starts" "$(jqt '.ok and .data.started')"
+cstat A "$DONE" 100; check "a refused host key ends in failed" "$(jqt '.data.phase=="failed" and (.data.error | contains("Host key verification failed"))')"
+[[ ! -e "$CA/copy/key" && ! -e "$CA/copy/known_hosts" && -z "$(ls -d "$CA"/copy/send.* 2>/dev/null)" ]]; check "A: the private key, known_hosts and the temp tarball are gone after a FAILED send too" $?
+rm -f "$STUB_STATE/ssh-fail"
+apiB "copy-cancel"
+# an expired key: the stub plays sshd, which refuses it
+PUBE="$(cpub)"
+apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBE" 203.0.113.9 30)"
+sed -i 's/expiry-time="[0-9]*Z"/expiry-time="200001010000Z"/' "$AKB"
+api "copy-send project demo" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+."
+cstat A "$DONE" 100; check "an expired key line is not honoured (sshd's expiry-time)" "$(jqt '.data.phase=="failed" and (.data.error | contains("Permission denied"))')"
+apiB "copy-cancel"
+# wrong source address
+PUBW="$(cpub)"
+apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBW" 203.0.113.77 30)"
+api "copy-send project demo" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+."
+cstat A "$DONE" 100; check "from= pins the source address" "$(jqt '.data.phase=="failed"')"
+apiB "copy-cancel"
+# busy
+PUBB="$(cpub)"
+apiB "copy-authorize" "$(printf '%s\n%s\n%s' "$PUBB" 203.0.113.9 30)"
+echo 3 >"$STUB_STATE/ssh-sleep"
+api "copy-send project demo" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+."
+api "copy-send project demo" "$(send_in 192.0.2.20 2222 bob ssh-ed25519 "$KB")
+."
+check "a second send while one runs is busy" "$(jqt '.ok==false and .error.code=="busy"')"
+api "copy-keygen"; check "copy-keygen while a send runs is busy" "$(jqt '.ok==false and .error.code=="busy"')"
+api "copy-status"; check "copy-status while running: contract fields" "$(jqt '.ok and .data.job=="send" and (.data.phase=="pack" or .data.phase=="transfer") and (.data | keys) == ["bytes","error","file","job","message","pct","phase","started","updated"]')"
+cstat A "$DONE" 100; check "...and it finishes" "$(jqt '.data.phase=="done"')"
+rm -f "$STUB_STATE/ssh-sleep"
+api "migrate-status"; check "the copy job is invisible to migrate-status" "$(jqt '.data.phase != "pack" and .data.phase != "apply"')"
+apiB "copy-cancel"
+CF2="$(ls "$CB/copy" 2>/dev/null)"
+[[ -z "$CF2" ]]; check "copy-cancel removed the received copy file and all leftovers" $?
+apiB "copy-status"; check "copy-status on B after cancel still answers" "$(jqt '.ok')"
+
+echo "copy: migrate is unchanged next to copy"
+[[ "$(grep -c ' clauderc-migrate$' "$AKB")" == 1 ]]; check "B still has exactly the migrate line" $?
+api "migrate-keygen"; check "migrate-keygen still works with the shared helpers" "$(jqt '.ok and (.data.public_key | test(" clauderc-migrate$"))')"
+sed -i '/^ALLOW_RUN=1$/d' "$HOME/.config/claude-launcher/config"
+rm -f "$HOME/.local/bin/ssh" "$STUB_STATE/client-ip"
 
 echo "team MCP server"
 OUT="$(python3 "$HERE/test-team.py" 2>&1)"; check "clauderc-team MCP self-check" $?

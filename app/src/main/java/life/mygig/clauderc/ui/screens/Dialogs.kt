@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui.screens
 
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -79,12 +80,12 @@ fun LoginDialog(vm: MainViewModel, kind: LoginKind) {
         title = {
             Text(
                 when (kind) {
-                    LoginKind.CLAUDE -> "Log in to Claude"
-                    LoginKind.GITHUB -> "Log in to GitHub"
-                    LoginKind.AWS -> "Log in to AWS"
-                    LoginKind.GITLAB -> "Log in to GitLab"
+                    LoginKind.CLAUDE -> "Sign in to Claude"
+                    LoginKind.GITHUB -> "Sign in to GitHub"
+                    LoginKind.AWS -> "Sign in to AWS"
+                    LoginKind.GITLAB -> "Sign in to GitLab"
                     LoginKind.YOUTUBE -> "Connect YouTube"
-                    LoginKind.DOCKER -> "Log in to a container registry"
+                    LoginKind.DOCKER -> "Sign in to a container registry"
                 },
             )
         },
@@ -155,38 +156,42 @@ fun AddServiceDialog(vm: MainViewModel) {
         .sortedBy { it.first.lowercase() }
     ModalBottomSheet(onDismissRequest = { vm.services.showAddService(false) }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxHeight(0.92f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Connect a service", style = MaterialTheme.typography.titleLarge)
+            Text("Connect a service", style = MaterialTheme.typography.headlineSmall, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
             OutlinedTextField(
                 value = query, onValueChange = { query = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Search services") }, shape = RoundedCornerShape(24.dp),
+                placeholder = { Text("Search services") }, shape = RoundedCornerShape(26.dp),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = androidx.compose.ui.graphics.Color.Transparent, unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh, unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                ),
                 keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
             )
             if (st == null) Text("Check the server first (pull down on Connections).")
             if (options.isEmpty() && st != null) Text("Everything here is already connected.")
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(shown.size) { i ->
-                    val (name, hint, go) = shown[i]
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f)) {
+                itemsIndexed(shown) { i, (name, hint, go) ->
                     Surface(
                         onClick = { go() },
                         enabled = st != null,
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        shape = life.mygig.clauderc.ui.components.groupedShape(i, shown.size),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text(name, style = MaterialTheme.typography.titleSmall, maxLines = 1)
-                            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                        Column {
+                            if (i > 0) life.mygig.clauderc.ui.components.CalmDivider()
+                            Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(name, style = MaterialTheme.typography.bodyLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium, maxLines = 1)
+                                    Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                                }
+                                life.mygig.clauderc.ui.components.RowChevron()
+                            }
                         }
                     }
                 }
-                item(span = { GridItemSpan(maxLineSpan) }) {
+                item {
                     Text("A–Z · connected ones move to the Connections tab", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 24.dp))
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp, bottom = 24.dp, start = 4.dp))
                 }
             }
         }
@@ -447,7 +452,7 @@ fun CustomKeysDialog(vm: MainViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Upload JSON file") }
                 Text(
-                    "Or upload a JSON file (e.g. a Google service-account key, name it GOOGLE_APPLICATION_CREDENTIALS): " +
+                    "Or upload a JSON file (e.g. a Google service-account key, name it like ACME_SA_CREDENTIALS; Firebase has its own entry in the list): " +
                         "the server keeps it private and the variable then holds the path of the saved file.",
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -545,7 +550,7 @@ fun SetupDialog(vm: MainViewModel, kind: LoginKind) {
                     Text(
                         "GitLab needs its command-line tool, glab, on the server. Install downloads the latest " +
                             "official release from gitlab.com into ~/.local/bin, checks it against the release's " +
-                            "checksums, and needs no sudo. Then you can log in.",
+                            "checksums, and needs no sudo. Then you can sign in.",
                     )
                     Button(onClick = { vm.services.installGlab() }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) {
                         Text("Install glab")
@@ -585,10 +590,10 @@ private fun ClaudeLogin(vm: MainViewModel, busy: Boolean) {
     if (u == null) {
         Text("Starts `claude auth login` on the server using your claude.ai subscription (never an API key).")
         Button(onClick = { vm.logins.claudeLoginStart() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-            Text("Start login")
+            Text("Start sign-in")
         }
     } else {
-        Text("1. Open the link and approve the login.")
+        Text("1. Open the link and approve the sign-in.")
         Button(onClick = { openUrl(context, u.url) }, modifier = Modifier.fillMaxWidth()) { Text("Open link") }
         Text("2. Paste the code it shows you.")
         OutlinedTextField(
@@ -682,7 +687,7 @@ private fun permissionsText(kind: LoginKind): String = when (kind) {
             "1. Enable \"YouTube Data API v3\" (APIs & Services › Library).\n" +
             "2. Google Auth Platform › Branding: app name and your email. Audience: External, then Publish app " +
             "so it's \"In production\". Unverified is fine for your own channel (you'll see a warning; continue). " +
-            "In \"Testing\" Google expires the login after 7 days.\n" +
+            "In \"Testing\" Google expires the sign-in after 7 days.\n" +
             "3. Google Auth Platform › Clients › Create client › type \"TVs and Limited Input devices\" › Create. " +
             "Copy the client ID and secret here.\n" +
             "4. Start sign-in: open google.com/device, enter the code, pick the Google account that owns the channel, " +
@@ -848,7 +853,7 @@ private fun AwsLogin(vm: MainViewModel, busy: Boolean) {
                 Text("SSO isn't configured on the server yet. Use access keys, or run `aws configure sso` there once.")
             }
             Button(onClick = { vm.logins.awsSsoStart() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                Text("Start SSO login")
+                Text("Start SSO sign-in")
             }
         } else {
             Text("Open the link, confirm the code matches, and approve.")
@@ -858,7 +863,7 @@ private fun AwsLogin(vm: MainViewModel, busy: Boolean) {
                 }
             }
             Button(onClick = { openUrl(context, u.url) }, modifier = Modifier.fillMaxWidth()) { Text("Open link") }
-            Text("Waiting for approval… this closes by itself when AWS is logged in.", style = MaterialTheme.typography.bodySmall)
+            Text("Waiting for approval… this closes by itself when AWS is signed in.", style = MaterialTheme.typography.bodySmall)
         }
     }
 }

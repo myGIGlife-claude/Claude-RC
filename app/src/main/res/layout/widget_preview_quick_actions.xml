@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Static picker preview of the Quick actions widget (the default four actions, labelled). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/widget_background" android:gravity="center" android:orientation="horizontal" android:padding="8dp">
+    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+        android:drawableTop="@drawable/ic_widget_new_repo" android:drawablePadding="4dp" android:gravity="center"
+        android:text="New repo" android:textColor="@color/widget_fg" android:textSize="11sp" />
+    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+        android:drawableTop="@drawable/ic_widget_key" android:drawablePadding="4dp" android:gravity="center"
+        android:text="Add key" android:textColor="@color/widget_fg" android:textSize="11sp" />
+    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+        android:drawableTop="@drawable/ic_widget_chat" android:drawablePadding="4dp" android:gravity="center"
+        android:text="New chat" android:textColor="@color/widget_fg" android:textSize="11sp" />
+    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+        android:drawableTop="@drawable/ic_widget_sessions" android:drawablePadding="4dp" android:gravity="center"
+        android:text="Sessions" android:textColor="@color/widget_fg" android:textSize="11sp" />
+</LinearLayout>

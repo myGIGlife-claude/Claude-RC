@@ -9,15 +9,15 @@ import life.mygig.clauderc.api.Codes
 
 /** Plain-language message, button label and fix for each error code. */
 fun friendly(e: ApiException): Triple<String, String?, Fix?> = when (e.code) {
-    Codes.NOT_LOGGED_IN_CLAUDE -> Triple(e.message, "Log in", Fix.Login(LoginKind.CLAUDE))
-    Codes.NOT_LOGGED_IN_GITHUB -> Triple(e.message, "Log in", Fix.Login(LoginKind.GITHUB))
+    Codes.NOT_LOGGED_IN_CLAUDE -> Triple(e.message, "Sign in", Fix.Login(LoginKind.CLAUDE))
+    Codes.NOT_LOGGED_IN_GITHUB -> Triple(e.message, "Sign in", Fix.Login(LoginKind.GITHUB))
     Codes.MISSING_SCOPES ->
         Triple(
             "The GitHub token is missing: ${e.missing.joinToString(", ").ifEmpty { "some scopes" }}.",
             "New token",
             Fix.Login(LoginKind.GITHUB),
         )
-    Codes.NOT_LOGGED_IN_AWS -> Triple(e.message, "Log in", Fix.Login(LoginKind.AWS))
+    Codes.NOT_LOGGED_IN_AWS -> Triple(e.message, "Sign in", Fix.Login(LoginKind.AWS))
     Codes.REPO_EXISTS -> Triple(e.message, "Projects", Fix.GoTo(Tab.PROJECTS))
     Codes.FOLDER_DIRTY -> {
         val project = e.path?.substringAfterLast('/')
@@ -28,9 +28,13 @@ fun friendly(e: ApiException): Triple<String, String?, Fix?> = when (e.code) {
         )
     }
     Codes.INVALID_NAME -> Triple(e.message, null, null)
-    Codes.BUSY -> Triple("The server is busy with another create/open. Try again in a moment.", null, null)
+    Codes.BUSY -> Triple("The server is busy with another task. Try again in a moment.", null, null)
     Codes.FORBIDDEN ->
-        Triple("The server refused this action. Update claude-launcher-api on the server.", null, null)
+        Triple(
+            "The server refused this. Update the server scripts: Connections › Update now.",
+            "Open Connections",
+            Fix.GoTo(Tab.STATUS),
+        )
     Codes.HOST_KEY_CHANGED ->
         Triple(
             "The server's host key changed, so the app refused to connect. " +
@@ -40,7 +44,7 @@ fun friendly(e: ApiException): Triple<String, String?, Fix?> = when (e.code) {
         )
     Codes.AUTH_FAILED ->
         Triple(
-            "The server didn't accept this phone's key. Run install-launcher-key.sh with the key from Settings.",
+            "The server doesn't know this phone yet. Settings › Servers › Connect with a password sets it up.",
             "Settings",
             Fix.OpenSettings,
         )
@@ -72,6 +76,10 @@ fun openUrl(context: Context, url: String) {
     } catch (_: ActivityNotFoundException) {
     }
 }
+
+/** "1 plugin", "5 plugins": the app's one rule for a count and its noun. */
+fun plural(n: Long, one: String, other: String): String = "$n ${if (n == 1L) one else other}"
+fun plural(n: Int, one: String, other: String): String = plural(n.toLong(), one, other)
 
 fun formatUptime(seconds: Long): String {
     val d = seconds / 86_400

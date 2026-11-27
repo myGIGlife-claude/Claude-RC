@@ -1,5 +1,6 @@
 package life.mygig.clauderc.ui.screens
 
+import life.mygig.clauderc.ui.components.CardBox
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -24,8 +25,8 @@ fun DriveSection(vm: MainViewModel) {
     var disconnect by remember { mutableStateOf(false) }
     val context = LocalContext.current
     LaunchedEffect(Unit) { vm.drive.driveRefresh() }
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+    CardBox {
+        Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Text("Google Drive backup", style = MaterialTheme.typography.titleMedium)
             if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             when {

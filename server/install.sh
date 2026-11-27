@@ -12,6 +12,9 @@
 
 set -euo pipefail
 
+# The app's "Connect with a password" setup has no terminal: it hands sudo an askpass helper instead.
+sudo() { if [[ -n "${SUDO_ASKPASS:-}" ]]; then command sudo -A "$@"; else command sudo "$@"; fi; }
+
 # The developer knowledge pack: skills (rc-*) every Claude session and worker loads, so they code against current standards.
 # Every file is checked against the manifest's sha256; a failure leaves the installed pack as it was and never breaks the update.
 install_knowledge() {  # <base url> <tmp dir>
@@ -65,7 +68,7 @@ main() {
   for f in jq tmux git flock curl; do command -v "$f" >/dev/null || missing+=("$f"); done
   ((${#missing[@]} == 0)) || echo "Note: install these first: ${missing[*]} (e.g. sudo apt install ${missing[*]})" >&2
 
-  for f in claude-setup.sh claude-launcher-api install-launcher-key.sh claude-autostart.sh youtube-upload clauderc-team claude-push claude-plugin-updates claude-backup; do
+  for f in claude-setup.sh claude-launcher-api install-launcher-key.sh claude-autostart.sh youtube-upload clauderc-team claude-push claude-plugin-updates claude-backup claude-queue; do
     curl -fsSL "$base/$f" -o "$tmp/$f"
   done
 
@@ -88,6 +91,7 @@ main() {
   put "$tmp/claude-push" "$HOME/.local/bin/claude-push"
   put "$tmp/claude-plugin-updates" "$HOME/.local/bin/claude-plugin-updates"
   put "$tmp/claude-backup" "$HOME/.local/bin/claude-backup"
+  put "$tmp/claude-queue" "$HOME/.local/bin/claude-queue"
   curl -fsSL "$base/knowledge/refresh.sh" -o "$tmp/knowledge-refresh" && put "$tmp/knowledge-refresh" "$HOME/.local/bin/clauderc-knowledge-refresh" ||
     echo "Note: the knowledge refresh tool wasn't installed." >&2
   install_knowledge "$base" "$tmp" || echo "Note: the developer knowledge pack wasn't updated." >&2

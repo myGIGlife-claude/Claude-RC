@@ -10,6 +10,9 @@
 -keepclassmembers class life.mygig.clauderc.** { *** Companion; }
 -keepclasseswithmembers class life.mygig.clauderc.** { kotlinx.serialization.KSerializer serializer(...); }
 
+# Widgets: Glance creates ActionCallback classes by name when a widget button is tapped.
+-keep class life.mygig.clauderc.widget.** implements androidx.glance.appwidget.action.ActionCallback { <init>(); }
+
 # Natural voice: sherpa-onnx's JNI looks its Kotlin classes and fields up by name; commons-compress has optional codecs we don't ship.
 -keep class com.k2fsa.sherpa.onnx.** { *; }
 -dontwarn org.apache.commons.compress.**

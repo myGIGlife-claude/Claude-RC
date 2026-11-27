@@ -18,6 +18,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -41,6 +42,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,11 +53,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.dp
 import life.mygig.clauderc.api.WORKER_NAME_RE
 import life.mygig.clauderc.api.ClusterAccount
 import life.mygig.clauderc.api.ClusterConfig
+import life.mygig.clauderc.api.LoginUrl
 import life.mygig.clauderc.api.TokenWindow
 import life.mygig.clauderc.api.UsageWindow
 import life.mygig.clauderc.api.Updates
@@ -64,28 +70,37 @@ import androidx.compose.foundation.layout.padding
 import java.time.Duration
 import java.time.Instant
 import kotlin.math.roundToInt
+import life.mygig.clauderc.ui.LoginKind
 import life.mygig.clauderc.ui.MainViewModel
 import life.mygig.clauderc.ui.components.CardBox
+import life.mygig.clauderc.ui.components.tabular
 import life.mygig.clauderc.ui.openUrl
-import life.mygig.clauderc.ui.theme.BadRed
-import life.mygig.clauderc.ui.theme.WarnAmber
+import life.mygig.clauderc.ui.theme.statusColors
 import life.mygig.clauderc.ui.vm.HostsController
+import life.mygig.clauderc.ui.vm.accountName
+import life.mygig.clauderc.ui.vm.authLabel
+import life.mygig.clauderc.ui.vm.choosesSignIn
+import life.mygig.clauderc.ui.vm.googleCodeLooksRight
 
 private val MODES = listOf("acceptEdits", "plan", "bypassPermissions")
-private fun modeHint(m: String) = when (m) {
-    "acceptEdits" -> "edits files; runs only commands the project lists in .cluster-allowed-tools"
-    "plan" -> "read-only: research and plans"
-    "bypassPermissions" -> "runs anything without asking"
+private fun modeHint(m: String, kind: String = "claude"): String = when {
+    // Grok approves every tool in every mode; only the sandbox limits it.
+    kind == "grok" -> if (m == "plan") "read-only project folder, inside the sandbox" else "runs anything, inside the sandbox"
+    m == "acceptEdits" -> "edits files; runs only commands the project lists in .cluster-allowed-tools"
+    m == "plan" -> "read-only: research and plans"
+    m == "bypassPermissions" -> "runs anything without asking"
     else -> m
 }
 
 /** cLaudeCluster: every Claude account you're connected to, with what's left of its usage, plus the workers the main Claude hands work to. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ClusterSection(vm: MainViewModel) {
     val groups by vm.team.cluster.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val login by vm.team.workerLogin.collectAsStateWithLifecycle()
     val keyFor by vm.team.workerKey.collectAsStateWithLifecycle()
+    val signInChoice by vm.team.workerSignInChoice.collectAsStateWithLifecycle()
     var apiKey by remember { mutableStateOf("") }
     val runs by vm.team.workerRuns.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
@@ -163,9 +178,13 @@ fun ClusterSection(vm: MainViewModel) {
             title = { Text("Add an account") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("It becomes a worker on this server. Next you sign in to the account in your browser.", style = MaterialTheme.typography.bodySmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for ((k, label) in listOf("claude" to "Claude", "codex" to "ChatGPT", "gemini" to "Gemini"))
+                    Text(
+                        if (choosesSignIn(kind)) "It becomes a worker on this server. Next you sign in with ${accountName(kind)} or paste an API key."
+                        else "It becomes a worker on this server. Next you sign in to the account in your browser.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {   // four chips don't fit one line in a phone's dialog
+                        for ((k, label) in listOf("claude" to "Claude", "codex" to "ChatGPT", "gemini" to "Gemini", "grok" to "Grok"))
                             FilterChip(selected = kind == k, onClick = { kind = k }, label = { Text(label) })
                     }
                     OutlinedTextField(
@@ -173,23 +192,32 @@ fun ClusterSection(vm: MainViewModel) {
                         singleLine = true, modifier = Modifier.fillMaxWidth(), isError = name.isNotEmpty() && !WORKER_NAME_RE.matches(name),
                         keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
                     )
-                    OutlinedTextField(value = role, onValueChange = { role = it }, label = { Text("What it's for") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    RoleField(value = role, onValueChange = { role = it }, label = "What it's for")
                     Text("To use another server's account instead, add that server (top bar) and it offers to join.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
         )
     }
 
-    keyFor?.let { who ->
+    keyFor?.let { ask ->
+        val who = ask.name
+        val grok = ask.kind == "grok"
         AlertDialog(
             onDismissRequest = { vm.team.closeWorkerKey(); apiKey = "" },
-            confirmButton = { TextButton(onClick = { vm.team.saveWorkerKey(who, apiKey); apiKey = "" }, enabled = apiKey.length >= 20 && busy == null) { Text("Save key") } },
+            confirmButton = { TextButton(onClick = { vm.team.saveWorkerKey(who, apiKey); apiKey = "" }, enabled = apiKey.length >= (if (grok) 16 else 20) && busy == null) { Text("Save key") } },
             dismissButton = { TextButton(onClick = { vm.team.closeWorkerKey(); apiKey = "" }) { Text("Cancel") } },
-            title = { Text("Gemini key for $who") },
+            title = { Text(if (grok) "Grok key for $who" else "Gemini key for $who") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Google no longer lets the Gemini command-line tool sign in with a personal account. Paste an API key from aistudio.google.com/apikey instead.")
-                    OutlinedButton(onClick = { openUrl(context, "https://aistudio.google.com/apikey") }, modifier = Modifier.fillMaxWidth()) { Text("Open Google AI Studio") }
+                    if (grok) {
+                        Text("API keys use xAI credits. Prefer signing in with your Grok account if your plan includes the Grok CLI.")
+                        Text("Create an API key at console.x.ai (API Keys; it starts with xai-) and paste it here. It is stored only on the server, for this account. If this account is also signed in with Grok, that sign-in is used instead of the key.")
+                        OutlinedButton(onClick = { openUrl(context, "https://console.x.ai") }, modifier = Modifier.fillMaxWidth()) { Text("Open xAI console") }
+                    } else {
+                        Text("A free-tier key has a very small daily limit. Signing in with your Google account is usually better.")
+                        Text("Create an API key at aistudio.google.com/apikey and paste it here. It is stored only on the server, for this account. If this account is also signed in with Google, that sign-in is used instead of the key.")
+                        OutlinedButton(onClick = { openUrl(context, "https://aistudio.google.com/apikey") }, modifier = Modifier.fillMaxWidth()) { Text("Open Google AI Studio") }
+                    }
                     OutlinedTextField(
                         value = apiKey, onValueChange = { apiKey = it.trim() }, label = { Text("API key") }, singleLine = true,
                         visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
@@ -200,7 +228,26 @@ fun ClusterSection(vm: MainViewModel) {
         )
     }
 
-    login?.let { (who, url) ->
+    signInChoice?.let { choice ->
+        val who = choice.name
+        AlertDialog(
+            onDismissRequest = vm.team::closeWorkerSignInChoice,
+            confirmButton = { TextButton(onClick = vm.team::closeWorkerSignInChoice) { Text("Cancel") } },
+            title = { Text("Sign in $who") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = { vm.team.startAccountSignIn(choice) }, enabled = busy == null, modifier = Modifier.fillMaxWidth()) { Text("Sign in with ${accountName(choice.kind)}") }
+                    OutlinedButton(onClick = { vm.team.useApiKey(choice) }, modifier = Modifier.fillMaxWidth()) { Text("Use an API key instead") }
+                }
+            },
+        )
+    }
+
+    val deviceLogin = login?.takeIf { it.second.code != null }
+    val googleLogin = login?.takeIf { it.second.pasteCode }
+    if (deviceLogin != null) GrokSignInDialog(vm, deviceLogin.first, deviceLogin.second)
+    else if (googleLogin != null) GoogleSignInDialog(vm, googleLogin.first, googleLogin.second)
+    else login?.let { (who, url) ->
         AlertDialog(
             onDismissRequest = { vm.team.closeWorkerLogin(); code = "" },
             confirmButton = {
@@ -238,7 +285,7 @@ fun ClusterSection(vm: MainViewModel) {
             title = { Text("$who: recent tasks") },
             text = {
                 Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (list.isEmpty()) Text("Nothing delegated yet.")
+                    if (list.isEmpty()) Text("Nothing delegated yet. Ask the main chat to hand work to a worker.")
                     list.forEach { r ->
                         CardBox {
                             Column(Modifier.fillMaxWidth()) {
@@ -261,6 +308,55 @@ fun ClusterSection(vm: MainViewModel) {
             text = { Text("Signs the account out on the server and forgets its past tasks.") },
         )
     }
+}
+
+/** Grok's device code: nothing to type here. The view model waits for the browser's approval and closes this; a stray tap outside must not end the sign-in. */
+@Composable
+private fun GrokSignInDialog(vm: MainViewModel, who: String, login: LoginUrl) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = vm.team::closeWorkerLogin,
+        properties = DialogProperties(dismissOnClickOutside = false),
+        confirmButton = { TextButton(onClick = vm.team::closeWorkerLogin) { Text("Cancel") } },
+        title = { Text("Sign in $who") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                TextButton(onClick = { openUrl(context, login.url) }, modifier = Modifier.fillMaxWidth()) { Text(login.url) }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(login.code.orEmpty(), style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f))
+                    CopyButton(login.code.orEmpty(), what = "code", tonal = true)
+                }
+                Text("Open the page, check that the code matches, and approve. This window closes when Grok is signed in.")
+            }
+        },
+    )
+}
+
+/** Gemini's Google sign-in: Google's page shows a code to paste here. A refused code stays in the field with the reason under it, ready to fix. */
+@Composable
+private fun GoogleSignInDialog(vm: MainViewModel, who: String, login: LoginUrl) {
+    val context = LocalContext.current
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    val error by vm.team.workerLoginError.collectAsStateWithLifecycle()
+    var code by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = vm.team::closeWorkerLogin,
+        properties = DialogProperties(dismissOnClickOutside = false),
+        confirmButton = { TextButton(onClick = { vm.team.submitGoogleCode(who, code) }, enabled = googleCodeLooksRight(code) && busy == null) { Text("Sign in") } },
+        dismissButton = { TextButton(onClick = vm.team::closeWorkerLogin) { Text("Cancel") } },
+        title = { Text("Sign in $who") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Open the link, sign in with the Google account that has Gemini (Google One AI plan or a personal account), allow access, then copy the code Google shows and paste it here.")
+                OutlinedButton(onClick = { openUrl(context, login.url) }, modifier = Modifier.fillMaxWidth()) { Text("Open link") }
+                OutlinedTextField(
+                    value = code, onValueChange = { code = it.trim() }, label = { Text("Paste the code from Google") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(), isError = error.isNotEmpty(), keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                )
+                if (error.isNotEmpty()) Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+        },
+    )
 }
 
 @Composable
@@ -288,7 +384,7 @@ private fun ClusterSettingsCard(vm: MainViewModel, c: ClusterConfig, idle: Boole
             }
             Text("Sandbox for workers", style = MaterialTheme.typography.labelLarge)
             Text(
-                "Each worker run sees only its own project copy and its own login: none of your credentials, SSH keys or other projects. " +
+                "Each worker run sees only its own project copy and its own sign-in: none of your credentials, SSH keys or other projects. " +
                     "Auto uses it when this server supports it; Required refuses to run workers without it.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -334,7 +430,7 @@ private fun HostsCard(vm: MainViewModel, idle: Boolean, onRemove: (String) -> Un
             )
             val hs = hosts
             if (hs == null) Text("Loading…", style = MaterialTheme.typography.bodySmall)
-            else if (hs.isEmpty()) Text("No servers yet.", style = MaterialTheme.typography.bodySmall)
+            else if (hs.isEmpty()) Text("No servers yet. Tap + Add host to add one.", style = MaterialTheme.typography.bodySmall)
             hs?.forEach { h ->
                 Column {
                     Text(h.name, style = MaterialTheme.typography.labelLarge)
@@ -645,7 +741,7 @@ private fun HostSetupDialog(vm: MainViewModel, name: String, sshPort: Int) {
                     }
                     if (r.docker) Text(
                         "Docker is installed: its published ports bypass the firewall. Publish container ports on 127.0.0.1 (behind Caddy).",
-                        style = MaterialTheme.typography.bodySmall, color = WarnAmber,
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.statusColors.warnText,
                     )
                 }
                 error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
@@ -676,10 +772,34 @@ private fun Stepper(label: String, enabled: Boolean, canDown: Boolean, canUp: Bo
 private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean, onRemove: () -> Unit) {
     val idle = vm.busy.collectAsStateWithLifecycle().value == null   // a double tap would repeat the action (Mode would skip a step)
     val worker = a.name != "main"
+    val st by vm.status.collectAsStateWithLifecycle()
+    var editing by remember { mutableStateOf(false) }
+    if (editing) {
+        var newName by remember { mutableStateOf(a.name) }
+        var newRole by remember { mutableStateOf(a.role) }
+        val canRename = (st?.scriptApi ?: 0) >= 54   // worker-rename arrived with script API 54
+        val nameOk = !canRename || WORKER_NAME_RE.matches(newName)
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            confirmButton = { TextButton(onClick = { editing = false; vm.team.editWorker(a.name, if (canRename) newName else a.name, newRole) }, enabled = nameOk && idle) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("Cancel") } },
+            title = { Text("Edit ${a.name}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (canRename) OutlinedTextField(
+                        value = newName, onValueChange = { newName = it.trim() }, label = { Text("Name") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth(), isError = !nameOk, keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
+                    ) else Text("Renaming needs a server update (Update now).", style = MaterialTheme.typography.bodySmall)
+                    RoleField(value = newRole, onValueChange = { newRole = it }, label = "What it's for")
+                    if (canRename) Text("It can't be renamed while it has a task running or a sign-in open.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+        )
+    }
     CardBox {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                (if (worker) a.name else "Main account") + (if (a.kind == "codex") " · ChatGPT" else if (a.kind == "gemini") " · Gemini" else "") + (a.plan?.let { " · $it" } ?: "") + if (a.signedIn) "" else " · not signed in",
+                (if (worker) a.name else "Main account") + (if (a.kind == "codex") " · ChatGPT" else if (a.kind == "gemini") " · Gemini" else if (a.kind == "grok") " · Grok" else "") + (a.plan?.let { " · $it" } ?: "") + (if (a.signedIn) authLabel(a.kind, a.auth).let { if (it.isEmpty()) "" else " · $it" } else " · not signed in"),
                 style = MaterialTheme.typography.titleSmall,
             )
             a.email?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -693,8 +813,8 @@ private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    UsageBar("5-hour", u.fiveHour)
-                    UsageBar("Weekly", u.sevenDay)
+                    UsageBar("5 hours", u.fiveHour)
+                    UsageBar("Week", u.sevenDay)
                 }
                 a.tokens?.let { t ->
                     Text(
@@ -703,13 +823,18 @@ private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean
                     )
                 }
             }
+            // The main account is signed in through the same Claude sign-in as Connections › Sign-ins: without this a signed-out main account had no way back in from here.
+            if (!worker && a.kind == "claude") {
+                OutlinedButton(onClick = { vm.logins.showLogin(LoginKind.CLAUDE) }, enabled = idle) { Text(if (a.signedIn) "Re-sign in" else "Sign in") }
+            }
             if (worker && canManage) {
-                Text("Mode: ${a.mode} (${modeHint(a.mode)})", style = MaterialTheme.typography.bodySmall)
+                Text("Mode: ${a.mode} (${modeHint(a.mode, a.kind)})", style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    OutlinedButton(onClick = { vm.team.workerLoginStart(a.name, a.kind) }, enabled = idle) { Text(if (a.kind == "gemini") (if (a.signedIn) "Change key" else "Add key") else if (a.signedIn) "Re-sign in" else "Sign in") }
+                    OutlinedButton(onClick = { vm.team.workerLoginStart(a.name, a.kind) }, enabled = idle) { Text(if (a.signedIn) "Re-sign in" else "Sign in") }
                     OutlinedButton(onClick = { vm.team.setWorker(a.name, "mode", MODES[(MODES.indexOf(a.mode) + 1) % MODES.size]) }, enabled = idle) { Text("Mode") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { editing = true }, enabled = idle) { Text("Edit") }
                     TextButton(onClick = { vm.team.showWorkerRuns(a.name) }) { Text("Tasks") }
                     TextButton(onClick = onRemove, enabled = idle) { Text("Remove") }
                 }
@@ -721,13 +846,20 @@ private fun AccountCard(vm: MainViewModel, a: ClusterAccount, canManage: Boolean
 @Composable
 private fun UsageBar(label: String, w: UsageWindow) {
     val used = (w.pct ?: return).coerceIn(0.0, 100.0)
+    val color = when { used >= 90 -> MaterialTheme.statusColors.badDot; used >= 75 -> MaterialTheme.statusColors.warnDot; else -> MaterialTheme.colorScheme.primary }
+    val percentColor = when { used >= 90 -> MaterialTheme.statusColors.badText; used >= 75 -> MaterialTheme.statusColors.warnText; else -> MaterialTheme.colorScheme.onSurfaceVariant }
     // The bar fills as usage is spent, so a full bar means nothing is left.
-    Column {
-        Text("$label: ${used.roundToInt()}% used" + (resetsIn(w.resetsAt)?.let { " · resets in $it" } ?: ""), style = MaterialTheme.typography.labelMedium)
-        LinearProgressIndicator(
-            progress = { (used / 100).toFloat() }, modifier = Modifier.fillMaxWidth(),
-            color = when { used >= 90 -> BadRed; used >= 75 -> WarnAmber; else -> MaterialTheme.colorScheme.primary },
-        )
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(56.dp))
+            LinearProgressIndicator(
+                progress = { (used / 100).toFloat() },
+                modifier = Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(3.dp)),
+                color = color, trackColor = MaterialTheme.colorScheme.surfaceContainerHighest, gapSize = 0.dp, drawStopIndicator = {},
+            )
+            Text("${used.roundToInt()}%", style = MaterialTheme.typography.bodySmall.tabular(), color = percentColor, modifier = Modifier.width(40.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
+        }
+        resetsIn(w.resetsAt)?.let { Text("resets in $it", style = MaterialTheme.typography.labelSmall.tabular(), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 66.dp)) }
     }
 }
 
@@ -794,11 +926,11 @@ fun ChatClusterSheet(vm: MainViewModel, onClose: () -> Unit) {
                         }
                         if (w.attached) {
                             var role by remember(w.role) { mutableStateOf(w.role) }
-                            OutlinedTextField(
-                                value = role, onValueChange = { role = it }, label = { Text("What it does here") }, singleLine = true,
-                                modifier = Modifier.fillMaxWidth().onFocusChanged { if (!it.isFocused && role != w.role) vm.team.assignWorker(w.name, "role", role) },
-                                keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
-                                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { if (role != w.role) vm.team.assignWorker(w.name, "role", role) }),
+                            // Picking from the list saves at once; typing saves when the field loses focus.
+                            RoleField(
+                                value = role, label = "What it does here", onValueChange = { role = it },
+                                onPick = { v -> if (v != w.role) vm.team.assignWorker(w.name, "role", v) },
+                                modifier = Modifier.fillMaxWidth().onFocusChanged { if (!it.hasFocus && role != w.role) vm.team.assignWorker(w.name, "role", role) },
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 MODE_LABELS.forEach { (m, label) ->

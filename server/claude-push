@@ -58,13 +58,28 @@ def send(title, body, channel, session, kind):
             urllib.request.urlopen(req, timeout=10).read()
             sent += 1
         except urllib.error.HTTPError as e:
-            if e.code == 404 or b"UNREGISTERED" in e.read():
+            # FCM also uses 404 for project/configuration errors. Only remove
+            # registrations it explicitly identifies as unregistered.
+            error_body = e.read()
+            if b"UNREGISTERED" in error_body:
                 dead.add(t)
         except OSError:
             pass
     if dead:
-        with open(tokens_file, "w") as f:
-            f.write("".join(t + "\n" for t in tokens if t not in dead))
+        # Registrations may arrive while requests are in flight. Filter the
+        # current file, and replace it atomically so a partial write cannot
+        # erase the token list.
+        with open(tokens_file) as f:
+            current = [t for t in f.read().split() if t]
+        fd, tmp = tempfile.mkstemp(prefix=".push-tokens-", dir=os.path.dirname(tokens_file), text=True)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write("".join(t + "\n" for t in current if t not in dead))
+            os.replace(tmp, tokens_file)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
     return sent
 
 

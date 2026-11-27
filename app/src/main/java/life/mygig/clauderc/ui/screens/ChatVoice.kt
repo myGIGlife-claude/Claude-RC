@@ -33,11 +33,11 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
     private lateinit var tts: TextToSpeech
     private val worker = Executors.newSingleThreadExecutor()
 
+    private var released = false
+
     init {
-        if (prefs.getBoolean("natural", false) && NaturalVoice.isInstalled(context)) {
-            ready = true   // the natural voice doesn't need the phone's engine
-            worker.execute { runCatching { NaturalVoice.engine(context).generate("Hi.", prefs.getInt("sid", NATURAL_DEFAULT_SID), 1.0f) } }   // load and warm the model now: the first run is the slow one, so the first Play shouldn't pay for it
-        }
+        NaturalVoice.acquire()
+        if (prefs.getBoolean("natural", false) && NaturalVoice.isInstalled(context)) ready = true   // the natural voice doesn't need the phone's engine
         tts = TextToSpeech(context) { st ->
             if (st == TextToSpeech.SUCCESS) {
                 tts.language = Locale.getDefault()
@@ -52,6 +52,12 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
                 ready = true
             } else if (!ready) onFail("No text-to-speech voice on this phone.")
         }
+    }
+
+    /** Load and warm the model ahead of the first Play (the first run is the slow one); called when the speaker is switched on. */
+    fun warmUp() {
+        if (!naturalOn()) return
+        worker.execute { runCatching { NaturalVoice.generate(context, "Hi.", prefs.getInt("sid", NATURAL_DEFAULT_SID)) } }
     }
 
     private fun split(id: String) = id.substringBeforeLast('|') to (id.substringAfterLast('|').toIntOrNull() ?: 0)
@@ -145,12 +151,11 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
             try {
                 val t0 = System.nanoTime()
                 note = "Loading the voice…"
-                val engine = NaturalVoice.engine(context)
                 val loaded = (System.nanoTime() - t0) / 1_000_000
                 for (i in from until parts.size) {
                     if (gen != generation) return@execute
                     val t1 = System.nanoTime()
-                    val audio = engine.generate(parts[i], sid, 1.0f)
+                    val audio = NaturalVoice.generate(context, parts[i], sid)
                     val made = (System.nanoTime() - t1) / 1_000_000
                     val secs = audio.samples.size.toDouble() / audio.sampleRate
                     note = "Voice loaded in ${loaded / 1000.0} s; last piece: ${"%.1f".format(secs)} s of speech made in ${made / 1000.0} s"
@@ -188,7 +193,7 @@ class ChatVoice(private val context: Context, private val prefs: CachedPrefs, pr
         tts.stop(); tts.shutdown()
         closed = true
         stopNatural()
-        worker.execute { NaturalVoice.release() }
+        if (!released) { released = true; worker.execute { NaturalVoice.release() } }
         worker.shutdown()
         player.shutdown()
     }

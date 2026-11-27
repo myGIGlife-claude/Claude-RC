@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Test stub for xAI's Grok Build CLI (`grok -p "<prompt>" --output-format json`): one JSON object on stdout.
+# Records its argv and whether the key was in its environment (never the key) in $STUB_STATE. grok-fail there = fail the run.
+state="${STUB_STATE:-/tmp}"
+if [[ "${1:-}" == --version ]]; then
+  [[ -f "$state/grok-version-fail" ]] && exit 1
+  echo "grok stub 0.0.0"; exit 0
+fi
+# `login --device-code`: the real CLI's text, then waits. In $STUB_STATE: grok-login-approve = save the login and exit 0,
+# grok-login-nofile = exit 0 without saving one, grok-login-deny = exit 1.
+if [[ "${1:-}" == login ]]; then
+  [[ "${2:-}" == --device-code ]] || { echo "stub grok: only --device-code" >&2; exit 2; }
+  [[ "$HOME" == /tmp/* || "$HOME" == "${TMPDIR:-/nonexistent}"/* ]] || { echo "stub grok: refusing to write a login under $HOME" >&2; exit 1; }
+  code="$(cat "$state/grok-login-code" 2>/dev/null || echo QJPW-MG9J)"
+  printf 'To sign in, open this URL in your browser:\n\n  https://accounts.x.ai/oauth2/device?user_code=%s\n\n' "$code"
+  printf "Confirm this code in your browser:\n\n  %s\n\nOnly continue with a code you requested. Don't share it with anyone.\n\nWaiting for authorization...\n" "$code"
+  while :; do
+    if [[ -f "$state/grok-login-approve" ]]; then
+      mkdir -p "$HOME/.grok" && echo '{"stub":"account"}' >"$HOME/.grok/auth.json"; exit 0
+    fi
+    [[ -f "$state/grok-login-nofile" ]] && exit 0
+    [[ -f "$state/grok-login-deny" ]] && { echo "stub grok: authorization denied"; exit 1; }
+    sleep 0.1
+  done
+fi
+printf '%s\n' "$*" >"$state/grok-args" 2>/dev/null
+prompt="" resume="" args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case "${args[i]}" in
+    -p) prompt="${args[i + 1]:-}" ;;
+    -r) resume="${args[i + 1]:-}" ;;
+  esac
+done
+key="unset"; [[ -n "${XAI_API_KEY:-}" ]] && key="set(${#XAI_API_KEY})"
+printf 'key=%s home=%s cwd=%s\n' "$key" "${HOME:-}" "$PWD" >"$state/grok-env" 2>/dev/null
+if [[ -f "$state/grok-fail" || "$prompt" == *FAIL* ]]; then echo '{"error":{"message":"stub grok failure"}}'; exit 1; fi
+jq -cn --arg r "stub grok says hi key=$key home=${HOME:-} resume=$resume prompt=$prompt" \
+  '{sessionId:"3f2c9a10-7b1e-4d2a-9c55-0a1b2c3d4e5f",result:$r}'

@@ -17,9 +17,9 @@ set -uo pipefail
 # and tokens in Claude's settings env, 11 = custom API keys, 12 = Google Play,
 # 13 = Android signing keys, 14 = YouTube, 15 = mcp/plugins/disconnect and
 # session previews, 16 = in-app chat (PIN), 17 = chat uploads + chat log,
-# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id)
+# 18 = MCP sign-in, 19 = repo delete/rename/visibility, 20 = doctor-start, 21 = chat-file, 22 = chat mode, 23 = chat model, 24 = chat questions, 25 = team, 26 = cluster (accounts + usage), 27 = per-chat workers, 32 = cluster-config (per-chat parallel tasks, hand back to main near the 5 h limit), 30 = push (push-config/-register/-session/-test, sessions.push_done), 33 = skills-update, 34 = migrate (migrate-plan/-keygen/-authorize/-send/-passphrase/-status/-restore), 35 = migrate verify/user/signout/reboot (migrate-sudo-check/-create-user/-verify/-signout-old/-reboot), 36 = migrate-clone + a login key and apt tools in migrate-create-user, 37 = worker kinds (worker-add <name> [claude|codex|gemini], kind in worker-list/cluster; Gemini signs in with worker-set-key), 38 = set-secret-file, _FILE/_CREDENTIALS endings, 39 = hosts (host-list/-probe/-add/-test/-remove/-session/-attach), 40 = host-keygen, auth generated, 41 = host-harden, 42 = host-keyimport, 43 = Google Drive backup (drive-login-start/-poll, drive-status/-passphrase/-backup/-backup-status/-list/-delete/-schedule/-logout/-restore)., 44 = host-authorize, 45 = host-key-export, 46 = knowledge-status/-schedule/-refresh, 47 = General chat (general-list/-new/-open/-rename/-stop/-delete, sessions general/chat_id), 50 = grok worker kind, 51 = grok account sign-in (device code; worker-login-cancel), 52 = gemini account sign-in, fail-fast quota errors, 53 = starred-chat queue (queue-status/-on/-off/-star/-log, sessions.starred), 54 = worker-rename, 55 = inbox (inbox, inbox-dismiss), 56 = no chat PIN, 58 = copy between servers (copy-list/-keygen/-authorize/-probe/-send/-status/-apply/-cancel)
 # Bump when the app starts needing a new server feature.
-SCRIPT_API=49
+SCRIPT_API=58
 CLAUDERC_REPO="${CLAUDERC_REPO:-myGIGlife-claude/Claude-RC}"
 CLAUDERC_RAW="${CLAUDERC_RAW:-https://raw.githubusercontent.com}"
 CLAUDERC_API="${CLAUDERC_API:-https://api.github.com}"
@@ -120,7 +120,22 @@ EOF
 
 # The first tmux call forks the tmux server, which would inherit and hold open
 # the SSH channel (fd 3) and the api lock (fd 9). Never let it.
-tmux() { command tmux "$@" 3>&- 9>&-; }
+tmux() { command tmux "$@" 3>&- 6>&- 9>&-; }   # 6: the state lock (with_state_lock)
+
+# with_state_lock <command> [args…]: run it holding $LAUNCHER_CONFIG_DIR/.state.lock, so two overlapping requests that
+# read-modify-write the same state file (env, custom-names, services.json, attach/, cluster.json) don't lose a write.
+# fd 6: 3 is the SSH channel, 7 and 8 the drive/job/PIN locks, 9 the api lock. A nested call reuses the held lock (a
+# second flock on a new open of the same file would wait on ourselves).
+with_state_lock() {
+  if [[ -n "${STATE_LOCK_HELD:-}" ]]; then "$@"; return; fi
+  mkdir -p "$LAUNCHER_CONFIG_DIR"
+  local STATE_LOCK_HELD=1 rc=0
+  {
+    flock -w 20 6 || api_err busy "Another change is still being saved. Try again in a moment."
+    "$@" || rc=$?
+  } 6>>"$LAUNCHER_CONFIG_DIR/.state.lock"
+  return "$rc"
+}
 
 t() { local s="$1"; shift; timeout --kill-after=5 "$s" "$@"; }
 
@@ -151,16 +166,31 @@ session_dir() {
 # A credentials file that has a token (a logged-out Claude leaves `{"claudeAiOauth":{}}` behind, which must not count as signed in).
 creds_ok() { jq -e '(.claudeAiOauth.accessToken // empty) | strings | length > 0' "$1" >/dev/null 2>&1; }
 
-# Workers can be other CLIs: kind is claude (default), codex (ChatGPT) or gemini. Each is signed in under its own home folder.
-WORKER_KINDS=" claude codex gemini "
+# Workers can be other CLIs: kind is claude (default), codex (ChatGPT), gemini or grok. Each is signed in under its own home folder.
+WORKER_KINDS=" claude codex gemini grok "
+GROK_AUTH_FILE=".grok/auth.json"   # unverified: the name comes from xAI's installer notes; `grok login` keeps its login under $HOME/.grok
+GEMINI_AUTH_FILE=".gemini/oauth_creds.json"   # the Gemini CLI's cached Google login, under $GEMINI_CLI_HOME
+GEMINI_SIGNIN_DIR=".gemini-signin"   # the sign-in runs here, inside the worker's home, so a login in use stays until a new one has really arrived
 worker_kind() { jq -r '.kind // "claude"' "$1/meta.json" 2>/dev/null || echo claude; }
 # worker_signed <worker dir>: its login file has something in it.
 worker_signed() {
   case "$(worker_kind "$1")" in
     codex) jq -e 'length > 0' "$1/home/auth.json" >/dev/null 2>&1 ;;
-    gemini) [[ -s "$1/home/gemini-api-key" ]] ;;   # Google ended personal-account sign-in for the Gemini CLI: it uses an API key
+    gemini) [[ -s "$1/home/gemini-api-key" || -s "$1/home/$GEMINI_AUTH_FILE" ]] ;;   # an API key or a Google account login
+    grok) [[ -s "$1/home/xai-api-key" || -s "$1/home/$GROK_AUTH_FILE" ]] ;;   # an API key or a Grok account login
     *) creds_ok "$1/home/.credentials.json" ;;
   esac
+}
+
+# worker_auth <worker dir>: which login a Gemini or Grok worker's runs use. The account wins when both exist (same rule as at run time). Empty for the other kinds.
+worker_auth() {
+  local account key
+  case "$(worker_kind "$1")" in
+    gemini) account="$1/home/$GEMINI_AUTH_FILE"; key="$1/home/gemini-api-key" ;;
+    grok) account="$1/home/$GROK_AUTH_FILE"; key="$1/home/xai-api-key" ;;
+    *) return 0 ;;
+  esac
+  if [[ -s "$account" ]]; then echo account; elif [[ -s "$key" ]]; then echo key; fi
 }
 
 claude_logged_in() { [[ -s "${LOGIN_CONFIG_DIR:-$HOME/.claude}/.credentials.json" ]]; }
@@ -232,6 +262,17 @@ autostart_forget() {
   awk -F'\t' -v s="$sess" '$1 != s' "$AUTOSTART_LIST" >"$tmp" && mv "$tmp" "$AUTOSTART_LIST" || rm -f "$tmp"
 }
 
+# tmux 3.6 reports a new pane's folder as the server's own until its process has started, so a save right after
+# new-session would record the wrong folder. Wait (up to ~2 s) for the real one.
+settle_pane() {
+  local sess="$1" want i
+  want="$(cd "$2" 2>/dev/null && pwd -P)" || return 0
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    [[ "$(tmux display-message -p -t "=$sess:" '#{pane_current_path}' 2>/dev/null)" == "$want" ]] && return 0
+    sleep 0.2
+  done
+}
+
 # Starts the session exactly as the menu always has, so claude-autostart picks
 # it up. Returns 0 if started, 2 if already running.
 launch_session() {
@@ -243,6 +284,7 @@ launch_session() {
   trust_folder "$dir"
   tmux new-session -d -s "$sess" -c "$dir" \
     "env -u ANTHROPIC_API_KEY claude --remote-control $(printf %q "$name"); exec bash" || return 1
+  settle_pane "$sess" "$dir"
   autostart_save
   return 0
 }
@@ -739,6 +781,7 @@ api_start_session() {
 
 do_status() {
   ensure_env_hook   # keeps Claude's settings in step with the saved tokens
+  copy_prune        # an expired copy key and day-old copy leftovers go
   ensure_push_hook
   local claude_ok=false gh_ok=false gh_user="" scopes="[]" aws_ok=false aws_json="null" ident
   claude_logged_in && claude_ok=true
@@ -875,14 +918,20 @@ do_repos() {
         })}' <<<"$raw")"
 }
 
+# claude_panes: one line per Claude session, fields joined by @@: name, pane folder, start command, current command,
+# created, attached, session_path. Same detection as claude-autostart: any session whose pane started claude (login
+# and sign-in helpers left out).
+claude_panes() {
+  { tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}@@#{session_created}@@#{session_attached}@@#{session_path}' 2>/dev/null || true; } |
+    awk -F'@@' -v l1="$CLAUDE_LOGIN_SESSION" -v l2="$AWS_LOGIN_SESSION" \
+      '($3 ~ /claude/ || $4 == "claude") && $1 != l1 && $1 != l2 && $1 != "mcp-auth" && $1 !~ /^worker-login-/ && !seen[$1]++'
+}
+
 # The running Claude sessions as a JSON array (what `sessions` and `migrate-plan` report).
 sessions_list_json() {
   local s
-  # Same detection as claude-autostart: any session whose pane started claude.
   # A General chat is a session named chat-<id> started in <chat dir>/<id> (session_path, which doesn't move with cd).
-  s="$({ tmux list-panes -a -F '#{session_name}@@#{pane_current_path}@@#{pane_start_command}@@#{pane_current_command}@@#{session_created}@@#{session_attached}@@#{session_path}' 2>/dev/null || true; } |
-    awk -F'@@' -v l1="$CLAUDE_LOGIN_SESSION" -v l2="$AWS_LOGIN_SESSION" \
-      '($3 ~ /claude/ || $4 == "claude") && $1 != l1 && $1 != l2 && $1 != "mcp-auth" && $1 !~ /^worker-login-/ && !seen[$1]++' |
+  s="$(claude_panes |
     jq -Rc --arg cd "$CHAT_DIR" --arg cr "$(realpath -m -- "$CHAT_DIR")" --arg re "$GENERAL_SESS_RE" 'split("@@")
       | ((.[0] | select(test($re)) | ltrimstr("chat-")) // null) as $id
       | ($id != null and (.[6] == ($cd + "/" + $id) or .[6] == ($cr + "/" + $id))) as $g
@@ -898,15 +947,15 @@ sessions_list_json() {
     out="$(jq -c --argjson d "$([[ -e "$PUSH_DIR/$name" ]] && echo true || echo false)" \
       '.[-1].push_done = $d' <<<"$out")"
   done < <(jq -c '.[]' <<<"${s:-[]}")
-  printf '%s' "$out"
+  jq -c --argjson c "$(queue_conf)" 'map(. + {starred:(.name as $n | $c.stars | index($n) != null)})' <<<"$out"
 }
 
 # session_state_json <session>: {preview, waiting, busy}: its last lines, and whether it's waiting on a question or working.
 session_state_json() {
   local screen tail4 waiting=false busy=false
   screen="$(tmux capture-pane -p -J -t "=$1:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15)"
-  # Drop Claude's input box and status bar: separators, the empty ❯ prompt, mode/shortcut hints.
-  tail4="$(grep -v '^[[:space:]]*$' <<<"$screen" | grep -vE '^[─━╭╰│ ]+$|^ *❯|⏵⏵|shift\+tab|for shortcuts|← for agents|esc to interrupt|^ *⎿? *Tip:|/clear to save|Restart to update' |
+  # Drop Claude's input box and status bar: separators, the empty ❯ prompt, mode/shortcut hints, the cost status line and the token spinner.
+  tail4="$(grep -v '^[[:space:]]*$' <<<"$screen" | grep -vE '^[─━╭╰│ ]+$|^ *❯|⏵⏵|shift\+tab|for shortcuts|← for agents|esc to interrupt|^ *⎿? *Tip:|/clear to save|Restart to update|full +\$[0-9]|last +\$[0-9]|tokens\)$' |
     sed -e 's/[[:space:]]*$//' -e 's/^[[:space:]]\{8,\}//' | tail -n 3 | cut -c1-120)"
   grep -qE "$WAIT_RE" <<<"$screen" && waiting=true
   grep -q "esc to interrupt" <<<"$screen" && busy=true
@@ -970,24 +1019,45 @@ general_title() {
   printf '%s' "${t:-New chat}"
 }
 
+# The app polls general-list every 15 s: only the newest folders (and running chats) get the full look, which forks a few
+# processes each; older ones are listed from their folder alone (cached .title, folder time, not running).
+GENERAL_LIST_FULL=100
 do_general_list() {
   [[ $# -eq 0 ]] || bad_args "general-list takes no arguments"
-  local d id f sess state created updated tmp
+  local d id f t tt sess state created updated tmp mt n=0 running=" "
   tmp="$(mktemp)"
-  for d in "$CHAT_DIR"/*/; do
+  running+="$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^chat-' | tr '\n' ' ')"
+  while IFS=' ' read -r mt d; do
     d="${d%/}"; id="${d##*/}"
     [[ "$id" =~ $GENERAL_ID_RE && ! -L "$d" ]] || continue
+    if ((n >= GENERAL_LIST_FULL)) && [[ "$running" != *" chat-$id "* ]]; then
+      t=""
+      [[ -f "$d/.title" ]] && IFS= read -r -n 400 t <"$d/.title"
+      printf '%s\t%s\t%s\t%s\n' "$id" "${t//[[:cntrl:]]/}" "$d" "$mt" >>"$tmp.old"
+      continue
+    fi
+    n=$((n + 1))
     f="$(general_transcript "$d")"
     created="$(date -u -d "${id:0:4}-${id:4:2}-${id:6:2} ${id:9:2}:${id:11:2}:${id:13:2}" +%s 2>/dev/null)" || created=0
     updated="$(stat -c %Y -- "${f:-$d}" 2>/dev/null)" || updated=0
     sess="" state='{"preview":"","waiting":false,"busy":false}'
-    if general_dir_of "chat-$id" >/dev/null; then sess="chat-$id"; state="$(session_state_json "$sess")"; fi
-    jq -cn --arg id "$id" --arg t "$(general_title "$d" "$f")" --arg d "$d" --arg s "$sess" \
+    if [[ "$running" == *" chat-$id "* ]] && general_dir_of "chat-$id" >/dev/null; then sess="chat-$id"; state="$(session_state_json "$sess")"; fi
+    t="$(general_title "$d" "$f")"
+    # The first message never changes: keep the title it gave, so the cheap listing above has it once this chat is old.
+    if [[ -n "$f" && "$t" != "New chat" && ! -e "$d/.title" ]]; then
+      tt="$(mktemp "$d/.title.XXXXXX" 2>/dev/null)" && { printf '%s\n' "$t" >"$tt" && mv -n -- "$tt" "$d/.title"; rm -f -- "$tt"; }
+    fi
+    jq -cn --arg id "$id" --arg t "$t" --arg d "$d" --arg s "$sess" \
       --argjson c "${created:-0}" --argjson u "${updated:-0}" --argjson st "$state" \
       '{id:$id, title:$t, dir:$d, running:($s != ""), session:$s, created_at:$c, updated_at:$u} + $st' >>"$tmp"
-  done
+  done < <(stat -c '%Y %n' -- "$CHAT_DIR"/*/ 2>/dev/null | sort -rn)
+  if [[ -s "$tmp.old" ]]; then
+    jq -Rc 'split("\t") | {id:.[0], title:.[1], dir:.[2], running:false, session:"",
+      created_at:(try (.[0][0:15] | strptime("%Y%m%d-%H%M%S") | mktime) catch 0), updated_at:(.[3] | tonumber? // 0),
+      preview:"", waiting:false, busy:false}' "$tmp.old" >>"$tmp"
+  fi
   jq -sc '{chats:sort_by(-.updated_at, -.created_at)}' "$tmp" >"$tmp.out"
-  rm -f "$tmp"
+  rm -f "$tmp" "$tmp.old"
   api_ok_file "$tmp.out"
 }
 
@@ -1024,6 +1094,9 @@ do_general_open() {
   need tmux
   command -v claude >/dev/null 2>&1 || api_err internal "'claude' is not installed on the server."
   local sid rc=0 already=false
+  # One open per chat at a time: two phones/taps racing on a stopped chat could kill each other's new tmux session. fd 9 is closed for tmux (see the tmux wrapper).
+  exec 9>>"$CHAT_DIR/.open-$GEN_ID.lock"
+  flock -w 20 9 || api_err busy "This chat is still opening. Try again in a moment."
   if general_running; then
     already=true
   else
@@ -1185,6 +1258,7 @@ resume_session() {
   trust_folder "$dir"
   if tmux new-session -d -s "$sess" -c "$dir" \
     "env -u ANTHROPIC_API_KEY claude --remote-control $(printf %q "$name") --resume $sid; exec bash"; then
+    settle_pane "$sess" "$dir"
     autostart_save
     sleep 4
     pp="$(tmux display-message -p -t "=$sess:" '#{pane_pid}' 2>/dev/null)"
@@ -1267,6 +1341,7 @@ do_keys() {
   for k in "$@"; do [[ " $KEYS_ALLOWED " == *" $k "* ]] || api_err invalid_name "Key '$k' isn't allowed."; done
   tmux has-session -t "=$sess" 2>/dev/null || api_err invalid_name "No running session named '$sess'."
   for k in "$@"; do tmux send-keys -t "=$sess:" "$k"; sleep 0.2; done
+  chat_log "$sess" keys   # the owner is in this chat (the queue backs off)
   sleep 1   # let the screen redraw before reading it back
   text="$(tmux capture-pane -p -J -t "=$sess:" -S -500 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 120)"
   api_ok "$(jq -cn --arg s "$sess" --arg t "$text" '{session:$s, lines:120, text:$t}')"
@@ -1464,8 +1539,11 @@ start_login_session() {
   local envs=(-e "LOGIN_BIN=$bin")
   # Team: sign a worker account in to its own config dir.
   [[ -n "${LOGIN_CONFIG_DIR:-}" ]] && envs+=(-e "CLAUDE_CONFIG_DIR=$LOGIN_CONFIG_DIR" -e "CODEX_HOME=$LOGIN_CONFIG_DIR" -e "GEMINI_CLI_HOME=$LOGIN_CONFIG_DIR" -e NO_BROWSER=true)
+  # Grok has no variable for its folder: it keeps its login under $HOME/.grok. The pane starts there too: a Gemini CLI started in the
+  # owner's home would read the owner's ~/.gemini and .env as its workspace settings.
+  [[ -n "${LOGIN_HOME:-}" ]] && envs+=(-e "HOME=$LOGIN_HOME" -c "$LOGIN_HOME")
   tmux new-session -d -s "$name" -x 1000 -y 60 "${envs[@]}" \
-    bash -c 'env -u ANTHROPIC_API_KEY "$LOGIN_BIN" "$@"; echo "[exit $?]"; sleep 900' login "$@" >/dev/null 2>&1
+    bash -c 'env -u ANTHROPIC_API_KEY -u GEMINI_API_KEY -u GOOGLE_API_KEY "$LOGIN_BIN" "$@"; echo "[exit $?]"; sleep 900' login "$@" >/dev/null 2>&1
 }
 
 end_login() {
@@ -1563,7 +1641,7 @@ do_worker_list() {
     [[ -f "$d/meta.json" ]] || continue
     n="$(basename "$d")"; signed=false
     worker_signed "${d%/}" && signed=true
-    out+="$(jq -c --arg n "$n" --argjson s "$signed" '{name:$n, kind:(.kind // "claude"), role:(.role // ""), mode:(.mode // "acceptEdits"), signed_in:$s}' "$d/meta.json")"$'\n'
+    out+="$(jq -c --arg n "$n" --argjson s "$signed" --arg au "$(worker_auth "${d%/}")" '{name:$n, kind:(.kind // "claude"), role:(.role // ""), mode:(.mode // "acceptEdits"), signed_in:$s} + (if $au == "" then {} else {auth:$au} end)' "$d/meta.json")"$'\n'
   done
   api_ok "$(printf '%s' "$out" | jq -sc '{workers:.}')"
 }
@@ -1593,6 +1671,13 @@ token_usage() {
   printf '%s\n' "$out"
 }
 
+# usage_fetch_raw <token>: the usage endpoint's JSON (empty on any failure). The token goes through curl's config on
+# stdin so it never shows in `ps`.
+usage_fetch_raw() {
+  printf 'header = "Authorization: Bearer %s"\nheader = "anthropic-beta: oauth-2025-04-20"\n' "$1" |
+    curl -sf --max-time 8 --config - https://api.anthropic.com/api/oauth/usage 2>/dev/null || true
+}
+
 # One account for the cluster view as a JSON line: who it is and how much usage is left.
 # $1 name, $2 config dir (holds .credentials.json), $3 .claude.json, $4 role, $5 mode
 cluster_account() {
@@ -1613,8 +1698,7 @@ cluster_account() {
   else
     # ponytail: undocumented endpoint (what Claude Code's /usage reads); if it changes the tile just says "unavailable".
     # The token goes through curl's config on stdin so it never shows in `ps`.
-    raw="$(printf 'header = "Authorization: Bearer %s"\nheader = "anthropic-beta: oauth-2025-04-20"\n' "$tok" |
-      curl -sf --max-time 8 --config - https://api.anthropic.com/api/oauth/usage 2>/dev/null || true)"
+    raw="$(usage_fetch_raw "$tok")"
     usage="$(jq -c '{five_hour:{pct:(.five_hour.utilization // null), resets_at:(.five_hour.resets_at // null)}, seven_day:{pct:(.seven_day.utilization // null), resets_at:(.seven_day.resets_at // null)}}' <<<"$raw" 2>/dev/null || true)"
     [[ -n "$usage" ]] || { usage=null; uerr='"unavailable"'; }
   fi
@@ -1635,8 +1719,8 @@ do_cluster() {
     if [[ "$(worker_kind "${d%/}")" == claude ]]; then
       cluster_account "$n" "$d/home" "$d/home/.claude.json" "$(jq -r '.role // ""' "$d/meta.json")" "$(jq -r '.mode // "acceptEdits"' "$d/meta.json")" >"$tmp/$(printf %02d "$i")" &
     else   # no usage numbers or token counts for these
-      jq -c --arg n "$n" --argjson s "$({ worker_signed "${d%/}" && echo true; } || echo false)" \
-        '{name:$n, kind:.kind, email:null, plan:null, signed_in:$s, role:(.role // ""), mode:(.mode // "acceptEdits"), usage:null, usage_error:"unavailable", tokens:null}' "$d/meta.json" >"$tmp/$(printf %02d "$i")"
+      jq -c --arg n "$n" --argjson s "$({ worker_signed "${d%/}" && echo true; } || echo false)" --arg au "$(worker_auth "${d%/}")" \
+        '{name:$n, kind:.kind, email:null, plan:null, signed_in:$s, role:(.role // ""), mode:(.mode // "acceptEdits"), usage:null, usage_error:"unavailable", tokens:null} + (if $au == "" then {} else {auth:$au} end)' "$d/meta.json" >"$tmp/$(printf %02d "$i")"
     fi
   done
   wait
@@ -1664,6 +1748,9 @@ do_cluster_config() {
 # cluster-config-set max_parallel 1-10 | handback true|false | handback_pct 50-100
 do_cluster_config_set() {
   [[ $# -eq 2 ]] || bad_args "usage: cluster-config-set max_parallel|handback|handback_pct|sandbox <value>"
+  with_state_lock cluster_config_set_locked "$@"
+}
+cluster_config_set_locked() {
   local cur new tmp
   cur="$(cluster_config_json)"
   case "$1" in
@@ -1688,7 +1775,7 @@ do_worker_add() {
   role="$(read_secret_line)"
   exec 0</dev/null
   worker_check "$name"
-  [[ "$WORKER_KINDS" == *" $kind "* && $# -le 2 ]] || api_err invalid_name "Kind must be claude, codex or gemini."
+  [[ "$WORKER_KINDS" == *" $kind "* && $# -le 2 ]] || api_err invalid_name "Kind must be claude, codex, gemini or grok."
   [[ ! -f "$WORKERS_DIR/$name/meta.json" ]] || api_err invalid_name "A worker named '$name' already exists."
   mkdir -p "$WORKERS_DIR/$name/home" "$WORKERS_DIR/$name/tasks"
   chmod 700 "$WORKERS_DIR" "$WORKERS_DIR/$name" "$WORKERS_DIR/$name/home" "$WORKERS_DIR/$name/tasks"
@@ -1712,6 +1799,47 @@ do_worker_set() {
   jq -c --arg f "$field" --arg v "${val:0:200}" '.[$f] = $v' "$WORKERS_DIR/$name/meta.json" >"$tmp" &&
     mv -f "$tmp" "$WORKERS_DIR/$name/meta.json" || { rm -f "$tmp"; api_err internal "Couldn't save the worker."; }
   api_ok "$(jq -cn --arg n "$name" '{saved:$n}')"
+}
+
+# worker-rename <old> <new>: moves the folder, then rewrites every stored mention of the old name (task records and the
+# worker's own .claude.json hold absolute workers/<old>/ paths; attach/*.json are keyed by worker). Names are [A-Za-z0-9_-]: safe in sed.
+# Branches already made (cluster/<old>/<id>) keep their names: the task records still point at them.
+worker_rewrite() {  # $1 = from, $2 = to, $3 = worker folder
+  local f t
+  for f in "$3"/tasks/*.json "$3"/home/.claude.json; do
+    [[ -f "$f" ]] || continue
+    t="$(mktemp "$3/rw.XXXXXX")" && sed "s#/workers/$1/#/workers/$2/#g" "$f" >"$t" && cat "$t" >"$f" || { rm -f "$t"; return 1; }
+    rm -f "$t"
+  done
+}
+worker_rename_locked() {  # $1 = old, $2 = new
+  local old="$1" new="$2" f t
+  mv -T -- "$WORKERS_DIR/$old" "$WORKERS_DIR/$new" || api_err internal "Couldn't rename the worker's folder."
+  if ! worker_rewrite "$old" "$new" "$WORKERS_DIR/$new"; then
+    worker_rewrite "$new" "$old" "$WORKERS_DIR/$new"; mv -T -- "$WORKERS_DIR/$new" "$WORKERS_DIR/$old"
+    api_err internal "Couldn't update the worker's saved tasks, so nothing was renamed."
+  fi
+  for f in "$ATTACH_DIR"/*.json; do
+    [[ -f "$f" ]] || continue
+    jq -e --arg o "$old" 'type == "object" and has($o)' "$f" >/dev/null 2>&1 || continue
+    t="$(mktemp "$ATTACH_DIR/a.XXXXXX")" &&
+      jq -c --arg o "$old" --arg n "$new" '.[$n] = .[$o] | del(.[$o])' "$f" >"$t" && mv -f "$t" "$f" || { rm -f "$t"; api_err internal "Renamed the worker, but couldn't update a project's attached list; rename it back and try again."; }
+  done
+}
+do_worker_rename() {
+  [[ $# -eq 2 ]] || bad_args "usage: worker-rename <old> <new>"
+  worker_exists "$1"; worker_check "$2"
+  [[ "$1" != "$2" ]] || api_err invalid_name "That is already its name."
+  [[ ! -e "$WORKERS_DIR/$2" ]] || api_err invalid_name "A worker named '$2' already exists."
+  tmux has-session -t "=worker-login-$1" 2>/dev/null && api_err busy "Finish or cancel the sign-in first."
+  local f st
+  for f in "$WORKERS_DIR/$1"/tasks/*.json; do
+    [[ -f "$f" ]] || continue
+    st="$(jq -r '.status // ""' "$f" 2>/dev/null)"
+    [[ "$st" != running ]] || api_err busy "It has a task running. Wait for it to finish, then rename."
+  done
+  with_state_lock worker_rename_locked "$1" "$2"
+  api_ok "$(jq -cn --arg o "$1" --arg n "$2" '{renamed:$n, from:$o}')"
 }
 
 do_worker_remove() {
@@ -1740,7 +1868,8 @@ attach_session() {
   ATTACH_FILE="$ATTACH_DIR/$(claude_proj_slug "$d").json"
 }
 attach_read() { { [[ -s "$ATTACH_FILE" ]] && jq -c 'if type == "object" then . else {} end' "$ATTACH_FILE" 2>/dev/null; } || echo '{}'; }
-attach_write() {  # $1 = jq filter, rest = jq args
+attach_write() { with_state_lock attach_write_locked "$@"; }
+attach_write_locked() {  # $1 = jq filter, rest = jq args
   local f="$1" tmp; shift
   mkdir -p "$ATTACH_DIR" && chmod 700 "$ATTACH_DIR"
   tmp="$(mktemp "$ATTACH_DIR/a.XXXXXX")"
@@ -2163,6 +2292,7 @@ conn_port="${CLAUDERC_CONN:-}"; conn_port="${conn_port##* }"
 add_sshd_port "$conn_port"
 while read -r p; do add_sshd_port "$p"; done < <(sshd -T 2>/dev/null | awk '/^port /{print $2}')
 # This server's address (first field of SSH_CONNECTION) is never banned by fail2ban; used only when it is a plain IP.
+# Tailscale addresses (100.64.0.0/10, fd7a:115c:a1e0::/48) are never banned either: retries from your own devices on the tailnet.
 client_ip="${CLAUDERC_CONN:-}"; client_ip="${client_ip%% *}"
 if ! [[ "$client_ip" =~ ^(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])){3}$ ||
   ("$client_ip" == *:* && "$client_ip" =~ ^[0-9A-Fa-f:.]{2,45}$) ]]; then client_ip=""; fi
@@ -2207,7 +2337,7 @@ if has harden && ((pkgs_ok)); then
 enabled = true
 backend = systemd
 port = $f2b_ports
-ignoreip = 127.0.0.1/8 ::1${client_ip:+ $client_ip}
+ignoreip = 127.0.0.1/8 ::1 100.64.0.0/10 fd7a:115c:a1e0::/48${client_ip:+ $client_ip}
 maxretry = 4
 findtime = 10m
 bantime = 1h
@@ -2373,6 +2503,7 @@ REMOTE
 # ~/.ssh/authorized_keys over the pinned ssh login, once (nothing changes if it is already there).
 do_host_authorize() {
   [[ $# -eq 1 ]] || bad_args "usage: host-authorize <name>"
+  migrate_need_run   # it lets another key into that account, like migrate-authorize
   local key type blob comment
   key="$(read_secret_line)"
   exec 0</dev/null
@@ -2466,7 +2597,8 @@ do_worker_login_start() {
   worker_login_target "${1:-}"
   case "$(worker_kind "$WORKERS_DIR/$1")" in
     codex) do_login_codex_start ;;
-    gemini) api_err invalid_name "Gemini workers sign in with an API key (worker-set-key)." ;;
+    gemini) do_login_gemini_start ;;
+    grok) do_login_grok_start ;;
     *) do_login_claude_start ;;
   esac
 }
@@ -2474,13 +2606,30 @@ do_worker_login_code() {
   worker_login_target "${1:-}"
   case "$(worker_kind "$WORKERS_DIR/$1")" in
     codex) do_login_codex_code ;;
-    gemini) api_err invalid_name "Gemini workers sign in with an API key (worker-set-key)." ;;
+    gemini) do_login_gemini_code ;;
+    grok) do_login_grok_wait ;;
     *) do_login_claude_code ;;
   esac
 }
+do_worker_login_cancel() {
+  worker_login_target "${1:-}"
+  end_login "$CLAUDE_LOGIN_SESSION"
+  [[ "$(worker_kind "$WORKERS_DIR/$1")" == gemini ]] && rm -rf -- "${LOGIN_CONFIG_DIR:?}/$GEMINI_SIGNIN_DIR"
+  api_ok '{"cancelled":true}'
+}
 
-# The Codex and Gemini CLIs install on first use (npm into ~/.local, on the sessions' PATH).
-ensure_cli() {  # <binary> <npm package>
+# The Codex and Gemini CLIs install on first use (npm into ~/.local, on the sessions' PATH); Grok through xAI's official installer.
+ensure_cli() {  # <binary> <npm package> (grok: no package)
+  if [[ "$1" == grok ]]; then
+    if ! command -v grok >/dev/null 2>&1; then
+      timeout 300 env -u ANTHROPIC_API_KEY -u GROK_DEPLOYMENT_KEY GROK_BIN_DIR="$HOME/.local/bin" \
+        bash -c 'curl -fsSL https://x.ai/cli/install.sh | bash' >/dev/null 2>&1 || true
+      hash -r
+    fi
+    command -v grok >/dev/null 2>&1 && timeout 30 grok --version >/dev/null 2>&1 ||
+      api_err internal "Couldn't install the Grok CLI on the server. Check that the server can reach x.ai, then try again."
+    return 0
+  fi
   command -v "$1" >/dev/null 2>&1 && return 0
   command -v npm >/dev/null 2>&1 || api_err internal "Installing $1 needs npm, which isn't on the server."
   timeout 300 npm install -g --prefix "$HOME/.local" "$2" >/dev/null 2>&1 || true
@@ -2530,7 +2679,7 @@ do_login_codex_code() {
 }
 
 # Success = the CLI wrote its login file under the worker's home.
-do_login_device_wait() {  # <codex|gemini>
+do_login_device_wait() {  # <codex>
   local w="${CLAUDE_LOGIN_SESSION#worker-login-}" i text=""
   exec 0</dev/null
   for ((i = 0; i < 45; i++)); do
@@ -2542,22 +2691,168 @@ do_login_device_wait() {  # <codex|gemini>
   api_err not_logged_in_claude "Login did not complete. Start the sign-in again." "$(jq -cn --arg t "$(tail -n 15 <<<"$text")" '{pane:$t}')"
 }
 
-# Gemini: the key (from Google AI Studio) comes on stdin and is kept in the worker's home, mode 600; clauderc-team hands it to the CLI.
+# Grok account (the user's subscription): `grok login --device-code` prints a link and a code, then waits until the page is approved and exits.
+do_login_grok_start() {
+  need tmux; ensure_cli grok
+  LOGIN_HOME="$LOGIN_CONFIG_DIR"
+  start_login_session "$CLAUDE_LOGIN_SESSION" "$(command -v grok)" login --device-code || api_err internal "Could not start the login session."
+  login_wait_url "$CLAUDE_LOGIN_SESSION" 30
+  local i code=""
+  if [[ -n "$LOGIN_URL" ]]; then
+    for ((i = 0; i < 20; i++)); do   # the code is printed a moment after the link
+      code="$(pane_text "$CLAUDE_LOGIN_SESSION" | sed -n '/Confirm this code/,$p' | grep -oE '\b[A-Z0-9]{4}-[A-Z0-9]{4}\b' | head -n 1 || true)"
+      [[ -n "$code" ]] && break
+      sleep 0.5
+    done
+    LOGIN_PANE="$(pane_text "$CLAUDE_LOGIN_SESSION" | tail -n 15 || true)"
+  fi
+  if [[ -z "$LOGIN_URL" || -z "$code" ]]; then
+    end_login "$CLAUDE_LOGIN_SESSION"
+    api_err internal "Grok didn't show a sign-in link and code." "$(jq -cn --arg t "$LOGIN_PANE" '{pane:$t}')"
+  fi
+  api_ok "$(jq -cn --arg u "$LOGIN_URL" --arg c "$code" --arg s "$CLAUDE_LOGIN_SESSION" '{url:$u, code:$c, session:$s}')"
+}
+
+# Success = `grok login` itself exited 0. worker_signed can't be the test: a worker that has an API key or an older login would count
+# as finished before the user approved anything. login_pending = not approved yet, ask again (the session stays up).
+# The answer can be asked for again: the phone often loses its connection while the browser is in front, and an orphaned wait must not
+# end the session under the app's retry. So the session stays after the exit; the app ends it (worker-login-cancel) or it goes by itself in 15 min.
+do_login_grok_wait() {
+  local i text secs=120
+  [[ "${CLAUDERC_GROK_LOGIN_WAIT:-}" =~ ^[0-9]+$ ]] && secs="$CLAUDERC_GROK_LOGIN_WAIT"   # the tests' short wait
+  exec 0</dev/null
+  for ((i = 0; i < secs; i++)); do
+    tmux has-session -t "=$CLAUDE_LOGIN_SESSION" 2>/dev/null || api_err login_failed "This sign-in has ended. Start the sign-in again."
+    text="$(pane_text "$CLAUDE_LOGIN_SESSION")"
+    if grep -q '\[exit 0\]' <<<"$text"; then
+      if [[ -s "$LOGIN_CONFIG_DIR/$GROK_AUTH_FILE" ]]; then
+        chmod 600 -- "$LOGIN_CONFIG_DIR/$GROK_AUTH_FILE"
+        api_ok '{"logged_in":true}'
+      fi
+      api_err login_failed "Grok finished signing in, but its login file isn't where this server looks for it ($GROK_AUTH_FILE)." "$(jq -cn --arg t "$(tail -n 15 <<<"$text")" '{pane:$t}')"
+    fi
+    if grep -q '\[exit ' <<<"$text"; then
+      api_err login_failed "Grok didn't finish signing in (the code may have expired). Start the sign-in again." "$(jq -cn --arg t "$(tail -n 15 <<<"$text")" '{pane:$t}')"
+    fi
+    sleep 1
+  done
+  api_err login_pending "Still waiting for you to approve the sign-in in your browser."
+}
+
+# gemini_select_auth <home> <oauth-personal|gemini-api-key>: tell the CLI which login to use, keeping its other settings. Runs outside
+# the sandbox while a worker can write this folder, so a link it planted there is removed, never followed.
+gemini_select_auth() {
+  local g="$1/.gemini" f new
+  [[ -L "$g" ]] && rm -f -- "$g"
+  mkdir -p -- "$g"
+  f="$g/settings.json"; new="$g/.settings.$$.new"
+  rm -f -- "$new"
+  if [[ -f "$f" && ! -L "$f" ]]; then
+    jq -c --arg t "$2" 'if type == "object" then . else {} end | .security.auth.selectedType = $t' "$f" >"$new" 2>/dev/null || : >"$new"
+  fi
+  [[ -s "$new" ]] || jq -cn --arg t "$2" '{security:{auth:{selectedType:$t}}}' >"$new"
+  mv -fT -- "$new" "$f"
+}
+
+# Gemini with a Google account: the interactive CLI in a tmux pane prints a link and "Enter the authorization code:"; Google's page shows a
+# code the user pastes back. (A headless run can't do this: it stops with "Manual authorization is required".) It runs in a folder of its own:
+# a CLI that finds a cached login shows no link at all, and a re-sign-in must not cost the worker its current login until the new one exists.
+# `timeout`: this pane would otherwise wait for a code for ever.
+do_login_gemini_start() {
+  need tmux; ensure_cli gemini @google/gemini-cli
+  local signin="$LOGIN_CONFIG_DIR/$GEMINI_SIGNIN_DIR" i text="" url=""
+  end_login "$CLAUDE_LOGIN_SESSION"
+  rm -rf -- "$signin"
+  (umask 077; mkdir -p -- "$signin") || api_err internal "Couldn't prepare the sign-in."
+  gemini_select_auth "$signin" oauth-personal
+  LOGIN_CONFIG_DIR="$signin" LOGIN_HOME="$signin"
+  start_login_session "$CLAUDE_LOGIN_SESSION" "$(command -v timeout)" --foreground 900 "$(command -v gemini)" --skip-trust || api_err internal "Could not start the login session."
+  for ((i = 0; i < 90; i++)); do
+    sleep 0.5
+    text="$(pane_text "$CLAUDE_LOGIN_SESSION")"
+    url="$(grep -oE 'https://accounts\.google\.com/[^[:space:]]+' <<<"$text" | tail -n 1 | tr -d '\r' || true)"
+    [[ -n "$url" ]] && break
+    grep -q '\[exit ' <<<"$text" && break
+  done
+  if [[ -z "$url" ]]; then
+    end_login "$CLAUDE_LOGIN_SESSION"
+    rm -rf -- "$signin"
+    api_err login_failed "Gemini didn't show a Google sign-in link." "$(jq -cn --arg t "$(tail -n 15 <<<"$text")" '{pane:$t}')"
+  fi
+  api_ok "$(jq -cn --arg u "$url" --arg s "$CLAUDE_LOGIN_SESSION" '{url:$u, session:$s, paste_code:true}')"
+}
+
+# The CLI wrote its login into the sign-in folder: it becomes the worker's login. unverified: the file name after a real sign-in, and that headless runs reuse it.
+gemini_login_finish() {  # <worker home>
+  local signin="$1/$GEMINI_SIGNIN_DIR"
+  sleep 0.5   # the CLI may still be writing it
+  end_login "$CLAUDE_LOGIN_SESSION"
+  gemini_select_auth "$1" oauth-personal
+  mv -fT -- "$signin/$GEMINI_AUTH_FILE" "$1/$GEMINI_AUTH_FILE" || api_err internal "Couldn't save the Google sign-in."
+  chmod 600 -- "$1/$GEMINI_AUTH_FILE"
+  [[ -f "$signin/.gemini/google_accounts.json" && ! -L "$signin/.gemini/google_accounts.json" ]] && mv -fT -- "$signin/.gemini/google_accounts.json" "$1/.gemini/google_accounts.json"
+  rm -rf -- "$signin"
+  api_ok '{"logged_in":true}'
+}
+
+# Lines that mean the CLI refused the code. The URL line is left out: its random parts could spell one of these words.
+gemini_login_refusals() { grep -v 'https://' <<<"$1" | grep -ciE 'invalid|error|failed|expired' || true; }
+
+do_login_gemini_code() {
+  local code i text="" before now home="$LOGIN_CONFIG_DIR"
+  local creds="$home/$GEMINI_SIGNIN_DIR/$GEMINI_AUTH_FILE"
+  code="$(read_secret_line)"
+  exec 0</dev/null
+  code="${code//[[:space:]]/}"
+  [[ "$code" =~ ^[A-Za-z0-9/_.~=+#-]{8,512}$ ]] || api_err invalid_name "That doesn't look like the code from Google. Check you copied all of it."
+  tmux has-session -t "=$CLAUDE_LOGIN_SESSION" 2>/dev/null || api_err login_failed "This sign-in has ended. Start the sign-in again."
+  # The folder started empty, so any login in it is new. Already there = an earlier code was accepted after its answer gave up.
+  [[ -s "$creds" && ! -L "$creds" ]] && gemini_login_finish "$home"
+  text="$(pane_text "$CLAUDE_LOGIN_SESSION")"
+  before="$(gemini_login_refusals "$text")"
+  tmux send-keys -t "=$CLAUDE_LOGIN_SESSION:" -l -- "$code"
+  tmux send-keys -t "=$CLAUDE_LOGIN_SESSION:" Enter
+  for ((i = 0; i < 45; i++)); do
+    sleep 1
+    [[ -s "$creds" && ! -L "$creds" ]] && gemini_login_finish "$home"
+    text="$(pane_text "$CLAUDE_LOGIN_SESSION")"
+    grep -q '\[exit ' <<<"$text" && break
+    now="$(gemini_login_refusals "$text")"
+    ((now > before)) && break
+  done
+  sleep 2
+  [[ -s "$creds" && ! -L "$creds" ]] && gemini_login_finish "$home"
+  text="$(pane_text "$CLAUDE_LOGIN_SESSION")"
+  if grep -q '\[exit ' <<<"$text" || ! tmux has-session -t "=$CLAUDE_LOGIN_SESSION" 2>/dev/null; then   # it gave up: only a new sign-in can work now
+    end_login "$CLAUDE_LOGIN_SESSION"
+    rm -rf -- "${home:?}/$GEMINI_SIGNIN_DIR"
+  fi
+  text="${text//"$code"/[code]}"
+  api_err login_failed "That code didn't work. Check you copied all of it, or start the sign-in again." "$(jq -cn --arg t "$(tail -n 15 <<<"$text")" '{pane:$t}')"
+}
+
+# Gemini and Grok: the key (from Google AI Studio / console.x.ai) comes on stdin and is kept in the worker's home, mode 600; clauderc-team hands it to the CLI.
 do_worker_set_key() {
-  local name="${1:-}" key dir
+  local name="${1:-}" key dir kind
   key="$(read_secret_line)"
   exec 0</dev/null
   worker_exists "$name"
-  [[ "$(worker_kind "$WORKERS_DIR/$name")" == gemini ]] || api_err invalid_name "Only Gemini workers use an API key."
+  kind="$(worker_kind "$WORKERS_DIR/$name")"
+  [[ "$kind" == gemini || "$kind" == grok ]] || api_err invalid_name "Only Gemini and Grok workers use an API key."
   key="${key//[[:space:]]/}"
+  if [[ "$kind" == grok ]]; then
+    [[ "$key" =~ ^xai-[A-Za-z0-9_.-]{16,200}$ ]] || api_err invalid_name "That isn't an xAI API key: they start with xai-. Create one at console.x.ai (API Keys)."
+    ensure_cli grok
+    dir="$WORKERS_DIR/$name/home"
+    (umask 077; printf '%s\n' "$key" >"$dir/xai-api-key.new" && mv -f "$dir/xai-api-key.new" "$dir/xai-api-key") || api_err internal "Couldn't save the key."
+    api_ok "$(jq -cn --arg n "$name" '{saved:$n}')"
+  fi
   [[ "$key" =~ ^[A-Za-z0-9._-]{20,200}$ ]] || api_err invalid_name "That doesn't look like a Gemini API key."
   ensure_cli gemini @google/gemini-cli
   dir="$WORKERS_DIR/$name/home"
   (umask 077; printf '%s\n' "$key" >"$dir/gemini-api-key.new" && mv -f "$dir/gemini-api-key.new" "$dir/gemini-api-key")
-  # An old Google-account login would be tried first and refused: remove it and pick the key.
-  rm -f "$dir/.gemini/oauth_creds.json"
-  mkdir -p "$dir/.gemini"
-  echo '{"security":{"auth":{"selectedType":"gemini-api-key"}}}' >"$dir/.gemini/settings.json"
+  # A Google account login stays and wins over the key (same rule as Grok): clauderc-team picks again before each run.
+  [[ -s "$dir/$GEMINI_AUTH_FILE" ]] || gemini_select_auth "$dir" gemini-api-key
   api_ok "$(jq -cn --arg n "$name" '{saved:$n}')"
 }
 
@@ -2772,7 +3067,8 @@ svc_verify() {
 # the file is kept mode 600, and names we added before but no longer have are
 # removed. The .bashrc line is kept for your own terminal. Applies when a
 # session (re)starts.
-ensure_env_hook() {
+ensure_env_hook() { with_state_lock ensure_env_hook_locked; }   # locked: an overlapping set_env must not be mirrored stale
+ensure_env_hook_locked() {
   [[ -f "$SERVICES_ENV" ]] || return 0
   grep -qF "$SERVICES_ENV_HOOK" "$HOME/.bashrc" 2>/dev/null || printf '\n%s\n' "$SERVICES_ENV_HOOK" >>"$HOME/.bashrc"
   local f="$HOME/.claude/settings.json" managed="$LAUNCHER_CONFIG_DIR/settings-env-names" tmp vars line old
@@ -2831,13 +3127,29 @@ sa_token_ok() {
 
 # set_env <VAR> <value>: replace VAR's line in the env file (values are
 # regex-checked, so they never contain a quote). An empty value removes it.
-set_env() {
+set_env() { with_state_lock set_env_locked "$@"; }
+set_env_locked() {
   local tmp
-  mkdir -p "$LAUNCHER_CONFIG_DIR"
   tmp="$(mktemp "$SERVICES_ENV.XXXXXX")"
   chmod 600 "$tmp"
   { grep -v "^export $1=" "$SERVICES_ENV" 2>/dev/null; [[ -z "$2" ]] || printf "export %s='%s'\n" "$1" "$2"; } >"$tmp"
   mv "$tmp" "$SERVICES_ENV"
+}
+
+# services_info_set <jq filter> [jq args…]: rewrite services.json (who each token service is logged in as).
+services_info_set() { with_state_lock services_info_set_locked "$@"; }
+services_info_set_locked() {
+  local f="$1" tmp; shift
+  tmp="$(mktemp "$SERVICES_INFO.XXXXXX")" || return 1
+  { jq -c . "$SERVICES_INFO" 2>/dev/null || echo '{}'; } | jq -c "$@" "$f" >"$tmp" && mv -f "$tmp" "$SERVICES_INFO" || { rm -f "$tmp"; return 1; }
+}
+
+# custom_names_edit add|remove <NAME>: the list of names added with set-secret.
+custom_names_edit() { with_state_lock custom_names_edit_locked "$@"; }
+custom_names_edit_locked() {
+  local tmp
+  tmp="$(mktemp "$CUSTOM_NAMES.XXXXXX")" || return 1
+  { grep -vx -- "$2" "$CUSTOM_NAMES" 2>/dev/null; [[ "$1" != add ]] || echo "$2"; } | sort -u >"$tmp" && mv -f "$tmp" "$CUSTOM_NAMES" || { rm -f "$tmp"; return 1; }
 }
 
 # login-token <service>: stdin = one value per SVC_VARS line, or the whole
@@ -2886,9 +3198,7 @@ do_login_token() {
     fi
   fi
   ensure_env_hook
-  tmp="$(mktemp "$SERVICES_INFO.XXXXXX")"
-  { jq -c . "$SERVICES_INFO" 2>/dev/null || echo '{}'; } | jq -c --arg id "$id" --arg w "$who" '.[$id] = $w' >"$tmp"
-  mv "$tmp" "$SERVICES_INFO"
+  services_info_set '.[$id] = $w' --arg id "$id" --arg w "$who"
   api_ok "$(jq -cn --arg w "$who" '{logged_in:true, user:$w}')"
 }
 
@@ -2896,13 +3206,29 @@ do_login_token() {
 
 # Names that redirect package installs, API traffic or TLS trust for every session are refused (an attacker with the phone key could
 # otherwise point pip/npm/the AWS CLI at their own server, or swap the CA bundle).
-CUSTOM_NAME_DENY='^(PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|UV_INDEX_URL|UV_DEFAULT_INDEX|UV_EXTRA_INDEX_URL|NPM_CONFIG_REGISTRY|OPENAI_BASE_URL|OPENAI_API_BASE|AWS_ENDPOINT_URL(_[A-Z0-9_]+)?|SSL_CERT_FILE|CURL_CA_BUNDLE|REQUESTS_CA_BUNDLE|NODE_EXTRA_CA_CERTS|DOCKER_HOST|GH_HOST|GITHUB_API_URL|GIT_SSH_COMMAND|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$'
+CUSTOM_NAME_DENY='^(PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|PIP_TRUSTED_HOST|PIP_FIND_LINKS|HF_ENDPOINT|UV_INDEX_URL|UV_DEFAULT_INDEX|UV_EXTRA_INDEX_URL|NPM_CONFIG_REGISTRY|OPENAI_BASE_URL|OPENAI_API_BASE|AWS_ENDPOINT_URL(_[A-Z0-9_]+)?|SSL_CERT_FILE|CURL_CA_BUNDLE|REQUESTS_CA_BUNDLE|NODE_EXTRA_CA_CERTS|DOCKER_HOST|GH_HOST|GITHUB_API_URL|GIT_SSH_COMMAND|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$'
 custom_name_ok() { [[ "$1" =~ $CUSTOM_NAME_RE && "$1" != CLAUDE_* && "$1" != ANTHROPIC_* && ! "$1" =~ $CUSTOM_NAME_DENY ]]; }
+# 0 when <NAME> belongs to a built-in service: set-/remove-secret would overwrite or wipe that service's login.
+service_var_name() {
+  local s v
+  [[ "$1" == OVH_* || "$1" == YOUTUBE_* || "$1" == CLOUDSDK_CORE_PROJECT ]] && return 0
+  for s in $TOKEN_SERVICES; do
+    svc_def "$s" || continue
+    for v in "${SVC_VARS[@]}"; do [[ "$v" == "$1" ]] && return 0; done
+  done
+  return 1
+}
+# custom_name_check <NAME> <usage>: a name set-/remove-secret may touch, else the call ends.
+custom_name_check() {
+  custom_name_ok "$1" || bad_args "$2"
+  ! service_var_name "$1" || api_err invalid_name "$1 belongs to a built-in service: sign in to that service under Keys instead."
+}
 
 # set-secret <NAME>: stdin = the value. For APIs without a built-in service:
 # saved like the others, so every Claude session and MCP server sees it.
 do_set_secret() {
-  [[ $# -eq 1 ]] && custom_name_ok "$1" || bad_args "usage: set-secret <NAME ending in _KEY, _TOKEN, _SECRET, …>"
+  [[ $# -eq 1 ]] || bad_args "usage: set-secret <NAME ending in _KEY, _TOKEN, _SECRET, …>"
+  custom_name_check "$1" "usage: set-secret <NAME ending in _KEY, _TOKEN, _SECRET, …>"
   local v
   v="$(read_secret_line)"
   exec 0</dev/null
@@ -2910,7 +3236,7 @@ do_set_secret() {
   [[ -n "$v" && ${#v} -le 4000 && "$v" != *"'"* ]] || api_err invalid_name "The value is empty, too long, or contains a single quote."
   set_env "$1" "$v"
   unset v
-  { grep -vx "$1" "$CUSTOM_NAMES" 2>/dev/null; echo "$1"; } | sort -u >"$CUSTOM_NAMES.tmp" && mv "$CUSTOM_NAMES.tmp" "$CUSTOM_NAMES"
+  custom_names_edit add "$1"
   ensure_env_hook
   api_ok "$(jq -cn --arg n "$1" '{saved:$n}')"
 }
@@ -2918,7 +3244,8 @@ do_set_secret() {
 # set-secret-file <NAME>: stdin = a JSON file (e.g. a service-account key),
 # base64-encoded. Saved as secret-files/<NAME>.json (mode 600); NAME holds its path.
 do_set_secret_file() {
-  [[ $# -eq 1 ]] && custom_name_ok "$1" || bad_args "usage: set-secret-file <NAME ending in _KEY, _FILE, _CREDENTIALS, …>"
+  [[ $# -eq 1 ]] || bad_args "usage: set-secret-file <NAME ending in _KEY, _FILE, _CREDENTIALS, …>"
+  custom_name_check "$1" "usage: set-secret-file <NAME ending in _KEY, _FILE, _CREDENTIALS, …>"
   local n="$1" dir f
   dir="$(mktemp -d)" && chmod 700 "$dir"
   trap 'rc=$?; rm -rf "$dir"; (exit $rc); on_exit' EXIT
@@ -2930,7 +3257,7 @@ do_set_secret_file() {
   f="$SECRET_FILES_DIR/$n.json"
   install -m 600 "$dir/f" "$f.new" && mv -f "$f.new" "$f"
   set_env "$n" "$f"
-  { grep -vx "$n" "$CUSTOM_NAMES" 2>/dev/null; echo "$n"; } | sort -u >"$CUSTOM_NAMES.tmp" && mv "$CUSTOM_NAMES.tmp" "$CUSTOM_NAMES"
+  custom_names_edit add "$n"
   ensure_env_hook
   api_ok "$(jq -cn --arg n "$n" '{saved:$n, file:true}')"
 }
@@ -3084,8 +3411,7 @@ do_youtube_login_poll() {
   fi
   set_env YOUTUBE_CLIENT_ID "$id"; set_env YOUTUBE_CLIENT_SECRET "$secret"; set_env YOUTUBE_REFRESH_TOKEN "$rt"
   rm -f "$YT_PENDING"
-  local tmp; tmp="$(mktemp "$SERVICES_INFO.XXXXXX")"
-  { jq -c . "$SERVICES_INFO" 2>/dev/null || echo '{}'; } | jq -c --arg w "$chan" '.youtube = $w' >"$tmp" && mv "$tmp" "$SERVICES_INFO"
+  services_info_set '.youtube = $w' --arg w "$chan"
   ensure_env_hook
   api_ok "$(jq -cn --arg c "$chan" '{logged_in:true, user:$c}')"
 }
@@ -3422,16 +3748,21 @@ do_drive_status() {
     '{configured:$c, connected:$n, schedule:$s, last_backup:$l, has_passphrase:$p}')"
 }
 
-# drive-passphrase: stdin = the passphrase (12-200 characters, one line); empty = forget the saved one.
+# drive-passphrase: stdin = the passphrase (12-200 characters, one line). An empty line, then the line "forget", removes
+# the saved one; an empty line alone (or nothing in time) changes nothing.
 do_drive_passphrase() {
   [[ $# -eq 0 ]] || bad_args "drive-passphrase reads the passphrase on stdin"
   local p tmp
   p="$(read_secret_line)"
-  exec 0</dev/null
   if [[ -z "$p" ]]; then
+    p="$(read_secret_line)"
+    exec 0</dev/null
+    [[ "$p" == forget ]] || bad_args "empty passphrase (an empty line, then the line forget, removes the saved one)"
+    migrate_need_run
     rm -f "$DRIVE_PASS"
     api_ok '{"saved":false,"removed":true}'
   fi
+  exec 0</dev/null
   migrate_need_run   # backups are encrypted with it: a stranger's passphrase would make them readable to a stranger
   if ((${#p} < 12 || ${#p} > 200)) || [[ ! "$p" =~ ^[[:print:]]+$ ]]; then
     unset p
@@ -3495,6 +3826,7 @@ drive_find() {
 
 do_drive_delete() {
   [[ $# -eq 1 ]] && drive_id_ok "$1" || bad_args "usage: drive-delete <id>"
+  migrate_need_run   # the backup is gone for good
   drive_need_token
   drive_find "$1"
   drive_delete_file "$1" || api_err internal "Google Drive didn't delete the backup."
@@ -3563,6 +3895,7 @@ do_knowledge_refresh() {
 # drive-logout: revoke at Google (best effort), forget the token, stop the schedule. The passphrase stays.
 do_drive_logout() {
   [[ $# -eq 0 ]] || bad_args "drive-logout takes no arguments"
+  migrate_need_run   # it stops the backups
   local rt
   rt="$(jq -r '.refresh_token // empty' "$DRIVE_TOKEN" 2>/dev/null)"
   if drive_safe "$rt"; then
@@ -3604,11 +3937,12 @@ do_drive_restore() {
 
 # remove-secret <NAME>: only names added with set-secret.
 do_remove_secret() {
-  [[ $# -eq 1 ]] && custom_name_ok "$1" || bad_args "usage: remove-secret <NAME>"
+  [[ $# -eq 1 ]] || bad_args "usage: remove-secret <NAME>"
+  custom_name_check "$1" "usage: remove-secret <NAME>"
   grep -qx "$1" "$CUSTOM_NAMES" 2>/dev/null || api_err invalid_name "$1 isn't a custom key."
   set_env "$1" ""
   rm -f "$SECRET_FILES_DIR/$1.json"
-  grep -vx "$1" "$CUSTOM_NAMES" >"$CUSTOM_NAMES.tmp"; mv "$CUSTOM_NAMES.tmp" "$CUSTOM_NAMES"
+  custom_names_edit remove "$1"
   ensure_env_hook
   api_ok "$(jq -cn --arg n "$1" '{removed:$n}')"
 }
@@ -3943,14 +4277,14 @@ do_mcp_auth_start() {
   for ((i = 0; i < 120; i++)); do
     sleep 0.5
     text="$(mcp_auth_screen)"
-    url="$(grep -A1 'copy this URL manually' <<<"$text" | grep -oE 'https://[^[:space:]]+' | head -n 1)"
+    url="$(grep -A3 -E 'copy this URL manually|Use the URL below' <<<"$text" | grep -oE 'https://[^[:space:]]+' | head -n 1)"
     [[ -n "$url" ]] && break
     sel="$(grep -m1 '❯' <<<"$text")"
     if grep -q 'Yes, I trust this folder' <<<"$text"; then
       [[ "$sel" == *"Yes, I trust"* ]] && mcp_auth_key Enter || mcp_auth_key Down
-    elif grep -qE '[0-9]\. (Re-?a|A)uthenticate' <<<"$text"; then
+    elif grep -qE '([0-9]\. |^ *(❯ *)?)(Re-?a|A)uthenticate *$' <<<"$text"; then
       [[ "$sel" == *uthenticate* ]] && mcp_auth_key Enter || mcp_auth_key Down
-    elif grep -q 'Manage MCP servers' <<<"$text"; then
+    elif grep -qE 'Manage MCP servers|^ *MCP servers *$' <<<"$text"; then   # Claude Code 2.1.33x dropped "Manage"
       ((moves++ < 40)) || break
       [[ " $sel " == *" $name "* ]] && mcp_auth_key Enter || mcp_auth_key Down
     fi
@@ -4087,77 +4421,26 @@ do_disconnect() {
   [[ "$1" == gcp ]] && set_env CLOUDSDK_CORE_PROJECT ""
   [[ "$1" == googleplay ]] && { set_env SUPPLY_JSON_KEY ""; set_env ANDROID_PUBLISHER_CREDENTIALS ""; }
   [[ -n "$SVC_KEYFILE" ]] && rm -f "$LAUNCHER_CONFIG_DIR/$SVC_KEYFILE"
-  if [[ -f "$SERVICES_INFO" ]]; then
-    tmp="$(mktemp "$SERVICES_INFO.XXXXXX")" && jq -c --arg id "$1" 'del(.[$id])' "$SERVICES_INFO" >"$tmp" && mv "$tmp" "$SERVICES_INFO"
-  fi
+  if [[ -f "$SERVICES_INFO" ]]; then services_info_set 'del(.[$id])' --arg id "$1"; fi
   ensure_env_hook
   api_ok "$(jq -cn --arg id "$1" '{disconnected:$id}')"
 }
 
 # ---- In-app chat ----------------------------------------------------------------
-# Chat needs a PIN on top of the phone's key. It lives only in this file on the
-# server (mode 600), so you can read it here if you forget it; no action ever
-# returns it. 5 wrong PINs lock chat for 30 minutes (or until you delete
-# chat-locked on the server).
-CHAT_PIN_FILE="$LAUNCHER_CONFIG_DIR/chat-pin"
-CHAT_LOCK="$LAUNCHER_CONFIG_DIR/chat-locked"
-CHAT_FAILS="$API_STATE_DIR/chat-pin-fails"
 CHAT_LOG="$API_STATE_DIR/chat.log"
-
-chat_pin() { sed -n 's/^PIN=\([0-9]\{6,12\}\)$/\1/p' "$CHAT_PIN_FILE" 2>/dev/null | head -n 1; }
-
-chat_locked_until() {
-  local t
-  [[ -f "$CHAT_LOCK" ]] || return 1
-  t=$(($(stat -c %Y "$CHAT_LOCK") + 1800))
-  if (($(date +%s) >= t)); then rm -f "$CHAT_LOCK"; return 1; fi
-  echo "$t"
-}
-
-# check_pin <pin>: returns, or ends the call with an error (counting failures).
-check_pin() {
-  local want n until
-  want="$(chat_pin)"
-  [[ -n "$want" ]] || api_err pin_not_set "Set a chat PIN in the app first."
-  # One guess at a time: parallel calls would each read the same fail count.
-  exec 8>>"$CHAT_FAILS.lock"; flock -w 10 8 || api_err busy "Try again in a moment."
-  if until="$(chat_locked_until)"; then
-    api_err chat_locked "Too many wrong PINs. Chat is locked until $(date -d "@$until" +%H:%M), or delete ~/.config/claude-launcher/chat-locked on the server."
-  fi
-  if [[ "$1" == "$want" ]]; then rm -f "$CHAT_FAILS"; return 0; fi
-  n=$(($(cat "$CHAT_FAILS" 2>/dev/null || echo 0) + 1))
-  echo "$n" >"$CHAT_FAILS"
-  if ((n >= 5)); then
-    rm -f "$CHAT_FAILS"; touch "$CHAT_LOCK"
-    api_err chat_locked "Too many wrong PINs. Chat is locked for 30 minutes (or delete ~/.config/claude-launcher/chat-locked on the server)."
-  fi
-  api_err wrong_pin "Wrong PIN ($((5 - n)) tries left). Forgot it? It's in ~/.config/claude-launcher/chat-pin on the server."
-}
-
 chat_log() { printf '%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" >>"$CHAT_LOG" 2>/dev/null; }
 
-# chat-pin-status: whether a PIN is set and whether chat is locked.
+# The chat PIN was removed (SCRIPT_API 56): the app lock guards the app. Apps still send a PIN line first; it is read and ignored.
+check_pin() { :; }
+
+# chat-pin-status / chat-pin-set: kept for older apps, which ask for a PIN they think is set; any PIN works.
 do_chat_pin_status() {
   [[ $# -eq 0 ]] || bad_args "chat-pin-status takes no arguments"
-  local set=false until
-  [[ -n "$(chat_pin)" ]] && set=true
-  until="$(chat_locked_until)" || until=""
-  api_ok "$(jq -cn --argjson s "$set" --arg u "$until" '{set:$s, locked_until:(if $u == "" then null else ($u|tonumber) end)}')"
+  api_ok '{"set":true,"required":false,"locked_until":null}'
 }
-
-# chat-pin-set: stdin = new PIN, then the current PIN when one is set.
 do_chat_pin_set() {
   [[ $# -eq 0 ]] || bad_args "chat-pin-set takes no arguments"
-  local new old tmp
-  new="$(read_secret_line)"; old="$(read_secret_line)"
   exec 0</dev/null
-  [[ "$new" =~ ^[0-9]{6,12}$ ]] || api_err invalid_name "The PIN must be 6 to 12 digits."
-  [[ -z "$(chat_pin)" ]] || check_pin "$old"
-  mkdir -p "$LAUNCHER_CONFIG_DIR"
-  tmp="$(mktemp "$CHAT_PIN_FILE.XXXXXX")"; chmod 600 "$tmp"
-  printf '# cLaudeRC chat PIN. The app never shows it; this file is how you get it back.\n# Delete this file to remove the PIN (then set a new one in the app).\nPIN=%s\n' "$new" >"$tmp"
-  mv "$tmp" "$CHAT_PIN_FILE"
-  chat_log - pin-set
   api_ok '{"set":true}'
 }
 
@@ -4195,15 +4478,49 @@ do_chat_open() {
 # whether it's working or waiting on a question (with that screen).
 do_chat_history() {
   [[ $# -eq 1 ]] || bad_args "usage: chat-history <session>"
-  local pin sess f screen waiting=false busy=false tmp mode model="" ask=null
-  pin="$(read_secret_line)"; exec 0</dev/null
+  local pin sess tmp; pin="$(read_secret_line)"; exec 0</dev/null
   chat_session "$1"; sess="$CHAT_SESS"
   check_pin "$pin"
+  tmp="$(mktemp)"
+  chat_history_json "$sess" "$tmp"
+  api_ok_file "$tmp"
+}
+
+# chat_screen <sess>: the last 15 lines of the session's screen.
+chat_screen() {
+  tmux capture-pane -p -J -t "=$1:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15
+}
+
+# chat_mode <screen>: the permission mode Claude's status line shows (none shown = default).
+chat_mode() {
+  local mode
+  mode="$(grep -oE '(auto mode|plan mode|accept edits|bypass permissions) on' <<<"$1" | tail -n 1)"
+  case "$mode" in "auto mode"*) echo auto ;; "plan mode"*) echo plan ;; "accept edits"*) echo edits ;; "bypass"*) echo bypass ;; *) echo default ;; esac
+}
+
+# chat_token <sess>: changes whenever what the app shows changes. Transcript identity + size + mtime, waiting/busy,
+# the mode, and a checksum of the screen only while waiting (while busy the spinner changes every second).
+chat_token() {
+  local sess="$1" f screen w=0 b=0 mode m=0 ck=0 st
+  tmux has-session -t "=$sess" 2>/dev/null || { echo gone; return; }
   f="$(chat_transcript "$sess")"
-  screen="$(tmux capture-pane -p -J -t "=$sess:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15)"
-  # The permission mode Claude's status line shows (none shown = default).
-  mode="$(grep -oE '(auto mode|plan mode|accept edits|bypass permissions) on' <<<"$screen" | tail -n 1)"
-  case "$mode" in "auto mode"*) mode=auto ;; "plan mode"*) mode=plan ;; "accept edits"*) mode=edits ;; "bypass"*) mode=bypass ;; *) mode=default ;; esac
+  st="$({ [[ -n "$f" ]] && stat -c '%i.%s.%Y' "$f"; } 2>/dev/null)"
+  screen="$(chat_screen "$sess")"
+  grep -qE "$WAIT_RE" <<<"$screen" && w=1
+  grep -q "esc to interrupt" <<<"$screen" && b=1
+  mode="$(chat_mode "$screen")"
+  case "$mode" in auto) m=1 ;; plan) m=2 ;; edits) m=3 ;; bypass) m=4 ;; esac
+  ((w)) && ck="$(printf '%s' "$screen" | cksum | cut -d' ' -f1)"
+  echo "v1.${st:-0.0.0}.$w$b$m.$ck"
+}
+
+# chat_history_json <sess> <out>: writes the chat-history answer (with its token) to <out>.
+chat_history_json() {
+  local sess="$1" out="$2" f screen waiting=false busy=false tmp mode model="" ask=null tok
+  tok="$(chat_token "$sess")"
+  f="$(chat_transcript "$sess")"
+  screen="$(chat_screen "$sess")"
+  mode="$(chat_mode "$screen")"
   grep -qE "$WAIT_RE" <<<"$screen" && waiting=true
   grep -q "esc to interrupt" <<<"$screen" && busy=true
   # Claude's multiple-choice question (AskUserQuestion) still waiting for an answer, as data for the app.
@@ -4256,10 +4573,75 @@ do_chat_history() {
       # The last 60 of your messages and Claude replies, with the tool steps between them.
       ([to_entries[] | select(.value.role != "tool") | .key] | .[-60] // 0) as $from | .[$from:]' >"$tmp"
   jq -e . "$tmp" >/dev/null 2>&1 || echo '[]' >"$tmp"
-  jq -c --arg s "$sess" --argjson w "$waiting" --argjson b "$busy" --arg sc "$screen" --arg mo "$mode" --arg md "$model" --argjson ak "$ask" \
-    '{session:$s, messages:., waiting:$w, busy:$b, mode:$mo, model:$md, ask:$ak, screen:(if $w then $sc else null end)}' "$tmp" >"$tmp.out"
+  jq -c --arg s "$sess" --argjson w "$waiting" --argjson b "$busy" --arg sc "$screen" --arg mo "$mode" --arg md "$model" --argjson ak "$ask" --arg tk "$tok" \
+    '{session:$s, messages:., waiting:$w, busy:$b, mode:$mo, model:$md, ask:$ak, screen:(if $w then $sc else null end), token:$tk}' "$tmp" >"$out"
   rm -f "$tmp"
-  api_ok_file "$tmp.out"
+}
+
+# chat-watch <session>: stdin = PIN line, then the app's last token (empty = none). Answers like chat-history,
+# plus changed:true, as soon as the token differs; else {changed:false, token} after CLAUDERC_WATCH_SECS.
+# Polls with stat once a second (no inotify). Two watchers per session at most (flock slots); no shared lock,
+# so chat-send is never blocked. A bare newline every CLAUDERC_WATCH_BEAT ticks to the answer stream: when the
+# client has gone the write fails and we leave (the launcher execs us, so the pipe is the client's own).
+do_chat_watch() {
+  [[ $# -eq 1 ]] || bad_args "usage: chat-watch <session>"
+  local pin have sess tok fd="" i n=0 end tmp d="$LAUNCHER_CONFIG_DIR/watch"
+  pin="$(read_secret_line)"; have="$(read_secret_line)"; exec 0</dev/null
+  chat_session "$1"; sess="$CHAT_SESS"
+  check_pin "$pin"
+  [[ "$have" =~ ^[A-Za-z0-9.:-]{0,120}$ ]] || have=""
+  mkdir -p "$d" && chmod 700 "$d"
+  for i in 1 2; do
+    exec {fd}>>"$d/$sess.$i"
+    flock -n "$fd" && break
+    exec {fd}>&-; fd=""
+  done
+  [[ -n "$fd" ]] || api_ok "$(jq -cn --arg s "$sess" '{session:$s,changed:false,token:"",retry:true}')"
+  end=$((SECONDS + ${CLAUDERC_WATCH_SECS:-25}))
+  while :; do
+    tok="$(chat_token "$sess")"
+    [[ "$tok" != gone ]] || api_err invalid_name "No running session named '$1'."
+    if [[ "$tok" != "$have" ]]; then
+      tmp="$(mktemp)"
+      chat_history_json "$sess" "$tmp"
+      jq -c '. + {changed:true}' "$tmp" >"$tmp.out" 2>/dev/null; rm -f "$tmp"
+      api_ok_file "$tmp.out"
+    fi
+    ((SECONDS < end)) || api_ok "$(jq -cn --arg s "$sess" --arg t "$tok" '{session:$s,changed:false,token:$t}')"
+    sleep 1
+    ((++n % ${CLAUDERC_WATCH_BEAT:-5})) || printf '\n' >&3 2>/dev/null || exit 0
+  done
+}
+
+# chat_paste <session> <message> [guard]: paste the message into the session's box (bracketed paste) and press Enter.
+# With guard (the queue), the pane is read again right before the paste and before every Enter: a permission dialog or a
+# busy session aborts it, so an Enter can never confirm a dialog that appeared in the gap.
+chat_paste() {
+  local sess="$1" msg="$2" guard="${3:-}" scr
+  chat_guard() {   # 0 = safe to go on
+    [[ -n "$guard" ]] || return 0
+    scr="$(chat_screen "$sess")"
+    ! grep -qE "$WAIT_RE" <<<"$scr"
+  }
+  if [[ -n "$guard" ]]; then
+    scr="$(chat_screen "$sess")"
+    ! grep -qE "$WAIT_RE|esc to interrupt" <<<"$scr" || api_err internal "The session is busy or waiting for you."
+  fi
+  printf '%s' "$msg" | tmux load-buffer -b "clauderc-chat-$$" - || api_err internal "Couldn't hand the message to tmux."
+  tmux paste-buffer -p -d -b "clauderc-chat-$$" -t "=$sess:" || api_err internal "Couldn't paste the message."
+  # A long or multi-line paste is collapsed to "[Pasted text …]" and takes a moment to register: give it longer, and press Enter again if it is still sitting in the box.
+  if [[ ${#msg} -gt 300 || "$msg" == *$'\n'* ]]; then sleep 1; else sleep 0.3; fi
+  chat_guard || api_err internal "The session started waiting for you."
+  tmux send-keys -t "=$sess:" Enter
+  if [[ ${#msg} -gt 300 || "$msg" == *$'\n'* ]]; then
+    local i
+    for i in 1 2 3 4 5; do   # a busy session can swallow the Enter more than once
+      sleep 1
+      tmux capture-pane -p -t "=$sess:" 2>/dev/null | tail -n 6 | grep -q '^❯ .*\[Pasted text' || break
+      chat_guard || api_err internal "The session started waiting for you."
+      tmux send-keys -t "=$sess:" Enter
+    done
+  fi
 }
 
 # chat-send <session>: stdin = PIN, then the message (multi-line is fine: it
@@ -4268,27 +4650,699 @@ do_chat_send() {
   [[ $# -eq 1 ]] || bad_args "usage: chat-send <session>"
   local pin sess msg
   pin="$(read_secret_line)"
-  msg="$(head -c 20000)"
+  msg="$(head -c 20002; echo x)"   # the x keeps trailing newlines, so the size check below is exact
   exec 0</dev/null
+  msg="${msg%x}"; msg="${msg%$'\n'}"   # one closing newline isn't part of the message
   chat_session "$1"; sess="$CHAT_SESS"
   check_pin "$pin"
+  (($(printf '%s' "$msg" | wc -c) <= 20000)) || api_err invalid_name "That message is too long (20,000 characters at most)."
+  while [[ "$msg" == *$'\n' ]]; do msg="${msg%$'\n'}"; done
   [[ -n "${msg//[[:space:]]/}" ]] || bad_args "empty message"
-  printf '%s' "$msg" | tmux load-buffer -b "clauderc-chat-$$" - || api_err internal "Couldn't hand the message to tmux."
-  tmux paste-buffer -p -d -b "clauderc-chat-$$" -t "=$sess:" || api_err internal "Couldn't paste the message."
-  # A long or multi-line paste is collapsed to "[Pasted text …]" and takes a moment to register: give it longer, and press Enter again if it is still sitting in the box.
-  if [[ ${#msg} -gt 300 || "$msg" == *$'\n'* ]]; then sleep 1; else sleep 0.3; fi
-  tmux send-keys -t "=$sess:" Enter
-  if [[ ${#msg} -gt 300 || "$msg" == *$'\n'* ]]; then
-    local i
-    for i in 1 2 3 4 5; do   # a busy session can swallow the Enter more than once
-      sleep 1
-      tmux capture-pane -p -t "=$sess:" 2>/dev/null | tail -n 6 | grep -q '^❯ .*\[Pasted text' || break
-      tmux send-keys -t "=$sess:" Enter
-    done
-  fi
+  chat_paste "$sess" "$msg"
   unset msg
   chat_log "$sess" send
   api_ok "$(jq -cn --arg s "$sess" '{sent:true, session:$s}')"
+}
+
+# ---- Auto-continue queue (docs/queue-design.md): state under <launcher config>/queue, files 600, dir 700 ----
+QUEUE_DIR="$LAUNCHER_CONFIG_DIR/queue"
+QUEUE_CRON_MARK="# clauderc-queue"
+QUEUE_LOG_MAX="${CLAUDERC_QUEUE_LOG_MAX:-1048576}"
+QUEUE_DEFAULTS='{"enabled":false,"parallel":1,"max_5h":90,"max_7d":95,"max_turn_min":240,"stars":[]}'
+
+queue_init() { mkdir -p "$QUEUE_DIR" && chmod 700 "$QUEUE_DIR"; }
+
+# queue_lock: one writer at a time (the tick takes the same lock); fd 7 stays open until the call ends.
+queue_lock() { queue_init; exec 7>>"$QUEUE_DIR/lock"; flock -w 20 7 || api_err busy "The queue is busy. Try again in a moment."; }
+
+# queue_conf: the owner's settings, with defaults for anything missing.
+queue_conf() { jq -c --argjson d "$QUEUE_DEFAULTS" '$d + (. // {})' "$QUEUE_DIR/queue.json" 2>/dev/null || printf '%s' "$QUEUE_DEFAULTS"; }
+
+# queue_conf_write <json>: atomic, mode 600.
+queue_conf_write() {
+  local tmp; queue_init
+  tmp="$(mktemp "$QUEUE_DIR/queue.json.XXXXXX")" || api_err internal "Couldn't save the queue settings."
+  printf '%s\n' "$1" >"$tmp" && chmod 600 "$tmp" && mv "$tmp" "$QUEUE_DIR/queue.json" || api_err internal "Couldn't save the queue settings."
+}
+
+# queue_log_add <session|-> <event> [detail]: names and states only, never chat text. Rotated at QUEUE_LOG_MAX.
+queue_log_add() {
+  local f="$QUEUE_DIR/log" d="${3:-}"
+  queue_init
+  d="${d//[$'\t\r\n']/ }"
+  if [[ -f "$f" ]] && (($(stat -c %s "$f" 2>/dev/null || echo 0) >= QUEUE_LOG_MAX)); then mv -f "$f" "$f.1"; fi
+  (umask 077; printf '%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "$d" >>"$f")
+}
+
+# queue_cron: the one-minute tick line exists exactly while something is starred.
+queue_cron() {
+  if [[ "$(jq -r '.stars | length' <<<"$(queue_conf)")" -gt 0 ]]; then
+    cron_line_set "$QUEUE_CRON_MARK" on "* * * * * '$HOME/.local/bin/claude-queue' >/dev/null 2>&1 $QUEUE_CRON_MARK"
+  else
+    cron_line_set "$QUEUE_CRON_MARK" off
+  fi
+}
+
+# queue_status_json: settings, usage numbers and each starred chat's state (names and states only).
+queue_status_json() {
+  local usage='{}' st='{}'
+  [[ -f "$LAUNCHER_CONFIG_DIR/usage-cache/_main.json" ]] && usage="$(jq -c '{five, seven, five_resets, seven_resets}' "$LAUNCHER_CONFIG_DIR/usage-cache/_main.json" 2>/dev/null || echo '{}')"
+  [[ -f "$QUEUE_DIR/state.json" ]] && st="$(jq -c . "$QUEUE_DIR/state.json" 2>/dev/null || echo '{}')"
+  jq -cn --argjson c "$(queue_conf)" --argjson u "$usage" --argjson st "$st" --argjson now "${CLAUDERC_NOW:-$(date +%s)}" '
+    {enabled:$c.enabled, parallel:$c.parallel, max_5h:$c.max_5h, max_7d:$c.max_7d,
+     usage:({five:null, seven:null, five_resets:null, seven_resets:null} + $u),
+     limited_until:($st._limited_until // 0),
+     chats:[$c.stars[] as $s | ($st[$s] // {}) as $e
+       | {session:$s, state:(if $e.waiting then "needs_you" elif $e.gone then "stopped" else ($e.state // "idle") end), since:($e.since // 0), note:($e.note // ""), turns:($e.turns // 0),
+          next_try:($e.next_try // 0),
+          running_min:(if $e.state == "running" and $e.turn.started then (($now - $e.turn.started) / 60 | floor) else 0 end)}]}'
+}
+
+# queue-status
+do_queue_status() { [[ $# -eq 0 ]] || bad_args "queue-status takes no arguments"; api_ok "$(queue_status_json)"; }
+
+# queue-on: stdin = PIN. Switching the queue on lets the server type into starred chats unattended.
+do_queue_on() {
+  [[ $# -eq 0 ]] || bad_args "queue-on takes no arguments"
+  local pin; pin="$(read_secret_line)"; exec 0</dev/null
+  check_pin "$pin"
+  queue_lock
+  queue_conf_write "$(queue_conf | jq -c '.enabled = true')"
+  queue_log_add - on
+  api_ok "$(queue_status_json)"
+}
+
+# queue-off: no PIN, the kill switch must always work. A running turn finishes its task.
+do_queue_off() {
+  [[ $# -eq 0 ]] || bad_args "queue-off takes no arguments"
+  # A tick holds the lock for up to a minute and never writes queue.json: wait a moment for a star action, then switch off anyway.
+  queue_init; exec 7>>"$QUEUE_DIR/lock"; flock -w 2 7 || true
+  queue_conf_write "$(queue_conf | jq -c '.enabled = false')"
+  queue_log_add - off
+  api_ok "$(queue_status_json)"
+}
+
+# queue-star <session> on|off: stdin = PIN for "on" only. Un-starring needs none.
+do_queue_star() {
+  [[ $# -eq 2 && ( "$2" == on || "$2" == off ) ]] || bad_args "usage: queue-star <session> on|off"
+  local pin sess screen
+  if [[ "$2" == on ]]; then
+    pin="$(read_secret_line)"; exec 0</dev/null
+    chat_session "$1"; sess="$CHAT_SESS"
+    check_pin "$pin"
+    [[ ! "$sess" =~ $GENERAL_SESS_RE ]] || api_err invalid_name "General chats can't join the queue."
+    screen="$(tmux capture-pane -p -J -t "=$sess:" 2>/dev/null)"
+    ! grep -q 'bypass permissions on' <<<"$screen" || api_err unsafe_mode "This chat skips all permission prompts, so the queue won't run it."
+  else
+    valid_project "$1" || api_err invalid_name "Invalid project name."
+    sess="$(resolve_session "$1")"
+  fi
+  queue_lock
+  if [[ "$2" == on ]]; then
+    queue_conf_write "$(queue_conf | jq -c --arg s "$sess" '.stars = ((.stars - [$s]) + [$s])')"
+    queue_log_add "$sess" star
+  else
+    queue_conf_write "$(queue_conf | jq -c --arg s "$sess" '.stars -= [$s]')"
+    # A fresh star starts clean: drop its state (failures, error) with the star.
+    if [[ -f "$QUEUE_DIR/state.json" ]]; then
+      jq -c --arg s "$sess" 'del(.[$s])' "$QUEUE_DIR/state.json" >"$QUEUE_DIR/state.json.new" 2>/dev/null &&
+        chmod 600 "$QUEUE_DIR/state.json.new" && mv "$QUEUE_DIR/state.json.new" "$QUEUE_DIR/state.json" || rm -f "$QUEUE_DIR/state.json.new"
+    fi
+    queue_log_add "$sess" unstar
+  fi
+  queue_cron
+  api_ok "$(jq -cn --arg s "$sess" --argjson on "$([[ "$2" == on ]] && echo true || echo false)" '{session:$s, starred:$on}')"
+}
+
+# queue-log [--lines N]: the last N log lines (default 100, at most 500).
+do_queue_log() {
+  local n=100
+  if [[ $# -eq 2 && "$1" == --lines && "$2" =~ ^[0-9]{1,3}$ ]]; then n=$((10#$2)); ((n >= 1 && n <= 500)) || n=500
+  elif [[ $# -ne 0 ]]; then bad_args "usage: queue-log [--lines N]"; fi
+  api_ok "$(tail -n "$n" "$QUEUE_DIR/log" 2>/dev/null | jq -Rcn '{lines:[inputs | split("\t") | {ts:.[0], session:.[1], event:.[2], detail:(.[3] // "")}]}')"
+}
+
+# ---- The tick (claude-queue runs it every minute under flock; see docs/queue-design.md). Never sends keys or answers a prompt. ----
+# The same text for every chat: no names, paths or replies from one chat ever go into another.
+QUEUE_MSG='[cLaudeRC queue] Automatic turn. Follow "Auto-continue queue" in ~/.claude/CLAUDE.md: Session start, then ONE task from PLAN.md, finished completely (tested, committed, PLAN.md updated). All "Always ask first" stops still apply. If you need the owner, put the question last, on a line starting with QUESTION:. If nothing is left, reply exactly: QUEUE: nothing to do'
+QUEUE_RESUME_MSG='[cLaudeRC queue] Usage window reset: continue the task you were on.'
+# unverified: the wording of Claude's usage-limit banner (none was found in a real transcript); matched loosely.
+QUEUE_LIMIT_RE='usage limit|limit reached|resets [0-9]'
+
+# qmod <session> <jq filter on that session's entry> [jq args]: update the in-memory state ($QST).
+qmod() { local s="$1" f="$2"; shift 2; QST="$(jq -c --arg s "$s" --argjson now "$QNOW" "$@" ".[\$s] = ((.[\$s] // {}) | $f)" <<<"$QST")"; }
+qget() { jq -r --arg s "$1" "(.[\$s] // {}) | $2" <<<"$QST"; }
+# qstate <session> <state> [note]: set the state (log only a change; names and states, never chat text).
+qstate() {
+  local old; old="$(qget "$1" '.state // ""')"
+  qmod "$1" '(if .state != $st then .since = $now else . end) | .state = $st | .note = $n' --arg st "$2" --arg n "${3:-}"
+  [[ "$old" == "$2" ]] && return 0
+  case "$2" in
+    idle | running) ;;
+    stopped | unsafe) queue_log_add "$1" skip "$2 ${3:-}" ;;
+    backoff | error) queue_log_add "$1" fail "$2 ${3:-}" ;;
+    *) queue_log_add "$1" "$2" "${3:-}" ;;
+  esac
+}
+qpane() { tmux capture-pane -p -J -t "=$1:" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' | tail -n 15; }
+
+# queue_usage: sets QFIVE/QSEVEN (empty = unknown) and their reset times. One shared cache with clauderc-team (same keys
+# plus five_resets/seven_resets): the endpoint rate-limits, so at most one call per 120 s and none before retry_until.
+# shortcut: Retry-After is not read (curl -f hides the headers): a failure waits 120 s; cluster_account still calls the endpoint itself.
+queue_usage() {
+  local f="$LAUNCHER_CONFIG_DIR/usage-cache/_main.json" c ts ru tok exp raw new
+  c="$(jq -c 'if type == "object" then . else {} end' "$f" 2>/dev/null || echo '{}')"
+  ts="$(jq -r '.ts // 0 | floor' <<<"$c")"; ru="$(jq -r '.retry_until // 0 | floor' <<<"$c")"
+  ((ts > QNOW)) && ts=0                  # the clock went backwards: that number is not from "now"
+  ((ru > QNOW + 900)) && ru=$((QNOW + 900))
+  if ((QNOW - ts >= 120 && QNOW >= ru)); then
+    tok=""; exp=0
+    if creds_ok "$HOME/.claude/.credentials.json"; then
+      tok="$(jq -r '.claudeAiOauth.accessToken // empty' "$HOME/.claude/.credentials.json")"
+      exp="$(jq -r '.claudeAiOauth.expiresAt // 0' "$HOME/.claude/.credentials.json")"
+    fi
+    if [[ -z "$tok" ]]; then :   # not signed in: nothing to ask
+    elif [[ "$exp" =~ ^[0-9]+$ ]] && ((exp > 0 && exp / 1000 <= QNOW)); then
+      c="$(jq -c --argjson r "$((QNOW + 120))" '.retry_until = $r' <<<"$c")"   # Claude refreshes its own token when it next runs
+    else
+      raw="$(usage_fetch_raw "$tok")"
+      new="$(jq -c --argjson now "$QNOW" 'def n: if type == "number" then . else null end;
+        {ts:$now, retry_until:0, five:(.five_hour.utilization | n), seven:(.seven_day.utilization | n),
+         five_resets:(.five_hour.resets_at // null), seven_resets:(.seven_day.resets_at // null)}' <<<"$raw" 2>/dev/null || true)"
+      if [[ -n "$new" ]]; then c="$(jq -c --argjson n "$new" '. + $n' <<<"$c")"
+      else c="$(jq -c --argjson r "$((QNOW + 120))" '.retry_until = $r' <<<"$c")"; fi
+    fi
+    ( mkdir -p "${f%/*}" && chmod 700 "${f%/*}" && umask 077 && printf '%s\n' "$c" >"$f.$$" && mv "$f.$$" "$f" ) 2>/dev/null || true
+    ts="$(jq -r '.ts // 0 | floor' <<<"$c")"
+  fi
+  QFIVE=""; QSEVEN=""; QFIVE_R=""; QSEVEN_R=""
+  if ((ts <= QNOW && QNOW - ts < 1800)); then   # a failed refresh keeps the last numbers 30 minutes (same as clauderc-team)
+    QFIVE="$(jq -r '.five // empty' <<<"$c")"; QSEVEN="$(jq -r '.seven // empty' <<<"$c")"
+    QFIVE_R="$(jq -r '.five_resets // empty' <<<"$c")"; QSEVEN_R="$(jq -r '.seven_resets // empty' <<<"$c")"
+  fi
+}
+
+# queue_over <value> <max>: true when the value is known and at or over max.
+queue_over() { [[ -n "$1" ]] && awk -v v="$1" -v m="$2" 'BEGIN{exit !(v+0 >= m+0)}'; }
+
+# queue_reset_at: epoch of the reset of the window that is over its limit (+120 s), else now + 15 min.
+queue_reset_at() {
+  local r="" t=""
+  queue_over "$QFIVE" "$QMAX5" && r="$QFIVE_R"
+  [[ -z "$r" ]] && queue_over "$QSEVEN" "$QMAX7" && r="$QSEVEN_R"
+  [[ -n "$r" ]] && t="$(date -d "$r" +%s 2>/dev/null || true)"
+  if [[ "$t" =~ ^[0-9]+$ ]] && ((t + 120 > QNOW)); then echo $((t + 120)); else echo $((QNOW + 900)); fi
+}
+
+# queue_reply <transcript> <skip lines>: {n, stop, api, err, text} of Claude's newest reply after the first <skip> lines.
+# api/err: the newest record is Claude Code's own error record (isApiErrorMessage, model "<synthetic>", stop_reason
+# stop_sequence; seen on a real transcript: "API Error: Connection lost ...", error "server_error").
+queue_reply() {
+  tail -n +$(($2 + 1)) "$1" 2>/dev/null | jq -cs '[.[] | select(.type == "assistant")] as $a
+    | ([.[] | select(.type == "user" or .type == "assistant")] | last // {}) as $l   # not .[-1]: Claude Code appends system/last-prompt/ai-title/mode records after the last turn
+    | {n:($a | length), stop:($a | last | .message.stop_reason // ""), api:(($a | last | .isApiErrorMessage) == true), err:(($a | last | .error) // ""),
+       # Esc / "No" on a tool prompt: Claude Code writes a user record "[Request interrupted by user ..." and nothing after it.
+       intr:(($l.type == "user") and ((($l.message.content // "") | if type == "string" then . else ([.[]? | select(.type == "text") | .text] | join(" ")) end) | startswith("[Request interrupted by user"))),
+       text:((([$a[] | select(any(.message.content[]?; .type == "text"))] | last | [.message.content[]? | select(.type == "text") | .text]) // []) | join("\n"))}' 2>/dev/null ||
+    echo '{"n":0,"stop":"","api":false,"err":"","intr":false,"text":""}'
+}
+
+# queue_last_event <session> [action regex]: epoch of the newest chat.log entry for the session (0 = none).
+# Every chat.log action counts as the owner being there: send, keys, interrupt, open, upload ...
+queue_last_event() {
+  local last t
+  last="$(awk -F'\t' -v s="$1" -v a="${2:-.}" '$2 == s && $3 ~ a {t = $1} END {print t}' "$CHAT_LOG" 2>/dev/null)"
+  [[ -n "$last" ]] && t="$(date -d "$last" +%s 2>/dev/null)" && echo "$t" || echo 0
+}
+
+# queue_has <regex> <text>: some line of the text matches, after stripping what Claude wraps markers in (quotes, bold, code, a final period).
+queue_has() { sed -E 's/^[[:space:]>*_`#-]+//; s/[[:space:]*_`.]+$//' <<<"$2" | grep -qE "$1"; }
+
+# queue_busy_owner <session>: the owner is in the chat (any chat.log entry in the last 20 minutes, or a terminal is attached).
+queue_busy_owner() {
+  local t
+  [[ -n "$(tmux list-clients -t "=$1" 2>/dev/null)" ]] && return 0
+  t="$(queue_last_event "$1")"
+  ((t > 0 && QNOW - t < 1200))
+}
+
+# queue_fail <session> <reason>: backoff 15 min, then 60 min, then error (un-star and star again resets).
+queue_fail() {
+  local n; n=$(($(qget "$1" '.fails // 0') + 1))
+  qmod "$1" '.fails = $n | .next_try = $nt | del(.turn)' --argjson n "$n" --argjson nt "$((QNOW + (n == 1 ? 900 : 3600)))"
+  if ((n >= 3)); then qstate "$1" error "$2"; else qstate "$1" backoff "$2"; fi
+}
+
+queue_plan_sum() { sha1sum "$(session_dir "$1")/PLAN.md" 2>/dev/null | cut -d' ' -f1 || true; }
+
+# queue_park <session> <note>: the turn is over (or was stopped) and the chat waits for the owner (any chat.log entry newer than now).
+queue_park() { qmod "$1" 'del(.turn, .waiting, .wait_since, .done_ticks, .resume)'; qstate "$1" needs_you "$2"; }
+
+# queue_check_running <session>: has the turn finished, hit a prompt, a limit or an error, or gone on too long?
+# A prompt keeps the chat `running` with waiting=true: the turn is still the chat's (slot and repo stay held) and is read
+# normally once the owner has answered from the app.
+queue_check_running() {
+  local s="$1" screen f base started r n stop apierr errk text mt ticks tail3 dur cur prev quick
+  tmux has-session -t "=$s" 2>/dev/null || { queue_park "$s" "session gone"; return; }   # a reboot: park, never a fresh turn
+  started="$(qget "$s" '.turn.started // 0')"
+  screen="$(qpane "$s")"
+  if ((started > 0 && $(queue_last_event "$s" '^interrupt$') >= started)); then queue_park "$s" "interrupted"; return; fi
+  # The turn's own transcript while it exists (a newer file in the folder is another conversation).
+  f="$(qget "$s" '.turn.transcript // ""')"; base="$(qget "$s" '.turn.lines // 0')"
+  [[ -n "$f" && -f "$f" ]] || { f="$(chat_transcript "$s")"; base=0; }
+  r="$(queue_reply "$f" "$base")"; n="$(jq -r .n <<<"$r")"; stop="$(jq -r .stop <<<"$r")"
+  apierr="$(jq -r .api <<<"$r")"; errk="$(jq -r .err <<<"$r")"; text="$(jq -r .text <<<"$r")"
+  if [[ "$(jq -r .intr <<<"$r")" == true ]]; then queue_park "$s" "interrupted"; return; fi
+  if grep -qE "$WAIT_RE" <<<"$screen"; then
+    [[ "$(qget "$s" '.waiting // false')" == true ]] || { qmod "$s" '.waiting = true | .wait_since = $now'; queue_log_add "$s" needs_you "waiting for you"; }
+    return
+  fi
+  # Answered: the time spent waiting does not count against max_turn_min.
+  [[ "$(qget "$s" '.waiting // false')" != true ]] || { qmod "$s" '.turn.started += ($now - (.wait_since // $now)) | del(.waiting, .wait_since)'; started="$(qget "$s" '.turn.started')"; }
+  if ((QNOW - started > QMAXTURN * 60)); then queue_log_add "$s" fail overrun; queue_park "$s" "turn took too long"; return; fi
+  if grep -q "esc to interrupt" <<<"$screen"; then qmod "$s" '.done_ticks = 0'; return; fi
+  if [[ "$apierr" == true ]]; then
+    if [[ "$errk" == rate_limit ]] || grep -qiE "$QUEUE_LIMIT_RE" <<<"$text"; then
+      qmod "$s" '.resume = true | del(.turn, .done_ticks)'; qstate "$s" limited "usage limit"; QLU="$(queue_reset_at)"
+    else queue_fail "$s" "api error"; fi
+    return
+  fi
+  if ((n == 0)) || [[ "$stop" != end_turn ]]; then
+    # No finished reply: a limit banner can only be the last lines of the pane (Claude's own reply text never counts).
+    tail3="$(tail -n 3 <<<"$screen")"
+    if ((QNOW - started >= 30)) && grep -qiE "$QUEUE_LIMIT_RE" <<<"$tail3"; then
+      qmod "$s" '.resume = true | del(.turn, .done_ticks)'; qstate "$s" limited "usage limit"; QLU="$(queue_reset_at)"; return
+    fi
+    ((n == 0 && QNOW - started >= 90)) && queue_fail "$s" "no reply"   # the paste did not land
+    qmod "$s" '.done_ticks = 0'
+    return
+  fi
+  mt="$(stat -c %Y "$f" 2>/dev/null || echo "$QNOW")"
+  if ((QNOW - mt < 90)); then qmod "$s" '.done_ticks = 0'; return; fi
+  ticks=$(($(qget "$s" '.done_ticks // 0') + 1))
+  if ((ticks < 2)); then qmod "$s" '.done_ticks = $t' --argjson t "$ticks"; return; fi
+  dur=$((QNOW - started)); cur="$(queue_plan_sum "$s")"; prev="$(qget "$s" '.plan_last // "-"')"
+  # Flood guard: three quick turns in a row with PLAN.md unchanged (a "nothing to do" in words the markers miss) park it.
+  if ((dur < 300)) && [[ "$prev" == "-" || "$prev" == "x$cur" ]]; then quick=$(($(qget "$s" '.quick // 0') + 1)); else quick=0; fi
+  qmod "$s" 'del(.turn, .done_ticks, .resume) | .fails = 0 | .turns = ((.turns // 0) + 1) | .quick = $q | .plan_last = $p' --argjson q "$quick" --arg p "x$cur"
+  if queue_has '^QUESTION:' "$text"; then qstate "$s" question "asked you"
+  elif queue_has '^QUEUE: nothing to do$' "$text" || ((quick >= 3)); then
+    qmod "$s" '.plan_sum = $p | .nothing_at = $now | .quick = 0' --arg p "$cur"
+    qstate "$s" nothing "plan empty"
+  else qstate "$s" idle; queue_log_add "$s" "done"; fi
+}
+
+# queue_eligible <session>: may it get a turn now? Sets states (stopped, needs_you, unsafe) as it finds them; QREPO = its checkout.
+queue_eligible() {
+  local s="$1" st screen f base r dir repo o nt
+  st="$(qget "$s" '.state // "idle"')"
+  case "$st" in running | error) return 1 ;; esac
+  [[ "$(qget "$s" '.turn // empty')" == "" ]] || return 1
+  # No session (a reboot before claude-autostart ran): leave every park as it is, just say "stopped".
+  tmux has-session -t "=$s" 2>/dev/null || { [[ "$(qget "$s" '.gone // false')" == true ]] || { qmod "$s" '.gone = true'; queue_log_add "$s" skip "session not running"; }; return 1; }
+  [[ "$(qget "$s" '.gone // false')" != true ]] || qmod "$s" 'del(.gone)'
+  [[ "$st" == unsafe ]] && st=idle   # re-checked below
+  case "$st" in
+    needs_you) (($(queue_last_event "$s") > $(qget "$s" '.since // 0'))) || return 1 ;;   # parked until the owner has done something here
+    backoff)
+      nt="$(qget "$s" '.next_try // 0')"
+      ((nt > QNOW + 3600)) && { nt=$((QNOW + 3600)); qmod "$s" '.next_try = $n' --argjson n "$nt"; }   # the clock went backwards once
+      ((QNOW >= nt)) || return 1 ;;
+    nothing)
+      ((QNOW - $(qget "$s" '.nothing_at // 0') >= 86400)) || [[ "$(queue_plan_sum "$s")" != "$(qget "$s" '.plan_sum // ""')" ]] || return 1 ;;
+  esac
+  # An unanswered question in the newest reply parks the chat whatever the state says (fresh star, lost state file, reboot).
+  f="$(chat_transcript "$s")"; base=$(($([[ -f "$f" ]] && wc -l <"$f" || echo 0) - 400)); ((base < 0)) && base=0
+  r="$(queue_reply "$f" "$base")"
+  if queue_has '^QUESTION:' "$(jq -r .text <<<"$r")"; then [[ "$st" == question ]] || qstate "$s" question "asked you"; return 1; fi
+  screen="$(qpane "$s")"
+  if grep -qE "$WAIT_RE" <<<"$screen"; then qstate "$s" needs_you "waiting for you"; return 1; fi
+  grep -q "esc to interrupt" <<<"$screen" && return 1
+  if grep -q 'bypass permissions on' <<<"$screen"; then qstate "$s" unsafe "bypass permissions"; return 1; fi
+  queue_busy_owner "$s" && return 1
+  dir="$(session_dir "$s")"
+  repo="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || echo "$dir")"
+  QREPO="$repo"
+  # The checkout is taken by another starred chat that holds a turn (running or still has one), will resume one, or is busy right now.
+  [[ "$(jq -r --arg me "$s" --arg r "$repo" '[to_entries[] | select(.key | startswith("_") | not) | select(.key != $me)
+    | select(.value.state == "running" or .value.turn != null or .value.resume == true) | select(.value.repo == $r)] | length' <<<"$QST")" == 0 ]] || return 1
+  for o in "${QSTARS[@]}"; do
+    [[ "$o" != "$s" ]] && qpane "$o" | grep -q "esc to interrupt" || continue
+    dir="$(session_dir "$o")"
+    [[ "$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || echo "$dir")" == "$repo" ]] && return 1
+  done
+  return 0
+}
+
+queue_enabled() { [[ "$(queue_conf | jq -r .enabled)" == true ]]; }
+
+queue_tick() {
+  exec 3>/dev/null   # api_err (inside chat_paste) writes here; the tick has no caller to answer
+  queue_init
+  local conf s i n running slots par room msg start f lines
+  QNOW="${CLAUDERC_NOW:-$(date +%s)}"
+  conf="$(queue_conf)"
+  [[ "$(jq -r .enabled <<<"$conf")" == true && "$(jq -r '.stars | length' <<<"$conf")" -gt 0 ]] || return 0
+  QMAX5="$(jq -r .max_5h <<<"$conf")"; QMAX7="$(jq -r .max_7d <<<"$conf")"; QMAXTURN="$(jq -r .max_turn_min <<<"$conf")"; par="$(jq -r .parallel <<<"$conf")"
+  QST="$(jq -c 'if type == "object" then . else {} end' "$QUEUE_DIR/state.json" 2>/dev/null || echo '{}')"
+  QLU="$(jq -r '._limited_until // 0' <<<"$QST")"
+  ((QLU > QNOW + 8 * 86400)) && QLU=$((QNOW + 8 * 86400))   # the clock went backwards once: a window is at most a week
+  mapfile -t QSTARS < <(jq -r '.stars[]' <<<"$conf")
+  queue_usage
+  running=0
+  for s in "${QSTARS[@]}"; do
+    [[ "$(qget "$s" '.state // ""')" == running ]] && queue_check_running "$s"
+    # A chat holds a slot while it has a turn, or while its pane is busy (the owner or an overrun turn).
+    if [[ "$(qget "$s" '.state // ""')" == running || "$(qget "$s" '.turn // empty')" != "" ]] || qpane "$s" | grep -q "esc to interrupt"; then running=$((running + 1)); fi
+  done
+  if ((QNOW >= QLU)); then   # else: waiting for a window reset
+    room=true
+    queue_over "$QFIVE" "$QMAX5" && room=false
+    queue_over "$QSEVEN" "$QMAX7" && room=false
+    if [[ "$room" == false ]]; then
+      ((QLU == 0)) && queue_log_add - limited "5h ${QFIVE:-?}% 7d ${QSEVEN:-?}%"
+      QLU="$(queue_reset_at)"
+    elif ((QLU > 0)); then QLU=0; queue_log_add - resumed
+    fi
+    if [[ "$room" == true ]]; then
+      [[ -n "$QFIVE" && -n "$QSEVEN" ]] || par=1   # unknown usage: one turn at a time whatever the setting says
+      slots=$((par - running))
+      # Round-robin: start after the entry the last send went to, wrap once.
+      start=0; n=${#QSTARS[@]}
+      for ((i = 0; i < n; i++)); do [[ "${QSTARS[i]}" == "$(jq -r '._cursor // ""' <<<"$QST")" ]] && start=$((i + 1)); done
+      for ((i = 0; i < n && slots > 0; i++)); do
+        s="${QSTARS[(start + i) % n]}"
+        queue_eligible "$s" || continue
+        queue_enabled || break   # the owner switched the queue off while this tick ran
+        if [[ "$(qget "$s" '.resume // false')" == true ]]; then msg="$QUEUE_RESUME_MSG"; else msg="$QUEUE_MSG"; fi
+        f="$(chat_transcript "$s")"; lines="$([[ -f "$f" ]] && wc -l <"$f" || echo 0)"   # counted before the paste
+        if ( chat_paste "$s" "$msg" guard ) >/dev/null 2>&1; then
+          qmod "$s" 'del(.resume, .waiting) | .done_ticks = 0 | .repo = $r | .turn = {started:$now, transcript:$f, lines:$l}' \
+            --arg r "$QREPO" --arg f "$f" --argjson l "$lines"
+          qstate "$s" running
+          QST="$(jq -c --arg s "$s" '._cursor = $s' <<<"$QST")"
+          queue_log_add "$s" sent
+          slots=$((slots - 1))
+        else
+          queue_fail "$s" "paste failed"
+        fi
+      done
+    fi
+  fi
+  QST="$(jq -c --argjson lu "$QLU" '._limited_until = $lu' <<<"$QST")"
+  printf '%s\n' "$QST" >"$QUEUE_DIR/state.json.new" && chmod 600 "$QUEUE_DIR/state.json.new" && mv "$QUEUE_DIR/state.json.new" "$QUEUE_DIR/state.json"
+}
+
+# ---------------- Inbox: what needs the owner right now (SCRIPT_API 55, docs/ultimate-design.md section 1) ----------------
+# Read-only: panes are only captured (never typed into); the queue state, transcripts and the gh cache are only read.
+# Items carry names, states, tool names, PR numbers/titles and workflow names; never pane text, reply text, the
+# QUESTION line, commands or file paths. State in $INBOX_DIR (700, files 600, written tmp + mv):
+#   gh.json   {ts, repos:{"o/r":{dir, branch, ts, stale, prs:[…], builds:[…]}}, logins:{claude, github, workers:{…}}}
+#   seen      TSV id fp ts: when a prompt / login item was first seen (its `since`)
+#   dismissed TSV id fp ts: hidden while the pair still matches; pruned after 7 days
+INBOX_DIR="$LAUNCHER_CONFIG_DIR/inbox"
+INBOX_TTL=300                                        # the gh cache: 5 minutes
+INBOX_GH_TIMEOUT="${CLAUDERC_INBOX_GH_TIMEOUT:-8}"   # per gh call (the tests make it short)
+INBOX_GH_BUDGET=25                                   # every gh call of one refresh together, in seconds
+INBOX_MAX_REPOS=30
+INBOX_KEEP=604800                                    # dismissals: 7 days
+# unverified: the wording of Claude Code's permission prompts (from current Claude Code, not seen on a real pane here).
+# Check it on a real pane before `act` (P3) relies on it; a miss only drops approve/deny (the item stays, open only).
+PERM_RE='Do you want to (proceed|make this edit|create|run)|Allow .* to'
+INBOX_ID_RE='^[a-z]{2,10}-[0-9a-f]{12}$'
+INBOX_FP_RE='^[0-9a-f]{12}$'
+GITHUB_URL_RE='^(https://([^/@]+@)?|ssh://([^/@]+@)?|[A-Za-z0-9._-]+@)github\.com[:/]'
+
+inbox_init() { mkdir -p "$INBOX_DIR" && chmod 700 "$INBOX_DIR"; }
+inbox_sha() { printf '%s' "$1" | sha1sum | cut -c1-12; }
+
+# inbox_put <file> <content>: atomic, mode 600.
+inbox_put() {
+  local tmp; tmp="$(mktemp "$1.XXXXXX")" || return 1
+  { printf '%s\n' "$2" >"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$1"; } || { rm -f "$tmp"; return 1; }
+}
+
+# inbox_tsv_map <file>: {"<id> <fp>": ts} from an "id fp ts" TSV file ({} when there is none).
+inbox_tsv_map() {
+  [[ -f "$1" ]] || { echo '{}'; return; }   # (jq -Rs on a missing file still prints a value, then fails)
+  jq -Rsc 'split("\n") | map(split("\t") | select(length == 3 and (.[2] | test("^[0-9]+$"))) | {key:(.[0] + " " + .[1]), value:(.[2] | tonumber)}) | from_entries' "$1" 2>/dev/null || echo '{}'
+}
+
+# inbox_cache: the gh cache, {} when there is none or it is broken.
+inbox_cache() { jq -c 'if type == "object" then . else {} end' "$INBOX_DIR/gh.json" 2>/dev/null || echo '{}'; }
+inbox_fresh() {
+  local ts; ts="$(jq -r '.ts // 0 | numbers | floor' <<<"$1" 2>/dev/null)"
+  [[ "$ts" =~ ^[0-9]+$ ]] && ((ts > 0 && ts <= INOW && INOW - ts < INBOX_TTL))   # stamped in the future = the clock moved: refresh
+}
+
+# inbox_prompt_lines <session>: the pane's last lines minus Claude's status bar: what a prompt's fp is made of.
+inbox_prompt_lines() {
+  qpane "$1" | grep -vE '^[[:space:]]*$|^[─━╭╰│ ]+$|⏵⏵|shift\+tab|for shortcuts|esc to interrupt|full +\$[0-9]|last +\$[0-9]|tokens\)$' | sed -e 's/[[:space:]]*$//' || true
+}
+
+# inbox_pending_tool <transcript>: "<tool_use id> <tool name>" of the newest tool_use with no tool_result (last 200
+# lines), or nothing. Only these two fields leave here; the tool's input (commands, paths) never does.
+# unverified: that a waiting permission prompt's tool_use is already in the transcript (P3 checks it on a real server).
+inbox_pending_tool() {
+  [[ -n "$1" && -f "$1" ]] || return 0
+  tail -n 200 "$1" 2>/dev/null | jq -Rc 'fromjson? // empty' 2>/dev/null | jq -rs '
+    [.[] | objects | .message.content? | arrays | .[] | objects] as $b
+    | [$b[] | select(.type == "tool_result") | .tool_use_id] as $done
+    | [$b[] | select(.type == "tool_use" and ((.id // "") | type == "string" and length > 0)) | select(.id as $i | $done | index($i) | not)]
+    | last // empty | "\(.id) \(.name // "")"' 2>/dev/null || true
+}
+
+# inbox_prompt_rows: a row per Claude session whose pane waits on a question (WAIT_RE, the same test `sessions` makes).
+# Approve/deny only for a permission prompt (PERM_RE) whose pending tool_use was found. fp = session + tool_use id +
+# the prompt's lines, so a new prompt in the same chat is a new item.
+inbox_prompt_rows() {
+  local s screen pend tid tool act
+  while IFS= read -r s; do
+    [[ -n "$s" ]] || continue
+    screen="$(qpane "$s")"
+    grep -qE "$WAIT_RE" <<<"$screen" || continue
+    tid=""; tool=""
+    pend="$(inbox_pending_tool "$(chat_transcript "$s")")"
+    [[ -n "$pend" ]] && read -r tid tool <<<"$pend"
+    [[ "$tid" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || tid=""
+    [[ "$tool" =~ ^[A-Za-z0-9_.:-]{1,64}$ ]] || tool=""
+    act=false
+    grep -qE "$PERM_RE" <<<"$screen" && [[ -n "$tid" && -n "$tool" ]] && act=true
+    jq -cn --arg s "$s" --arg tool "$tool" --argjson act "$act" \
+      --arg fp "$(inbox_sha "$s"$'\n'"$tid"$'\n'"$(inbox_prompt_lines "$s")")" \
+      '{kind:"prompt", key:"prompt|\($s)", fp:$fp, scope:$s, session:$s,
+        text:(if $act then "wants to use \($tool)" else "is waiting for an answer" end), title:null, since:null,
+        actions:(if $act then ["open","approve","deny","dismiss"] else ["open","dismiss"] end), number:null, run:null}'
+  done < <(claude_panes | awk -F'@@' '{print $1}')
+}
+
+# inbox_queue_rows <live sessions json>: starred chats the queue parked. question -> "asked you a question"; needs_you,
+# error, stopped -> `parked` with the queue's note (fixed strings set by the tick, never reply text). fp = the state's since.
+inbox_queue_rows() {
+  [[ -f "$QUEUE_DIR/queue.json" ]] || return 0
+  queue_status_json | jq -c --argjson live "$1" '.chats[]
+    | select(.state == "question" or .state == "needs_you" or .state == "error" or .state == "stopped")
+    | (if .state == "question" then "question" else "parked" end) as $k
+    | ((.note // "") | tostring | gsub("[[:cntrl:]]"; "") | .[0:60]) as $n
+    | .session as $s
+    | {kind:$k, key:"\($k)|\($s)", fpsrc:"\(.since // 0)", scope:$s,
+       session:(if .state != "stopped" and ($live | index($s)) != null then $s else null end),
+       text:(if $k == "question" then "asked you a question" elif .state == "stopped" then "session not running" elif $n != "" then $n else "needs you" end),
+       title:null, since:(.since // 0), actions:["open","dismiss"], number:null, run:null}' 2>/dev/null || true
+}
+
+# inbox_gh_rows <cache> <live sessions json>: pr and build rows from the gh cache (session = the project's tmux session if it runs).
+inbox_gh_rows() {
+  jq -c --argjson live "$2" '(.repos // {}) | to_entries[] | .key as $slug | .value as $e
+    | (($e.dir // "") | gsub("[.:]"; "-")) as $s
+    | (if $s != "" and ($live | index($s)) != null then $s else null end) as $sess
+    | (($e.prs // [])[] | {kind:"pr", key:"pr|\($slug)|\(.number)", fpsrc:"\(.head)|\(.concl)", scope:$slug, session:$sess,
+         text:"#\(.number) ready to merge · \(.checks) checks green", title, since, actions:["merge","open","dismiss"], number, run:null}),
+      (($e.builds // [])[] | {kind:"build", key:"build|\($slug)|\(.workflow)", fpsrc:"\(.run)", scope:$slug, session:$sess,
+         text:"\(.workflow) failed on \($e.branch)", title:null, since, actions:["open","dismiss"], number:null, run})' <<<"$1" 2>/dev/null || true
+}
+
+# inbox_login_rows <cache>: Claude / GitHub signed out, workers without a login (from the cached checks).
+# Workers are keyed login|worker:<name> so a worker named like a service can't share its id.
+inbox_login_rows() {
+  jq -c 'def row($k; $scope; $t; $st): {kind:"login", key:"login|\($k)", fpsrc:$st, scope:$scope, session:null, text:$t,
+           title:null, since:null, actions:["open","dismiss"], number:null, run:null};
+    (.logins // {}) as $l
+    | (if $l.claude == false then row("claude"; "claude"; "Claude sign-in failed"; "claude:signed_out") else empty end),
+      (if $l.github == false then row("github"; "github"; "GitHub sign-in failed"; "github:signed_out") else empty end),
+      (($l.workers // {}) | to_entries[] | select(.value == false) | row("worker:\(.key)"; .key; "worker sign-in failed"; "worker:\(.key):signed_out"))' <<<"$1" 2>/dev/null || true
+}
+
+# inbox_finish: rows (stdin, one JSON object per line) get id = <kind>- + 12 hex of sha1(key) and fp = 12 hex of sha1 of
+# the state an action would act on (prompt rows bring their own fp).
+inbox_finish() {
+  local row k key fp fps
+  while IFS= read -r row; do
+    [[ -n "$row" ]] || continue
+    IFS=$'\x1f' read -r k key fp fps < <(jq -r '[.kind, .key, (.fp // ""), (.fpsrc // "")] | map(tostring) | join("\u001f")' <<<"$row")
+    [[ -n "$fp" ]] || fp="$(inbox_sha "$fps")"
+    jq -c --arg id "$k-$(inbox_sha "$key")" --arg fp "$fp" '{id:$id, fp:$fp} + del(.key, .fpsrc, .fp)' <<<"$row"
+  done
+}
+
+# inbox_dismissed: {"<id> <fp>": ts} of dismissals younger than 7 days. Takes inbox/dismiss.lock (fd 4) unless
+# INBOX_DLOCK is set (the caller holds it), and drops older or broken lines from the file.
+inbox_dismissed() {
+  local f="$INBOX_DIR/dismissed" m locked=1
+  if [[ -z "${INBOX_DLOCK:-}" ]]; then
+    exec 4>>"$INBOX_DIR/dismiss.lock"
+    flock -w 10 4 || locked=0   # busy: read only, prune next time
+  fi
+  m="$(inbox_tsv_map "$f" | jq -c --argjson min "$((INOW - INBOX_KEEP))" 'with_entries(select(.value >= $min))')"
+  if ((locked)) && [[ -f "$f" && "$(jq -r length <<<"$m")" != "$(grep -c . "$f" 2>/dev/null)" ]]; then
+    inbox_put "$f" "$(jq -r 'to_entries | map("\(.key | sub(" "; "\t"))\t\(.value)") | join("\n")' <<<"$m")" || true
+  fi
+  printf '%s' "$m"
+}
+
+# inbox_repos <gh user>: "<o/r> <folder> <default branch>" for each project folder whose origin is a github.com repo of
+# the owner (gh user or DEFAULT_OWNER), each repo once, at most INBOX_MAX_REPOS.
+inbox_repos() {
+  local d name url slug br owner seen=" " n=0 u="${1,,}" o="${DEFAULT_OWNER,,}"
+  for d in "$PROJECTS_DIR"/*/; do
+    d="${d%/}"; name="${d##*/}"
+    [[ -e "$d/.git" && "$name" =~ $PROJECT_RE ]] || continue
+    url="$(git -C "$d" remote get-url origin 2>/dev/null </dev/null)" || continue
+    [[ "$url" =~ $GITHUB_URL_RE ]] || continue
+    slug="$(origin_slug "$d")"
+    [[ "$slug" =~ $REPO_RE && "$seen" != *" $slug "* ]] || continue
+    owner="${slug%%/*}"
+    [[ ( -n "$u" && "$owner" == "$u" ) || ( -n "$o" && "$owner" == "$o" ) ]] || continue
+    br="$(git -C "$d" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null </dev/null)"; br="${br#origin/}"
+    [[ "$br" =~ ^[A-Za-z0-9._][A-Za-z0-9._/-]{0,99}$ ]] || br=main
+    seen+="$slug "
+    printf '%s %s %s\n' "$slug" "$name" "$br"
+    n=$((n + 1)); ((n >= INBOX_MAX_REPOS)) && break
+  done
+  return 0
+}
+
+# inbox_gh <deadline epoch> <gh args…>: one gh call, at most INBOX_GH_TIMEOUT seconds and never past the deadline.
+inbox_gh() {
+  local left now
+  now="$(date +%s)"; left=$(($1 - now)); shift
+  ((left > INBOX_GH_TIMEOUT)) && left=$INBOX_GH_TIMEOUT
+  ((left >= 1)) || return 1
+  timeout --kill-after=2 "$left" gh "$@" </dev/null 2>/dev/null
+}
+
+# inbox_fetch_repo <o/r> <default branch> <deadline>: {prs, builds} of one repo, only what qualifies; fails on any error.
+# PR: open, not draft, not from a fork, base = default branch, mergeable, every check green (non-empty rollup).
+# Build: per workflow the newest completed run on the default branch; failure/timed_out/startup_failure = an item.
+# unverified: the shapes of gh's JSON (statusCheckRollup entries with __typename CheckRun {conclusion} / StatusContext
+# {state} in upper case, run conclusions in lower case) are from gh's docs, not from a real call on this server.
+inbox_fetch_repo() {
+  local prs runs
+  prs="$(inbox_gh "$3" pr list -R "$1" --state open -L 20 --json number,title,headRefOid,isDraft,mergeable,isCrossRepository,baseRefName,statusCheckRollup,updatedAt)" || return 1
+  runs="$(inbox_gh "$3" run list -R "$1" -b "$2" -L 10 --json databaseId,workflowName,status,conclusion,headSha,createdAt)" || return 1
+  jq -cn --argjson p "$prs" --argjson r "$runs" --arg b "$2" '
+    def clean($n): tostring | gsub("[[:cntrl:]]"; "") | .[0:$n];
+    def epoch: (try (sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) catch 0) // 0;
+    def ok_check: if .__typename == "StatusContext" then .state == "SUCCESS"
+      else ((.conclusion // "") | tostring | ascii_upcase) as $c | $c == "SUCCESS" or $c == "NEUTRAL" or $c == "SKIPPED" end;
+    def green: (.statusCheckRollup | type) == "array" and (.statusCheckRollup | length) > 0 and all(.statusCheckRollup[]; ok_check);
+    {prs: [$p[]? | select((.number | type) == "number" and .isDraft == false and .isCrossRepository == false
+                          and .mergeable == "MERGEABLE" and .baseRefName == $b and green)
+           | {number, title:((.title // "") | clean(80)), head:((.headRefOid // "") | clean(64)), checks:(.statusCheckRollup | length),
+              concl:([.statusCheckRollup[] | (.conclusion // .state // "") | tostring] | join(",")), since:((.updatedAt // "") | epoch)}],
+     builds: [[$r[]? | select(.status == "completed" and (.databaseId | type) == "number" and (.workflowName | type) == "string")]
+              | group_by(.workflowName)[] | max_by(.createdAt // "")
+              | select(((.conclusion // "") | tostring | ascii_downcase) as $c | $c == "failure" or $c == "timed_out" or $c == "startup_failure")
+              | {workflow:(.workflowName | clean(60)), run:.databaseId, since:((.createdAt // "") | epoch)}]}' 2>/dev/null
+}
+
+# inbox_refresh: rebuild gh.json (the caller holds inbox/lock). A repo whose calls fail or time out keeps its old entry,
+# marked stale. Logins: the same local checks `status` and `worker-list` make, no new probes.
+inbox_refresh() {
+  local old user="" gh_in=false gh_ok=false repos='{}' deadline slug dir br e w='{}' d n s
+  old="$(inbox_cache)"
+  deadline=$(($(date +%s) + INBOX_GH_BUDGET))
+  if command -v gh >/dev/null 2>&1; then
+    gh_in=true
+    github_logged_in && user="$(t 10 gh api user --jq .login </dev/null 2>/dev/null)"
+    if [[ "$user" =~ $OWNER_RE ]]; then gh_ok=true; else user=""; fi
+  fi
+  if [[ "$gh_ok" == true ]]; then
+    while read -r slug dir br; do
+      [[ -n "$slug" ]] || continue
+      if e="$(inbox_fetch_repo "$slug" "$br" "$deadline")" && [[ -n "$e" ]]; then
+        e="$(jq -c --arg d "$dir" --arg b "$br" --argjson now "$INOW" '. + {dir:$d, branch:$b, ts:$now, stale:false}' <<<"$e")"
+      else
+        e="$(jq -c --arg k "$slug" --arg d "$dir" --arg b "$br" '({prs:[], builds:[]} + (.repos[$k] // {})) + {dir:$d, branch:$b, stale:true}' <<<"$old")"
+      fi
+      repos="$(jq -c --arg k "$slug" --argjson e "$e" '.[$k] = $e' <<<"$repos")"
+    done < <(inbox_repos "$user")
+  fi
+  for d in "$WORKERS_DIR"/*/; do
+    [[ -f "$d/meta.json" ]] || continue
+    n="$(basename "$d")"; [[ "$n" =~ $WORKER_RE ]] || continue
+    s=false; worker_signed "${d%/}" && s=true
+    w="$(jq -c --arg n "$n" --argjson s "$s" '.[$n] = $s' <<<"$w")"
+  done
+  inbox_put "$INBOX_DIR/gh.json" "$(jq -cn --argjson now "$INOW" --argjson r "$repos" --argjson w "$w" \
+    --argjson c "$(creds_ok "${LOGIN_CONFIG_DIR:-$HOME/.claude}/.credentials.json" && echo true || echo false)" \
+    --argjson g "$(if [[ "$gh_in" == true ]]; then echo "$gh_ok"; else echo null; fi)" \
+    '{ts:$now, repos:$r, logins:{claude:$c, github:$g, workers:$w}}')" || true
+}
+
+# inbox_build <cache> <stale true|false>: the answer {now, gh_age, stale, count, items}. Keeps inbox/seen (first-seen
+# times of prompt and login items still there) and leaves out dismissed id+fp pairs.
+inbox_build() {
+  local live rows items dis age stale="$2"
+  live="$({ tmux list-sessions -F '#{session_name}' 2>/dev/null || true; } | jq -Rsc 'split("\n") | map(select(. != ""))')"
+  rows="$({ inbox_prompt_rows; inbox_queue_rows "$live"; inbox_gh_rows "$1" "$live"; inbox_login_rows "$1"; } | inbox_finish)"
+  items="$(jq -sc --argjson seen "$(inbox_tsv_map "$INBOX_DIR/seen")" --argjson now "$INOW" \
+    'map(.since = (.since // $seen[.id + " " + .fp] // $now))' <<<"$rows")" || return 1
+  inbox_put "$INBOX_DIR/seen" "$(jq -r 'map(select(.kind == "prompt" or .kind == "login") | "\(.id)\t\(.fp)\t\(.since)") | join("\n")' <<<"$items")" || true
+  dis="$(inbox_dismissed)"
+  age="$(jq -r --argjson now "$INOW" '(.ts // null | numbers | $now - . | if . < 0 then 0 else . end) // "null"' <<<"$1")"
+  [[ "$(jq -r '[(.repos // {})[] | .stale == true] | any' <<<"$1")" == true ]] && stale=true
+  jq -cn --argjson items "$items" --argjson dis "${dis:-{\}}" --argjson now "$INOW" --argjson age "${age:-null}" --argjson stale "$stale" '
+    {"prompt":0, "question":1, "parked":2, "pr":3, "build":4, "login":5} as $rank
+    | [$items[] | select($dis[.id + " " + .fp] == null)] | sort_by([($rank[.kind] // 9), .since])
+    | {now:$now, gh_age:$age, stale:$stale, count:length,
+       items:map({id, fp, kind, scope, session, text, title, since, actions, number, run})}'
+}
+
+# inbox: what needs the owner now. Uses the gh cache; when it is older than 5 minutes it is refreshed here under
+# inbox/lock (fd 5). A refresh already running is waited for up to 30 s, then the old cache is answered, marked stale.
+do_inbox() {
+  [[ $# -eq 0 ]] || bad_args "inbox takes no arguments"
+  inbox_init || api_err internal "Couldn't create the inbox folder."
+  INOW="${CLAUDERC_NOW:-$(date +%s)}"
+  local cache stale=false
+  cache="$(inbox_cache)"
+  if ! inbox_fresh "$cache"; then
+    exec 5>>"$INBOX_DIR/lock"
+    if flock -w 30 5; then
+      cache="$(inbox_cache)"   # another call may have refreshed it while we waited
+      inbox_fresh "$cache" || { inbox_refresh; cache="$(inbox_cache)"; }
+    else
+      stale=true
+    fi
+    exec 5>&-
+  fi
+  api_ok "$(inbox_build "$cache" "$stale")"
+}
+
+# inbox-dismiss <id> <fp>: hide that item until its fp changes. No PIN: hiding can't do harm, and it comes back as
+# soon as anything about it changes. Answers {count} (from the cache; never refreshes).
+do_inbox_dismiss() {
+  [[ $# -eq 2 && "$1" =~ $INBOX_ID_RE && "$2" =~ $INBOX_FP_RE ]] || bad_args "usage: inbox-dismiss <id> <fp>"
+  inbox_init || api_err internal "Couldn't create the inbox folder."
+  INOW="${CLAUDERC_NOW:-$(date +%s)}"
+  exec 4>>"$INBOX_DIR/dismiss.lock"
+  flock -w 10 4 || api_err busy "The inbox is busy. Try again in a moment."
+  INBOX_DLOCK=1 inbox_dismissed >/dev/null   # prune first
+  grep -q "^$1"$'\t'"$2"$'\t' "$INBOX_DIR/dismissed" 2>/dev/null ||
+    (umask 077; printf '%s\t%s\t%s\n' "$1" "$2" "$INOW" >>"$INBOX_DIR/dismissed") || api_err internal "Couldn't save the dismissal."
+  exec 4>&-
+  api_ok "$(inbox_build "$(inbox_cache)" false | jq -c '{count}')"
 }
 
 # chat-commands <session>: stdin = PIN. The slash commands Claude can run there beyond the built-ins:
@@ -4471,6 +5525,7 @@ do_chat_file() {
   check_pin "$pin"
   dir="$(session_dir "$sess")"
   [[ -d "$dir" ]] || api_err internal "Couldn't find the session's folder."
+  [[ "$path" == /* ]] || path="$dir/$path"   # Claude sends relative paths: they mean the project folder, not this script's cwd
   real="$(realpath -e -- "$path" 2>/dev/null)" && [[ -f "$real" ]] || api_err invalid_name "That file isn't on the server any more."
   case "$real" in
     "$(realpath "$dir")"/* | "/tmp/claude-$(id -u)/$(claude_proj_slug "$dir")"/*) ok=true ;;
@@ -4563,7 +5618,7 @@ migrate_job_alive() {
 migrate_job_active() {
   [[ -s "$MIGRATE_STATUS" ]] || return 1
   case "$(jq -r '.phase // ""' "$MIGRATE_STATUS" 2>/dev/null)" in
-    export | transfer | restore) migrate_job_alive ;;
+    export | transfer | restore | pack | apply) migrate_job_alive ;;
     *) return 1 ;;
   esac
 }
@@ -4613,7 +5668,7 @@ do_migrate_keygen() {
 # The key may only run `claude-backup receive`; an older clauderc-migrate line is replaced.
 do_migrate_authorize() {
   [[ $# -eq 0 ]] || bad_args "migrate-authorize reads the key on stdin"
-  local key addr blob opts tmp ak="$HOME/.ssh/authorized_keys"
+  local key addr blob opts
   key="$(read_secret_line)"; addr="$(read_secret_line)"
   exec 0</dev/null
   migrate_need_run   # it lets another key push a backup here that migrate-restore unpacks: never from a lost phone alone
@@ -4627,17 +5682,24 @@ do_migrate_authorize() {
   # from= only for a literal IP (sshd compares it with the client's IP, it doesn't resolve names): a host name would lock the sender out.
   addr="${addr,,}"
   if migrate_is_ip "$addr"; then opts+=",from=\"$addr\""; fi
+  with_state_lock migrate_ak_put clauderc-migrate "$opts" "$blob"
+}
+
+# migrate_ak_put <marker> <options> <blob>: the one authorized_keys line carrying <marker> (the key's comment) becomes
+# "<options> ssh-ed25519 <blob> <marker>"; other lines, including the other marker's, stay. Answers and exits.
+migrate_ak_put() {
+  local marker="$1" opts="$2" blob="$3" tmp ak="$HOME/.ssh/authorized_keys"
   [[ -d "$HOME/.ssh" ]] || mkdir -m 700 "$HOME/.ssh" || api_err internal "Couldn't create ~/.ssh."
-  # An existing file is copied first (minus the older clauderc-migrate line); if that fails it is left exactly as it was.
+  # An existing file is copied first (minus the older line of this marker); if that fails it is left exactly as it was.
   if [[ -e "$ak" && ( ! -f "$ak" || ! -r "$ak" ) ]]; then
     api_err internal "Your authorized_keys file can't be read: left as it is."
   fi
   tmp="$(mktemp "$HOME/.ssh/authorized_keys.XXXXXX")" || api_err internal "Couldn't write ~/.ssh/authorized_keys."
-  if [[ -f "$ak" ]] && ! awk '$NF != "clauderc-migrate"' "$ak" >"$tmp"; then
+  if [[ -f "$ak" ]] && ! awk -v m="$marker" '$NF != m' "$ak" >"$tmp"; then
     rm -f "$tmp"
     api_err internal "Couldn't read ~/.ssh/authorized_keys: left as it is."
   fi
-  if printf '%s ssh-ed25519 %s clauderc-migrate\n' "$opts" "$blob" >>"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$ak"; then
+  if printf '%s ssh-ed25519 %s %s\n' "$opts" "$blob" "$marker" >>"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$ak"; then
     api_ok '{"authorized":true}'
   fi
   rm -f "$tmp"
@@ -4653,8 +5715,8 @@ migrate_is_ip() {
 
 # ---- the detached jobs (internal: started as `claude-setup.sh --migrate-worker`, not reachable through the runner)
 
-MIGRATE_JOB="" MIGRATE_STARTED=0 MIGRATE_FILE="" MIGRATE_FINISHED=0 MIGRATE_CHILD=""
-MIGRATE_ON_FAIL=() MIGRATE_ALWAYS=()   # files removed when the job fails / whenever it ends
+MIGRATE_JOB="" MIGRATE_STARTED=0 MIGRATE_FILE="" MIGRATE_FINISHED=0 MIGRATE_CHILD="" MIGRATE_FAIL_HOOK="" MIGRATE_RESULT_FILE=""
+MIGRATE_ON_FAIL=() MIGRATE_ALWAYS=() MIGRATE_RMDIRS=()   # files removed when the job fails / whenever it ends; folders removed either way
 
 migrate_progress() { migrate_status_write "$MIGRATE_JOB" "$1" "$2" "$3" "$4" "$MIGRATE_FILE" "$MIGRATE_STARTED" ""; }
 
@@ -4662,6 +5724,8 @@ migrate_fail() {
   local f pct=0 bytes=0
   read -r pct bytes < <(jq -r '[(.pct // 0), (.bytes // 0)] | @tsv' "$MIGRATE_STATUS" 2>/dev/null) || true
   for f in "${MIGRATE_ON_FAIL[@]}" "${MIGRATE_ALWAYS[@]}"; do rm -f -- "$f"; done
+  for f in "${MIGRATE_RMDIRS[@]}"; do rm -rf -- "$f"; done
+  [[ -z "$MIGRATE_FAIL_HOOK" ]] || "$MIGRATE_FAIL_HOOK" || true   # copy-apply closes its key line
   MIGRATE_FINISHED=1
   migrate_status_write "$MIGRATE_JOB" failed "Failed" "${pct:-0}" "${bytes:-0}" "$MIGRATE_FILE" "$MIGRATE_STARTED" "$1"
   exit 1
@@ -4672,6 +5736,7 @@ migrate_worker_exit() {
   [[ -z "$MIGRATE_CHILD" ]] || kill "$MIGRATE_CHILD" 2>/dev/null
   ((MIGRATE_FINISHED == 1)) || migrate_fail "The job stopped unexpectedly"
   for f in "${MIGRATE_ALWAYS[@]}"; do rm -f -- "$f"; done
+  for f in "${MIGRATE_RMDIRS[@]}"; do rm -rf -- "$f"; done
 }
 
 # PROGRESS lines (CLAUDE_BACKUP_PROGRESS=1) on stdin; anything else is kept in $1 for the error text.
@@ -4699,26 +5764,14 @@ migrate_read_progress() {
   done
 }
 
-# migrate_worker_send <host> <port> <user> <host-key type> <known_hosts file> <out file> <started>
-migrate_worker_send() {
-  local host="$1" port="$2" user="$3" ktype="$4" kh="$5" out="$6" started="$7"
-  local pf="$MIGRATE_CFG/passphrase" errlog sshout rc size pos pct msg name hostalg="$4" t0
-  MIGRATE_JOB=send MIGRATE_STARTED="$started"
-  errlog="$(mktemp "$MIGRATE_STATE/err.XXXXXX")"; sshout="$(mktemp "$MIGRATE_STATE/out.XXXXXX")"
-  MIGRATE_ON_FAIL=("$out"); MIGRATE_ALWAYS=("$kh" "$errlog" "$sshout")
-  migrate_progress export "Packing up this server" 0 0
-
-  CLAUDE_BACKUP_PROGRESS=1 "$(migrate_backup_bin)" export --no-claude-login --pass-file "$pf" --out "$out" </dev/null 2>&1 >/dev/null |
-    migrate_read_progress "$errlog" send
-  rc="${PIPESTATUS[0]}"
-  ((rc == 0)) || migrate_fail "The export failed: $(migrate_last_lines "$errlog")"
-  [[ -s "$out" ]] || migrate_fail "The export produced no file."
-  size="$(stat -c %s "$out")"
-
-  : >"$errlog"
-  migrate_progress transfer "Sending to the new server" 60 0
+# migrate_ssh_push <host> <port> <user> <host-key type> <known_hosts file> <key> <file to send> <stdout file> <stderr file> <size>
+# Streams the file to `receive` on the other server over ssh (pinned host key) and reports 60-99% from the stream's position.
+# A failure ends the job (migrate_fail).
+migrate_ssh_push() {
+  local host="$1" port="$2" user="$3" ktype="$4" kh="$5" key="$6" out="$7" sshout="$8" errlog="$9" size="${10}"
+  local hostalg="$4" rc pos pct msg t0
   [[ "$ktype" == ssh-rsa ]] && hostalg="rsa-sha2-512,rsa-sha2-256,ssh-rsa"
-  ssh -F /dev/null -i "$MIGRATE_CFG/key" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none \
+  ssh -F /dev/null -i "$key" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none \
     -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$kh" -o GlobalKnownHostsFile=/dev/null -o UpdateHostKeys=no \
     -o "HostKeyAlgorithms=$hostalg" -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
     -o ForwardAgent=no -o LogLevel=ERROR -T -p "$port" "$user@$host" receive <"$out" >"$sshout" 2>"$errlog" &
@@ -4739,6 +5792,27 @@ migrate_worker_send() {
   wait "$MIGRATE_CHILD"; rc=$?
   MIGRATE_CHILD=""
   ((rc == 0)) || migrate_fail "Couldn't send the file: $(migrate_last_lines "$errlog")"
+}
+
+# migrate_worker_send <host> <port> <user> <host-key type> <known_hosts file> <out file> <started>
+migrate_worker_send() {
+  local host="$1" port="$2" user="$3" ktype="$4" kh="$5" out="$6" started="$7"
+  local pf="$MIGRATE_CFG/passphrase" errlog sshout rc size name
+  MIGRATE_JOB=send MIGRATE_STARTED="$started"
+  errlog="$(mktemp "$MIGRATE_STATE/err.XXXXXX")"; sshout="$(mktemp "$MIGRATE_STATE/out.XXXXXX")"
+  MIGRATE_ON_FAIL=("$out"); MIGRATE_ALWAYS=("$kh" "$errlog" "$sshout")
+  migrate_progress export "Packing up this server" 0 0
+
+  CLAUDE_BACKUP_PROGRESS=1 "$(migrate_backup_bin)" export --no-claude-login --pass-file "$pf" --out "$out" </dev/null 2>&1 >/dev/null |
+    migrate_read_progress "$errlog" send
+  rc="${PIPESTATUS[0]}"
+  ((rc == 0)) || migrate_fail "The export failed: $(migrate_last_lines "$errlog")"
+  [[ -s "$out" ]] || migrate_fail "The export produced no file."
+  size="$(stat -c %s "$out")"
+
+  : >"$errlog"
+  migrate_progress transfer "Sending to the new server" 60 0
+  migrate_ssh_push "$host" "$port" "$user" "$ktype" "$kh" "$MIGRATE_CFG/key" "$out" "$sshout" "$errlog" "$size"
   name="$(grep -oE 'incoming-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\.gpg' "$sshout" | head -n 1 || true)"
   [[ -n "$name" ]] || migrate_fail "The new server didn't confirm that it got the file."
   MIGRATE_FINISHED=1
@@ -4779,6 +5853,8 @@ migrate_worker() {
   case "$kind" in
     send) migrate_worker_send "$@" ;;
     restore) migrate_worker_restore "$@" ;;
+    copy-send) copy_ctx; copy_worker_send "$@" ;;
+    copy-apply) copy_ctx; copy_worker_apply "$@" ;;
     *) MIGRATE_FINISHED=1; exit 2 ;;
   esac
 }
@@ -4836,9 +5912,10 @@ do_migrate_passphrase() {
 # migrate-status: where the current job is. A job whose worker died without finishing is reported (and recorded) as failed.
 do_migrate_status() {
   [[ $# -eq 0 ]] || bad_args "migrate-status takes no arguments"
+  local out
   if [[ -s "$MIGRATE_STATUS" ]] && jq -e 'type == "object" and has("phase")' "$MIGRATE_STATUS" >/dev/null 2>&1; then
     case "$(jq -r '.phase' "$MIGRATE_STATUS")" in
-      export | transfer | restore)
+      export | transfer | restore | pack | apply)
         if ! migrate_job_alive; then
           rm -f "$MIGRATE_STATE"/restore-pass.*   # a dead restore leaves its passphrase file behind
           jq -c '.phase = "failed" | .message = "Failed" | .error = "The job stopped unexpectedly" | .updated = (now | floor) | .pid = null' \
@@ -4846,7 +5923,10 @@ do_migrate_status() {
         fi
         ;;
     esac
-    api_ok "$(jq -c 'del(.pid)' "$MIGRATE_STATUS")"
+    # copy jobs keep what they skipped or refused in result.json
+    out="$(jq -c 'del(.pid)' "$MIGRATE_STATUS")"
+    [[ ! -s "${MIGRATE_RESULT_FILE:-}" ]] || out="$(jq -c --slurpfile r "$MIGRATE_RESULT_FILE" '. + {result:$r[0]}' <<<"$out")"
+    api_ok "$out"
   fi
   api_ok '{"job":"none","phase":"none","message":"","pct":0,"bytes":0}'
 }
@@ -5110,6 +6190,12 @@ migrate_repo_path() {
   return 1
 }
 
+migrate_ak_drop_migrate() {
+  local ak="$HOME/.ssh/authorized_keys" tmp
+  tmp="$(mktemp "$ak.XXXXXX")" || return 1
+  awk '$NF != "clauderc-migrate"' "$ak" >"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$ak" || { rm -f "$tmp"; return 1; }
+}
+
 # migrate-verify [manifest file]: the checklist at the end of the wizard. Read-only, except that it removes the migrate key.
 do_migrate_verify() {
   [[ $# -le 1 ]] || bad_args "usage: migrate-verify [manifest file name]"
@@ -5215,9 +6301,8 @@ do_migrate_verify() {
   # the transfer key must not stay authorized
   ak="$HOME/.ssh/authorized_keys"
   if [[ -f "$ak" ]] && awk '$NF == "clauderc-migrate" { f = 1 } END { exit !f }' "$ak"; then
-    tmp="$(mktemp "$HOME/.ssh/authorized_keys.XXXXXX")"
-    if [[ -n "$tmp" ]] && awk '$NF != "clauderc-migrate"' "$ak" >"$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$ak"; then migrate_vitem migrate_key_removed true removed
-    else rm -f "$tmp"; migrate_vitem migrate_key_removed false "couldn't remove the transfer key from ~/.ssh/authorized_keys"; fi
+    if with_state_lock migrate_ak_drop_migrate; then migrate_vitem migrate_key_removed true removed
+    else migrate_vitem migrate_key_removed false "couldn't remove the transfer key from ~/.ssh/authorized_keys"; fi
   else
     migrate_vitem migrate_key_removed true "no transfer key found"
   fi
@@ -5238,11 +6323,12 @@ do_migrate_clone() {
 # ---- migrate-signout-old <claude|workers|github|autostart...>: local files only; nothing is revoked on Anthropic's or GitHub's side.
 do_migrate_signout_old() {
   [[ $# -ge 1 && $# -le 4 ]] || bad_args "usage: migrate-signout-old <claude|workers|github|autostart>..."
-  local item seen=" " f n done_=() names=() list="$AUTOSTART_LIST"
+  local item seen=" " f n done_=() names=() list="$AUTOSTART_LIST" kept=true
   for item in "$@"; do
     [[ "$item" =~ ^(claude|workers|github|autostart)$ && "$seen" != *" $item "* ]] || bad_args "Each of claude, workers, github, autostart at most once."
     seen+="$item "
   done
+  migrate_need_run   # it deletes logins and the migration backups
   for item in "$@"; do
     case "$item" in
       claude)   # only the local token file (`claude auth logout` would revoke the grant)
@@ -5275,13 +6361,18 @@ do_migrate_signout_old() {
         if ((n == 1 || ${#names[@]} > 0)); then done_+=(autostart); fi ;;
     esac
   done
-  # Whatever was ticked: the transfer key (the private half), the passphrase files and the exported backups go.
+  # Whatever was ticked, the transfer key (the private half) goes. The passphrase files and the exported backups go only
+  # once migrate-send finished: until then they may be the only copy of what was meant to reach the new server.
   rm -rf -- "${MIGRATE_CFG:?}" || api_err internal "Couldn't delete the transfer key folder $MIGRATE_CFG."
-  for f in "$MIGRATE_STATE"/restore-pass.* "$MIGRATE_BACKUPS"/migrate-*.gpg; do
-    [[ -e "$f" || -L "$f" ]] || continue
-    rm -f -- "$f" || api_err internal "Couldn't delete $f."
-  done
-  api_ok "$(jq -cn '{done:$ARGS.positional}' --args "${done_[@]}")"
+  if [[ "$(jq -r '(.job // "") + "/" + (.phase // "")' "$MIGRATE_STATUS" 2>/dev/null)" == send/done ]]; then
+    kept=false
+    for f in "$MIGRATE_STATE"/restore-pass.* "$MIGRATE_BACKUPS"/migrate-*.gpg; do
+      [[ -e "$f" || -L "$f" ]] || continue
+      rm -f -- "$f" || api_err internal "Couldn't delete $f."
+    done
+  fi
+  api_ok "$(jq -cn --argjson k "$kept" '{done:$ARGS.positional, kept_backups:$k}
+    + (if $k then {message:"The backups in ~/backups were kept: the send to the new server never finished."} else {} end)' --args "${done_[@]}")"
 }
 
 # ---- migrate-reboot: stdin line 1 = sudo password. The answer goes out first; the reboot follows a few seconds later from a detached job.
@@ -5308,6 +6399,683 @@ do_migrate_reboot() {
   api_ok '{"rebooting":true}'
 }
 
+# ======================================================================
+# Copy between servers (the contract is docs/copy-design.md). Same machinery as Migrate, with its own marker
+# (clauderc-copy), folders and status file: copy_ctx points the migrate helpers at them.
+#   COPY_CFG   ~/.config/claude-launcher/copy: the one-time key, the copy files B receives, staging folders
+#   COPY_STATE ~/.local/state/claude-launcher/copy: status.json, result.json, the job lock
+# Nothing here deletes anything on the source. Secret values never leave a server except inside the tar.gz that goes
+# straight to the other server over the pinned SSH key.
+# ======================================================================
+COPY_CFG="$LAUNCHER_CONFIG_DIR/copy"
+COPY_STATE="$API_STATE_DIR/copy"
+COPY_FILE_RE='^copy-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\.tgz$'
+COPY_PROJECT_RE='^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$'   # no leading dot or dash
+COPY_BRANCH_RE='^[A-Za-z0-9._/@+-]{1,200}$'
+COPY_MAX_LIST=20000
+COPY_JUNK_RE='(^|/)(node_modules|build|\.gradle|target|\.cache|__pycache__)(/|$)'
+# Only names set-secret or a built-in service could set are merged from another server's env file (an allowlist), and never
+# GOOGLE_APPLICATION_CREDENTIALS (the app's Firebase service owns it).
+COPY_GIT=(git -c core.fsmonitor=false -c core.hooksPath=/dev/null)   # the server's own git calls on received repos
+COPY_ROOT=""   # set by copy_project_root / the secrets kind
+
+copy_ctx() {
+  MIGRATE_CFG="$COPY_CFG"; MIGRATE_STATE="$COPY_STATE"; MIGRATE_STATUS="$COPY_STATE/status.json"
+  MIGRATE_RESULT_FILE="$COPY_STATE/result.json"
+}
+
+# A relative path with no .., no leading / and no control characters or backslashes.
+copy_rel_ok() {
+  local r="$1"
+  [[ -n "$r" && "$r" != /* && ! "$r" =~ [[:cntrl:]] && "$r" != *'\'* ]] || return 1
+  case "/$r/" in */../* | */./* | *//*) return 1 ;; esac
+  return 0
+}
+
+# No folder on the way from <root> to <rel> is a link (or a file).
+copy_parents_ok() {
+  local p="$1" c
+  local -a parts
+  [[ "$2" == */* ]] || return 0
+  IFS=/ read -ra parts <<<"${2%/*}"
+  for c in "${parts[@]}"; do
+    p="$p/$c"
+    if [[ -L "$p" || ( -e "$p" && ! -d "$p" ) ]]; then return 1; fi
+  done
+  return 0
+}
+
+# copy_project_root <name>: sets COPY_ROOT; the folder must resolve to <projects dir>/<name>, inside the home folder.
+copy_project_root() {
+  local pd hd
+  [[ "$1" =~ $COPY_PROJECT_RE ]] || return 1
+  pd="$(realpath -m -- "$PROJECTS_DIR")"; hd="$(realpath -m -- "$HOME")"
+  [[ "$pd" == "$hd"/* ]] || return 1
+  COPY_ROOT="$PROJECTS_DIR/$1"
+  [[ "$(realpath -m -- "$COPY_ROOT")" == "$pd/$1" ]]
+}
+
+# copy_ak_drop all|expired: remove the clauderc-copy line(s) of authorized_keys (a line without a readable expiry counts as
+# expired). Other lines, the migrate line included, are never touched. Run it through with_state_lock.
+copy_ak_drop() {
+  local ak="$HOME/.ssh/authorized_keys" tmp
+  [[ -f "$ak" ]] && grep -q ' clauderc-copy$' "$ak" 2>/dev/null || return 0
+  tmp="$(mktemp "$ak.XXXXXX")" || return 1
+  if awk -v mode="$1" -v now="$(date -u +%Y%m%d%H%M)" '
+      $NF == "clauderc-copy" { if (mode == "all") next; i = index($0, "expiry-time=\""); if (i == 0 || substr($0, i + 13, 12) + 0 < now + 0) next }
+      { print }' "$ak" >"$tmp"; then
+    if cmp -s "$tmp" "$ak"; then rm -f "$tmp"; else chmod 600 "$tmp" && mv -f "$tmp" "$ak"; fi
+  else
+    rm -f "$tmp"; return 1
+  fi
+}
+copy_drop_key() { with_state_lock copy_ak_drop all; }
+
+# Called by do_status (every app poll): expired keys and leftovers older than a day go.
+copy_prune() {
+  if [[ -f "$HOME/.ssh/authorized_keys" ]] && grep -q ' clauderc-copy$' "$HOME/.ssh/authorized_keys" 2>/dev/null; then
+    with_state_lock copy_ak_drop expired
+  fi
+  [[ -d "$COPY_CFG" ]] || return 0
+  find "$COPY_CFG" -maxdepth 1 \( -name 'copy-*.tgz' -o -name 'copy-*.tgz.part' -o -name 'stage.*' -o -name 'send.*' \) -mmin +1440 \
+    -exec rm -rf -- {} + 2>/dev/null
+  return 0
+}
+
+# ---- copy-list
+
+# Relative paths (NUL-separated) on stdin -> "size<TAB>mtime<TAB>mode<TAB>path" lines; junk, odd names and vanished files dropped.
+copy_files_tsv() {
+  LC_ALL=C grep -zvE "$COPY_JUNK_RE|[[:cntrl:]]" | (cd "$1" && xargs -0 -r stat --printf='%s\t%Y\t%a\t%n\n' --) 2>/dev/null
+}
+
+# The files of project folder $1 that are worth copying: a git repo = untracked and ignored files only (the rest comes from git),
+# anything else = every file. $2 = all: the whole folder, .git included.
+copy_project_nul() {
+  if [[ "${2:-}" != all && -d "$1/.git" && "$("${COPY_GIT[@]}" -C "$1" rev-parse --show-toplevel 2>/dev/null)" == "$(realpath -- "$1")" ]]; then
+    "${COPY_GIT[@]}" -C "$1" ls-files -z --others 2>/dev/null | grep -zv '/$'
+  else
+    (cd "$1" && find . \( -name node_modules -o -name build -o -name .gradle -o -name target -o -name .cache -o -name __pycache__ \) -prune \
+      -o \( -type f -o -type l \) -printf '%P\0')
+  fi
+}
+
+copy_secrets_tsv() {
+  local m n
+  if [[ -f "$SERVICES_ENV" ]]; then
+    m="$(stat -c %Y "$SERVICES_ENV")"
+    sed -nE 's/^export ([A-Z_][A-Z0-9_]*)=.*/\1/p' "$SERVICES_ENV" | while IFS= read -r n; do printf '0\t%s\t600\tenv/%s\n' "$m" "$n"; done
+  fi
+  find "$SECRET_FILES_DIR" -maxdepth 1 -type f -printf 'secret-files/%f\0' 2>/dev/null | copy_files_tsv "$LAUNCHER_CONFIG_DIR"
+  { find "$KEYSTORE_DIR" -maxdepth 1 -type f -name '*.jks' -printf 'keystores/%f\0' 2>/dev/null
+    [[ ! -f "$APPLE_DIR/AuthKey.p8" ]] || printf 'apple/AuthKey.p8\0'; } | copy_files_tsv "$LAUNCHER_CONFIG_DIR" | sed 's/$/\t1/'
+}
+
+# Local branches of repo $1 that some commit no remote has: "commits<TAB>time<TAB>sha<TAB>name" (what a bundle would carry).
+copy_bundle_tsv() {
+  local b sha ts n
+  "${COPY_GIT[@]}" -C "$1" for-each-ref --format='%(refname:short)%09%(objectname)%09%(committerdate:unix)' refs/heads 2>/dev/null |
+    while IFS=$'\t' read -r b sha ts; do
+      [[ "$b" =~ $COPY_BRANCH_RE && "$b" != -* ]] || continue
+      n="$("${COPY_GIT[@]}" -C "$1" rev-list --count "$sha" --not --remotes 2>/dev/null)" || continue
+      if [[ "$n" =~ ^[0-9]+$ ]] && ((n > 0)); then printf '%s\t%s\t%s\t%s\n' "$n" "$ts" "$sha" "$b"; fi
+    done
+}
+
+# copy-list <project|secrets|bundle> [project]: what this server has, names and sizes only. A bundle list on a server that is
+# sent "name sha" lines on stdin answers which of those commits it already has.
+do_copy_list() {
+  local kind="${1:-}" proj="${2:-}" tsv="" exists=null line n sha
+  case "$kind" in
+    secrets) [[ $# -eq 1 ]] ;;
+    project | bundle) [[ $# -eq 2 ]] ;;
+    *) false ;;
+  esac || bad_args "usage: copy-list <project|secrets|bundle> [project]"
+  local -a have=()
+  if [[ "$kind" == bundle ]]; then
+    while IFS= read -r -t 5 line; do
+      line="${line//$'\r'/}"
+      [[ -z "$line" ]] || have+=("$line")
+      ((${#have[@]} <= COPY_MAX_LIST)) || break
+    done
+  fi
+  exec 0</dev/null
+  if [[ "$kind" == secrets ]]; then
+    tsv="$(copy_secrets_tsv | head -n $((COPY_MAX_LIST + 1)))"
+  else
+    copy_project_root "$proj" || api_err invalid_name "That isn't a project folder name."
+    if [[ -d "$COPY_ROOT" ]]; then
+      exists=true
+      if [[ "$kind" == project ]]; then
+        tsv="$(copy_project_nul "$COPY_ROOT" | head -z -n $((COPY_MAX_LIST + 1)) | copy_files_tsv "$COPY_ROOT")"
+      elif ((${#have[@]} == 0)); then
+        tsv="$(copy_bundle_tsv "$COPY_ROOT" | head -n $((COPY_MAX_LIST + 1)))"
+      else
+        for line in "${have[@]}"; do
+          n="${line%% *}"; sha="${line#* }"
+          [[ "$n" =~ $COPY_BRANCH_RE && "$n" != -* && "$sha" =~ ^[0-9a-f]{40,64}$ ]] || continue
+          "${COPY_GIT[@]}" -C "$COPY_ROOT" cat-file -e "$sha^{commit}" 2>/dev/null && tsv+="0"$'\t'"0"$'\t'"$sha"$'\t'"$n"$'\n'
+        done
+      fi
+    else
+      exists=false
+    fi
+  fi
+  api_ok "$(jq -Rn --argjson cap "$COPY_MAX_LIST" --argjson ex "$exists" '
+    [inputs | select(length > 0) | split("\t") | {path:.[3], size:(.[0] | tonumber), mtime:(.[1] | tonumber), mode:.[2]}
+      + (if .[4] == "1" then {optional:true} else {} end)] as $e
+    | {entries:$e[:$cap], truncated:($e | length > $cap)} + (if $ex == null then {} else {exists:$ex} end)' <<<"$tsv")"
+}
+
+# ---- copy-keygen / copy-authorize / copy-probe
+
+# copy-keygen: a NEW key for this copy (the old one is deleted), and this server's Tailscale IPv4 if it has one.
+do_copy_keygen() {
+  [[ $# -eq 0 ]] || bad_args "copy-keygen takes no arguments"
+  umask 077
+  need ssh-keygen
+  copy_ctx
+  local key="$COPY_CFG/key" pub tip=""
+  mkdir -p "$COPY_CFG" "$COPY_STATE" && chmod 700 "$COPY_CFG" "$COPY_STATE" || api_err internal "Couldn't create $COPY_CFG."
+  migrate_job_active && api_err busy "A copy is running."
+  rm -f "$key" "$key.pub"
+  ssh-keygen -q -t ed25519 -N '' -C clauderc-copy -f "$key" </dev/null >/dev/null 2>&1 || api_err internal "Couldn't create the copy key."
+  chmod 600 "$key"
+  pub="$(awk 'NR == 1 {print $1, $2, "clauderc-copy"}' "$key.pub")"
+  [[ "$pub" =~ ^ssh-ed25519\ [A-Za-z0-9+/]+=*\ clauderc-copy$ ]] || api_err internal "The copy key is unreadable."
+  if command -v tailscale >/dev/null 2>&1; then
+    tip="$(t 5 tailscale ip -4 2>/dev/null </dev/null | head -n 1)" || tip=""
+    migrate_is_ip "$tip" || tip=""
+  fi
+  api_ok "$(jq -cn --arg k "$pub" --arg ip "$tip" '{public_key:$k, tailnet_ip:$ip}')"
+}
+
+# copy-authorize: stdin = the source's public key line, its address (optional), minutes to live (default 120, max 720).
+# One line, forced to `claude-backup receive --copy`, that sshd itself stops honouring at expiry-time.
+do_copy_authorize() {
+  [[ $# -eq 0 ]] || bad_args "copy-authorize reads the key on stdin"
+  local key addr mins blob opts exp
+  key="$(read_secret_line)"; addr="$(read_secret_line)"; mins="$(read_secret_line)"
+  exec 0</dev/null
+  migrate_need_run   # it lets another key push files here that copy-apply unpacks: never from a lost phone alone
+  umask 077
+  [[ "$key" =~ $MIGRATE_PUBKEY_RE && ${#key} -le 300 ]] || api_err invalid_name "That isn't a public key line (ssh-ed25519 AAAA…)."
+  [[ -z "$addr" || "$addr" =~ $MIGRATE_ADDR_RE ]] || api_err invalid_name "That isn't a host name or IP address."
+  [[ -z "$mins" ]] && mins=120
+  [[ "$mins" =~ ^[0-9]{1,4}$ ]] && ((10#$mins >= 1 && 10#$mins <= 720)) || api_err invalid_name "The minutes must be 1-720."
+  [[ "$HOME" =~ ^/[A-Za-z0-9._/-]+$ ]] || api_err internal "The home folder name can't be put in an authorized_keys option."
+  [[ -x "$HOME/.local/bin/claude-backup" ]] || api_err not_configured "claude-backup is missing: run Update now"
+  blob="$(awk '{print $2}' <<<"$key")"
+  opts="restrict,command=\"$HOME/.local/bin/claude-backup receive --copy\""
+  addr="${addr,,}"
+  if migrate_is_ip "$addr"; then opts+=",from=\"$addr\""; fi
+  exp="$(date -u -d "+$((10#$mins)) minutes" +%Y%m%d%H%M)Z"
+  opts+=",expiry-time=\"$exp\""
+  mkdir -p "$COPY_CFG" && chmod 700 "$COPY_CFG"
+  with_state_lock migrate_ak_put clauderc-copy "$opts" "$blob"
+}
+
+# copy-probe: stdin = host, port, host-key type, host-key base64. Does that server answer with exactly that host key?
+# (No identity at all: "Permission denied" means the SSH door is there and the pinned key matched.)
+do_copy_probe() {
+  [[ $# -eq 0 ]] || bad_args "copy-probe reads the target on stdin"
+  local host port ktype blob d kh out hostalg reach=false ok=false
+  host="$(read_secret_line)"; port="$(read_secret_line)"; ktype="$(read_secret_line)"; blob="$(read_secret_line)"
+  exec 0</dev/null
+  umask 077
+  [[ "$host" =~ $MIGRATE_HOST_RE ]] || api_err invalid_name "That isn't a host name or IP address."
+  [[ "$port" =~ ^[0-9]{1,5}$ ]] && ((10#$port >= 1 && 10#$port <= 65535)) || api_err invalid_name "The port must be 1-65535."
+  port=$((10#$port))
+  [[ "$ktype" =~ $MIGRATE_HOSTKEY_TYPE_RE ]] || api_err invalid_name "That host key type isn't supported."
+  [[ "$blob" =~ $MIGRATE_BLOB_RE ]] || api_err invalid_name "That host key isn't valid base64."
+  need ssh
+  host="${host,,}"; hostalg="$ktype"
+  [[ "$ktype" == ssh-rsa ]] && hostalg="rsa-sha2-512,rsa-sha2-256,ssh-rsa"
+  d="$(mktemp -d)" || api_err internal "Couldn't make a temporary folder."
+  kh="$d/known_hosts"
+  if ((port == 22)); then printf '%s %s %s\n' "$host" "$ktype" "$blob" >"$kh"; else printf '[%s]:%s %s %s\n' "$host" "$port" "$ktype" "$blob" >"$kh"; fi
+  # -i names a file that doesn't exist: an explicit identity switches the default ~/.ssh/id_* keys off.
+  out="$(t 25 ssh -F /dev/null -i "$d/none" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o PreferredAuthentications=publickey \
+    -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$kh" -o GlobalKnownHostsFile=/dev/null -o UpdateHostKeys=no \
+    -o "HostKeyAlgorithms=$hostalg" -o ConnectTimeout=8 -o LogLevel=ERROR -T -p "$port" "clauderc-probe@$host" true </dev/null 2>&1)" || true
+  rm -rf "$d"
+  case "$out" in
+    *"Permission denied"*) reach=true ok=true ;;
+    *"Host key verification failed"* | *"REMOTE HOST IDENTIFICATION HAS CHANGED"*) reach=true ;;
+  esac
+  api_ok "$(jq -cn --argjson r "$reach" --argjson k "$ok" '{reachable:$r, hostkey_ok:$k}')"
+}
+
+# ---- copy-send
+
+# copy-send <secrets | project NAME | bundle NAME>: stdin = host, port, user, host-key type, host-key base64 (as migrate-send), then
+# optionally the chosen relative paths (secrets: env/NAME, secret-files/…; bundle: branch names) one per line. No line = everything
+# listed. For a project, the single line "." means the whole folder including .git (the folder is missing on the other server).
+do_copy_send() {
+  local kind="${1:-}" proj="${2:-}" host port user ktype blob kh started hostpat line n=0 p
+  case "$kind" in
+    secrets) [[ $# -eq 1 ]] ;;
+    project | bundle) [[ $# -eq 2 ]] ;;
+    *) false ;;
+  esac || bad_args "usage: copy-send <secrets|project|bundle> [project] (the target on stdin)"
+  migrate_need_run
+  host="$(read_secret_line)"; port="$(read_secret_line)"; user="$(read_secret_line)"
+  ktype="$(read_secret_line)"; blob="$(read_secret_line)"
+  local -a chosen=()
+  while IFS= read -r -t 15 line; do
+    line="${line//$'\r'/}"
+    [[ -z "$line" ]] && continue
+    chosen+=("$line")
+    ((${#chosen[@]} <= COPY_MAX_LIST)) || api_err invalid_name "Too many paths (the limit is $COPY_MAX_LIST)."
+  done
+  exec 0</dev/null
+  umask 077
+  [[ "$host" =~ $MIGRATE_HOST_RE ]] || api_err invalid_name "That isn't a host name or IP address."
+  [[ "$port" =~ ^[0-9]{1,5}$ ]] && ((10#$port >= 1 && 10#$port <= 65535)) || api_err invalid_name "The port must be 1-65535."
+  port=$((10#$port))
+  [[ "$user" =~ $MIGRATE_USER_RE ]] || api_err invalid_name "That isn't a valid user name."
+  [[ "$ktype" =~ $MIGRATE_HOSTKEY_TYPE_RE ]] || api_err invalid_name "That host key type isn't supported."
+  [[ "$blob" =~ $MIGRATE_BLOB_RE ]] || api_err invalid_name "That host key isn't valid base64."
+  if [[ "$kind" != secrets ]]; then
+    copy_project_root "$proj" || api_err invalid_name "That isn't a project folder name."
+    [[ -d "$COPY_ROOT" && ! -L "$COPY_ROOT" ]] || api_err invalid_name "There is no project folder $proj."
+  fi
+  for p in "${chosen[@]}"; do
+    case "$kind" in
+      bundle) [[ "$p" =~ $COPY_BRANCH_RE && "$p" != -* ]] ;;
+      project) [[ "$p" == . ]] || copy_rel_ok "$p" ;;
+      secrets) [[ "$p" =~ ^(secret-files/[^/]+|keystores/[^/]+\.jks|apple/AuthKey\.p8|env/[A-Z_][A-Z0-9_]*)$ ]] && copy_rel_ok "$p" ;;
+    esac || api_err invalid_name "That path can't be copied: ${p:0:60}"
+  done
+  need ssh; need tar
+  copy_ctx
+  migrate_take_job
+  [[ -s "$COPY_CFG/key" ]] || api_err not_ready "The copy key doesn't exist yet (copy-keygen)."
+  rm -f "$COPY_STATE/result.json"
+  host="${host,,}"
+  if ((port == 22)); then hostpat="$host"; else hostpat="[$host]:$port"; fi
+  kh="$COPY_CFG/known_hosts"
+  printf '%s %s %s\n' "$hostpat" "$ktype" "$blob" >"$kh" || api_err internal "Couldn't write the pinned host key."
+  : >"$COPY_CFG/chosen"
+  for p in "${chosen[@]}"; do printf '%s\n' "$p" >>"$COPY_CFG/chosen"; done
+  started="$(date +%s)"
+  migrate_status_write send pack "Packing the files" 0 0 "" "$started" "" || api_err internal "Couldn't write the status."
+  setsid "$SCRIPT_PATH" --migrate-worker copy-send "$kind" "${proj:--}" "$host" "$port" "$user" "$ktype" "$kh" "$started" \
+    </dev/null >/dev/null 2>&1 3>&- 8>&- 9>&- &
+  api_ok '{"started":true}'
+}
+
+# Packs the chosen files into $1/out.tgz (.clauderc-copy.json first) and sends it. Everything it made, and the private key, goes at the end.
+copy_worker_send() {
+  local kind="$1" proj="$2" host="$3" port="$4" user="$5" ktype="$6" kh="$7" started="$8"
+  local tmpd root="" list p tsv size name src rc line
+  local -a chosen=() tarargs
+  MIGRATE_JOB=send MIGRATE_STARTED="$started"
+  tmpd="$(mktemp -d "$COPY_CFG/send.XXXXXX")" || migrate_fail "Couldn't make a working folder."
+  MIGRATE_RMDIRS=("$tmpd"); MIGRATE_ALWAYS=("$kh" "$COPY_CFG/key" "$COPY_CFG/key.pub" "$COPY_CFG/chosen")
+  list="$tmpd/list.nul"; tsv="$tmpd/files.tsv"
+  while IFS= read -r line; do chosen+=("$line"); done <"$COPY_CFG/chosen"
+  src="$(hostname -s 2>/dev/null | tr -cd 'A-Za-z0-9-' | cut -c1-40)"; [[ -n "$src" ]] || src=other
+  migrate_progress pack "Looking at the files" 5 0
+  : >"$list"; : >"$tsv"
+  case "$kind" in
+    project)
+      copy_project_root "$proj" || migrate_fail "That isn't a project folder."
+      root="$COPY_ROOT"
+      if ((${#chosen[@]} == 1)) && [[ "${chosen[0]}" == . ]]; then copy_project_nul "$root" all >"$list"
+      elif ((${#chosen[@]} > 0)); then for p in "${chosen[@]}"; do printf '%s\0' "$p"; done >"$list"
+      else copy_project_nul "$root" >"$list"; fi
+      # a link on the way would let a chosen name reach outside the folder; what isn't there any more is dropped
+      for p in "${chosen[@]}"; do
+        [[ "$p" == . ]] || copy_parents_ok "$root" "$p" || migrate_fail "A folder on the way to $p is a link."
+      done
+      copy_files_tsv "$root" <"$list" >"$tsv"
+      # the manifest lists exactly what is packed: the stat'ed names (junk-free, still there)
+      awk -F'\t' '{ printf "%s\0", substr($0, length($1 $2 $3) + 4) }' "$tsv" >"$list"
+      ;;
+    secrets)
+      root="$LAUNCHER_CONFIG_DIR"
+      local env_names=() entry opt
+      if ((${#chosen[@]} == 0)); then
+        while IFS=$'\t' read -r _ _ _ entry opt; do [[ "$opt" == 1 ]] || chosen+=("$entry"); done < <(copy_secrets_tsv)
+      fi
+      for p in "${chosen[@]}"; do
+        case "$p" in env/*) env_names+=("${p#env/}") ;; *) printf '%s\0' "$p" ;; esac
+      done >"$list"
+      if ((${#env_names[@]} > 0)) && [[ -f "$SERVICES_ENV" ]]; then
+        # only the chosen names go into the copy of the env file
+        for p in "${env_names[@]}"; do grep -E "^export ${p}=" "$SERVICES_ENV" || true; done >"$tmpd/env"
+        chmod 600 "$tmpd/env"
+        [[ ! -s "$tmpd/env" ]] || printf '%s\t%s\t600\tenv\n' "$(stat -c %s "$tmpd/env")" "$(stat -c %Y "$tmpd/env")" >"$tsv"
+      fi
+      copy_files_tsv "$root" <"$list" >>"$tsv"
+      ;;
+    bundle)
+      copy_project_root "$proj" || migrate_fail "That isn't a project folder."
+      root="$COPY_ROOT"
+      local -a want=() b
+      copy_bundle_tsv "$root" >"$tmpd/branches.tsv"
+      if ((${#chosen[@]} == 0)); then while IFS=$'\t' read -r _ _ _ b; do want+=("$b"); done <"$tmpd/branches.tsv"; else want=("${chosen[@]}"); fi
+      ((${#want[@]} > 0)) || migrate_fail "There is no commit here that a remote lacks."
+      for b in "${want[@]}"; do
+        awk -F'\t' -v b="$b" '$4 == b {f = 1} END {exit !f}' "$tmpd/branches.tsv" || migrate_fail "Branch $b has nothing to bundle."
+      done
+      "${COPY_GIT[@]}" -C "$root" bundle create "$tmpd/bundle" "${want[@]}" --not --remotes >/dev/null 2>"$tmpd/err" ||
+        migrate_fail "git couldn't make the bundle: $(migrate_last_lines "$tmpd/err")"
+      ;;
+  esac
+  migrate_progress pack "Packing the files" 20 0
+  jq -n --arg kind "$kind" --arg project "$([[ "$kind" == secrets ]] && echo "" || echo "$proj")" --arg source "$src" --argjson now "$(date +%s)" \
+    --rawfile tsv "$tsv" --rawfile br "$([[ -f "$tmpd/branches.tsv" ]] && echo "$tmpd/branches.tsv" || echo /dev/null)" '
+    {version:1, kind:$kind, project:$project, source:$source, created:$now,
+     files:[$tsv | split("\n")[] | select(length > 0) | split("\t") | {path:.[3], size:(.[0] | tonumber), mtime:(.[1] | tonumber), mode:.[2]}],
+     branches:[$br | split("\n")[] | select(length > 0) | split("\t") | {name:.[3], sha:.[2]}]}' >"$tmpd/.clauderc-copy.json" ||
+    migrate_fail "Couldn't write the manifest."
+  if [[ "$kind" == bundle ]]; then
+    # only the asked-for branches are named in the manifest
+    jq -c --argjson w "$(printf '%s\n' "${want[@]}" | jq -R . | jq -sc .)" '.branches |= map(select(.name as $n | $w | index($n)))' "$tmpd/.clauderc-copy.json" >"$tmpd/m2" &&
+      mv -f "$tmpd/m2" "$tmpd/.clauderc-copy.json"
+  fi
+  tarargs=(-czf "$tmpd/out.tgz" --numeric-owner --hard-dereference --no-recursion --null --verbatim-files-from -C "$tmpd" .clauderc-copy.json)
+  [[ "$kind" != bundle ]] || tarargs+=(bundle)
+  [[ ! -f "$tmpd/env" || "$kind" != secrets ]] || tarargs+=(env)
+  [[ "$kind" == bundle ]] || tarargs+=(-C "$root" -T "$list")
+  tar "${tarargs[@]}" 2>"$tmpd/err"; rc=$?
+  ((rc <= 1)) || migrate_fail "Packing failed: $(migrate_last_lines "$tmpd/err")"
+  size="$(stat -c %s "$tmpd/out.tgz")"
+  : >"$tmpd/err"
+  migrate_progress transfer "Sending to the other server" 60 0
+  migrate_ssh_push "$host" "$port" "$user" "$ktype" "$kh" "$COPY_CFG/key" "$tmpd/out.tgz" "$tmpd/out" "$tmpd/err" "$size"
+  name="$(grep -oE 'copy-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\.tgz' "$tmpd/out" | head -n 1 || true)"
+  [[ -n "$name" ]] || migrate_fail "The other server didn't confirm that it got the file."
+  MIGRATE_FINISHED=1
+  migrate_status_write send "done" "Sent to the other server" 100 "$size" "$name" "$started" ""
+}
+
+# ---- copy-status / copy-cancel
+
+do_copy_status() {
+  [[ $# -eq 0 ]] || bad_args "copy-status takes no arguments"
+  copy_ctx
+  do_migrate_status
+}
+
+# copy-cancel: close the door and tidy up (this server's key line, the received copy files, a stopped job's leftovers, the key).
+do_copy_cancel() {
+  [[ $# -eq 0 ]] || bad_args "copy-cancel takes no arguments"
+  copy_ctx
+  migrate_job_active && api_err busy "A copy is running: wait for it to end."
+  copy_drop_key || api_err internal "Couldn't update ~/.ssh/authorized_keys."
+  if [[ -d "$COPY_CFG" ]]; then
+    rm -rf -- "$COPY_CFG"/copy-*.tgz "$COPY_CFG"/copy-*.tgz.part "$COPY_CFG"/stage.* "$COPY_CFG"/send.* "$COPY_CFG/key" "$COPY_CFG/key.pub" \
+      "$COPY_CFG/known_hosts" "$COPY_CFG/chosen"
+  fi
+  api_ok '{"cancelled":true}'
+}
+
+# ---- copy-apply
+
+# copy-apply <copy file>: stdin = the policy (new-only | newer), then the relative paths the owner agreed to overwrite.
+do_copy_apply() {
+  [[ $# -eq 1 && "$1" =~ $COPY_FILE_RE ]] || bad_args "usage: copy-apply <copy-….tgz> (policy and overwrite list on stdin)"
+  local name="$1" policy line started p
+  local -a ow=()
+  policy="$(read_secret_line)"
+  while IFS= read -r -t 15 line; do
+    line="${line//$'\r'/}"
+    [[ -z "$line" ]] && continue
+    ow+=("$line")
+    ((${#ow[@]} <= COPY_MAX_LIST)) || api_err invalid_name "Too many paths (the limit is $COPY_MAX_LIST)."
+  done
+  exec 0</dev/null
+  migrate_need_run   # it unpacks into projects and the secrets folder
+  umask 077
+  [[ "$policy" == new-only || "$policy" == newer ]] || api_err invalid_name "The policy must be new-only or newer."
+  for p in "${ow[@]}"; do copy_rel_ok "$p" || api_err invalid_name "That path can't be overwritten: ${p:0:60}"; done
+  need tar
+  copy_ctx
+  [[ -f "$COPY_CFG/$name" && ! -L "$COPY_CFG/$name" ]] || api_err invalid_name "There is no $name here."
+  migrate_take_job
+  rm -f "$COPY_STATE/result.json"
+  for p in "${ow[@]}"; do printf '%s\n' "$p"; done >"$COPY_STATE/overwrite" || api_err internal "Couldn't save the list."
+  started="$(date +%s)"
+  migrate_status_write apply apply "Checking the file" 0 0 "$name" "$started" "" || api_err internal "Couldn't write the status."
+  setsid "$SCRIPT_PATH" --migrate-worker copy-apply "$name" "$policy" "$COPY_STATE/overwrite" "$started" </dev/null >/dev/null 2>&1 3>&- 8>&- 9>&- &
+  api_ok '{"started":true}'
+}
+
+COPY_STAGE="" COPY_BACKUP="" COPY_POLICY="" COPY_RES=""
+COPY_OW=()
+
+copy_res() { printf '%s\t%s\t%s\n' "$1" "$2" "${3:-}" >>"$COPY_RES"; }
+copy_fail() { migrate_fail "$1"; }
+
+# copy_scan_archive <file>: every member must be a plain file, folder or symlink with a safe unique name, none under a symlink.
+# Writes names.nul (files) and links.nul (symlinks) into the staging folder and members.txt (names, one per line).
+copy_scan_archive() {
+  local f="$1" st="$COPY_STAGE" line type rest nm p n_plain n_verbose=0 total=0 avail
+  local -A seen=() lset=()
+  local -a names=() lnames=()
+  local re='^(.)[-rwxsStT]{9} [^ ]+ +([0-9]+) [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}(:[0-9]{2})? (.*)$'
+  n_plain="$(LC_ALL=C.UTF-8 tar --quoting-style=escape -tzf "$f" 2>/dev/null | wc -l)"
+  LC_ALL=C.UTF-8 tar --quoting-style=escape --numeric-owner -tvzf "$f" >"$st/verbose" 2>/dev/null || copy_fail "That isn't a readable copy file."
+  while IFS= read -r line; do
+    n_verbose=$((n_verbose + 1))
+    [[ "$line" =~ $re ]] || copy_fail "The copy file has a member line I can't read: refused."
+    type="${BASH_REMATCH[1]}"; total=$((total + 10#${BASH_REMATCH[2]})); rest="${BASH_REMATCH[4]}"
+    case "$type" in
+      -) nm="$rest" ;;
+      d) nm="${rest%/}" ;;
+      l) nm="${rest%% -> *}" ;;
+      *) copy_fail "The copy file has a member that isn't a plain file, folder or link: refused." ;;
+    esac
+    copy_rel_ok "$nm" || copy_fail "The copy file has an unsafe member name: refused."
+    [[ -z "${seen[k$nm]:-}" ]] || copy_fail "The copy file lists $nm twice: refused."
+    seen[k$nm]=1
+    case "$type" in
+      l) lset["k$nm"]=1; lnames+=("$nm") ;;
+      -) [[ "$nm" == .clauderc-copy.json ]] || names+=("$nm") ;;
+    esac
+  done <"$st/verbose"
+  ((n_plain == n_verbose)) || copy_fail "The copy file's member list doesn't add up: refused."
+  # the unpacked size (a gzip bomb) must fit on this disk with 1 GB to spare
+  avail="$(df -Pk -- "$COPY_CFG" 2>/dev/null | awk 'NR == 2 { printf "%.0f\n", $4 * 1024 }')"
+  [[ "$avail" =~ ^[0-9]+$ ]] || avail=0
+  ((total + 1073741824 <= avail)) || copy_fail "Not enough free disk space to unpack the copy ($((total / 1048576)) MB needed): refused."
+  # no member may sit below a member that is a symlink
+  for nm in "${names[@]}" "${lnames[@]}"; do
+    p="$nm"
+    while [[ "$p" == */* ]]; do
+      p="${p%/*}"
+      [[ -z "${lset[k$p]:-}" ]] || copy_fail "The copy file writes below a symlink ($p): refused."
+    done
+  done
+  for nm in "${names[@]}"; do printf '%s\0' "$nm"; done >"$st/names.nul"
+  for nm in "${lnames[@]}"; do printf '%s\0' "$nm"; done >"$st/links.nul"
+  printf '%s\n' "${names[@]}" "${lnames[@]}" | LC_ALL=C sort >"$st/members.txt"
+}
+
+# copy_backup <root> <rel>: B's version is kept in ~/backups/pre-copy-<time>/ before anything overwrites it.
+copy_backup() {
+  if [[ -z "$COPY_BACKUP" ]]; then
+    COPY_BACKUP="$HOME/backups/pre-copy-$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$HOME/backups" "$COPY_BACKUP" && chmod 700 "$HOME/backups" "$COPY_BACKUP" || copy_fail "Couldn't create $COPY_BACKUP."
+  fi
+  mkdir -p "$COPY_BACKUP/$(dirname -- "$2")" && cp -a --no-dereference -- "$1/$2" "$COPY_BACKUP/$2" || copy_fail "Couldn't back up $2 first."
+}
+
+# copy_place <staged root> <dest root> <rel> <secret 0|1> <mode>: policy, backup, move.
+copy_place() {
+  local x="$1" root="$2" rel="$3" secret="$4" mode="$5" src dest named=0 p am bm
+  src="$x/$rel"; dest="$root/$rel"
+  copy_parents_ok "$root" "$rel" || { copy_res refused "$rel" "a folder on the way is a link or a file"; return 0; }
+  for p in "${COPY_OW[@]}"; do [[ "$p" == "$rel" ]] && named=1; done
+  if [[ -e "$dest" || -L "$dest" ]]; then
+    if [[ -d "$dest" && ! -L "$dest" ]]; then copy_res refused "$rel" "a folder is in the way"; return 0; fi
+    if [[ -f "$src" && ! -L "$src" && -f "$dest" && ! -L "$dest" ]] && cmp -s "$src" "$dest"; then copy_res skipped "$rel" "same"; return 0; fi
+    am="$(stat -c %Y "$src")"; bm="$(stat -c %Y "$dest")"
+    if ((named == 0)); then
+      if [[ "$COPY_POLICY" == newer ]] && ((am > bm)); then :; else copy_res skipped "$rel" "exists"; return 0; fi
+    fi
+    copy_backup "$root" "$rel"
+  fi
+  mkdir -p "$(dirname -- "$dest")" && mv -f -T -- "$src" "$dest" || { copy_res refused "$rel" "couldn't move it into place"; return 0; }
+  if [[ -L "$dest" ]]; then
+    # a link that lands outside the destination once B's own folders are in the picture is taken back out
+    local rr; rr="$(realpath -m -- "$root")"; p="$(realpath -m -- "$dest")"
+    if [[ "$p" != "$rr"/* ]]; then rm -f -- "$dest"; copy_res refused "$rel" "a symlink that points outside the folder"; return 0; fi
+  else
+    if ((secret == 1)); then chmod 600 "$dest"
+    elif [[ "$mode" =~ ^[0-7]{3,4}$ ]]; then chmod "$(printf '%o' $((8#${mode: -3} & 8#755)))" "$dest"; fi
+  fi
+  copy_res copied "$rel"
+}
+
+# The other server's env file names merged into this one: only names this server lacks; another value = a conflict, never written.
+copy_env_merge() {
+  local f="$1" line n v cur added=0
+  [[ -f "$f" ]] || return 0
+  [[ ! -f "$SERVICES_ENV" ]] || { copy_backup "$LAUNCHER_CONFIG_DIR" env 2>/dev/null || true; }
+  while IFS= read -r line; do
+    [[ "$line" =~ ^export\ ([A-Z_][A-Z0-9_]*)=\'(.*)\'$ ]] || continue
+    n="${BASH_REMATCH[1]}"; v="${BASH_REMATCH[2]}"
+    if [[ "$n" == GOOGLE_APPLICATION_CREDENTIALS ]] || ! { custom_name_ok "$n" || service_var_name "$n"; }; then
+      copy_res refused "env/$n" "this name can't be copied"; continue
+    fi
+    if [[ -z "$v" || ${#v} -gt 4000 || "$v" == *"'"* ]]; then copy_res refused "env/$n" "the value is empty, too long, or has a single quote"; continue; fi
+    if grep -q "^export $n=" "$SERVICES_ENV" 2>/dev/null; then
+      cur="$(sed -n "s/^export $n='\\(.*\\)'\$/\\1/p" "$SERVICES_ENV" | head -n 1)"
+      if [[ "$cur" == "$v" ]]; then copy_res skipped "env/$n" "same"; else copy_res env_conflict "$n"; fi
+    else
+      set_env "$n" "$v"; service_var_name "$n" || custom_names_edit add "$n"
+      copy_res env_added "$n"; added=1
+    fi
+  done <"$f"
+  if ((added == 1)); then ensure_env_hook; fi
+}
+
+copy_apply_bundle() {
+  local x="$1" proj="$2" src="$3" manifest="$4" b root rc made=0
+  local -a refs=() names=()
+  copy_project_root "$proj" || copy_fail "The copy names a project folder that isn't allowed."
+  root="$COPY_ROOT"
+  [[ -f "$x/bundle" && ! -L "$x/bundle" ]] || copy_fail "The copy has no bundle in it."
+  while IFS= read -r b; do
+    [[ "$b" =~ $COPY_BRANCH_RE && "$b" != -* ]] || copy_fail "The copy names a branch that isn't allowed."
+    names+=("$b"); refs+=("+refs/heads/$b:refs/remotes/from-$src/$b")
+  done < <(jq -r '.branches[].name' "$manifest")
+  ((${#names[@]} > 0)) || copy_fail "The copy names no branch."
+  if [[ -d "$root" ]]; then
+    [[ "$("${COPY_GIT[@]}" -C "$root" rev-parse --show-toplevel 2>/dev/null)" == "$(realpath -- "$root")" ]] || copy_fail "$proj is a folder here but not a git repository: copy the project instead."
+  else
+    mkdir -p "$PROJECTS_DIR" && git init -q "$root" || copy_fail "Couldn't create the repository."
+    made=1
+  fi
+  # fetch only writes refs/remotes/from-<source>/…: no local branch moves. Hooks off.
+  "${COPY_GIT[@]}" -C "$root" fetch -q --no-tags "$x/bundle" "${refs[@]}" 2>"$COPY_STAGE/giterr"; rc=$?
+  if ((rc != 0)); then
+    ((made == 0)) || rm -rf -- "$root"   # a repository this job just made, still empty
+    copy_fail "git couldn't take the bundle (copy the project first if the repository is missing here): $(migrate_last_lines "$COPY_STAGE/giterr")"
+  fi
+  # a repository made just now has no branch: the first one becomes the local branch
+  if ! "${COPY_GIT[@]}" -C "$root" rev-parse -q --verify HEAD >/dev/null 2>&1; then
+    "${COPY_GIT[@]}" -C "$root" checkout -q -b "${names[0]}" "refs/remotes/from-$src/${names[0]}" 2>/dev/null || true
+  fi
+  for b in "${names[@]}"; do copy_res fetched "$b" "refs/remotes/from-$src/$b"; done
+}
+
+# The detached apply job: check, stage, place file by file, close the door.
+copy_worker_apply() {
+  local name="$1" policy="$2" owf="$3" started="$4" file="$COPY_CFG/$1" st x kind proj src root secret rel mode n total i line rc
+  MIGRATE_JOB=apply MIGRATE_STARTED="$started" MIGRATE_FILE="$name" MIGRATE_FAIL_HOOK=copy_drop_key
+  COPY_POLICY="$policy"; COPY_OW=()
+  while IFS= read -r line; do COPY_OW+=("$line"); done <"$owf"
+  st="$(mktemp -d "$COPY_CFG/stage.XXXXXX")" || copy_fail "Couldn't make a staging folder."
+  COPY_STAGE="$st"; COPY_RES="$st/res.tsv"; : >"$COPY_RES"
+  MIGRATE_RMDIRS=("$st"); MIGRATE_ALWAYS=("$owf")   # the copy file stays after a failure so a retry works
+  x="$st/x"; mkdir -p "$x"
+  migrate_progress apply "Checking the file" 2 0
+  tar -xzOf "$file" .clauderc-copy.json >"$st/manifest.json" 2>/dev/null || copy_fail "The copy file has no manifest."
+  jq -e 'type == "object" and .version == 1 and (.kind | IN("project", "secrets", "bundle")) and (.files | type == "array") and (.branches | type == "array")' \
+    "$st/manifest.json" >/dev/null 2>&1 || copy_fail "The manifest isn't valid."
+  kind="$(jq -r .kind "$st/manifest.json")"; proj="$(jq -r '.project // ""' "$st/manifest.json")"; src="$(jq -r '.source // ""' "$st/manifest.json")"
+  [[ "$src" =~ ^[A-Za-z0-9-]{1,40}$ ]] || src=other
+  copy_scan_archive "$file"
+  if [[ "$kind" == bundle ]]; then
+    [[ "$(cat "$st/members.txt")" == bundle ]] || copy_fail "The copy has members a bundle doesn't have: refused."
+  else
+    jq -r '.files[].path' "$st/manifest.json" | LC_ALL=C sort >"$st/listed.txt"
+    [[ -z "$(LC_ALL=C comm -13 "$st/listed.txt" "$st/members.txt" | head -n 1)" ]] || copy_fail "The copy has files its manifest doesn't list: refused."
+  fi
+  migrate_progress apply "Unpacking" 10 0
+  # files first, then the symlinks: nothing can be written through a link, because none exists while files are written
+  if [[ -s "$st/names.nul" ]]; then
+    tar -xzf "$file" -C "$x" --no-same-owner --no-same-permissions --no-overwrite-dir --no-wildcards --null --verbatim-files-from -T "$st/names.nul" \
+      2>"$st/tarerr" || copy_fail "Unpacking failed: $(migrate_last_lines "$st/tarerr")"
+  fi
+  if [[ -s "$st/links.nul" ]]; then
+    tar -xzf "$file" -C "$x" --no-same-owner --no-wildcards --null --verbatim-files-from -T "$st/links.nul" 2>"$st/tarerr" ||
+      copy_fail "Unpacking failed: $(migrate_last_lines "$st/tarerr")"
+  fi
+  [[ -z "$(find "$x" ! -type f ! -type d ! -type l -print -quit)" ]] || copy_fail "Unpacking made something that isn't a file, folder or link: refused."
+  # a symlink must resolve to somewhere inside the unpacked tree (real resolution, so ".." after a link can't climb out)
+  local xr l
+  xr="$(realpath -- "$x")"
+  while IFS= read -r -d '' rel; do
+    n="$(realpath -m -- "$x/$rel")"; l="$(realpath -m -s -- "$x/$(dirname -- "$rel")/$(readlink -- "$x/$rel")")"
+    if [[ "$n" != "$xr" && "$n" != "$xr"/* ]] || [[ "$l" != "$x" && "$l" != "$x"/* ]]; then
+      rm -f -- "$x/$rel"; copy_res refused "$rel" "a symlink that points outside the folder"
+    fi
+  done < <(cd "$x" && find . -type l -printf '%P\0')
+  case "$kind" in
+    bundle)
+      migrate_progress apply "Fetching the branches" 60 0
+      copy_apply_bundle "$x" "$proj" "$src" "$st/manifest.json"
+      ;;
+    *)
+      secret=0
+      if [[ "$kind" == project ]]; then
+        copy_project_root "$proj" || copy_fail "The copy names a project folder that isn't allowed."
+        root="$COPY_ROOT"
+        mkdir -p "$PROJECTS_DIR" || copy_fail "Couldn't create the projects folder."
+        if [[ -d "$root" ]]; then COPY_OW_GIT=0; else COPY_OW_GIT=1; mkdir -p "$root" || copy_fail "Couldn't create $root."; fi
+      else
+        secret=1; root="$LAUNCHER_CONFIG_DIR"; COPY_OW_GIT=0
+        mkdir -p "$root" && chmod 700 "$root" || copy_fail "Couldn't create $root."
+        # the env file is merged by name below, never placed as a file
+        [[ ! -f "$x/env" ]] || { copy_env_merge "$x/env"; rm -f -- "$x/env"; }
+      fi
+      total="$(cd "$x" && find . \( -type f -o -type l \) | wc -l)"; i=0
+      while IFS= read -r -d '' rel; do
+        i=$((i + 1))
+        ((total > 0 && i % 50 == 0)) && migrate_progress apply "Placing the files ($i of $total)" $((20 + 78 * i / total)) 0
+        if [[ "$kind" == project && "$COPY_OW_GIT" == 0 ]] && [[ "/$rel/" == */.git/* ]]; then
+          copy_res refused "$rel" "the .git folder is never overwritten"; continue
+        fi
+        if [[ "$kind" == secrets ]] && ! [[ "$rel" =~ ^(secret-files/[^/]+|keystores/[^/]+\.jks|apple/AuthKey\.p8)$ ]]; then
+          copy_res refused "$rel" "not a secrets file"; continue
+        fi
+        mode="$(jq -r --arg p "$rel" '[.files[] | select(.path == $p) | .mode][0] // ""' "$st/manifest.json")"
+        copy_place "$x" "$root" "$rel" "$secret" "$mode"
+      done < <(cd "$x" && find . \( -type f -o -type l \) -printf '%P\0' | LC_ALL=C sort -z)
+      ;;
+  esac
+  migrate_progress apply "Closing the door" 99 0
+  copy_drop_key
+  rm -f -- "$file"
+  jq -Rn --arg bk "$COPY_BACKUP" --argjson kr "$(grep -q ' clauderc-copy$' "$HOME/.ssh/authorized_keys" 2>/dev/null && echo false || echo true)" '
+    [inputs | split("\t")] as $r
+    | {copied:[$r[] | select(.[0] == "copied") | .[1]],
+       skipped:[$r[] | select(.[0] == "skipped") | {path:.[1], reason:.[2]}],
+       refused:[$r[] | select(.[0] == "refused") | {path:.[1], reason:.[2]}],
+       env_added:[$r[] | select(.[0] == "env_added") | .[1]],
+       env_conflicts:[$r[] | select(.[0] == "env_conflict") | .[1]],
+       fetched:[$r[] | select(.[0] == "fetched") | .[1]],
+       backup:$bk, key_removed:$kr}' "$COPY_RES" >"$COPY_STATE/result.json" || copy_fail "Couldn't write the result."
+  MIGRATE_FINISHED=1
+  migrate_status_write apply "done" "Copied" 100 0 "" "$started" ""
+}
+
 api_main() {
   # fd 3 = the one JSON object; everything else goes to stderr.
   exec 3>&1 1>&2
@@ -5321,8 +7089,8 @@ api_main() {
   shift || true
   case "$cmd" in
     login-claude-code | login-github | login-aws-keys | login-gitlab | login-docker | run | claude-cmd | login-token | install-cli | set-secret | set-secret-file | login-keystore | login-apple | youtube-login-start | \
-      chat-pin-set | chat-open | chat-history | general-rename | chat-send | chat-interrupt | chat-commands | permissions-get | permissions-set | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
-      migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | host-probe | host-add | host-keyimport | host-authorize | host-harden | drive-passphrase) ;;  # these read stdin
+      chat-pin-set | queue-on | queue-star | chat-open | chat-history | chat-watch | general-rename | chat-send | chat-interrupt | chat-commands | permissions-get | permissions-set | chat-file | upload | mcp-auth-start | mcp-auth-finish | push-setup | worker-add | worker-set | worker-set-key | worker-login-code | cluster-assign | \
+      migrate-authorize | migrate-send | migrate-restore | migrate-sudo-check | migrate-create-user | migrate-reboot | copy-list | copy-authorize | copy-probe | copy-send | copy-apply | host-probe | host-add | host-keyimport | host-authorize | host-harden | drive-passphrase) ;;  # these read stdin
     *) exec 0</dev/null ;;
   esac
 
@@ -5335,6 +7103,13 @@ api_main() {
     push-register)       do_push_register "$@" ;;
     push-session)        do_push_session "$@" ;;
     push-test)           [[ $# -eq 0 ]] || bad_args "push-test takes no arguments"; do_push_test ;;
+    queue-status)        do_queue_status "$@" ;;
+    queue-on)            do_queue_on "$@" ;;
+    queue-off)           do_queue_off "$@" ;;
+    queue-star)          do_queue_star "$@" ;;
+    queue-log)           do_queue_log "$@" ;;
+    inbox)               do_inbox "$@" ;;
+    inbox-dismiss)       do_inbox_dismiss "$@" ;;
     sessions)            [[ $# -eq 0 ]] || bad_args "sessions takes no arguments"; do_sessions ;;
     general-list)        do_general_list "$@" ;;
     general-new)         do_general_new "$@" ;;
@@ -5388,6 +7163,7 @@ api_main() {
     worker-list)         [[ $# -eq 0 ]] || bad_args "worker-list takes no arguments"; do_worker_list ;;
     worker-add)          do_worker_add "$@" ;;
     worker-set)          do_worker_set "$@" ;;
+    worker-rename)       do_worker_rename "$@" ;;
     worker-set-key)      do_worker_set_key "$@" ;;
     cluster-config)      do_cluster_config "$@" ;;
     cluster-config-set)  do_cluster_config_set "$@" ;;
@@ -5413,6 +7189,7 @@ api_main() {
     host-attach)         do_host_attach "$@" ;;
     worker-login-start)  do_worker_login_start "$@" ;;
     worker-login-code)   do_worker_login_code "$@" ;;
+    worker-login-cancel) do_worker_login_cancel "$@" ;;
     mcp)                 do_mcp "$@" ;;
     mcp-refresh)         do_mcp_refresh "$@" ;;
     mcp-auth-start)      [[ $# -eq 0 ]] || bad_args "mcp-auth-start reads the name on stdin"; do_mcp_auth_start ;;
@@ -5433,11 +7210,20 @@ api_main() {
     migrate-clone)       do_migrate_clone "$@" ;;
     migrate-signout-old) do_migrate_signout_old "$@" ;;
     migrate-reboot)      do_migrate_reboot "$@" ;;
+    copy-list)           do_copy_list "$@" ;;
+    copy-keygen)         do_copy_keygen "$@" ;;
+    copy-authorize)      do_copy_authorize "$@" ;;
+    copy-probe)          do_copy_probe "$@" ;;
+    copy-send)           do_copy_send "$@" ;;
+    copy-status)         do_copy_status "$@" ;;
+    copy-apply)          do_copy_apply "$@" ;;
+    copy-cancel)         do_copy_cancel "$@" ;;
     disconnect)         do_disconnect "$@" ;;
     chat-pin-status)     do_chat_pin_status "$@" ;;
     chat-pin-set)        do_chat_pin_set "$@" ;;
     chat-open)           do_chat_open "$@" ;;
     chat-history)        do_chat_history "$@" ;;
+    chat-watch)          do_chat_watch "$@" ;;
     chat-send)           do_chat_send "$@" ;;
     chat-interrupt)      do_chat_interrupt "$@" ;;
     chat-commands)       do_chat_commands "$@" ;;
@@ -5462,6 +7248,7 @@ main() {
     --clone-worker) shift; clone_worker "$@" ;;
     --migrate-worker) shift; migrate_worker "$@" ;;
     --drive-backup-run) shift; drive_backup_run "$@" ;;
+    --queue-tick) queue_tick ;;
     --mcp-refresh) mcp_refresh_now ;;
     --version) echo "$SCRIPT_API" ;;
     -h | --help) sed -n '2,10p' "$SCRIPT_PATH" | sed 's/^# \{0,1\}//' ;;

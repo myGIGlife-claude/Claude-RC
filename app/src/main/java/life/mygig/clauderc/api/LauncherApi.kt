@@ -1,7 +1,11 @@
 package life.mygig.clauderc.api
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runInterruptible
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -39,6 +43,8 @@ object Codes {
     const val INTERNAL = "internal"
     const val FORBIDDEN = "forbidden"
     const val SESSION_BUSY = "session_busy"
+    /** A Grok sign-in the browser hasn't approved yet: ask again, it is still running. */
+    const val LOGIN_PENDING = "login_pending"
 
     // Local, never sent by the server.
     const val HOST_KEY_CHANGED = "host_key_changed"
@@ -91,9 +97,24 @@ val MIGRATE_FILE_RE = Regex("^incoming-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\\.gpg$")
 private val MIGRATE_ITEMS = setOf("claude", "workers", "github", "autostart")
 private val MIGRATE_HOST_RE = Regex("^[A-Za-z0-9._:-]{1,253}$")
 private val MIGRATE_SSH_USER_RE = Regex("^[A-Za-z0-9._][A-Za-z0-9._-]{0,63}$")
+/** The server's MIGRATE_USER_RE (copy-send refuses anything else). */
+private val COPY_SSH_USER_RE = Regex("^[A-Za-z_][A-Za-z0-9_.-]{0,31}$")
 private val MIGRATE_KEY_TYPE_RE = Regex("^[A-Za-z0-9@.-]{1,64}$")
 private val MIGRATE_KEY_BLOB_RE = Regex("^[A-Za-z0-9+/=]{1,8192}$")
 private val MIGRATE_MANIFEST_RE = Regex("^[A-Za-z0-9._-]{1,100}$")
+
+/** The first stdin line every chat action reads: once the chat PIN, now always empty (the server ignores it). */
+internal const val NO_PIN = ""
+
+/**
+ * Read-only actions whose identical in-flight calls may share one SSH call (see LauncherApi.run).
+ * Never add an action that changes anything: a second caller would silently not run it.
+ */
+internal val COALESCED = setOf("status", "sessions", "general-list", "queue-status", "chat-history", "chat-commands", "cluster", "mcp")
+
+/** A [COALESCED] action with no stdin, or only the empty PIN line. */
+internal fun coalescable(command: String, stdin: String?): Boolean =
+    (stdin == null || stdin == NO_PIN) && command.substringBefore(' ') in COALESCED
 
 /** Typed calls to `claude-launcher-api` on the server. */
 class LauncherApi(
@@ -222,7 +243,7 @@ class LauncherApi(
     suspend fun workers(): WorkersData = call("worker-list")
     suspend fun workerAdd(name: String, role: String, kind: String = "claude"): JsonObject {
         requireWorker(name)
-        require(kind in listOf("claude", "codex", "gemini"))
+        require(kind in listOf("claude", "codex", "gemini", "grok"))
         return call("worker-add $name $kind", stdin = role.trim().replace('\n', ' '))
     }
     suspend fun workerSet(name: String, field: String, value: String): JsonObject {
@@ -230,14 +251,21 @@ class LauncherApi(
         if (field != "role" && field != "mode") throw ApiException(Codes.INVALID_NAME, "Bad field")
         return call("worker-set $name $field", stdin = value.trim().replace('\n', ' '))
     }
-    /** Gemini workers sign in with an API key from Google AI Studio (the key travels on stdin only). */
+    /** Gemini and Grok workers that choose it sign in with an API key (the key travels on stdin only). The first key also installs the CLI, hence the long timeout. */
     suspend fun workerSetKey(name: String, key: String): JsonObject { requireWorker(name); return call("worker-set-key $name", stdin = key.trim(), timeoutMs = 300_000) }
+    /** Needs script API 54. */
+    suspend fun workerRename(old: String, new: String): JsonObject { requireWorker(old); requireWorker(new); return call("worker-rename $old $new") }
     suspend fun workerRemove(name: String): JsonObject { requireWorker(name); return call("worker-remove $name") }
     suspend fun workerLoginStart(name: String): LoginUrl { requireWorker(name); return call("worker-login-start $name", timeoutMs = 60_000) }
     suspend fun workerLoginCode(name: String, code: String): LoginDone {
         requireWorker(name)
         return call("worker-login-code $name", stdin = code.trim(), timeoutMs = 120_000)
     }
+    /** Grok or Google account sign-in: gives the link, and for Grok [LoginUrl.code]. The first use also installs the CLI, hence the long timeout. */
+    suspend fun workerAccountLoginStart(name: String): LoginUrl { requireWorker(name); return call("worker-login-start $name", timeoutMs = 360_000) }
+    /** Waits up to 120 s on the server for the browser's approval; throws [Codes.LOGIN_PENDING] when it hasn't come yet. */
+    suspend fun workerGrokLoginWait(name: String): LoginDone { requireWorker(name); return call("worker-login-code $name", timeoutMs = 150_000) }
+    suspend fun workerLoginCancel(name: String): JsonObject { requireWorker(name); return call("worker-login-cancel $name") }
     suspend fun workerRuns(name: String): WorkerRunsData { requireWorker(name); return call("worker-runs $name") }
     // Which workers one chat's project hands work to.
     suspend fun clusterSession(session: String): ChatWorkersData { requireName(session); return call("cluster-session $session") }
@@ -319,30 +347,44 @@ class LauncherApi(
     }
     suspend fun disconnect(service: String): JsonObject = call("disconnect $service")
 
-    // In-app chat: every call carries the PIN on stdin; the server checks it.
-    suspend fun chatPinStatus(): PinStatus = call("chat-pin-status")
-    suspend fun chatPinSet(newPin: String, oldPin: String = ""): JsonObject = call("chat-pin-set", stdin = newPin + "\n" + oldPin)
-    suspend fun chatOpen(session: String, pin: String): JsonObject { requireName(session); return call("chat-open $session", stdin = pin) }
-    suspend fun chatHistory(session: String, pin: String): ChatData { requireName(session); return call("chat-history $session", stdin = pin) }
-    suspend fun chatSend(session: String, pin: String, text: String): JsonObject {
+    // In-app chat. Every chat action still reads one PIN line first and ignores it (SCRIPT_API 56):
+    // NO_PIN is that line, always empty. Keep the order: that line, then the action's own lines.
+    /** Logs "open" in the server's chat log: the queue backs off a chat the owner is looking at. */
+    suspend fun chatOpen(session: String): JsonObject { requireName(session); return call("chat-open $session", stdin = NO_PIN) }
+    suspend fun chatHistory(session: String): ChatData { requireName(session); return call("chat-history $session", stdin = NO_PIN) }
+    /** Long-poll (SCRIPT_API 57): answers when [token] (the last one seen, "" = none) is out of date, else after ~25 s with changed=false. */
+    suspend fun chatWatch(session: String, token: String): ChatData {
         requireName(session)
-        return call("chat-send $session", stdin = pin + "\n" + text)
+        return call("chat-watch $session", stdin = NO_PIN + "\n" + token, timeoutMs = 45_000)
     }
-    /** Sends a file into the session's project (uploads/<name>); PIN-protected like chat. */
-    suspend fun upload(session: String, pin: String, name: String, base64: String): UploadResult {
+    suspend fun chatSend(session: String, text: String): JsonObject {
         requireName(session)
-        return call("upload $session", stdin = pin + "\n" + name + "\n" + base64, timeoutMs = 240_000)
+        return call("chat-send $session", stdin = NO_PIN + "\n" + text)
     }
-    suspend fun chatFile(session: String, pin: String, path: String): ChatFile {
+    /** Sends a file into the session's project (uploads/<name>). */
+    suspend fun upload(session: String, name: String, base64: String): UploadResult {
         requireName(session)
-        return call("chat-file $session", stdin = pin + "\n" + path, timeoutMs = 120_000)
+        return call("upload $session", stdin = NO_PIN + "\n" + name + "\n" + base64, timeoutMs = 240_000)
+    }
+    suspend fun chatFile(session: String, path: String): ChatFile {
+        requireName(session)
+        return call("chat-file $session", stdin = NO_PIN + "\n" + path, timeoutMs = 120_000)
     }
     suspend fun chatLog(): List<ChatLogEntry> = call("chat-log")
-    suspend fun chatCommands(session: String, pin: String): ChatCommands { requireName(session); return call("chat-commands $session", stdin = pin) }
-    suspend fun permissionsGet(session: String, pin: String): Permissions { requireName(session); return call("permissions-get $session", stdin = pin) }
+    suspend fun chatCommands(session: String): ChatCommands { requireName(session); return call("chat-commands $session", stdin = NO_PIN) }
+    suspend fun permissionsGet(session: String): Permissions { requireName(session); return call("permissions-get $session", stdin = NO_PIN) }
     /** One change to a settings file's permissions; [json] is {scope, op, list, rule, new, mode} (see permissionChange). */
-    suspend fun permissionsSet(session: String, pin: String, json: String): JsonObject { requireName(session); return call("permissions-set $session", stdin = pin + "\n" + json) }
-    suspend fun chatInterrupt(session: String, pin: String): JsonObject { requireName(session); return call("chat-interrupt $session", stdin = pin) }
+    suspend fun permissionsSet(session: String, json: String): JsonObject { requireName(session); return call("permissions-set $session", stdin = NO_PIN + "\n" + json) }
+    suspend fun queueStatus(): QueueStatus = call("queue-status")
+    suspend fun queueOn(): QueueStatus = call("queue-on", stdin = NO_PIN)
+    suspend fun queueOff(): QueueStatus = call("queue-off")
+    /** "on" reads the (empty) PIN line first; "off" reads no stdin. */
+    suspend fun queueStar(session: String, on: Boolean): QueueStarResult {
+        requireName(session)
+        return call("queue-star $session ${if (on) "on" else "off"}", stdin = if (on) NO_PIN else null)
+    }
+    suspend fun queueLog(lines: Int = 100): QueueLog = call("queue-log --lines ${lines.coerceIn(1, 500)}")
+    suspend fun chatInterrupt(session: String): JsonObject { requireName(session); return call("chat-interrupt $session", stdin = NO_PIN) }
     suspend fun loginKeystore(name: String, alias: String, storePassword: String, keyPassword: String, fileBase64: String): JsonObject =
         call("login-keystore $name", stdin = listOf(alias.trim(), storePassword, keyPassword, fileBase64).joinToString("\n"))
     /** Saves an App Store Connect API key: key ID, issuer ID, team ID and the .p8 (base64) go on stdin. */
@@ -391,7 +433,7 @@ class LauncherApi(
         val key = phonePublicKey.trim()
         if (key.isEmpty() || key.any { it == '\n' || it == '\r' }) throw ApiException(Codes.INVALID_NAME, "Bad phone key")
         val login = loginPublicKey?.trim().orEmpty()
-        if (login.any { it == '\n' || it == '\r' }) throw ApiException(Codes.INVALID_NAME, "Bad login key")
+        if (login.any { it == '\n' || it == '\r' }) throw ApiException(Codes.INVALID_NAME, "Bad sign-in key")
         val stdin = sudoPassword + "\n" + key + if (login.isNotEmpty()) "\n" + login else ""
         return call("migrate-create-user $name", stdin = stdin, timeoutMs = 1_200_000)
     }
@@ -409,6 +451,61 @@ class LauncherApi(
         return call("migrate-signout-old " + items.distinct().joinToString(" "), timeoutMs = 120_000)
     }
     suspend fun migrateReboot(sudoPassword: String): JsonObject = call("migrate-reboot", stdin = sudoPassword)
+
+    // Copy between servers (docs/copy-design.md). Never add these to COALESCED. No secret value passes through here:
+    // only names, paths and the one-time public key.
+    private fun copyArgs(kind: CopyKind, project: String?): String {
+        if (kind == CopyKind.PROJECT) requireName(project.orEmpty())
+        return kind.wire + if (kind == CopyKind.PROJECT) " $project" else ""
+    }
+
+    /**
+     * [stdin] is only for the bundle kind on the target: the source's `name sha` lines. A bundle list always gets stdin
+     * (possibly empty) so it isn't left waiting up to 5 s for lines that never come.
+     */
+    suspend fun copyList(kind: CopyKind, project: String?, stdin: List<String> = emptyList()): CopyList =
+        call("copy-list " + copyArgs(kind, project), stdin = if (kind == CopyKind.BUNDLE) stdin.joinToString("\n") else null, timeoutMs = 180_000)
+    suspend fun copyKeygen(): CopyKey = call("copy-keygen")
+    /** On the target: [fromAddress] (the source's tailnet IP, or "" on the public route) and minutes to live. */
+    suspend fun copyAuthorize(publicKey: String, fromAddress: String, minutes: Int = 120): JsonObject {
+        val key = publicKey.trim()
+        if (!key.startsWith("ssh-") || key.any { it == '\n' || it == '\r' }) throw ApiException(Codes.INVALID_NAME, "Bad copy key")
+        if (fromAddress.isNotEmpty()) requireMigrate(MIGRATE_HOST_RE, fromAddress, "Bad server address")
+        return call("copy-authorize", stdin = listOf(key, fromAddress, minutes.coerceIn(1, 720).toString()).joinToString("\n"))
+    }
+    private fun pinnedLines(host: String, port: Int, hostKeyType: String, hostKeyBlob: String): List<String> {
+        requireMigrate(MIGRATE_HOST_RE, host, "Bad server address")
+        if (port !in 1..65535) throw ApiException(Codes.INVALID_NAME, "Bad port")
+        requireMigrate(MIGRATE_KEY_TYPE_RE, hostKeyType, "Bad host key type")
+        requireMigrate(MIGRATE_KEY_BLOB_RE, hostKeyBlob, "Bad host key")
+        return listOf(host, port.toString(), hostKeyType, hostKeyBlob)
+    }
+    /** On the source: can it reach [host] and does it show the pinned key? */
+    suspend fun copyProbe(host: String, port: Int, hostKeyType: String, hostKeyBlob: String): CopyProbe =
+        call("copy-probe", stdin = pinnedLines(host, port, hostKeyType, hostKeyBlob).joinToString("\n"), timeoutMs = 60_000)
+    /**
+     * On the source: starts the send; returns at once. Stdin = host, port, user, host-key type, host-key base64 (as
+     * migrate-send), then the chosen paths one per line (secrets: env/NAME, secret-files/x; bundle: branch names; project:
+     * relative paths, or the single line "." for the whole folder). The server would send everything for no path lines; the app
+     * always names what was ticked.
+     */
+    suspend fun copySend(
+        kind: CopyKind, project: String?, host: String, port: Int, user: String, hostKeyType: String, hostKeyBlob: String,
+        paths: List<String>,
+    ): JsonObject {
+        requireMigrate(COPY_SSH_USER_RE, user, "Bad user name")
+        if (paths.isEmpty() || paths.any { !copyPathOk(it) }) throw ApiException(Codes.INVALID_NAME, "Bad file list")
+        val head = pinnedLines(host, port, hostKeyType, hostKeyBlob)
+        return call("copy-send " + copyArgs(kind, project), stdin = (listOf(head[0], head[1], user, head[2], head[3]) + paths).joinToString("\n"))
+    }
+    suspend fun copyStatus(): CopyStatus = call("copy-status")
+    /** On the target: applies the received [file]; [lines] = policy, then the paths to overwrite (see copyApplyLines). */
+    suspend fun copyApply(file: String, lines: List<String>): JsonObject {
+        requireMigrate(COPY_FILE_RE, file, "Bad copy file name")
+        if (lines.isEmpty() || lines.any { !copyPathOk(it) }) throw ApiException(Codes.INVALID_NAME, "Bad file list")
+        return call("copy-apply $file", stdin = lines.joinToString("\n"))
+    }
+    suspend fun copyCancel(): JsonObject = call("copy-cancel")
 
     private fun requireMigrate(re: Regex, value: String, message: String) {
         if (!re.matches(value)) throw ApiException(Codes.INVALID_NAME, message)
@@ -437,8 +534,51 @@ class LauncherApi(
         }
     }
 
+    /**
+     * Identical read calls share one SSH call: a second caller of the same [COALESCED] action+args
+     * (no stdin other than the empty PIN line) awaits the call already running. A call joins only one
+     * that started after the last other call finished ([writes]), so a read issued right after a write
+     * never gets an answer from before it.
+     */
+    private class InFlight(val writes: Long, val result: CompletableDeferred<String>)
+    /** Keyed by server and command: after a server switch, a call to the old one is never shared. */
+    private val inFlight = HashMap<Pair<ServerConfig, String>, InFlight>()
+    private var writes = 0L   // guarded by inFlight
+
     private suspend fun run(command: String, stdin: String?, timeoutMs: Long): String {
         val cfg = config()
+        if (!coalescable(command, stdin)) {
+            // A watch is a read that lasts: counting it would stop reads from sharing for the whole watch.
+            val watch = command.startsWith("chat-watch ")
+            try { return exec(cfg, command, stdin, timeoutMs) } finally { if (!watch) synchronized(inFlight) { writes++ } }
+        }
+        val key = cfg to command
+        while (true) {
+            val mine = CompletableDeferred<String>()
+            val joined = synchronized(inFlight) {
+                val cur = inFlight[key]
+                if (cur != null && cur.writes == writes) cur.result else { inFlight[key] = InFlight(writes, mine); null }
+            }
+            if (joined != null) {
+                try { return joined.await() } catch (e: Exception) {
+                    // The first caller was cancelled (left its screen): not our failure, so run it ourselves.
+                    if (e !is CancellationException && e !is InterruptedException) throw e
+                    currentCoroutineContext().ensureActive()
+                    continue
+                }
+            }
+            try {
+                return exec(cfg, command, stdin, timeoutMs).also { mine.complete(it) }
+            } catch (e: Throwable) {
+                mine.completeExceptionally(e)
+                throw e
+            } finally {
+                synchronized(inFlight) { if (inFlight[key]?.result === mine) inFlight.remove(key) }
+            }
+        }
+    }
+
+    private suspend fun exec(cfg: ServerConfig, command: String, stdin: String?, timeoutMs: Long): String {
         val id = withContext(Dispatchers.Default) {
             try {
                 identity()

@@ -1,6 +1,6 @@
 ---
 name: rc-us-business-law
-description: US business law research and drafting (2026-10): entity choice (LLC, operating agreement, incorporate, S corp election, EIN, registered agent, annual report) with NC, Ohio and Delaware detail; beneficial ownership BOI/CTA status; contracts (NDA, indemnity, limitation of liability, SaaS agreement, MSA, non-compete); independent contractor vs employee classification; trademark and copyright basics.
+description: "US business law research and drafting (2026-10): entity choice (LLC, operating agreement, incorporate, S corp election, EIN, registered agent, annual report) with NC, Ohio and Delaware detail; beneficial ownership BOI/CTA status; contracts (NDA, indemnity, limitation of liability, SaaS agreement, MSA, non-compete); independent contractor vs employee classification; trademark and copyright basics."
 ---
 # US business law: entities, contracts, workers  (as of 2026-10)
 

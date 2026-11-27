@@ -9,7 +9,10 @@ package life.mygig.clauderc.ui.components
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.materialIcon
 import androidx.compose.material.icons.materialPath
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.PathParser
 
 val Icons.Filled.AttachFile: ImageVector
     get() {
@@ -320,3 +323,46 @@ val Icons.Filled.VisibilityOff: ImageVector
     }
 
 private var _visibilityOff: ImageVector? = null
+
+val Icons.Filled.Tune: ImageVector
+    get() {
+        _tune?.let { return it }
+        _tune = materialIcon(name = "Filled.Tune") {
+            addPath(
+                pathData = PathParser().parsePathString("M3,17v2h6v-2H3zM3,5v2h10V5H3zM13,21v-2h8v-2h-8v-2h-2v6h2zM7,9v2H3v2h4v2h2V9H7zM21,13v-2H11v2h10zM15,9h2V7h4V5h-4V3h-2v6z").toNodes(),
+                fill = SolidColor(Color.Black),
+            )
+        }
+        return _tune!!
+    }
+
+private var _tune: ImageVector? = null
+
+/** Material's "Image" icon (named Photo here so it doesn't clash with the Image composable). */
+val Icons.Filled.Photo: ImageVector
+    get() {
+        _image?.let { return it }
+        _image = materialIcon(name = "Filled.Image") {
+            addPath(
+                pathData = PathParser().parsePathString("M21,19V5c0,-1.1 -0.9,-2 -2,-2H5c-1.1,0 -2,0.9 -2,2v14c0,1.1 0.9,2 2,2h14c1.1,0 2,-0.9 2,-2zM8.5,13.5l2.5,3.01L14.5,12l4.5,6H5l3.5,-4.5z").toNodes(),
+                fill = SolidColor(Color.Black),
+            )
+        }
+        return _image!!
+    }
+
+private var _image: ImageVector? = null
+
+val Icons.Filled.InsertDriveFile: ImageVector
+    get() {
+        _insertDriveFile?.let { return it }
+        _insertDriveFile = materialIcon(name = "Filled.InsertDriveFile") {
+            addPath(
+                pathData = PathParser().parsePathString("M6,2c-1.1,0 -1.99,0.9 -1.99,2L4,20c0,1.1 0.89,2 1.99,2L18,22c1.1,0 2,-0.9 2,-2L20,8l-6,-6L6,2zM13,9L13,3.5L18.5,9L13,9z").toNodes(),
+                fill = SolidColor(Color.Black),
+            )
+        }
+        return _insertDriveFile!!
+    }
+
+private var _insertDriveFile: ImageVector? = null

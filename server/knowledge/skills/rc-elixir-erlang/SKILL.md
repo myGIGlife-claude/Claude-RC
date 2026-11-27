@@ -1,6 +1,6 @@
 ---
 name: rc-elixir-erlang
-description: Current Elixir (1.20) and Erlang/OTP (27-29) practice: BEAM processes, OTP behaviours, supervision, Phoenix 1.8, LiveView 1.x, Ecto, Oban, Req/Finch, Bandit, releases, clustering, telemetry, ExUnit/Mox, Credo/Dialyzer, Sobelow. Use when writing or reviewing *.ex, *.exs, *.heex, *.erl, mix.exs, rebar.config, config/runtime.exs, Dockerfiles for releases, or when advice might be Distillery/HTTPoison/pre-1.0 LiveView era.
+description: "Current Elixir (1.20) and Erlang/OTP (27-29) practice: BEAM processes, OTP behaviours, supervision, Phoenix 1.8, LiveView 1.x, Ecto, Oban, Req/Finch, Bandit, releases, clustering, telemetry, ExUnit/Mox, Credo/Dialyzer, Sobelow. Use when writing or reviewing *.ex, *.exs, *.heex, *.erl, mix.exs, rebar.config, config/runtime.exs, Dockerfiles for releases, or when advice might be Distillery/HTTPoison/pre-1.0 LiveView era."
 ---
 # Elixir and Erlang/OTP  (as of 2026-10)
 

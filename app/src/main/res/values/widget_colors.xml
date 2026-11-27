@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget drawables and picker previews (calm look, docs/mockups/ui-refresh.html). Glance code uses the same
+     values in widget/WidgetUi.kt. Dark values are in values-night. -->
+<resources>
+    <color name="widget_surface">#F4F2EC</color>
+    <color name="widget_soft">#F3D9CD</color>
+    <color name="widget_accent">#B85C3E</color>
+    <color name="widget_fg">#1C1B18</color>
+    <color name="widget_muted">#5C5952</color>
+    <color name="widget_ok">#1E8E5A</color>
+    <color name="widget_warn">#8A5A00</color>
+    <color name="widget_warn_bg">#FBF0D8</color>
+    <color name="widget_idle">#8C8880</color>
+    <color name="widget_line">#DAD6CC</color>
+</resources>

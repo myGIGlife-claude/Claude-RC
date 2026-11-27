@@ -116,6 +116,8 @@ data class Session(
     val general: Boolean = false,
     /** The general chat's id when [general]. */
     @SerialName("chat_id") val chatId: String = "",
+    /** In the auto-continue queue; missing on servers before SCRIPT_API 53. */
+    val starred: Boolean = false,
 )
 
 /** A saved general chat: a Claude conversation in its own folder, not tied to a repo. */
@@ -196,7 +198,7 @@ data class StopResult(val session: String, val stopped: Boolean)
 data class TailResult(val session: String, val lines: Int = 0, val text: String = "")
 
 @Serializable
-data class LoginUrl(val url: String, val code: String? = null, @SerialName("device_code") val deviceCode: String? = null, @SerialName("paste_url") val pasteUrl: Boolean = false)
+data class LoginUrl(val url: String, val code: String? = null, @SerialName("device_code") val deviceCode: String? = null, @SerialName("paste_url") val pasteUrl: Boolean = false, @SerialName("paste_code") val pasteCode: Boolean = false)
 
 @Serializable
 data class YoutubeStart(val url: String, val code: String, val interval: Int = 5, @SerialName("expires_in") val expiresIn: Int = 1800)
@@ -351,10 +353,13 @@ data class ChatData(
     val ask: List<AskQuestion>? = null,
     /** The question on screen when [waiting]. */
     val screen: String? = null,
+    /** chat-watch: what the app last saw changed (empty from older servers). */
+    val token: String = "",
+    /** chat-watch: false = nothing new yet, the other fields are empty. Older servers always send full data. */
+    val changed: Boolean = true,
+    /** chat-watch: the server's watcher slots are busy; ask again in a few seconds. */
+    val retry: Boolean = false,
 )
-
-@Serializable
-data class PinStatus(val set: Boolean = false, @SerialName("locked_until") val lockedUntil: Long? = null)
 
 @Serializable
 data class ChatLogEntry(val ts: String = "", val session: String = "", val action: String = "")
@@ -388,7 +393,7 @@ data class Tokens(@SerialName("five_hour") val fiveHour: TokenWindow = TokenWind
 @Serializable
 data class ClusterAccount(
     val name: String,
-    /** claude, codex (ChatGPT) or gemini. */
+    /** claude, codex (ChatGPT), gemini or grok. */
     val kind: String = "claude",
     val email: String? = null,
     val plan: String? = null,
@@ -399,6 +404,8 @@ data class ClusterAccount(
     /** "expired" (Claude renews it next time it runs) or "unavailable". */
     @SerialName("usage_error") val usageError: String? = null,
     val tokens: Tokens? = null,
+    /** Gemini and Grok workers: which login their runs use, "account" or "key". Empty for the others. */
+    val auth: String = "",
 )
 
 @Serializable

@@ -1,6 +1,7 @@
 package life.mygig.clauderc.voice
 
 import android.content.Context
+import com.k2fsa.sherpa.onnx.GeneratedAudio
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
@@ -62,10 +63,17 @@ object NaturalVoice {
 
     fun isInstalled(c: Context): Boolean = File(dir(c), "model.onnx").isFile && File(dir(c), "done").isFile
 
-    fun refresh(c: Context) { _installed.value = isInstalled(c) }
+    fun refresh(c: Context) {
+        _installed.value = isInstalled(c)
+        cleanTmp(c)
+    }
+
+    /** A download that was interrupted leaves its half-unpacked folder (hundreds of MB): remove it unless one is running. */
+    private fun cleanTmp(c: Context) { if (_state.value !is NaturalDownload.Running) File(c.applicationContext.filesDir, "natural-voice.tmp").deleteRecursively() }
 
     fun delete(c: Context) {
         dir(c).deleteRecursively()
+        cleanTmp(c)
         _installed.value = false
     }
 
@@ -139,11 +147,15 @@ object NaturalVoice {
         check(got == SHA256) { "The download didn't match its checksum, so it was thrown away." }
     }
 
-    /** Shared, because the speech engine takes seconds and hundreds of MB to load: [ChatVoice] frees it with [release]. */
+    /** Shared, because the speech engine takes seconds and hundreds of MB to load. Every [ChatVoice] calls [acquire] when made and [release] when done; the last one out frees it. */
     @Volatile private var engine: OfflineTts? = null
     private val lock = Any()
+    private val genLock = Any()   // one sentence at a time through the native engine
+    private var users = 0
 
-    fun engine(c: Context): OfflineTts = synchronized(lock) {
+    fun acquire() = synchronized(lock) { users++ }
+
+    private fun engine(c: Context): OfflineTts = synchronized(lock) {
         engine ?: run {
             val d = dir(c.applicationContext).path
             val kokoro = OfflineTtsKokoroModelConfig(
@@ -154,5 +166,14 @@ object NaturalVoice {
         }
     }
 
-    fun release() = synchronized(lock) { engine?.release(); engine = null }
+    /** Makes one piece of speech; loads the model first if nobody has yet. */
+    fun generate(c: Context, text: String, sid: Int, speed: Float = 1.0f): GeneratedAudio = synchronized(genLock) { engine(c).generate(text, sid, speed) }
+
+    /** One user is done. The engine is freed only when no [ChatVoice] is left and never while a sentence is being made. */
+    fun release() = synchronized(genLock) {
+        synchronized(lock) {
+            if (users > 0) users--
+            if (users == 0) { engine?.release(); engine = null }
+        }
+    }
 }

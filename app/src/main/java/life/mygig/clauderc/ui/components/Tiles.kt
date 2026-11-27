@@ -3,6 +3,7 @@ package life.mygig.clauderc.ui.components
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,23 +14,28 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import life.mygig.clauderc.ui.theme.BadRed
-import life.mygig.clauderc.ui.theme.OffGrey
-import life.mygig.clauderc.ui.theme.OkGreen
-import life.mygig.clauderc.ui.theme.WarnAmber
+import life.mygig.clauderc.ui.theme.statusColors
 import kotlinx.coroutines.delay
 
 /** True on narrow screens such as a foldable's cover display: use short labels there. */
@@ -43,28 +49,52 @@ fun OneLine(text: String) = Text(text, maxLines = 1, softWrap = false, overflow 
 /** A tile's health: the coloured dot. */
 enum class Health { OK, WARN, BAD, OFF, NONE }
 
+@Composable
+@ReadOnlyComposable
 fun Health.color(): Color = when (this) {
-    Health.OK -> OkGreen
-    Health.WARN -> WarnAmber
-    Health.BAD -> BadRed
-    Health.OFF, Health.NONE -> OffGrey
+    Health.OK -> MaterialTheme.statusColors.okDot
+    Health.WARN -> MaterialTheme.statusColors.warnDot
+    Health.BAD -> MaterialTheme.statusColors.badDot
+    Health.OFF, Health.NONE -> MaterialTheme.statusColors.offDot
 }
 
-/** A Claude session's light: green idle, amber working, red when it needs an answer or has worked 5+ minutes
- *  (timed from when this screen first saw it busy). */
+/** A Claude session's light: amber when it needs an answer, green while working, grey when idle. */
 @Composable
-fun claudeHealth(busy: Boolean, waiting: Boolean): Health {
-    val longRun by produceState(false, busy) { value = false; if (busy) { delay(5 * 60_000L); value = true } }
-    return when { waiting || longRun -> Health.BAD; busy -> Health.WARN; else -> Health.OK }
+fun claudeHealth(busy: Boolean, waiting: Boolean): Health = when { waiting -> Health.WARN; busy -> Health.OK; else -> Health.OFF }
+
+/** A Claude session's state in words: what [claudeHealth] says by colour. */
+internal fun sessionState(busy: Boolean, waiting: Boolean): String = when { waiting -> "needs an answer"; busy -> "working"; else -> "idle" }
+
+/** The line under a session's name: its state first, so colour is never the only clue, then its preview. */
+internal fun stateLine(state: String, preview: String): String = if (preview.isEmpty()) state else "$state · $preview"
+
+/** [stateLine] for a screen reader: a comma pauses, a middle dot may be read out. */
+internal fun stateSpoken(state: String, preview: String): String = if (preview.isEmpty()) state else "$state, $preview"
+
+/** What a dot means, for a dot with no state word next to it. */
+fun Health.description(): String = when (this) {
+    Health.OK -> "OK"
+    Health.WARN -> "Needs attention"
+    Health.BAD -> "Problem"
+    Health.OFF -> "Off"
+    Health.NONE -> "Not set up"
 }
 
+/** Without [contentDescription] the dot is decorative: pass one only when no text beside it says the state. */
 @Composable
-fun StatusDot(health: Health, modifier: Modifier = Modifier) {
+fun StatusDot(health: Health, modifier: Modifier = Modifier, contentDescription: String? = null) {
+    val named = if (contentDescription != null) modifier.semantics { this.contentDescription = contentDescription } else modifier.clearAndSetSemantics {}
     if (health == Health.NONE) {
-        Box(modifier.size(10.dp).border(1.dp, OffGrey, CircleShape))
+        Box(named.size(10.dp).border(1.dp, health.color(), CircleShape))
     } else {
-        Box(modifier.size(10.dp).background(health.color(), CircleShape))
+        Box(named.size(10.dp).background(health.color(), CircleShape))
     }
+}
+
+/** The arrow at the end of a row that opens something. Mirrors right-to-left; decorative, the row says what a tap does. */
+@Composable
+fun RowChevron() {
+    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
 }
 
 /** Small upper-case heading above a group of tiles. */
@@ -72,8 +102,8 @@ fun StatusDot(health: Health, modifier: Modifier = Modifier) {
 fun SectionLabel(text: String, modifier: Modifier = Modifier) {
     Text(
         text.uppercase(),
-        modifier = modifier.padding(top = 6.dp),
-        style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.sp, fontWeight = FontWeight.SemiBold),
+        modifier = modifier.padding(start = 4.dp, top = 8.dp),
+        style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.1.sp, fontWeight = FontWeight.SemiBold),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
@@ -92,18 +122,19 @@ fun InfoTile(
     Surface(
         onClick = onClick ?: {},
         enabled = onClick != null,
-        modifier = modifier.fillMaxWidth().heightIn(min = 72.dp),
-        shape = RoundedCornerShape(16.dp),
-        color = if (warn) Color(0xFF2A2418) else MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier.fillMaxWidth().heightIn(min = 76.dp),
+        shape = RoundedCornerShape(20.dp),
+        color = if (warn) MaterialTheme.statusColors.warnContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = if (warn) MaterialTheme.statusColors.onWarnContainer else MaterialTheme.colorScheme.onSurface,
         border = when {
-            warn -> BorderStroke(1.dp, Color(0xFF5C4A24))
+            warn -> BorderStroke(1.dp, MaterialTheme.statusColors.warnBorder)
             selected -> BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
             else -> null
         },
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatusDot(health)
+                StatusDot(health, contentDescription = health.description())
                 Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (!subtitle.isNullOrBlank()) {
@@ -111,8 +142,8 @@ fun InfoTile(
                     subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = when (health) {
-                        Health.WARN -> WarnAmber
-                        Health.BAD -> Color(0xFFF09A9D)
+                        Health.WARN -> MaterialTheme.statusColors.warnText
+                        Health.BAD -> MaterialTheme.statusColors.errorText
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
                     maxLines = 2,
@@ -126,9 +157,22 @@ fun InfoTile(
 /** A rounded card for groups of rows. */
 @Composable
 fun CardBox(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-        Box(Modifier.padding(14.dp)) { content() }
+    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Box(Modifier.padding(16.dp)) { content() }
     }
+}
+
+/** Rows that belong together on one soft surface; put a divider between them with [CalmDivider]. */
+@Composable
+fun CalmGroup(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        androidx.compose.foundation.layout.Column { content() }
+    }
+}
+
+@Composable
+fun CalmDivider() {
+    androidx.compose.material3.HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 }
 
 /** label → value rows inside a CardBox. */
@@ -140,6 +184,33 @@ fun InfoRows(rows: List<Pair<String, String>>) {
                 Text(k, modifier = Modifier.weight(0.38f), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(v, modifier = Modifier.weight(0.62f), style = MaterialTheme.typography.bodyMedium)
             }
+        }
+    }
+}
+
+/** The corner shape of row [index] of [count] in one soft group: rounded only at the top of the first and the bottom of the last. */
+fun groupedShape(index: Int, count: Int, radius: androidx.compose.ui.unit.Dp = 20.dp): androidx.compose.ui.graphics.Shape =
+    RoundedCornerShape(
+        topStart = if (index == 0) radius else 0.dp, topEnd = if (index == 0) radius else 0.dp,
+        bottomStart = if (index == count - 1) radius else 0.dp, bottomEnd = if (index == count - 1) radius else 0.dp,
+    )
+
+/** A harness-injected message folded to one calm row: label + first-line preview; tap to show the full [text]. */
+@Composable
+fun FoldedRow(label: String, preview: String, text: String, expanded: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClickLabel = if (expanded) "Hide" else "Show", role = Role.Button, onClick = onToggle),
+        shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (!expanded && preview.isNotEmpty()) Text(
+                    "  " + preview, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (expanded) Text(text.trim(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

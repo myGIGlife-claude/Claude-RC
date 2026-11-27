@@ -33,10 +33,10 @@ claude_stub = tmp / "claude-stub"
 stub_text = (HERE / "stubs" / "claude").read_text()
 stub_text = stub_text.replace("svc=${CLAUDERC_TEST_SECRET:-unset} args=", "svc=${CLAUDERC_TEST_SECRET:-unset} ssh=${SSH_AUTH_SOCK:-unset} gh=${GH_TOKEN:-unset} ghub=${GITHUB_TOKEN:-unset} settings=${SETTINGS_ONLY_SECRET:-unset} args=")
 claude_stub.write_text(stub_text); claude_stub.chmod(0o755)
-env = {**os.environ, "HOME": str(test_home), "CLAUDERC_SANDBOX": "off", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t", "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(claude_stub), "CLAUDERC_CODEX": str(HERE / "stubs" / "codex"), "CLAUDERC_GEMINI": str(HERE / "stubs" / "gemini"),
+env = {**os.environ, "HOME": str(test_home), "CLAUDERC_SANDBOX": "off", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t", "XDG_CONFIG_HOME": str(tmp / "cfg"), "CLAUDERC_CLAUDE": str(claude_stub), "CLAUDERC_CODEX": str(HERE / "stubs" / "codex"), "CLAUDERC_GEMINI": str(HERE / "stubs" / "gemini"), "CLAUDERC_GROK": str(HERE / "stubs" / "grok"),
        "ANTHROPIC_API_KEY": "secret-should-not-leak", "CLAUDE_CODE_OAUTH_TOKEN": "main-token", "CLAUDECODE": "1", "CLAUDERC_TEST_STUB_STATE": str(tmp / "stub"), "STUB_STATE": str(tmp / "stub"),
        "SSH_AUTH_SOCK": "/tmp/fake-agent.sock", "GH_TOKEN": "fake-gh-token", "GITHUB_TOKEN": "fake-github-token",
-       "CLAUDERC_TEST_SECRET": "service-token", "CLAUDERC_WORKER_SLOTS": "3", "CLAUDERC_USAGE_TTL": "0", "CLAUDERC_START_GAP": "0",
+       "CLAUDERC_TEST_SECRET": "service-token", "CLAUDERC_WORKER_SLOTS": "3", "CLAUDERC_USAGE_TTL": "0",
        "CLAUDERC_USAGE_URL": f"http://127.0.0.1:{usage_srv.server_port}/", "CLAUDERC_SSH": str(HERE / "stubs" / "ssh"), "CLAUDERC_SCP": str(HERE / "stubs" / "scp")}
 cfg.parent.mkdir(parents=True, exist_ok=True)
 (cfg.parent / "env").write_text("export CLAUDERC_TEST_SECRET='service-token'\n")
@@ -64,9 +64,9 @@ def attach(folder, names):
     f.write_text(json.dumps(names))
 
 
-def spawn(folder):
+def spawn(folder, e=None):
     return subprocess.Popen([sys.executable, str(HERE.parent / "clauderc-team"), "mcp"], stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE, text=True, env=env, cwd=folder)
+                            stdout=subprocess.PIPE, text=True, env=e or env, cwd=folder)
 
 
 proc = spawn(tmp)
@@ -173,16 +173,96 @@ err, text = tool("wait", task_id=tid, timeout_s=30)
 assert err and "stub codex failure" in text, text
 err, tid = tool("delegate", worker="gem", task="ask gemini")
 err, text = tool("wait", task_id=tid, timeout_s=30)
-assert not err and "key=AIzaKEY" in text and "ask gemini" in text and "--approval-mode auto_edit" in text, text
+assert not err and "key=AIzaKEY" in text and "auth=gemini-api-key" in text and "ask gemini" in text and "--approval-mode auto_edit" in text, text
+assert "AIzaKEY" not in (tmp / "stub" / "gemini-args").read_text(), "never in argv"
 err, tid = tool("reply", task_id=tid, message="and more")
 err, text = tool("wait", task_id=tid, timeout_s=30)
 assert not err and "and more" in text, text                                  # reply = a new run (gemini has no session ids)
 err, tid = tool("delegate", worker="gem", task="please FAIL")
 err, text = tool("wait", task_id=tid, timeout_s=30)
 assert err and "stub gemini failure" in text, text
+# A Google account login wins over the key, and the settings say so before the run. Other settings stay.
+gem_home = cfg / "gem" / "home"
+(gem_home / ".gemini").mkdir(exist_ok=True)
+(gem_home / ".gemini" / "settings.json").write_text('{"model":{"name":"m"},"security":{"auth":{"selectedType":"gemini-api-key","x":1}}}')
+(gem_home / ".gemini" / "oauth_creds.json").write_text('{"refresh_token":"stub"}')
+err, tid = tool("delegate", worker="gem", task="with the account")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "key=unset" in text and "auth=oauth-personal" in text, text
+assert (tmp / "stub" / "gemini-env").read_text().strip().endswith("key=unset auth=oauth-personal")
+assert json.loads((gem_home / ".gemini" / "settings.json").read_text()) == {"model": {"name": "m"}, "security": {"auth": {"selectedType": "oauth-personal", "x": 1}}}
+err, tid = tool("delegate", worker="gem", task="STUB_EXPIRED please")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert err and "Google sign-in expired" in text and "Claude tab" in text and "non-interactive" not in text, text
+# Only the Google login, no key: signed in, and it runs.
+(cfg / "gem3" / "home" / ".gemini").mkdir(parents=True); (cfg / "gem3" / "tasks").mkdir()
+(cfg / "gem3" / "meta.json").write_text(json.dumps({"role": "account only", "mode": "acceptEdits", "kind": "gemini"}))
+(cfg / "gem3" / "home" / ".gemini" / "oauth_creds.json").write_text('{"refresh_token":"stub"}')
+attach(tmp, {**json.loads((cfg.parent / "attach" / (re.sub(r"[^A-Za-z0-9]", "-", str(tmp.resolve())) + ".json")).read_text()), "gem3": {}})
+assert {w["name"]: w for w in json.loads(tool("list_workers")[1])}["gem3"]["signed_in"], "a Google login without a key counts"
+err, tid = tool("delegate", worker="gem3", task="account only")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "key=unset" in text and "auth=oauth-personal" in text, text
+(cfg / "gem3" / "home" / ".gemini" / "oauth_creds.json").write_text("")
+assert not {w["name"]: w for w in json.loads(tool("list_workers")[1])}["gem3"]["signed_in"], "an empty login file is not a login"
+# The planted-link case: the worker can write its home, this code runs as the owner.
+owner_cfg = tmp / "owner-gemini"; owner_cfg.mkdir(); (owner_cfg / "settings.json").write_text("owner\n")
+(gem_home / ".gemini" / "oauth_creds.json").unlink()
+(gem_home / ".gemini" / "settings.json").unlink(); (gem_home / ".gemini" / "settings.json").symlink_to(owner_cfg / "settings.json")
+err, tid = tool("delegate", worker="gem", task="after a planted file link")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "auth=gemini-api-key" in text and (owner_cfg / "settings.json").read_text() == "owner\n" and not (gem_home / ".gemini" / "settings.json").is_symlink(), text
+(gem_home / ".gemini").rename(gem_home / ".gemini-keep"); (gem_home / ".gemini").symlink_to(owner_cfg)
+err, tid = tool("delegate", worker="gem", task="after a planted folder link")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "auth=gemini-api-key" in text and (owner_cfg / "settings.json").read_text() == "owner\n" and not (gem_home / ".gemini").is_symlink(), text
+# Errors the CLI would retry for minutes end the run at once, with a plain message; the stub would sleep 5 minutes.
+for task, want in (("STUB_QUOTA now", "daily quota is used up"), ("STUB_OVERLOAD now", "overloaded right now")):
+    began = time.time()
+    err, tid = tool("delegate", worker="gem", task=task)
+    while True:
+        err, text = tool("wait", task_id=tid, timeout_s=30)
+        if not text.startswith(("Still running", "Queued")):
+            break
+    assert err and want in text and time.time() - began < 30, (task, text, time.time() - began)
+    # The CLI itself is gone, not only the wrapper: `timeout` keeps it in a process group of its own.
+    stat_file = Path("/proc", (tmp / "stub" / "gemini-pid").read_text().strip(), "stat")
+    assert not stat_file.exists() or stat_file.read_text().rsplit(")", 1)[1].split()[0] == "Z", "the CLI outlived the run"
+assert not list((cfg / "gem" / "tasks").glob("*.fatal")), "the marker is cleaned up"
+err, tid = tool("delegate", worker="gem", task="STUB_TWO_503 then an answer")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "STUB_TWO_503" in text, text
+# An answer that merely talks about these errors is an answer.
+err, tid = tool("delegate", worker="gem", task="explain TerminalQuotaError")
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err and "explain TerminalQuotaError" in text, text
 err, tid = tool("delegate", role="second opinion", task="by role")
 assert not err, tid
 tool("wait", task_id=tid, timeout_s=30)
+# Grok: API key in its own file; it runs only inside the sandbox, and this suite has the sandbox off, so it is refused.
+for name, signed in (("gro", True), ("gro2", False)):
+    (cfg / name / "home").mkdir(parents=True); (cfg / name / "tasks").mkdir()
+    (cfg / name / "meta.json").write_text(json.dumps({"role": "grok only", "mode": "acceptEdits", "kind": "grok"}))
+    if signed:
+        (cfg / name / "home" / "xai-api-key").write_text("xai-TESTKEY\n")
+attach(tmp, {**json.loads((cfg.parent / "attach" / (re.sub(r"[^A-Za-z0-9]", "-", str(tmp.resolve())) + ".json")).read_text()), "gro": {}, "gro2": {}})
+ws = {w["name"]: w for w in json.loads(tool("list_workers")[1])}
+assert ws["gro"]["kind"] == "grok" and ws["gro"]["signed_in"] and ws["gro2"]["signed_in"] is False and "five_hour_pct" not in ws["gro"], ws
+(cfg / "gro2" / "home" / ".grok").mkdir(); (cfg / "gro2" / "home" / ".grok" / "auth.json").write_text("")
+assert not {w["name"]: w for w in json.loads(tool("list_workers")[1])}["gro2"]["signed_in"], "an empty login file is not a login"
+(cfg / "gro2" / "home" / ".grok" / "auth.json").write_text('{"stub":"account"}\n')
+assert {w["name"]: w for w in json.loads(tool("list_workers")[1])}["gro2"]["signed_in"], "a Grok account login without a key counts"
+(cfg / "gro2" / "home" / ".grok" / "auth.json").unlink()
+err, text = tool("delegate", worker="gro2", task="x")
+assert err and "sign" in text.lower(), text
+err, text = tool("delegate", worker="gro", task="x")
+assert err and "Grok workers run only inside the sandbox" in text and "bubblewrap" in text, text
+assert not list((cfg / "gro" / "tasks").glob("*.json")), "refused: no task record, no clone"
+assert not (tmp / "stub" / "grok-args").exists(), "the stub never ran"
+err, text = tool("delegate", role="grok only", task="x")
+assert err and "Grok workers run only inside the sandbox" in text, text     # by role too, not "isn't signed in"
+err, text = tool("delegate", worker="gro", task="x" * 100_001)
+assert err and "too long" in text and "100,000" in text, text
 proc.stdin.close()
 proc.wait(timeout=5)
 
@@ -374,6 +454,20 @@ err, text = tool("merge", task_id=t1)
 assert err and "nothing changed" in text, text
 assert g("status", "--porcelain").strip() == "", "a failed merge leaves the checkout clean"
 tool("discard", task_id=t1)
+# The owner is in the middle of their own merge: merge refuses and leaves it alone (no merge --abort of the owner's work).
+err, t1 = tool("delegate", worker="research", task="WRITEFILE while the owner merges")
+tool("wait", task_id=t1, timeout_s=30)
+here = g("rev-parse", "--abbrev-ref", "HEAD").strip()
+g("checkout", "-qb", "owner-side"); (repo / "a.txt").write_text("side\n"); g("commit", "-qam", "side")
+g("checkout", "-q", here); (repo / "a.txt").write_text("mine\n"); g("commit", "-qam", "mine")
+assert subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "owner-side"], cwd=repo, capture_output=True).returncode
+merge_head = g("rev-parse", "MERGE_HEAD").strip()
+err, text = tool("merge", task_id=t1)
+assert err and "middle of a merge" in text, text
+assert g("rev-parse", "MERGE_HEAD").strip() == merge_head and "<<<<<<<" in (repo / "a.txt").read_text(), "the owner's merge is untouched"
+g("merge", "--abort"); g("branch", "-D", "owner-side")
+assert g("status", "--porcelain").strip() == "" and (repo / "a.txt").read_text() == "mine\n"
+tool("discard", task_id=t1)
 
 # A git project that can't get its own branch must not run the worker in the main checkout.
 (cfg / "research" / "trees").rename(cfg / "research" / "trees.bak")
@@ -438,6 +532,17 @@ err, text = tool("merge", task_id=tid)
 assert not err, text
 err, text = tool("reply", task_id=tid2, message="again")
 assert err and "merged or discarded" in text, text
+# Two follow-ups can't run at once on one branch: they would share the clone.
+err, tid = tool("delegate", worker="research", task="base for replies")
+tool("wait", task_id=tid, timeout_s=30)
+err, r1 = tool("reply", task_id=tid, message="first SLOW")
+assert not err, r1
+err, text = tool("reply", task_id=tid, message="second")
+assert err and "still running" in text, text
+tool("wait", task_id=r1, timeout_s=30)
+err, r2 = tool("reply", task_id=tid, message="second, after the first")
+assert not err, r2
+tool("wait", task_id=r2, timeout_s=30); tool("discard", task_id=tid)
 
 # A worker that hit its usage limit is a failed task, not a finished one.
 err, tid = tool("delegate", worker="research", task="LIMIT")
@@ -622,20 +727,35 @@ err, a2 = tool("delegate", worker="writer1", task="fresh b")
 err, text = tool("wait", task_id=a2, timeout_s=1)
 assert not err and not text.startswith("Queued"), text              # a fresh token: runs side by side
 tool("wait", task_id=a1, timeout_s=30); tool("wait", task_id=a2, timeout_s=30); tool("discard", task_id=a1); tool("discard", task_id=a2)
-# Starts of one worker's runs are spaced apart: two claude processes starting together can log the worker out.
+# The slot wrapper on its own: it runs the command with its arguments and exit code, and lets go of its slot.
 import runpy
 ns = runpy.run_path(str(HERE.parent / "clauderc-team"), run_name="not_main")
-lk = tmp / "gap"; lk.mkdir()
-def start_wrapper(tag):
-    return subprocess.Popen(["sh", "-c", ns["SLOT_SH"], "slot", str(lk / "run.lock"), "3", str(lk / f"{tag}.started"), str(lk / "none.json"), "1000", ns["TOKEN_LEFT_PY"], "3",
-                             "sh", "-c", f"date +%s.%N >{lk}/{tag}.at"])
-w1, w2 = start_wrapper("one"), start_wrapper("two")
-w1.wait(timeout=30); w2.wait(timeout=30)
-at = [float((lk / f"{x}.at").read_text()) for x in ("one", "two")]
-assert abs(at[0] - at[1]) >= 2.5, at                            # 3 s gap between the two starts
-orphan = subprocess.Popen(["sh", "-c", ns["SLOT_SH"], "slot", str(lk / "run.lock"), "3", str(lk / "orphan.started"), str(lk / "none.json"), "1000", ns["TOKEN_LEFT_PY"], "0", "sh", "-c", "sleep 3 &"])
+# Gemini: what stops a run, and what it says.
+stop, gerr = ns["gemini_stop_reason"], ns["gemini_error"]
+QUOTA, OVER, LOGIN = ns["GEMINI_QUOTA_MSG"], ns["GEMINI_503_MSG"], ns["GEMINI_LOGIN_MSG"]
+for line in ("TerminalQuotaError: x", "You have exhausted your daily quota on this model.", "Quota exceeded for metric: generativelanguage.googleapis.com/x"):
+    assert stop(line) == QUOTA, line
+assert stop("") is None and stop("Attempt 1 failed with status 429") is None and stop("all fine") is None
+two = "Attempt 1 failed with status 503\nAttempt 2 failed with status 503\n"
+assert stop(two) is None and stop(two + "Attempt 3 failed with status 503\n") == OVER
+assert stop(two + "Attempt 3 failed with status 503\nTerminalQuotaError") == QUOTA, "the one that won't pass by itself comes first"
+assert gerr("Manual authorization is required but the current session is non-interactive") == LOGIN and gerr("TerminalQuotaError") == QUOTA and gerr("something else") is None
+assert "Google account sign-in" in QUOTA and "another worker" in OVER and "Claude tab" in LOGIN
+vis = ns["gemini_visible_output"]
+assert vis('{"response":"about TerminalQuotaError"}') == "" and vis('{"error":{"message":"TerminalQuotaError"}}') != "" and vis("TerminalQuotaError raw") != ""
+# The key wrapper: from the file into the environment, with nothing in argv.
+gk = tmp / "gemkey"; gk.mkdir(); (gk / "k").write_text("AIzaFILEKEY\n")
+r = subprocess.run(["sh", "-c", ns["GEMINI_KEY_SH"], "gemini-run", str(gk / "k"), "sh", "-c", 'printf "%s|%s" "$GEMINI_API_KEY" "$(cat)"'], input="prompt", capture_output=True, text=True, timeout=30)
+assert r.stdout == "AIzaFILEKEY|prompt", r
+r = subprocess.run(["sh", "-c", ns["GEMINI_KEY_SH"], "gemini-run", str(gk / "missing"), "sh", "-c", "echo ran"], capture_output=True, text=True, timeout=30)
+assert r.returncode != 0 and "ran" not in r.stdout, r
+lk = tmp / "slots"; lk.mkdir()
+slot = lambda tag, *cmd: ["sh", "-c", ns["SLOT_SH"], "slot", str(lk / "run.lock"), "3", str(lk / f"{tag}.started"), str(lk / "none.json"), "1000", ns["TOKEN_LEFT_PY"], *cmd]
+r = subprocess.run(slot("args", "sh", "-c", 'echo "$1 $2"; exit 4', "x", "a b", "c"), capture_output=True, text=True, timeout=10)
+assert r.returncode == 4 and r.stdout == "a b c\n" and (lk / "args.started").exists(), (r.returncode, r.stdout)
+orphan = subprocess.Popen(slot("orphan", "sh", "-c", "sleep 3 &"))
 orphan.wait(timeout=5)
-free = subprocess.run(["sh", "-c", ns["SLOT_SH"], "slot", str(lk / "run.lock"), "3", str(lk / "free.started"), str(lk / "none.json"), "1000", ns["TOKEN_LEFT_PY"], "0", "true"], timeout=5)
+free = subprocess.run(slot("free", "true"), timeout=5)
 assert free.returncode == 0, "background worker descendants must not retain slot locks"
 # A logged-out Claude leaves a credentials file without a token: that is not "signed in".
 (cfg / "writer2" / "home" / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {}}))
@@ -671,7 +791,28 @@ err, tid = tool("delegate", worker="writer1", task="fresh sync 3")
 tool("wait", task_id=tid, timeout_s=30); tool("discard", task_id=tid)
 assert (wsk / "rc-demo" / "SKILL.md").read_text().endswith("v2\n") and (wsk / ".rc-version").read_text() == "2026-11-01\n", "a new VERSION refreshes it"
 import shutil; shutil.rmtree(kp)
+attach(repo, {"writer1": {"mode": "bypassPermissions"}})
+err, tid = tool("delegate", worker="writer1", task="bypass with the sandbox off")
+assert not err, tid                                              # the owner switched the sandbox off: their choice
+tool("wait", task_id=tid, timeout_s=30); tool("discard", task_id=tid)
 
+proc.stdin.close()
+proc.wait(timeout=5)
+# Sandbox 'auto' without a usable bubblewrap: other modes run unsandboxed as before, bypassPermissions is refused (fail closed).
+proc = spawn(repo, {**env, "CLAUDERC_SANDBOX": "auto", "CLAUDERC_BWRAP": "/nonexistent/bwrap"})
+_id = 0
+rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}})
+attach(repo, {"writer1": {"mode": "bypassPermissions"}, "auditor": {"mode": "acceptEdits"}})
+assert {w["name"]: w["sandbox"] for w in by_name().values()} == {"writer1": "unavailable", "auditor": "unavailable"}
+before = sorted(p.name for p in (cfg / "writer1" / "tasks").glob("*.json"))
+err, text = tool("delegate", worker="writer1", task="x")
+assert err and "bypassPermissions" in text and "bubblewrap" in text and "Nothing was started" in text, text
+assert sorted(p.name for p in (cfg / "writer1" / "tasks").glob("*.json")) == before, "no task record, no clone"
+err, tid = tool("delegate", worker="auditor", task="acceptEdits still runs")
+assert not err, tid
+err, text = tool("wait", task_id=tid, timeout_s=30)
+assert not err, text
+tool("discard", task_id=tid)
 proc.stdin.close()
 proc.wait(timeout=5)
 # ---- the worker sandbox (bubblewrap): what the argv grants, and (when bwrap works here) what a run can really see ----
@@ -706,6 +847,100 @@ if ns["bwrap_ok"]():
     assert inside(f"echo x > {sbx_home}/dropped", argv).returncode == 0 and not (sbx_home / "dropped").exists(), "writes to the home folder vanish"
 else:
     print("test-team: bubblewrap unusable here, the sandbox run checks were skipped")
+
+# ---- Grok: the command, what its sandbox mounts, and how its output is read ----
+GROK_UUID = "3f2c9a10-7b1e-4d2a-9c55-0a1b2c3d4e5f"
+parse = lambda s: ns["parse_output"]("grok", s)
+for key in ("result", "response", "text", "output", "message", "content"):
+    assert parse(json.dumps({key: " hi ", "sessionId": GROK_UUID})) == {"result": "hi", "session_id": GROK_UUID}, key
+assert parse(json.dumps({"result": "", "response": "  ", "text": ["x"], "output": "second"}))["result"] == "second", "first non-empty string"
+assert parse(json.dumps({"result": "a", "response": "b"}))["result"] == "a", "in the documented order"
+assert parse(json.dumps({"result": "a"})) == {"result": "a", "session_id": None}
+assert parse(json.dumps({"result": "a", "sessionId": "../../etc/passwd"}))["session_id"] is None, "a bad session id is dropped"
+assert parse(json.dumps({"result": "a", "sessionId": 7}))["session_id"] is None
+assert parse(json.dumps({"error": {"message": "no credit"}})) == {"result": "no credit", "is_error": True}
+assert parse(json.dumps({"error": "no credit"})) == {"result": "no credit", "is_error": True}
+assert parse(json.dumps({"is_error": True, "result": "refused"})) == {"result": "refused", "is_error": True}
+assert parse(json.dumps({"is_error": True})) == {"result": "Grok reported an error.", "is_error": True}
+assert parse("plain words\n") == {"result": "plain words"} and parse('["a"]') == {"result": '["a"]'}
+assert parse("") == {} and parse(" \n") == {} and parse('{"sessionId":"' + GROK_UUID + '"}') == {}
+assert ns["parse_output"]("gemini", '{"response":"g"}') == {"result": "g", "session_id": "fresh"}, "other kinds read as before"
+
+grok_w = tmp / "sbxworkers" / "g1"; (grok_w / "home").mkdir(parents=True); (grok_w / "tasks").mkdir()
+grok_key = grok_w / "home" / "xai-api-key"; grok_key.write_text("xai-SECRETKEY\n")
+# Which login a run uses (runs GROK_SH directly, so this holds where bubblewrap is unusable too).
+gl_home = tmp / "groklogin"; gl_state = tmp / "groklogin-state"; gl_home.mkdir(); gl_state.mkdir()
+def grok_login_run():
+    r = subprocess.run(["sh", "-c", ns["GROK_SH"], "grok-run", str(gl_home / "xai-api-key"), str(HERE / "stubs" / "grok"), "--output-format", "json"], input="hello", capture_output=True, text=True, timeout=30,
+                       env={"PATH": os.environ["PATH"], "HOME": str(gl_home), "STUB_STATE": str(gl_state)})
+    return r, (gl_state / "grok-env").read_text() if r.returncode == 0 else ""
+(gl_home / "xai-api-key").write_text("xai-ONLYKEY\n")
+r, e = grok_login_run(); assert r.returncode == 0 and "key=set(11)" in e, (r, e)
+(gl_home / ".grok").mkdir(); (gl_home / ".grok" / "auth.json").write_text('{"stub":"account"}\n')
+r, e = grok_login_run(); assert r.returncode == 0 and "key=unset" in e, ("both: the account wins, the key stays out", r, e)
+(gl_home / "xai-api-key").unlink()
+r, e = grok_login_run(); assert r.returncode == 0 and "key=unset" in e and "prompt=hello" in r.stdout, ("account only", r, e)
+(gl_home / ".grok" / "auth.json").write_text("")
+r, e = grok_login_run(); assert r.returncode != 0, ("neither: refused, as before", r, e)
+
+# The installer's layout: the real binary under ~/.grok/downloads, a link in ~/.local/bin, and the owner's own Grok login beside it.
+grok_dl = sbx_home / ".grok" / "downloads" / "v1"; grok_dl.mkdir(parents=True)
+(grok_dl / "grok").write_text((HERE / "stubs" / "grok").read_text()); (grok_dl / "grok").chmod(0o755)
+(sbx_home / ".local" / "bin" / "grok").symlink_to(grok_dl / "grok")
+(sbx_home / ".grok" / "auth.json").write_text("owner-grok-login\n"); (sbx_home / ".grok" / "sessions").mkdir(); (sbx_home / ".grok" / "bin").mkdir()
+ns["CLIS"]["grok"] = str(sbx_home / ".local" / "bin" / "grok")
+grok_state = sbx_ws / "grok-state"; grok_state.mkdir()
+grok_env = {"PATH": f"{sbx_home}/.local/bin:{sbx_home}/.grok/bin:/usr/bin:/bin", "HOME": str(sbx_home), "LANG": "C.UTF-8", "STUB_STATE": str(grok_state)}
+g_argv = ns["sandbox_argv"](sbx_t, "grok", grok_w, grok_env, read_only=False)
+g_argv[0] = g_argv[0] or "bwrap"
+g_run = ns["grok_run"](grok_key, "grok-model", GROK_UUID)
+assert g_run[:3] == ["sh", "-c", ns["GROK_SH"]] and g_run[5:] == [ns["CLIS"]["grok"], "--output-format", "json", "--always-approve", "--no-auto-update", "-m", "grok-model", "-r", GROK_UUID], g_run
+assert ns["grok_run"](grok_key)[-1] == "--no-auto-update", "no model, no resume: no flags"
+j = " ".join(g_argv + g_run)
+assert "xai-SECRETKEY" not in j and "XAI_API_KEY " not in j, "the key is never in argv"
+assert f"--ro-bind {grok_dl} {grok_dl}" in j, "the binary's own folder is mounted read-only"
+assert f"--ro-bind {sbx_home / '.grok'} " not in j and f"--ro-bind {sbx_home / '.grok' / 'bin'} " not in j and "auth.json" not in " ".join(g_argv), "nothing else of the owner's ~/.grok"
+assert f"--setenv HOME {grok_w / 'home'}" in j and "--clearenv" in g_argv, "its own home, nothing inherited"
+# A binary directly in ~/.grok must not bring the folder in with it.
+(sbx_home / ".grok" / "grok").write_text("#!/bin/sh\n"); (sbx_home / ".grok" / "grok").chmod(0o755); ns["CLIS"]["grok"] = str(sbx_home / ".grok" / "grok")
+j2 = " ".join(ns["sandbox_argv"](sbx_t, "grok", grok_w, grok_env, read_only=False))
+assert f"--ro-bind {sbx_home / '.grok' / 'grok'} " in j2 and f"--ro-bind {sbx_home / '.grok'} " not in j2, j2
+ns["CLIS"]["grok"] = str(sbx_home / ".local" / "bin" / "grok"); g_run = ns["grok_run"](grok_key, None, GROK_UUID)
+assert "--ro-bind" in " ".join(ns["sandbox_argv"](sbx_t, "grok", grok_w, grok_env, read_only=True)) and f"--ro-bind {sbx_ws} {sbx_ws}" in " ".join(ns["sandbox_argv"](sbx_t, "grok", grok_w, grok_env, read_only=True)), "plan mode: read-only workspace"
+if ns["bwrap_ok"]():
+    r = subprocess.run(g_argv + g_run, input="hello grok", capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    o = ns["parse_output"]("grok", r.stdout)
+    assert o["session_id"] == GROK_UUID and "prompt=hello grok" in o["result"] and f"resume={GROK_UUID}" in o["result"], o
+    assert f"key=set({len('xai-SECRETKEY')})" in o["result"] and f"home={grok_w / 'home'}" in o["result"], o
+    assert "-p hello grok" in (grok_state / "grok-args").read_text() and "SECRETKEY" not in (grok_state / "grok-args").read_text()
+    r = subprocess.run(g_argv + ["sh", "-c", f"cat {sbx_home}/.grok/auth.json; ls {sbx_home}/.grok; ls {sbx_home}/.grok/downloads"], capture_output=True, text=True, timeout=30)
+    assert "owner-grok-login" not in r.stdout + r.stderr and "auth.json" not in r.stdout and r.stdout.split() == ["downloads", "v1"], r.stdout + r.stderr
+    r = subprocess.run(g_argv + ["sh", "-c", "echo x > ~/.grok-probe"], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0 and (grok_w / "home" / ".grok-probe").exists(), "what grok keeps in its home survives the run (sessions for -r)"
+    # The whole way, through the MCP server: delegate, the reply resumes with -r, and plan mode can't write.
+    (test_home / ".local" / "bin").mkdir(parents=True, exist_ok=True)
+    (test_home / ".local" / "bin" / "grok").write_text((HERE / "stubs" / "grok").read_text()); (test_home / ".local" / "bin" / "grok").chmod(0o755)
+    g_proj = tmp / "grokproj"; g_proj.mkdir()
+    (cfg / "gro" / "meta.json").write_text(json.dumps({"role": "grok only", "mode": "bypassPermissions", "kind": "grok", "model": "grok-x"}))
+    attach(g_proj, {"gro": {}})
+    proc = spawn(g_proj, {**env, "CLAUDERC_SANDBOX": "on", "CLAUDERC_GROK": str(test_home / ".local" / "bin" / "grok"), "PATH": f"{test_home}/.local/bin:{env['PATH']}"})
+    _id = 0
+    rpc("initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}})
+    err, tid = tool("delegate", worker="gro", task="- starts with a dash")
+    assert not err, tid
+    err, text = tool("wait", task_id=tid, timeout_s=30)
+    assert not err and "stub grok says hi" in text and "key=set(11)" in text and "- starts with a dash" in text, text
+    assert "xai-TESTKEY" not in text
+    err, tid2 = tool("reply", task_id=tid, message="and more")
+    assert not err, tid2
+    err, text = tool("wait", task_id=tid2, timeout_s=30)
+    assert not err and f"resume={GROK_UUID}" in text and "and more" in text, text
+    proc.stdin.close()
+    proc.wait(timeout=5)
+    print("test-team: grok ran inside the sandbox")
+else:
+    print("test-team: bubblewrap unusable here, the grok sandbox run checks were skipped")
 # modes: the cluster setting, the env override, and 'on' refuses to run without bubblewrap
 os.environ.pop("CLAUDERC_SANDBOX", None); os.environ["XDG_CONFIG_HOME"] = str(tmp / "cfg2"); (tmp / "cfg2" / "claude-launcher").mkdir(parents=True)
 ns2 = runpy.run_path(str(HERE.parent / "clauderc-team"), run_name="not_main")
@@ -716,4 +951,66 @@ os.environ["CLAUDERC_SANDBOX"] = "off"; assert ns2["sandbox_mode"]() == "off"; o
 os.environ["CLAUDERC_BWRAP"] = "/nonexistent/bwrap"; ns3 = runpy.run_path(str(HERE.parent / "clauderc-team"), run_name="not_main")
 assert ns3["bwrap_ok"]() is False, "no bubblewrap: not usable"
 os.environ.pop("CLAUDERC_BWRAP")
+
+# ---- seal runs git as the owner in the worker's clone: nothing the worker wrote into it may make that git run a command ----
+os.environ["XDG_CONFIG_HOME"] = str(tmp / "cfg3")
+w3 = tmp / "cfg3" / "claude-launcher" / "workers" / "w"; (w3 / "home").mkdir(parents=True); (w3 / "tasks").mkdir()
+ns4 = runpy.run_path(str(HERE.parent / "clauderc-team"), run_name="not_main")
+repo3 = tmp / "repo3"; repo3.mkdir()
+g("init", "-q", c=repo3); (repo3 / "a.txt").write_text("one\n"); g("add", ".", c=repo3); g("commit", "-qm", "init", c=repo3)
+t3 = ns4["workspace"]("w", "c0ffee00", str(repo3))
+t3.pop("cwd"); t3.update(id="c0ffee00", worker="w", task="sealed")
+wt3, br3 = Path(t3["wt"]), t3["branch"]
+pwn = tmp / "pwned"
+with open(wt3 / ".git" / "config", "a") as f:
+    f.write(f'[filter "x"]\n\tclean = touch {pwn}; cat\n\tsmudge = cat\n\trequired = true\n[diff "x"]\n\ttextconv = touch {pwn}; cat\n'
+            f'[core]\n\tfsmonitor = touch {pwn}\n\tpager = touch {pwn}\n\tsshCommand = touch {pwn}\n')
+(wt3 / ".gitattributes").write_text("* filter=x diff=x\n")
+(wt3 / ".git" / "info").mkdir(exist_ok=True); (wt3 / ".git" / "info" / "attributes").write_text("* filter=x\n")
+(wt3 / "a.txt").write_text("changed\n"); (wt3 / "new.txt").write_text("work\n")
+stat = ns4["seal"](t3)
+assert not pwn.exists(), "a filter/textconv/fsmonitor/pager in the worker's clone must never run"
+assert "new.txt" in stat and "a.txt" in stat and ".gitattributes" in stat, stat
+assert g("show", f"{br3}:new.txt", c=repo3) == "work\n" and g("show", f"{br3}:a.txt", c=repo3) == "changed\n", "the work is committed as it is"
+assert "[filter" not in (wt3 / ".git" / "config").read_text() and not (wt3 / ".git" / "info" / "attributes").exists()
+# A config symlinked to an owner file is replaced, not written through; a commondir can't point the commit at the project.
+owner_file = tmp / "owner.txt"; owner_file.write_text("owner\n")
+(wt3 / ".git" / "config").unlink(); (wt3 / ".git" / "config").symlink_to(owner_file)
+(wt3 / ".git" / "commondir").write_text(str(repo3 / ".git"))
+(wt3 / "more.txt").write_text("more\n")
+head3 = g("rev-parse", "HEAD", c=repo3)
+stat = ns4["seal"](t3)
+assert owner_file.read_text() == "owner\n" and not (wt3 / ".git" / "config").is_symlink() and not (wt3 / ".git" / "commondir").exists()
+assert "more.txt" in g("ls-tree", "-r", "--name-only", br3, c=repo3) and g("rev-parse", "HEAD", c=repo3) == head3, "committed in the clone only"
+assert g("rev-parse", br3, c=wt3) == g("rev-parse", br3, c=repo3), "the clone's own branch got the commit, then the project fetched it"
+assert not pwn.exists()
+if ns4["bwrap_ok"]():   # with the sandbox on, seal's git runs inside it too
+    t3["sandbox"] = "on"; (wt3 / "boxed.txt").write_text("boxed\n")
+    ns4["seal"](t3)
+    assert g("show", f"{br3}:boxed.txt", c=repo3) == "boxed\n", "sealed inside the sandbox"
+# A .git that isn't the clone's own folder any more (a file pointing elsewhere) is refused.
+fake = tmp / "fakewt"; fake.mkdir(); (fake / ".git").write_text(f"gitdir: {repo3 / '.git'}\n"); (fake / "x.txt").write_text("x\n")
+try:
+    ns4["seal"]({**t3, "wt": str(fake)}); raise AssertionError("seal must refuse a .git file")
+except ns4["ToolError"]:
+    pass
+assert "x.txt" not in g("ls-files", c=repo3) and g("rev-parse", "HEAD", c=repo3) == head3
+
+# ---- pruning old records keeps a clone that a newer open reply still uses ----
+trees3, tasks3, long_ago = w3 / "trees", w3 / "tasks", time.time() - 15 * 86400
+def rec(i, **k):
+    (tasks3 / f"{i}.json").write_text(json.dumps({"id": i, "worker": "w", "status": "done", **k}))
+rec("aaaa0001", branch="cluster/w/aaaa0001", finished=long_ago); (trees3 / "aaaa0001").mkdir(parents=True)
+rec("aaaa0002", branch="cluster/w/aaaa0001", finished=time.time())   # a recent reply on the same clone, not closed
+rec("cccc0001", finished=long_ago)                                    # an old task without a branch
+ns4["live_tasks"]()
+assert (trees3 / "aaaa0001").is_dir() and (tasks3 / "aaaa0001.json").exists(), "the reply's clone is kept"
+assert not (tasks3 / "cccc0001.json").exists(), "other old records are still pruned"
+rec("aaaa0002", branch="cluster/w/aaaa0001", finished=time.time(), closed="merged")
+ns4["live_tasks"]()
+assert not (trees3 / "aaaa0001").exists() and not (tasks3 / "aaaa0001.json").exists() and (tasks3 / "aaaa0002.json").exists(), "closed: pruned"
+rec("bbbb0001", branch="cluster/w/bbbb0001", finished=long_ago); (trees3 / "bbbb0001").mkdir()
+rec("bbbb0002", branch="cluster/w/bbbb0001", finished=long_ago)      # every task on the branch is old: all go
+ns4["live_tasks"]()
+assert not (trees3 / "bbbb0001").exists() and not list(tasks3.glob("bbbb*")), list(tasks3.iterdir())
 print("test-team: ok")

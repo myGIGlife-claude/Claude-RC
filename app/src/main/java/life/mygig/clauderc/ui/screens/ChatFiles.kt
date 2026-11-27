@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,7 +58,7 @@ private fun mimeOf(name: String) = when (name.substringAfterLast('.', "").lowerc
 /** A file Claude sent to the Claude app: its caption, images as thumbnails, other files to save. */
 @Composable
 fun FileCard(vm: MainViewModel, m: ChatMessage) {
-    Surface(shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.widthIn(max = 340.dp)) {
+    Surface(shape = RoundedCornerShape(22.dp, 22.dp, 22.dp, 6.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.widthIn(max = 340.dp)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (m.text.isNotBlank()) SelectionContainer { Text(linkify(m.text), style = MaterialTheme.typography.bodyMedium) }
             m.files.forEach { FileItem(vm, it) }
@@ -101,7 +102,7 @@ private fun FileItem(vm: MainViewModel, path: String) {
                 r == null -> Text("Loading $name…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 r.isSuccess -> Image(
                     r.getOrThrow().asImageBitmap(), contentDescription = name, contentScale = ContentScale.FillWidth,
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { big = true },
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClickLabel = "View image", role = Role.Button) { big = true },
                 )
                 else -> Text("Couldn't load $name: ${r.exceptionOrNull()?.message}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
@@ -111,7 +112,7 @@ private fun FileItem(vm: MainViewModel, path: String) {
                 scope.launch {
                     working = true; note = null
                     runCatching { vm.chats.chatFileBytes(path) }
-                        .onSuccess { pending = it; vm.chats.externalScreen(); save.launch(name) }
+                        .onSuccess { pending = it; save.launch(name) }
                         .onFailure { note = "Couldn't get it: ${it.message}" }
                     working = false
                 }

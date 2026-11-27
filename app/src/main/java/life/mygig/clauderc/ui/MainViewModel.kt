@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
@@ -49,17 +51,23 @@ import life.mygig.clauderc.data.ThemeMode
 import life.mygig.clauderc.ssh.HostKeyInfo
 import life.mygig.clauderc.ssh.SshKeyManager
 import life.mygig.clauderc.ssh.SshRunner
+import life.mygig.clauderc.ui.vm.AddServerController
 import life.mygig.clauderc.ui.vm.ChatController
 import life.mygig.clauderc.ui.vm.ConnectionsController
+import life.mygig.clauderc.ui.vm.CopyController
 import life.mygig.clauderc.ui.vm.DriveController
 import life.mygig.clauderc.ui.vm.HostsController
 import life.mygig.clauderc.ui.vm.KnowledgeController
 import life.mygig.clauderc.ui.vm.LoginsController
 import life.mygig.clauderc.ui.vm.GeneralChatsController
 import life.mygig.clauderc.ui.vm.PushController
+import life.mygig.clauderc.ui.vm.QueueController
 import life.mygig.clauderc.ui.vm.ServicesController
 import life.mygig.clauderc.ui.vm.TeamController
 import life.mygig.clauderc.ui.vm.VmTools
+import life.mygig.clauderc.widget.WidgetTap
+import life.mygig.clauderc.widget.publishSessions
+import life.mygig.clauderc.widget.publishUsage
 
 enum class Tab { STATUS, NEW, PROJECTS, SESSIONS, COMMAND }
 enum class LoginKind { CLAUDE, GITHUB, AWS, GITLAB, DOCKER, YOUTUBE }
@@ -129,10 +137,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Google Drive backup. */
     val drive = DriveController(api, tools)
-    /** In-app chat: PIN, polling, pending messages, drafts, files. */
-    val chats: ChatController = ChatController(app, api, tools) { team.clearChat(); webHosts.clearChatHosts() }
+    /** In-app chat: polling, pending messages, drafts, files. */
+    val chats: ChatController = ChatController(app, api, tools, { _status.value?.scriptApi ?: 0 }) { team.clearChat(); webHosts.clearChatHosts() }
     /** General chats (not tied to a repo): the Sessions screen's General chat tab. */
     val general = GeneralChatsController(api, tools, { _status.value?.scriptApi }, { chats.openChat(it) }) { refreshSessions() }
+    /** Auto-continue queue: kill switch, stars, log (docs/queue-design.md). */
+    val queue = QueueController(api, tools, { _status.value?.scriptApi ?: 0 }) { edit -> _sessions.value = edit(_sessions.value) }
+    /** Settings › Connection › Copy: files and secrets from one server to another (docs/copy-design.md). */
+    val copy = CopyController(tools, store) { apiFor(it) }
     /** Team (extra Claude accounts), cluster settings and the open chat's workers. */
     val team: TeamController = TeamController(api, store, tools, { apiFor(it) }) { chats.chatSession.value }
     /** Hosts: web servers chats can work on (docs/hosts-design.md). */
@@ -145,6 +157,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val connections = ConnectionsController(api, tools, { _status.value?.scriptApi ?: 0 }, { refreshStatus() })
     /** The + dialog: CLI installs, signing keys, Apple key, custom keys, token services. */
     val services = ServicesController(api, tools, { _status.value }, { refreshStatus() }, logins)
+
+    /** Add server › Connect with a password (sets the server up over one password login). */
+    val addServerFlow = AddServerController(keys, tools) { s, st -> adoptNewServer(s, st) }
 
     private fun apiFor(s: Server) = LauncherApi(config = { s.toServerConfig() }, identity = { keys.identity() })
 
@@ -189,6 +204,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _foreground = MutableStateFlow(true)
     val foreground = _foreground.asStateFlow()
 
+    /** A home-screen widget tap waiting for the app to be unlocked. */
+    private val widgetTap = MutableStateFlow<WidgetTap?>(null)
+
     init {
         // An update's APK is only needed until it's installed (which restarts the app).
         viewModelScope.launch(Dispatchers.IO) { deleteApks() }
@@ -227,6 +245,66 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         delay(5 * 60 * 1000L)
                     }
                 }
+            }
+        }
+        viewModelScope.launch {
+            // Only once unlocked: App lock is what protects the chats.
+            combine(unlocked, widgetTap) { u, t -> t.takeIf { u } }.filterNotNull().collect { t ->
+                widgetTap.value = null
+                handleWidgetTap(t)
+            }
+        }
+        // The widgets show the active server's usage, whenever the app has loaded it.
+        viewModelScope.launch {
+            team.cluster.collect { groups -> groups?.firstOrNull { it.active }?.accounts?.let { publishUsage(getApplication(), it) } }
+        }
+    }
+
+    /** MainActivity hands over a widget tap; it runs once the app is unlocked. */
+    fun openFromWidget(t: WidgetTap) { widgetTap.value = t }
+
+    private fun handleWidgetTap(t: WidgetTap) {
+        // Whatever covers the tabs goes, so the place the widget named shows.
+        _showSettings.value = false
+        if (_tail.value != null) closeTail()
+        if (chats.chatSession.value != null) chats.closeChat()
+        when (t) {
+            WidgetTap.Sessions -> selectTab(Tab.SESSIONS)
+            is WidgetTap.Session -> openSessionFromWidget(t.name)
+            WidgetTap.NewRepo -> selectTab(Tab.NEW)
+            WidgetTap.Keys -> {
+                if (connections.detail.value != null) connections.openDetail(null)
+                connections.presetTab(Tab.STATUS, 2)   // Sign-ins, MCP, Keys
+                selectTab(Tab.STATUS)
+            }
+            WidgetTap.NewChat -> {
+                selectTab(Tab.SESSIONS)
+                general.selectTab(0)
+                if (general.supported()) general.newChat()
+            }
+            WidgetTap.Cluster -> {
+                connections.presetTab(Tab.COMMAND, 0)   // Accounts: the cLaudeCluster section
+                selectTab(Tab.COMMAND)
+            }
+        }
+    }
+
+    /** Opens the session's chat the way its row in Sessions does; if it is gone, the Sessions tab is enough. */
+    private fun openSessionFromWidget(name: String) {
+        selectTab(Tab.SESSIONS)
+        viewModelScope.launch {
+            val s = _sessions.value.firstOrNull { it.name == name } ?: run {
+                val fresh = try { api.sessions().sessions } catch (_: ApiException) { return@launch }
+                _sessions.value = fresh
+                publishSessions(getApplication(), fresh)
+                fresh.firstOrNull { it.name == name }
+            } ?: return@launch
+            if (s.general) {
+                general.selectTab(0)
+                general.open(s.chatId)   // starts it on the server first (general-open)
+            } else {
+                general.selectTab(1)
+                if (s.waiting) loadTail(s.name) else chats.openChat(s.name)
             }
         }
     }
@@ -316,7 +394,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         if (!waitingShown) {
-            say("Restarted $done session" + (if (done == 1) "" else "s") +
+            say("Restarted " + plural(done, "session", "sessions") +
                 if (busy.isEmpty()) "" else ". Still working, skipped: ${busy.joinToString(", ")}")
         }
         refreshSessions()
@@ -707,7 +785,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _sessionsRefreshing.value = true
             try {
-                _sessions.value = api.sessions().sessions
+                val fresh = api.sessions().sessions
+                _sessions.value = fresh
+                publishSessions(getApplication(), fresh)
             } catch (e: ApiException) {
                 report(e) { refreshSessions() }
             } finally {
@@ -764,7 +844,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // Another server: nothing from the old one may stay on screen or in use.
         connections.clearServerState()
         general.clearServerState()
-        chats.clearServerState()   // chat log, open chat, queued messages, drafts, PIN (session names repeat across servers)
+        queue.clearServerState()
+        chats.clearServerState()   // chat log, open chat, queued messages, drafts (session names repeat across servers)
+        SshRunner.closeAll()   // a removed or changed server's connection must not linger
     }
 
     fun acceptHostKey(accept: Boolean) {
@@ -788,6 +870,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         store.addServer()
         clearServerState()
         _showSettings.value = false
+    }
+
+    /**
+     * A server set up by [addServerFlow] whose phone key already answered [status]: added (or, if the list has it,
+     * re-pinned) and made current. The blank entry the setup screen was showing is dropped.
+     */
+    private suspend fun adoptNewServer(s: Server, status: StatusData) {
+        val cur = store.current()
+        val blank = cur.servers.firstOrNull { it.id == cur.activeId && !it.isConfigured }?.id
+        val same = cur.servers.firstOrNull { it.host == s.host && it.port == s.port && it.user == s.user }
+        if (same != null) {
+            store.switchServer(same.id)
+            store.pinHostKey(s.hostKeyType, s.hostKeyBlob, s.hostKeyFingerprint)
+            // A purpose typed on the form replaces the old one; left empty, the old one stays.
+            if (s.purpose.isNotBlank()) store.setPurpose(same.id, s.purpose)
+        } else {
+            store.switchServer(store.addServerEntry(s).id)
+        }
+        if (blank != null && blank != same?.id) store.removeServer(blank)
+        clearServerState()
+        _status.value = status
+        _showSettings.value = false
+        team.detectNewAccount()
+    }
+
+    /** What a server is for: stored on the phone only, no connection needed. */
+    fun setServerPurpose(id: String, text: String) = viewModelScope.launch { store.setPurpose(id, text) }
+
+    /**
+     * Purpose and Tailscale address, both phone-only. A changed address is part of the connection key, so the
+     * next call opens a fresh connection that tries it; the old one is swept once idle.
+     */
+    fun setServerDetails(id: String, purpose: String, tailnetHost: String) = viewModelScope.launch {
+        store.setPurpose(id, purpose)
+        store.setTailnetHost(id, tailnetHost)
     }
 
     fun switchServer(id: String) = viewModelScope.launch {
@@ -818,6 +935,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         } catch (e: Exception) {
             say("Couldn't create a new key: ${e.message}")
         }
+    }
+
+    /** After a backup restore: show the restored phone key and connect to the restored server (a failure shows the usual plain error; the data stays). */
+    fun afterRestore() = viewModelScope.launch {
+        runCatching { _publicKey.value = withContext(Dispatchers.Default) { keys.publicKey() } }
+        if (store.current().isConfigured) refreshStatus()
     }
 
     fun setAppLock(on: Boolean) = viewModelScope.launch { store.setAppLock(on) }

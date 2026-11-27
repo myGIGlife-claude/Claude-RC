@@ -36,3 +36,4 @@ backups/
 ios/*.xcodeproj/
 ios/build/
 *.ipa
+.playwright-mcp/

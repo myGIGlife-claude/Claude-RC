@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Static picker preview of the Usage widget (sample numbers). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/widget_background" android:orientation="vertical" android:padding="12dp">
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="@string/widget_usage_label" android:textColor="@color/widget_fg" android:textSize="16sp" android:textStyle="bold" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp"
+        android:text="main" android:textColor="@color/widget_fg" android:textSize="14sp" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp"
+        android:text="5 h  42%" android:textColor="@color/widget_muted" android:textSize="11sp" />
+    <ProgressBar style="@android:style/Widget.ProgressBar.Horizontal" android:layout_width="match_parent" android:layout_height="6dp"
+        android:max="100" android:progress="42" android:progressTint="@color/widget_accent" android:progressBackgroundTint="@color/widget_line" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp"
+        android:text="7 d  80%" android:textColor="@color/widget_muted" android:textSize="11sp" />
+    <ProgressBar style="@android:style/Widget.ProgressBar.Horizontal" android:layout_width="match_parent" android:layout_height="6dp"
+        android:max="100" android:progress="80" android:progressTint="@color/widget_warn" android:progressBackgroundTint="@color/widget_line" />
+</LinearLayout>

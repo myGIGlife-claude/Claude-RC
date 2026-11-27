@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Static picker preview of the Sessions widget (RemoteViews views only; sample names). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/widget_background" android:orientation="vertical" android:padding="12dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:text="@string/widget_sessions_label" android:textColor="@color/widget_fg" android:textSize="16sp" android:textStyle="bold" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:background="@drawable/widget_badge_bg"
+            android:paddingHorizontal="8dp" android:paddingVertical="2dp" android:text="1 waiting" android:textColor="@color/widget_warn" android:textSize="11sp" />
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="40dp" android:gravity="center_vertical">
+        <ImageView android:layout_width="10dp" android:layout_height="10dp" android:src="@drawable/widget_dot" android:tint="@color/widget_warn" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="10dp"
+            android:text="website" android:textColor="@color/widget_fg" android:textSize="14sp" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="needs you" android:textColor="@color/widget_muted" android:textSize="11sp" />
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="40dp" android:gravity="center_vertical">
+        <ImageView android:layout_width="10dp" android:layout_height="10dp" android:src="@drawable/widget_dot" android:tint="@color/widget_ok" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="10dp"
+            android:text="api" android:textColor="@color/widget_fg" android:textSize="14sp" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="working" android:textColor="@color/widget_muted" android:textSize="11sp" />
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="40dp" android:gravity="center_vertical">
+        <ImageView android:layout_width="10dp" android:layout_height="10dp" android:src="@drawable/widget_dot" android:tint="@color/widget_idle" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="10dp"
+            android:text="notes" android:textColor="@color/widget_fg" android:textSize="14sp" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="idle" android:textColor="@color/widget_muted" android:textSize="11sp" />
+    </LinearLayout>
+</LinearLayout>

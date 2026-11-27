@@ -17,24 +17,39 @@ DIFF_SHOWN = 20000        # characters of a diff that review returns
 MODES = ("acceptEdits", "plan", "bypassPermissions")
 git_lock = threading.Lock()   # one clone is created at a time
 CLAUDE = os.environ.get("CLAUDERC_CLAUDE", "claude")
-# Other CLIs a worker can be (meta.json "kind"): ChatGPT's Codex and Gemini, each signed in under its own home folder.
-CLIS = {"codex": os.environ.get("CLAUDERC_CODEX", "codex"), "gemini": os.environ.get("CLAUDERC_GEMINI", "gemini")}
+# Other CLIs a worker can be (meta.json "kind"): ChatGPT's Codex, Gemini and xAI's Grok, each signed in under its own home folder.
+CLIS = {"codex": os.environ.get("CLAUDERC_CODEX", "codex"), "gemini": os.environ.get("CLAUDERC_GEMINI", "gemini"), "grok": os.environ.get("CLAUDERC_GROK", "grok")}
 CODEX_SANDBOX = {"acceptEdits": "workspace-write", "plan": "read-only", "bypassPermissions": "danger-full-access"}
 BWRAP = os.environ.get("CLAUDERC_BWRAP") or shutil.which("bwrap")
 TOOL_DIRS = (".local/bin", ".local/lib", ".local/share/claude", ".nvm", ".npm-global", ".bun", ".cargo/bin", ".volta")   # ro: the CLIs and their runtimes, no secrets
 GEMINI_APPROVAL = {"acceptEdits": "auto_edit", "plan": "plan", "bypassPermissions": "yolo"}
+# Grok has no read-only or limited-approval headless mode (ask mode would wait for ever), so it only ever runs inside our sandbox.
+GROK_SANDBOX_ERROR = "Grok workers run only inside the sandbox: turn Sandbox on/auto in Cluster settings and make sure bubblewrap works."
+GROK_PROMPT_MAX = 100_000   # bytes: the prompt becomes one -p argument and Linux caps one argument at 128 KB (the headers added to a task fit in the gap)
+GROK_AUTH_FILE = ".grok/auth.json"   # unverified: the name comes from xAI's installer notes; `grok login` keeps its login under $HOME/.grok
+# Runs inside the sandbox, where HOME is the worker's home. A Grok account login wins (it uses the user's plan, a key uses xAI credits).
+# Otherwise the key goes from the worker's key file into grok's environment: bubblewrap's --setenv would put it in argv, where `ps`
+# shows it to the host. # unverified: whether `-p` could read stdin itself; the docs only show an argument.
+# unverified: whether the account login works headless in the sandbox (network is open, the home is writable for token refreshes).
+GROK_SH = f'if [ ! -s "$HOME/{GROK_AUTH_FILE}" ]; then XAI_API_KEY=$(cat -- "$1") || exit 1; export XAI_API_KEY; fi; shift; exec "$@" -p "$(cat)"'
+GEMINI_AUTH_FILE = ".gemini/oauth_creds.json"   # the CLI's cached Google login, under $GEMINI_CLI_HOME
+# A run with an API key: the key goes from the worker's key file into gemini's environment inside the sandbox (bubblewrap's --setenv would put it in argv).
+GEMINI_KEY_SH = 'GEMINI_API_KEY=$(cat -- "$1") || exit 1; export GEMINI_API_KEY; shift; exec "$@"'
+GEMINI_WATCH_S = 2        # how often a running Gemini task's output is checked for errors retrying can't fix
+GEMINI_TAIL = 256 * 1024  # bytes of each output file checked
+GEMINI_QUOTA_RE = re.compile(r"TerminalQuotaError|exhausted your daily quota|Quota exceeded for metric", re.I)
+GEMINI_503_RE = re.compile(r"Attempt \d+ failed with status 503")
+GEMINI_QUOTA_MSG = "Gemini's daily quota is used up on this key/account (free tier?). Use a Google account sign-in or a billed API key, or try again tomorrow."
+GEMINI_503_MSG = "Gemini is overloaded right now (Google capacity). Try again later or use another worker."
+GEMINI_LOGIN_MSG = "Gemini's Google sign-in expired or isn't valid on this server: sign in again from the Claude tab."
+GROK_TEXT_KEYS = ("result", "response", "text", "output", "message", "content")   # unverified: the docs only name .sessionId in the final JSON object
 SLOTS = max(1, int(os.environ.get("CLAUDERC_WORKER_SLOTS") or 10))   # hard cap of runs of one worker at once (they share its login like several chats share one); the owner's per-chat limit is lower
 USAGE_URL = os.environ.get("CLAUDERC_USAGE_URL") or "https://api.anthropic.com/api/oauth/usage"
 # A run whose login token expires before it could finish is started ALONE (exclusive lock on <lock>.mode; the others hold
 # it shared): two runs refreshing the same token at once invalidate each other's refresh token and log the worker out.
-SLOT_SH = ('b=$1; n=$2; m=$3; cred=$4; thr=$5; py=$6; gap=$7; shift 7; while :; do i=0; while [ $i -lt $n ]; do exec 9>"$b.$i"; '
+SLOT_SH = ('b=$1; n=$2; m=$3; cred=$4; thr=$5; py=$6; shift 6; while :; do i=0; while [ $i -lt $n ]; do exec 9>"$b.$i"; '
            'flock -n 9 && { left=$(python3 -c "$py" "$cred"); k=s; [ "$left" -lt "$thr" ] && k=x; exec 8>"$b.mode"; flock -$k 8; '
-           # Starts of one worker's runs are spaced GAP seconds apart: claude touches the shared login (token, config) when it
-           # starts, and two starting together invalidated each other's refresh token, logging the worker out.
-           'exec 7>"$b.start"; flock 7; now=$(date +%s); last=$(cat "$b.last" 2>/dev/null || echo 0); w=$((last + gap - now)); '
-           '[ $w -gt 0 ] && sleep $w; date +%s >"$b.last"; exec 7>&-; '
-           ': >"$m"; ( exec 7>&- 8>&- 9>&-; exec "$@" ); exit $?; }; i=$((i+1)); done; sleep 2; done')
-START_GAP = int(os.environ.get("CLAUDERC_START_GAP") or 0)   # seconds between the starts of one worker's runs (off: the logouts were a test bug, see CLAUDE.md)
+           ': >"$m"; ( exec 8>&- 9>&-; exec "$@" ); exit $?; }; i=$((i+1)); done; sleep 2; done')
 TOKEN_LEFT_PY = ('import json,sys,time\ntry: print(int(json.load(open(sys.argv[1]))["claudeAiOauth"]["expiresAt"]/1000-time.time()))\n'
                  'except Exception: print(999999)')
 RUN_TIMEOUT = 1800        # seconds one worker run may take
@@ -147,7 +162,7 @@ def settings(name, att=None):
 
 
 def kind(name):
-    """claude (default), codex or gemini."""
+    """claude (default), codex, gemini or grok."""
     try:
         k = json.loads((WORKERS / name / "meta.json").read_text()).get("kind")
     except (OSError, ValueError, AttributeError):
@@ -155,13 +170,32 @@ def kind(name):
     return k if k in CLIS else "claude"
 
 
+def has_text(p):
+    try:
+        return bool(p.read_text().strip())
+    except (OSError, ValueError):
+        return False
+
+
+def grok_signed_in(home):
+    """An API key or a Grok account login in the worker's home."""
+    return has_text(home / "xai-api-key") or has_text(home / GROK_AUTH_FILE)
+
+
+def gemini_signed_in(home):
+    """An API key or a Google account login in the worker's home."""
+    return has_text(home / "gemini-api-key") or has_text(home / GEMINI_AUTH_FILE)
+
+
 def signed_in(name):
     """The worker's login has a token (a logged-out Claude leaves a credentials file without one)."""
     k, h = kind(name), WORKERS / name / "home"
     if k != "claude":
         try:
-            if k == "gemini":   # an API key: Google ended personal-account sign-in for the Gemini CLI
-                return bool((h / "gemini-api-key").read_text().strip())
+            if k == "gemini":
+                return gemini_signed_in(h)
+            if k == "grok":
+                return grok_signed_in(h)
             c = json.loads((h / "auth.json").read_text())
         except (OSError, ValueError):
             return False
@@ -259,15 +293,18 @@ def usage_text(u):
 
 def live_tasks():
     """Running tasks (any project), after finishing the ones whose process died without anyone calling wait (a chat that
-    went away): a dead run must not count against the parallel limits for ever."""
-    out = []
+    went away): a dead run must not count against the parallel limits for ever. Finished records older than 14 days are
+    pruned with their clone, unless a newer open task (a reply) still works on the same branch and clone."""
+    out, recs, old = [], [], lambda t: t.get("status") != "running" and t.get("finished", t.get("started", time.time())) < time.time() - 14 * 86400
     for p in WORKERS.glob("*/tasks/*.json"):
         try:
-            t = json.loads(p.read_text())
+            recs.append((p, json.loads(p.read_text())))
         except (OSError, ValueError):
             continue
+    in_use = {t.get("branch") for _, t in recs if t.get("branch") and not t.get("closed") and not old(t)}
+    for p, t in recs:
         if t.get("status") != "running":
-            if t.get("finished", t.get("started", time.time())) < time.time() - 14 * 86400:
+            if old(t) and not (t.get("branch") and t["branch"] in in_use):
                 p.unlink(missing_ok=True)
                 p.with_suffix(".lock").unlink(missing_ok=True)
                 shutil.rmtree(p.parent.parent / "trees" / t.get("id", ""), ignore_errors=True)
@@ -318,11 +355,11 @@ def list_workers():
 
 
 def usable(att):
-    """{name: role} of the attached workers that exist and are signed in."""
+    """{name: role} of the attached workers that exist, are signed in and could run here (Grok needs the sandbox)."""
     out = {}
     for name in att:
         try:
-            if isinstance(name, str) and NAME_RE.match(name) and signed_in(name):
+            if isinstance(name, str) and NAME_RE.match(name) and signed_in(name) and not (kind(name) == "grok" and not can_sandbox()):
                 out[name] = settings(name, att)[0]
         except (OSError, ValueError):
             continue
@@ -349,6 +386,8 @@ def pick_by_role(role, c):
         raise ToolError(f"No attached worker has the role {role!r}. Attached roles: {roles or 'none (the owner adds workers with the Cluster button in the chat)'}.")
     ready = [n for n in mine if n in ok]
     if not ready:
+        if not can_sandbox() and any(kind(n) == "grok" for n in mine):
+            raise ToolError(GROK_SANDBOX_ERROR)
         raise ToolError(f"The workers with role {role!r} ({', '.join(mine)}) aren't signed in. Sign them in from the Claude tab in the cLaudeRC app.")
     best, us = best_worker(ready, c)
     if not best:
@@ -369,8 +408,50 @@ def failover(worker, c):
     return (best, f"Routed to {best} because {worker} is at {peak(u):.0f}% of its limit.") if best else None
 
 
-def git(*a, cwd):
-    return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "protocol.file.allow=user", *a], cwd=cwd, capture_output=True, text=True, timeout=120)
+def git(*a, cwd, env=None, pre=()):
+    return subprocess.run([*pre, "git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "protocol.file.allow=user", *a],
+                          cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
+
+
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+CLONE_CONFIG = "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n\tlogallrefupdates = true\n"
+
+
+def neutralise(wt):
+    """The worker could write its clone's .git (config, info/attributes) and .gitattributes: a `[filter "x"] clean = <cmd>`
+    plus `* filter=x` would make this server's git run <cmd> as the owner. Before the server runs git there, the clone's config
+    is replaced by a minimal known-good one, info/attributes and commondir (which could point at the project's .git) are
+    removed. Symlinks are removed, never followed."""
+    def drop(p):
+        if p.is_symlink() or p.is_file():
+            p.unlink()
+        elif p.exists():
+            shutil.rmtree(p)
+    g = Path(wt) / ".git"
+    if g.is_symlink() or not g.is_dir():
+        raise ToolError("The worker's copy has no .git folder of its own any more; discard the task.")
+    drop(g / "config")
+    drop(g / "commondir")
+    if (g / "info").is_symlink() or not (g / "info").is_dir():
+        drop(g / "info")
+    else:
+        drop(g / "info" / "attributes")
+    tmp = g / f"config.{uuid.uuid4().hex}.tmp"
+    tmp.write_text(CLONE_CONFIG)
+    os.replace(tmp, g / "config")
+
+
+def clone_git(t, *a):
+    """git in a worker's clone (after neutralise): its own .git only, no attributes from the clone (an empty attribute
+    tree, no attributes file) and no pager; inside the worker's sandbox when its runs are sandboxed."""
+    wt = t["wt"]
+    env = {n: os.environ[n] for n in ("PATH", "HOME", "LANG", "LC_ALL", "TZ", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM") if n in os.environ}
+    env.update(GIT_DIR=os.path.join(wt, ".git"), GIT_WORK_TREE=wt, GIT_ATTR_SOURCE=EMPTY_TREE, GIT_PAGER="cat", GIT_TERMINAL_PROMPT="0")
+    pre = ()
+    if t.get("sandbox") == "on" and sandbox_mode() != "off" and bwrap_ok():
+        w = WORKERS / t["worker"]
+        pre, env = tuple(sandbox_argv({**t, "cwd": wt}, "claude", w, env, read_only=False)), None
+    return git("-c", "core.attributesFile=/dev/null", "-c", "filter.lfs.required=false", *a, cwd=wt, env=env, pre=pre)
 
 
 def repo_dir(repo):
@@ -447,22 +528,24 @@ def bring_along(top, wt):
 
 
 def seal(t):
-    """Commit whatever the worker left in its clone; returns the diffstat against where it branched."""
-    if git("status", "--porcelain", cwd=t["wt"]).stdout.strip():
-        git("add", "-A", cwd=t["wt"])
+    """Commit whatever the worker left in its clone; returns the diffstat against where it branched. The clone is the worker's:
+    neutralise it first and run git there through clone_git only."""
+    neutralise(t["wt"])
+    if clone_git(t, "status", "--porcelain", "--ignore-submodules=dirty").stdout.strip():
+        clone_git(t, "add", "-A")
         if t.get("copied"):
-            git("reset", "-q", "--", *t["copied"], cwd=t["wt"])   # copies of ignored files stay out of the branch
-        git("-c", f"user.name=cluster-{t['worker']}", "-c", "user.email=cluster@localhost", "-c", "commit.gpgsign=false",
-            "commit", "-q", "--no-verify", "-m", f"{t['worker']}: {t['task'][:70]}", cwd=t["wt"])
+            clone_git(t, "reset", "-q", "--", *t["copied"])   # copies of ignored files stay out of the branch
+        clone_git(t, "-c", f"user.name=cluster-{t['worker']}", "-c", "user.email=cluster@localhost", "-c", "commit.gpgsign=false",
+                  "commit", "-q", "--no-verify", "-m", f"{t['worker']}: {t['task'][:70]}")
     sync_branch(t)
     return git("diff", "--no-ext-diff", "--no-textconv", "--stat", f"{t.get('fork') or t['base']}..{t['branch']}", cwd=t["top"]).stdout.strip()
 
 
 def sync_branch(t):
-    """Clone workspaces: bring the worker's branch into the project's repository (forced, so a follow-up replaces it). Hooks are
-    off, objects are checked, submodules and tags are not followed. Old worktree tasks already share the repository."""
-    if t.get("ws") != "clone":
-        return
+    """Bring the worker's branch from its clone into the project's repository (forced, so a follow-up replaces it). Hooks are
+    off, objects are checked, submodules and tags are not followed. The fetch starts upload-pack in the clone, which reads the
+    clone's config: neutralise it first."""
+    neutralise(t["wt"])
     r = git("-c", "transfer.fsckObjects=true", "fetch", "-q", "--no-tags", "--no-recurse-submodules", t["wt"],
             f"+refs/heads/{t['branch']}:refs/heads/{t['branch']}", cwd=t["top"])
     if r.returncode:
@@ -502,10 +585,7 @@ def check_idle(t):
 
 
 def close(t, how, delete_flag):
-    if t.get("ws") == "clone":
-        shutil.rmtree(t["wt"], ignore_errors=True)
-    else:
-        git("worktree", "remove", "--force", t["wt"], cwd=t["top"])
+    shutil.rmtree(t["wt"], ignore_errors=True)
     git("branch", delete_flag, t["branch"], cwd=t["top"])
     for p in WORKERS.glob("*/tasks/*.json"):   # every task (and follow-up) that shared the branch
         try:
@@ -606,12 +686,17 @@ def sync_skills(w):
 
 
 def sandbox_mode():
-    """auto (default): sandbox every worker run when bubblewrap works here, otherwise run as before; on: refuse to run without it; off."""
+    """auto (default): sandbox every worker run when bubblewrap works here, otherwise run as before (except bypassPermissions,
+    which is refused); on: refuse to run without it; off."""
     m = os.environ.get("CLAUDERC_SANDBOX") or cluster_cfg()["sandbox"]
     return m if m in ("auto", "on", "off") else "auto"
 
 
 _bwrap_ok = None
+
+
+def can_sandbox():
+    return sandbox_mode() != "off" and bwrap_ok()
 
 
 def bwrap_ok():
@@ -650,7 +735,13 @@ def sandbox_argv(t, k, w, env, read_only):
     for sub in TOOL_DIRS:
         ro(os.path.join(home, sub))
     prog = CLIS.get(k) if k in CLIS else CLAUDE
-    for p in [d for d in env.get("PATH", "").split(":") if d.startswith(home + "/")] + [os.path.dirname(os.path.realpath(shutil.which(prog) or prog))]:
+    real = os.path.realpath(shutil.which(prog) or prog)
+    path_dirs, tool = [d for d in env.get("PATH", "").split(":") if d.startswith(home + "/")], os.path.dirname(real)
+    if k == "grok":   # the installer's real binary lives under the owner's ~/.grok, next to its login and sessions: only the binary's own folder comes in
+        own = os.path.join(home, ".grok")
+        path_dirs = [d for d in path_dirs if d != own and not d.startswith(own + "/")]
+        tool = real if tool == own else tool
+    for p in path_dirs + [tool]:
         if p.startswith(home + "/"):
             ro(p)
     wh = str(w / "home")
@@ -664,7 +755,132 @@ def sandbox_argv(t, k, w, env, read_only):
     a += ["--clearenv"]
     for n, v in env.items():
         a += ["--setenv", n, v]
+    if k == "grok":   # no env var relocates ~/.grok (unverified), so its home is the worker's own folder: `-r` finds the session on a follow-up
+        a += ["--setenv", "HOME", wh]
     return a + ["--chdir", t["cwd"], "--"]
+
+
+def grok_run(key_file, model=None, resume=None):
+    """The command inside the sandbox (never the key itself). --always-approve in every mode, plan included: asking would hang
+    headless, and the sandbox is the boundary (plan = the workspace is mounted read-only)."""
+    return ["sh", "-c", GROK_SH, "grok-run", str(key_file), CLIS["grok"], "--output-format", "json", "--always-approve", "--no-auto-update"] \
+        + (["-m", model] if model else []) + (["-r", resume] if resume else [])
+
+
+def gemini_select_auth(home, selected):
+    """Tell the CLI which login this run uses, keeping its other settings. This runs as the owner, outside the sandbox, in a folder
+    the worker can write: a planted link must never be followed (it could aim the write at the owner's own settings)."""
+    g = os.path.join(str(home), ".gemini")
+    if os.path.islink(g):
+        os.unlink(g)
+    os.makedirs(g, exist_ok=True)
+    fd = os.open(g, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        cur = {}
+        try:   # O_NONBLOCK: a planted fifo must not hang this
+            with os.fdopen(os.open("settings.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)) as f:
+                cur = json.load(f)
+        except (OSError, ValueError):
+            pass
+        cur = cur if isinstance(cur, dict) else {}
+        sec = cur["security"] if isinstance(cur.get("security"), dict) else {}
+        auth = sec["auth"] if isinstance(sec.get("auth"), dict) else {}
+        cur = {**cur, "security": {**sec, "auth": {**auth, "selectedType": selected}}}
+        tmp = f".settings.{os.getpid()}.{threading.get_ident()}.tmp"
+        with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600, dir_fd=fd), "w") as f:
+            json.dump(cur, f)
+        os.replace(tmp, "settings.json", src_dir_fd=fd, dst_dir_fd=fd)
+    finally:
+        os.close(fd)
+
+
+def gemini_stop_reason(text):
+    """The plain message when a running Gemini CLI's output shows it can only keep retrying in vain, else None."""
+    if GEMINI_QUOTA_RE.search(text):
+        return GEMINI_QUOTA_MSG
+    if len(GEMINI_503_RE.findall(text)) >= 3:
+        return GEMINI_503_MSG
+    return None
+
+
+def gemini_error(text):
+    """The plain message for a failed Gemini run's output, else None (the output itself is then shown)."""
+    return GEMINI_LOGIN_MSG if "Manual authorization is required" in text else gemini_stop_reason(text)
+
+
+def gemini_visible_output(out_s):
+    """A finished answer is the worker's own text, which may well mention these errors: it doesn't count as the CLI's output."""
+    o = parse_output("gemini", out_s)
+    return "" if isinstance(o.get("result"), str) and not o.get("is_error") else out_s
+
+
+def tail_text(p):
+    try:
+        with open(p, "rb") as f:
+            f.seek(max(0, os.fstat(f.fileno()).st_size - GEMINI_TAIL))
+            return f.read().decode(errors="replace")
+    except OSError:
+        return ""
+
+
+def session_procs(sid):
+    """Live processes of a run's session. Not a process group: `timeout` moves itself and the CLI into one of their own."""
+    found = []
+    for p in os.listdir("/proc"):
+        if p.isdigit():
+            try:
+                f = Path("/proc", p, "stat").read_text(errors="replace")
+                f = f[f.rindex(")") + 2:].split()
+            except (OSError, ValueError):
+                continue
+            if f[0] != "Z" and int(f[3]) == sid:
+                found.append(int(p))
+    return found
+
+
+def end_run(proc):
+    """Stop a run with all its processes: politely, then for good after 5 s."""
+    def signal_all(sig):
+        for pid in session_procs(proc.pid):
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass
+    signal_all(signal.SIGTERM)
+    until = time.time() + 5
+    while time.time() < until:
+        proc.poll()   # reaps the wrapper
+        if not session_procs(proc.pid):
+            return
+        time.sleep(0.2)
+    signal_all(signal.SIGKILL)
+
+
+def watch_gemini(proc, d, tid):
+    """Until the run ends: the CLI retries quota and overload errors for minutes, so stop it as soon as its output shows one.
+    Only while this process lives; a run it left behind ends by itself and finalize still gives the plain message."""
+    while True:
+        try:
+            proc.wait(timeout=GEMINI_WATCH_S)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+        msg = gemini_stop_reason(tail_text(d / f"{tid}.err") + "\n" + gemini_visible_output(tail_text(d / f"{tid}.out")))
+        if msg:
+            (d / f"{tid}.fatal").write_text(msg)
+            end_run(proc)
+            proc.wait()
+            return
+
+
+def supervise(proc, tid, d, gemini):
+    try:
+        if gemini:
+            watch_gemini(proc, d, tid)
+    except Exception:   # the watcher is a shortcut: whatever goes wrong with it, the run must still be collected
+        pass
+    proc.wait()
+    finalize(tid)
 
 
 def launch(t):
@@ -700,26 +916,36 @@ def launch(t):
     elif k == "gemini":
         # no session ids to resume by, so a follow-up starts fresh (the prompt carries what it needs)
         run = [CLIS[k], "-p", "", "-o", "json", "--skip-trust", "--approval-mode", GEMINI_APPROVAL[mode]] + (["-m", model] if model else [])
+        # A Google account login wins over a key: the plan is the user's own, a free key's quota is tiny. unverified: that a headless run reuses a login made by the interactive CLI.
+        account = has_text(w / "home" / GEMINI_AUTH_FILE)
+        gemini_select_auth(w / "home", "oauth-personal" if account else "gemini-api-key")
+        if not account:
+            run = ["sh", "-c", GEMINI_KEY_SH, "gemini-run", str(w / "home" / "gemini-api-key")] + run
+    elif k == "grok":
+        if not use_sb:
+            raise ToolError(GROK_SANDBOX_ERROR)
+        run = grok_run(w / "home" / "xai-api-key", model, t.get("resume"))
+        if t["prompt"].startswith("-"):   # unverified: a value starting with - may be read as a flag; a leading newline keeps it a value
+            (d / f"{tid}.in").write_text("\n" + t["prompt"])
     else:
         run = [CLAUDE, "-p", "--output-format", "json", "--permission-mode", mode] + pick + (["--allowed-tools", ",".join(tools)] if tools else []) + (["--resume", t["resume"]] if t.get("resume") else [])
     # The worker must run as its own account: drop the main session's credentials, Claude Code markers and the service tokens.
     env = {n: os.environ[n] for n in ("PATH", "HOME", "LANG", "LC_ALL", "TERM", "USER", "LOGNAME", "SHELL", "TMPDIR", "TZ") if n in os.environ}
     if "CLAUDERC_TEST_STUB_STATE" in os.environ:
         env["STUB_STATE"] = os.environ["CLAUDERC_TEST_STUB_STATE"]
-    env[{"codex": "CODEX_HOME", "gemini": "GEMINI_CLI_HOME"}.get(k, "CLAUDE_CONFIG_DIR")] = str(w / "home")
-    if k == "gemini":
-        env["GEMINI_API_KEY"] = (w / "home" / "gemini-api-key").read_text().strip()
+    if k != "grok":   # grok gets its folder through HOME (sandbox_argv)
+        env[{"codex": "CODEX_HOME", "gemini": "GEMINI_CLI_HOME"}.get(k, "CLAUDE_CONFIG_DIR")] = str(w / "home")
     if use_sb:
         run = sandbox_argv(t, k, w, env, read_only=(mode == "plan")) + run
     cmd = ["sh", "-c", SLOT_SH, "slot", str(w / "run.lock"), str(SLOTS), str(d / f"{tid}.started"),
-           str(w / "home" / ".credentials.json"), str(RUN_TIMEOUT + 300), TOKEN_LEFT_PY, str(START_GAP),
+           str(w / "home" / ".credentials.json"), str(RUN_TIMEOUT + 300), TOKEN_LEFT_PY,
            "timeout", "--kill-after=10", str(RUN_TIMEOUT)] + run
     with open(d / f"{tid}.in") as fin, open(d / f"{tid}.out", "wb") as fo, open(d / f"{tid}.err", "wb") as fe:
         proc = subprocess.Popen(cmd, stdin=fin, stdout=fo, stderr=fe, cwd=t["cwd"], env=env, start_new_session=True)
     t["pid"] = proc.pid
     t["pid_start"] = proc_start(proc.pid)
     save(t)
-    threading.Thread(target=lambda: (proc.wait(), finalize(tid)), daemon=True).start()
+    threading.Thread(target=supervise, args=(proc, tid, d, k == "gemini"), daemon=True).start()
 
 
 def parse_output(k, out_s, last=""):
@@ -739,6 +965,8 @@ def parse_output(k, out_s, last=""):
         if last.strip():
             return {"result": last.strip(), "session_id": sid if isinstance(sid, str) and SESSION_RE.fullmatch(sid) else None}
         return {"result": err, "is_error": True, "session_id": sid if isinstance(sid, str) and SESSION_RE.fullmatch(sid) else None} if err else {}
+    if k == "grok":
+        return parse_grok(out_s)
     try:
         out = json.loads(out_s)
     except ValueError:
@@ -754,6 +982,28 @@ def parse_output(k, out_s, last=""):
     if sid is not None and (not isinstance(sid, str) or not SESSION_RE.fullmatch(sid)):
         out.pop("session_id", None)
     return out
+
+
+def parse_grok(out_s):
+    """`grok --output-format json`: one JSON object at the end. Only .sessionId is documented; the rest is defensive."""
+    text = out_s.strip()
+    if not text:
+        return {}
+    try:
+        out = json.loads(text)
+    except ValueError:
+        return {"result": text}   # unverified: plain-text output is taken as the answer
+    if not isinstance(out, dict):
+        return {"result": text}   # unverified: as above
+    first = next((out[n].strip() for n in GROK_TEXT_KEYS if isinstance(out.get(n), str) and out[n].strip()), None)
+    e = out.get("error")   # unverified: the error shape (`error` as text or {message}, or `is_error`)
+    if e or out.get("is_error"):
+        m = e.get("message") if isinstance(e, dict) else e
+        return {"result": m.strip() if isinstance(m, str) and m.strip() else first or "Grok reported an error.", "is_error": True}
+    if first is None:
+        return {}
+    sid = out.get("sessionId")
+    return {"result": first, "session_id": sid if isinstance(sid, str) and SESSION_RE.fullmatch(sid) else None}
 
 
 def finalize(tid):
@@ -784,7 +1034,10 @@ def _finalize_unlocked(tid):
         t["session_id"] = out.get("session_id") or t.get("resume")
         reply = out.get("result") if isinstance(out.get("result"), str) else None
         if out.get("is_error") or reply is None:
-            if not out and t.get("pid") and time.time() - t["started"] >= RUN_TIMEOUT - 5:
+            plain = (rd("fatal") or gemini_error(err_s + "\n" + out_s)) if kind(t["worker"]) == "gemini" else None
+            if plain:
+                msg = plain
+            elif not out and t.get("pid") and time.time() - t["started"] >= RUN_TIMEOUT - 5:
                 msg = f"Timed out after {RUN_TIMEOUT // 60} minutes."
             else:
                 msg = (reply or err_s or out_s or "The worker stopped without an answer (this task was lost). Delegate it again.")[-2000:]
@@ -810,7 +1063,7 @@ def _finalize_unlocked(tid):
             key = "reply" if t["status"] == "done" else "error"
             t[key] = (t.get(key) or "") + "\n\n[cluster] " + t["note"]
         t["finished"] = time.time()
-        for ext in ("in", "out", "err", "started", "last"):
+        for ext in ("in", "out", "err", "started", "last", "fatal"):
             (d / f"{tid}.{ext}").unlink(missing_ok=True)
         try:
             save(t)
@@ -827,12 +1080,16 @@ def start(worker, prompt, resume=None, parent=None, repo=None, stack=None, note=
         raise ToolError(f"Worker {worker} isn't signed in. Sign it in from the Claude tab in the cLaudeRC app.")
     if not isinstance(prompt, str) or not prompt.strip():
         raise ToolError("The task is empty.")
+    if kind(worker) == "grok" and len(prompt.encode(errors="replace")) > GROK_PROMPT_MAX:
+        raise ToolError(f"This task is too long for a Grok worker ({GROK_PROMPT_MAX:,} bytes at most: the prompt goes on its command line). Shorten it, or put the details in a file in the project and point to it.")
     if resume is not None and (not isinstance(resume, str) or not SESSION_RE.fullmatch(resume)):
         resume = None
     c = cluster_cfg()
     if sandbox_mode() == "on" and not bwrap_ok():
         raise ToolError("The owner requires workers to run sandboxed, but bubblewrap isn't usable on this server (install it: sudo apt install bubblewrap; "
                         "on Ubuntu 24.04+ unprivileged user namespaces must be allowed). Do this task yourself, or ask the owner to set the sandbox to auto.")
+    if kind(worker) == "grok" and not can_sandbox():
+        raise ToolError(GROK_SANDBOX_ERROR)
     u = usage(worker)
     if near_limit(worker, c, u):
         raise ToolError(f"{worker} has used {peak(u):.0f}% of its usage limit ({usage_text(u)}; the owner's hand-back point is {c['handback_pct']}%). "
@@ -840,6 +1097,11 @@ def start(worker, prompt, resume=None, parent=None, repo=None, stack=None, note=
     if running_here() >= c["max_parallel"]:
         raise ToolError(f"This chat already has {c['max_parallel']} worker tasks running (the owner's limit). Collect one with wait first, or do this one yourself.")
     role, mode = settings(worker, att)
+    if mode == "bypassPermissions" and sandbox_mode() == "auto" and not bwrap_ok():
+        # auto may run other modes unsandboxed, but a worker that asks nothing must never get the owner's whole home
+        raise ToolError(f"{worker} runs with bypassPermissions, and bubblewrap isn't usable on this server, so it would run unsandboxed "
+                        "with the owner's whole home. Nothing was started. Ask the owner to make bubblewrap work (sudo apt install bubblewrap; "
+                        "on Ubuntu 24.04+ unprivileged user namespaces must be allowed) or choose another mode for this worker; or do this task yourself.")
     tid, text = uuid.uuid4().hex[:8], prompt
     if parent:
         ws, cwd = {k: parent.get(k) for k in ("top", "base", "fork", "wt", "branch", "copied", "ws")}, parent["cwd"]
@@ -1158,6 +1420,8 @@ def call_tool(name, a):
             raise ToolError("Only a finished task can be replied to.")
         if t.get("closed"):
             raise ToolError("That task's branch was already merged or discarded; delegate a new task.")
+        if t.get("branch"):
+            check_idle(t)   # two runs on one clone would mix their edits and commits
         return start(t["worker"], a.get("message"), resume=t["session_id"], parent=t)
     if name == "review":
         t = branch_task(a.get("task_id"))
@@ -1177,6 +1441,8 @@ def call_tool(name, a):
         if size > DIFF_SHOWN and a.get("force") is not True:
             raise ToolError(f"The diff is {size} characters; review shows only the first {DIFF_SHOWN}. Read the rest with review file=<path>, or "
                             f"`git diff {t['base'][:8]}..{t['branch']} -- <path>` (also check .github/ and hook files), then call merge again with force=true.")
+        if git("rev-parse", "-q", "--verify", "MERGE_HEAD", cwd=t["top"]).returncode == 0:   # the owner's own merge: never touch it
+            raise ToolError("You are in the middle of a merge in the project: finish or abort it first.")
         try:  # hooks off: the worker's changes must not run code during the merge
             r = git("-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "merge", "--no-ff", "--no-verify", "-m", f"Merge {t['branch']}", t["branch"], cwd=t["top"])
         except subprocess.TimeoutExpired:

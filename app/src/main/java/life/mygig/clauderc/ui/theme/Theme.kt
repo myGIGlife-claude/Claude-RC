@@ -6,7 +6,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
@@ -56,10 +59,14 @@ private val Dark = darkColorScheme(
     outlineVariant = Color(0xFF45433F),
 )
 
-val OkGreen = Color(0xFF4CC38A)
-val BadRed = Color(0xFFE5484D)
+/** The amber fill of the Answer button, in both themes (it carries its own dark text). Status text and dots: [statusColors]. */
 val WarnAmber = Color(0xFFF2C46D)
-val OffGrey = Color(0xFF6B6862)
+
+private val LocalStatusColors = staticCompositionLocalOf { DarkStatusColors }
+
+/** Warning, error and status colours for the app's chosen theme (its own Light/Dark/System setting). */
+val MaterialTheme.statusColors: StatusColors
+    @Composable @ReadOnlyComposable get() = LocalStatusColors.current
 
 /** The session log / Run a command look: green on black. */
 object Term {
@@ -94,5 +101,7 @@ fun ClaudeRcTheme(mode: ThemeMode, content: @Composable () -> Unit) {
             }
         }
     }
-    MaterialTheme(colorScheme = scheme, content = content)
+    CompositionLocalProvider(LocalStatusColors provides if (dark) DarkStatusColors else LightStatusColors) {
+        MaterialTheme(colorScheme = scheme, content = content)
+    }
 }

@@ -21,7 +21,8 @@ export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 log() { echo "[claude-autostart] $*"; }
 
 # Running as root: no sudo needed (the Migrate wizard installs the boot service for a user who has no sudo of their own).
-sudo() { if [[ $EUID -eq 0 ]]; then "$@"; else command sudo "$@"; fi; }
+# With SUDO_ASKPASS set (the app's password setup has no terminal), sudo asks that helper instead.
+sudo() { if [[ $EUID -eq 0 ]]; then "$@"; elif [[ -n "${SUDO_ASKPASS:-}" ]]; then command sudo -A "$@"; else command sudo "$@"; fi; }
 
 # ----------------------------------------------------------------------
 save() {

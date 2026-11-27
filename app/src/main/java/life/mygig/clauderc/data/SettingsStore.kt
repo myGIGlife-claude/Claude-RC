@@ -33,12 +33,76 @@ data class Server(
     val previousFingerprint: String = "",
     /** In cLaudeCluster: true yes, false no, null not asked yet. */
     val inCluster: Boolean? = null,
+    /** What the owner says this server is for ("Web hosting"). Kept on the phone only; see [cleanPurpose]. */
+    val purpose: String = "",
+    /**
+     * Optional second address (the server's Tailscale IP or MagicDNS name), tried first with a short timeout;
+     * [host] is the fallback. Phone only, same pinned host key; see [isValidTailnetHost].
+     */
+    val tailnetHost: String = "",
 ) {
     val isConfigured: Boolean
         get() = host.isNotBlank() && user.isNotBlank() && hostKeyBlob.isNotBlank()
 
-    fun toServerConfig() = ServerConfig(host, port, user, hostKeyType, hostKeyBlob)
+    fun toServerConfig() = ServerConfig(host, port, user, hostKeyType, hostKeyBlob, cleanTailnetHost(tailnetHost))
 }
+
+const val TAILNET_HOST_MAX = 253
+
+private val HOST_LABEL = Regex("[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
+
+/**
+ * Whether [text] (trimmed) can be a [Server.tailnetHost]: empty, or one address with no spaces or control
+ * characters, at most [TAILNET_HOST_MAX] long, shaped like a hostname, an IPv4 address or an IPv6 address
+ * (no brackets, port or zone). Only the shape is checked; whether it answers is the connect's business.
+ */
+fun isValidTailnetHost(text: String): Boolean {
+    val t = text.trim()
+    if (t.isEmpty()) return true
+    if (t.length > TAILNET_HOST_MAX || t.any { it.isWhitespace() || it.isISOControl() }) return false
+    if (':' in t) return isIpv6Shape(t)
+    val labels = t.split('.')
+    // All numbers: must be a real IPv4 address, not "999.1.1.1" or "10.1".
+    if (labels.all { l -> l.isNotEmpty() && l.all { it in '0'..'9' } }) return isIpv4(t)
+    return labels.all { HOST_LABEL.matches(it) }
+}
+
+private fun isIpv4(t: String): Boolean {
+    val parts = t.split('.')
+    return parts.size == 4 && parts.all { p -> p.length in 1..3 && p.all { it in '0'..'9' } && p.toInt() <= 255 }
+}
+
+private fun isIpv6Shape(t: String): Boolean {
+    var s = t
+    val last = s.substringAfterLast(':')
+    if ('.' in last) {   // an embedded IPv4 tail ("::ffff:100.64.0.1") stands for two groups
+        if (!isIpv4(last)) return false
+        s = s.dropLast(last.length) + "0:0"
+    }
+    if (!s.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' || it == ':' }) return false
+    val halves = s.split("::")
+    if (halves.size > 2) return false
+    val groups = halves.flatMap { h -> if (h.isEmpty()) emptyList() else h.split(':') }
+    if (groups.any { it.isEmpty() || it.length > 4 }) return false
+    return if (halves.size == 2) groups.size <= 7 else groups.size == 8
+}
+
+/** The stored form: trimmed, or "" when it isn't a valid address (so a bad value is never dialled). */
+fun cleanTailnetHost(text: String): String = text.trim().takeIf { isValidTailnetHost(it) }.orEmpty()
+
+const val PURPOSE_MAX = 40
+
+/** Suggestions for [Server.purpose]; each one is already clean. */
+val PURPOSE_PRESETS = listOf("Claude sessions", "Web hosting", "Database", "Build / CI", "Backup", "Testing")
+
+/** A server's purpose as stored: control characters (newlines too) dropped, trimmed, at most [PURPOSE_MAX] characters. */
+fun cleanPurpose(text: String): String =
+    text.filterNot { it.isISOControl() }.trim().take(PURPOSE_MAX)
+        .let { if (it.lastOrNull()?.isHighSurrogate() == true) it.dropLast(1) else it }   // don't cut an emoji in half
+        .trimEnd()
+
+/** How the server list is stored; unknown keys are skipped so an older app still reads a newer list. */
+internal val settingsJson = Json { ignoreUnknownKeys = true }
 
 /** The active server's fields, plus the full list and the app-wide settings. */
 data class AppSettings(
@@ -49,6 +113,7 @@ data class AppSettings(
     val hostKeyBlob: String = "",
     val hostKeyFingerprint: String = "",
     val previousFingerprint: String = "",
+    val tailnetHost: String = "",
     val appLock: Boolean = false,
     /** Session notifications (needs Android's notification permission). */
     val notify: Boolean = false,
@@ -59,7 +124,7 @@ data class AppSettings(
     val isConfigured: Boolean
         get() = host.isNotBlank() && user.isNotBlank() && hostKeyBlob.isNotBlank()
 
-    fun toServerConfig() = ServerConfig(host, port, user, hostKeyType, hostKeyBlob)
+    fun toServerConfig() = ServerConfig(host, port, user, hostKeyType, hostKeyBlob, cleanTailnetHost(tailnetHost))
 }
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
@@ -80,7 +145,7 @@ class SettingsStore(private val context: Context) {
         val OWNERS_CACHE = stringPreferencesKey("owners_cache")
     }
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = settingsJson
 
     private fun servers(p: Preferences): List<Server> =
         p[K.SERVERS]?.let { runCatching { json.decodeFromString<List<Server>>(it) }.getOrNull() }
@@ -101,6 +166,7 @@ class SettingsStore(private val context: Context) {
             hostKeyBlob = a.hostKeyBlob,
             hostKeyFingerprint = a.hostKeyFingerprint,
             previousFingerprint = a.previousFingerprint,
+            tailnetHost = a.tailnetHost,
             appLock = p[K.APP_LOCK] ?: false,
             notify = p[K.NOTIFY] ?: false,
             theme = runCatching { ThemeMode.valueOf(p[K.THEME] ?: "SYSTEM") }.getOrDefault(ThemeMode.SYSTEM),
@@ -133,14 +199,15 @@ class SettingsStore(private val context: Context) {
     /**
      * A different host or port is a different server: drop its pinned key.
      * A different username on the same server keeps the pin, so a key change
-     * is still reported as a change. Either way the cached lists are dropped.
+     * is still reported as a change. Either way the cached lists are dropped. A new host or port also
+     * drops the Tailscale address: it belonged to the old server and would fail the new key check.
      */
     suspend fun saveServer(host: String, port: Int, user: String) {
         val before = current()
         editActive { s ->
             val newServer = s.host != host || s.port != port
             s.copy(host = host, port = port, user = user).let {
-                if (newServer) it.copy(hostKeyType = "", hostKeyBlob = "", hostKeyFingerprint = "", previousFingerprint = "") else it
+                if (newServer) it.copy(hostKeyType = "", hostKeyBlob = "", hostKeyFingerprint = "", previousFingerprint = "", tailnetHost = "") else it
             }
         }
         if (before.host != host || before.port != port || before.user != user) {
@@ -175,6 +242,18 @@ class SettingsStore(private val context: Context) {
         cur
     }
 
+    /** Sets what a server is for (any server, current or not); blank clears it. */
+    suspend fun setPurpose(id: String, text: String) = editServers { list, cur ->
+        list.replaceAll { if (it.id == id) it.copy(purpose = cleanPurpose(text)) else it }
+        cur
+    }
+
+    /** Sets a server's Tailscale address (any server, current or not); blank or invalid clears it. */
+    suspend fun setTailnetHost(id: String, text: String) = editServers { list, cur ->
+        list.replaceAll { if (it.id == id) it.copy(tailnetHost = cleanTailnetHost(text)) else it }
+        cur
+    }
+
     suspend fun switchServer(id: String) = editServers { list, cur -> if (list.any { it.id == id }) id else cur }
 
     /** Removes a server. If it was active, the first configured one becomes active. */
@@ -192,7 +271,7 @@ class SettingsStore(private val context: Context) {
     /** Replaces backed-up app preferences; transient caches are intentionally cleared. */
     suspend fun restoreBackup(servers: List<Server>, activeId: String, appLock: Boolean, notify: Boolean, theme: ThemeMode) {
         context.dataStore.edit { p ->
-            p[K.SERVERS] = json.encodeToString(servers)
+            p[K.SERVERS] = json.encodeToString(servers.map { it.copy(purpose = cleanPurpose(it.purpose), tailnetHost = cleanTailnetHost(it.tailnetHost)) })
             p[K.ACTIVE] = activeId.takeIf { id -> servers.any { it.id == id } } ?: servers.firstOrNull()?.id.orEmpty()
             p[K.APP_LOCK] = appLock
             p[K.NOTIFY] = notify

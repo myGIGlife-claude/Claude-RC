@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- updatePeriodMillis 0: WidgetRefreshWorker and the app redraw the widgets. Any size from one row on a fold's cover
+     screen to most of its inner screen: the widget lays itself out for the size it gets (WidgetLayout.kt). -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_sessions_description"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:previewLayout="@layout/widget_preview_sessions"
+    android:configure="life.mygig.clauderc.widget.WidgetConfigActivity"
+    android:widgetFeatures="reconfigurable|configuration_optional"
+    android:minWidth="@dimen/widget_two_cells"
+    android:minHeight="@dimen/widget_two_cells"
+    android:minResizeWidth="@dimen/widget_two_cells"
+    android:minResizeHeight="@dimen/widget_one_cell"
+    android:maxResizeWidth="@dimen/widget_max_resize"
+    android:maxResizeHeight="@dimen/widget_max_resize"
+    android:targetCellWidth="2"
+    android:targetCellHeight="2"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

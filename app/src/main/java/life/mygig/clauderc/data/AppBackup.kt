@@ -58,4 +58,5 @@ object AppBackup {
 @Serializable
 data class AppBackupPayload(val servers: List<Server>, val activeId: String, val appLock: Boolean, val notify: Boolean, val theme: String, val sshSeed: String)
 
-val appBackupJson = Json { encodeDefaults = true }
+/** Servers travel with their purpose (plain text); old backups without it load with "", unknown keys from newer apps are skipped. */
+val appBackupJson = Json { encodeDefaults = true; ignoreUnknownKeys = true }

@@ -1,6 +1,6 @@
 ---
 name: rc-us-motor-vehicle-carrier-law
-description: US motor-vehicle and motor-carrier law (Ohio/NC detail): FMCSA rules, USDOT number, MC number, operating authority, CDL, GVWR/GCWR, box truck, driveaway, pilot car/escort, oversize permit, truck lease and lease-to-own, Part 376, repossession, vehicle title, liens, registration, DMV, traffic ticket, lemon law, owner-operator and gig driver status. Use for any trucking, vehicle or carrier legal question or contract.
+description: "US motor-vehicle and motor-carrier law (Ohio/NC detail): FMCSA rules, USDOT number, MC number, operating authority, CDL, GVWR/GCWR, box truck, driveaway, pilot car/escort, oversize permit, truck lease and lease-to-own, Part 376, repossession, vehicle title, liens, registration, DMV, traffic ticket, lemon law, owner-operator and gig driver status. Use for any trucking, vehicle or carrier legal question or contract."
 ---
 # US motor-vehicle, trucking and carrier law  (as of 2026-10)
 

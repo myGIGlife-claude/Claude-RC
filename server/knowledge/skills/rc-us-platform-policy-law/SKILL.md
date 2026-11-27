@@ -1,6 +1,6 @@
 ---
 name: rc-us-platform-policy-law
-description: US law and platform rules for app/website policies as of 2026-10: privacy policy, terms of service/use, EULA, acceptable use, refund policy, subscription auto-renewal, cookie notice, data deletion, DMCA, COPPA, CCPA/CPRA and state privacy laws, FTC, CAN-SPAM, TCPA, ADA/WCAG, App Store privacy labels, Play Data safety form. Use when drafting or reviewing these documents or checking them against the code.
+description: "US law and platform rules for app/website policies as of 2026-10: privacy policy, terms of service/use, EULA, acceptable use, refund policy, subscription auto-renewal, cookie notice, data deletion, DMCA, COPPA, CCPA/CPRA and state privacy laws, FTC, CAN-SPAM, TCPA, ADA/WCAG, App Store privacy labels, Play Data safety form. Use when drafting or reviewing these documents or checking them against the code."
 ---
 # US platform policy law for apps and websites  (as of 2026-10)
 

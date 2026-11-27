@@ -47,6 +47,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import life.mygig.clauderc.api.PROJECT_NAME_RE
 import life.mygig.clauderc.ui.MainViewModel
+import life.mygig.clauderc.ui.components.CardBox
 import life.mygig.clauderc.ui.openInClaude
 import life.mygig.clauderc.ui.openUrl
 
@@ -81,7 +82,8 @@ fun NewProjectScreen(vm: MainViewModel) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        SectionLabel("New project")
+        Text("New project", style = MaterialTheme.typography.headlineMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp))
+        CardBox { Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         OutlinedTextField(
             value = name,
             onValueChange = { name = it.trim() },
@@ -122,6 +124,7 @@ fun NewProjectScreen(vm: MainViewModel) {
             Text("Start Claude now", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
             Switch(checked = start, onCheckedChange = { start = it })
         }
+        } }
 
         Button(
             onClick = { vm.createProject(name, owner, private, start) },
@@ -130,8 +133,8 @@ fun NewProjectScreen(vm: MainViewModel) {
         ) { Text("Create project") }
 
         result?.let { r ->
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            CardBox {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Created ${r.repo}", style = MaterialTheme.typography.titleMedium)
                     Text("Folder: ${r.path}", style = MaterialTheme.typography.bodySmall)
                     r.session?.let { Text("Session: $it", style = MaterialTheme.typography.bodySmall) }

@@ -37,6 +37,14 @@ case "$1 $2" in
   "auth login") read -r tok; [[ "$tok" == ghp_* ]] || { echo "bad token" >&2; exit 1; }; echo "$tok" > "$S/gh_token" ;;
   "repo delete") [[ -f "$S/gh_no_delete" ]] && { echo "HTTP 403: Must have admin rights to Repository. This API operation needs the \"delete_repo\" scope." >&2; exit 1; }; true ;;
   "repo rename" | "repo edit") true ;;
+  "pr list" | "run list")
+    # Inbox: answers $S/gh-prs-<o>_<r>.json / gh-runs-<o>_<r>.json (default []); every call goes to $S/gh-calls;
+    # $S/gh-sleep-<o>_<r> (seconds) makes that repo slow.
+    logged_in || exit 1
+    r=""; prev=""; for a in "$@"; do [[ "$prev" == -R ]] && r="$a"; prev="$a"; done
+    f="${r//\//_}"; echo "$*" >>"$S/gh-calls"
+    [[ -f "$S/gh-sleep-$f" ]] && sleep "$(cat "$S/gh-sleep-$f")"
+    if [[ "$1" == pr ]]; then cat "$S/gh-prs-$f.json" 2>/dev/null || echo '[]'; else cat "$S/gh-runs-$f.json" 2>/dev/null || echo '[]'; fi ;;
   "auth setup-git") ;;
   "auth logout") echo "$*" >>"$S/gh-logout-argv"; rm -f "$S/gh_token" ;;
   *) echo "gh stub: unhandled $*" >&2; exit 1 ;;

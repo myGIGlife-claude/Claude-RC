@@ -5,6 +5,7 @@ import android.app.Activity
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -103,8 +104,10 @@ import life.mygig.clauderc.ui.screens.TailScreen
 import life.mygig.clauderc.ui.screens.CustomKeysDialog
 import life.mygig.clauderc.ui.screens.AppleDialog
 import life.mygig.clauderc.ui.screens.KeystoresDialog
+import life.mygig.clauderc.ui.screens.AddServerScreen
 import life.mygig.clauderc.ui.screens.HostKeyDialog
 import life.mygig.clauderc.ui.screens.LoginDialog
+import life.mygig.clauderc.ui.screens.CopyScreen
 import life.mygig.clauderc.ui.screens.MigrateScreen
 import life.mygig.clauderc.ui.screens.NewProjectScreen
 import life.mygig.clauderc.ui.screens.ProjectsScreen
@@ -181,6 +184,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             val showApple by vm.services.showApple.collectAsStateWithLifecycle()
             // Only the open flag: the wizard screen follows the rest of its state itself.
             val showMigrate by remember(vm) { vm.migrate.map { it.open }.distinctUntilChanged() }.collectAsStateWithLifecycle(vm.migrate.value.open)
+            val showCopy by remember(vm) { vm.copy.ui.map { it.open }.distinctUntilChanged() }.collectAsStateWithLifecycle(vm.copy.ui.value.open)
             val tokenService by vm.services.tokenService.collectAsStateWithLifecycle()
             val tail by vm.tail.collectAsStateWithLifecycle()
             val pendingKey by vm.pendingHostKey.collectAsStateWithLifecycle()
@@ -233,6 +237,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                 topBar = {
                     Column {
                         TopAppBar(
+                            colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                             title = {
                                 Column {
                                     Text("cLaudeRC")
@@ -241,7 +246,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                                         Box {
                                             // Tap the server name to switch or add servers.
                                             Row(
-                                                Modifier.clickable { serverMenu = true },
+                                                Modifier.clickable(onClickLabel = "Switch server from $sub", role = Role.Button) { serverMenu = true },
                                                 verticalAlignment = Alignment.CenterVertically,
                                             ) {
                                                 Text(
@@ -250,12 +255,25 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis,
                                                 )
-                                                Icon(Icons.Filled.ArrowDropDown, contentDescription = "Switch server")
+                                                Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
                                             }
                                             DropdownMenu(expanded = serverMenu, onDismissRequest = { serverMenu = false }) {
                                                 s.servers.filter { it.isConfigured }.forEach { srv ->
                                                     DropdownMenuItem(
-                                                        text = { Text(srv.host) },
+                                                        text = {
+                                                            Column {
+                                                                Text(srv.host)
+                                                                if (srv.purpose.isNotBlank()) {
+                                                                    Text(
+                                                                        srv.purpose,
+                                                                        style = MaterialTheme.typography.bodySmall,
+                                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                                        maxLines = 1,
+                                                                        overflow = TextOverflow.Ellipsis,
+                                                                    )
+                                                                }
+                                                            }
+                                                        },
                                                         leadingIcon = {
                                                             if (srv.id == s.activeId) Icon(Icons.Filled.Check, contentDescription = "Current")
                                                         },
@@ -313,7 +331,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                 },
                 bottomBar = {
                     if (navVisible && !useRail) {
-                        NavigationBar {
+                        NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                             // Narrow screens (e.g. a foldable's cover display) get the short label.
                             val narrow = LocalConfiguration.current.screenWidthDp < 400
                             // Most used first; New in the middle; setup last.
@@ -396,6 +414,7 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
             tail?.let { TailScreen(vm, it) }
             if (showRun) RunScreen(vm)
             if (showMigrate) MigrateScreen(vm)
+            if (showCopy) CopyScreen(vm)
             chatSession?.let { ChatScreen(vm, it) }
             clusterOffer?.let { o ->
                 AlertDialog(
@@ -403,10 +422,16 @@ fun AppRoot(vm: MainViewModel, lock: AppLock) {
                     confirmButton = { TextButton(onClick = { vm.team.answerClusterOffer(true) }) { Text("Add to cluster") } },
                     dismissButton = { TextButton(onClick = { vm.team.answerClusterOffer(false) }) { Text("Not now") } },
                     title = { Text("A different Claude account") },
-                    text = { Text("${o.host} is signed in as ${o.email}, not the account on your other servers. Add it to cLaudeCluster to see its usage next to the others?") },
+                    text = {
+                        val purpose = s.servers.firstOrNull { it.id == o.serverId }?.purpose.orEmpty()
+                        val name = if (purpose.isNotBlank()) "${o.host} ($purpose)" else o.host
+                        Text("$name is signed in as ${o.email}, not the account on your other servers. Add it to cLaudeCluster to see its usage next to the others?")
+                    },
                 )
             }
             pendingKey?.let { HostKeyDialog(vm, it, s.hostKeyFingerprint.ifEmpty { s.previousFingerprint }) }
+            // Here, not in Settings: the setup screen goes away once the new server is added, the result stays.
+            AddServerScreen(vm)
         }
     }
 }
@@ -510,6 +535,11 @@ private fun androidx.compose.foundation.layout.RowScope.TabItem(
             BadgedBox(badge = { if (dot) Badge() }) { Icon(icon, contentDescription = if (dot) "$label, update available" else null) }
         },
         label = { Text(label, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip) },
+        colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
+            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+            selectedIconColor = MaterialTheme.colorScheme.primary,
+            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+        ),
     )
 }
 
@@ -530,5 +560,10 @@ private fun RailItem(
             BadgedBox(badge = { if (dot) Badge() }) { Icon(icon, contentDescription = if (dot) "$label, update available" else null) }
         },
         label = { Text(label, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip) },
+        colors = androidx.compose.material3.NavigationRailItemDefaults.colors(
+            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+            selectedIconColor = MaterialTheme.colorScheme.primary,
+            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+        ),
     )
 }

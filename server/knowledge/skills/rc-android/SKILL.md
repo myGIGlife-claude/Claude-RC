@@ -1,6 +1,6 @@
 ---
 name: rc-android
-description: Native Android development (Kotlin, Jetpack Compose, Material 3, Gradle/AGP) as of October 2026, covering platform behavior changes (API 35-37), Play policy and target-API deadlines, architecture, security, performance, testing and UI/UX. Use when you write or review Android code: build.gradle(.kts), libs.versions.toml, AndroidManifest.xml, Compose screens, ViewModels, Room, WorkManager, permissions, R8 rules, Play Console releases, or when you upgrade targetSdk, AGP, Kotlin or the Compose BOM.
+description: "Native Android development (Kotlin, Jetpack Compose, Material 3, Gradle/AGP) as of October 2026, covering platform behavior changes (API 35-37), Play policy and target-API deadlines, architecture, security, performance, testing and UI/UX. Use when you write or review Android code: build.gradle(.kts), libs.versions.toml, AndroidManifest.xml, Compose screens, ViewModels, Room, WorkManager, permissions, R8 rules, Play Console releases, or when you upgrade targetSdk, AGP, Kotlin or the Compose BOM."
 ---
 # Native Android development (as of 2026-10)
 

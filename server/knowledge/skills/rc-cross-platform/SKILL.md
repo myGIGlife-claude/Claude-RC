@@ -1,6 +1,6 @@
 ---
 name: rc-cross-platform
-description: Decision guide for cross-platform apps as of 2026-10: native (Kotlin+Compose, Swift+SwiftUI) vs Flutter, React Native/Expo, Kotlin/Compose Multiplatform, .NET MAUI, Capacitor, PWA, Tauri 2, Electron. Use when choosing or auditing a stack, or touching pubspec.yaml, app.json/eas.json, metro.config.js, capacitor.config.ts, tauri.conf.json, electron-builder, *.csproj with MAUI, or a KMP shared module.
+description: "Decision guide for cross-platform apps as of 2026-10: native (Kotlin+Compose, Swift+SwiftUI) vs Flutter, React Native/Expo, Kotlin/Compose Multiplatform, .NET MAUI, Capacitor, PWA, Tauri 2, Electron. Use when choosing or auditing a stack, or touching pubspec.yaml, app.json/eas.json, metro.config.js, capacitor.config.ts, tauri.conf.json, electron-builder, *.csproj with MAUI, or a KMP shared module."
 ---
 # Cross-platform app development: decide, then build  (as of 2026-10)
 

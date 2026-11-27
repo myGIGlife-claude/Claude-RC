@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# cron runs this every minute: one tick at a time (docs/queue-design.md).
+d="${XDG_CONFIG_HOME:-$HOME/.config}/claude-launcher/queue"
+mkdir -p "$d" && chmod 700 "$d"
+exec flock -n "$d/lock" timeout 55 "$HOME/claude-setup.sh" --queue-tick
