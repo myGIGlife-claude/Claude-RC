@@ -97,6 +97,8 @@ val MIGRATE_FILE_RE = Regex("^incoming-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\\.gpg$")
 private val MIGRATE_ITEMS = setOf("claude", "workers", "github", "autostart")
 private val MIGRATE_HOST_RE = Regex("^[A-Za-z0-9._:-]{1,253}$")
 private val MIGRATE_SSH_USER_RE = Regex("^[A-Za-z0-9._][A-Za-z0-9._-]{0,63}$")
+/** The server's MIGRATE_USER_RE (copy-send refuses anything else). */
+private val COPY_SSH_USER_RE = Regex("^[A-Za-z_][A-Za-z0-9_.-]{0,31}$")
 private val MIGRATE_KEY_TYPE_RE = Regex("^[A-Za-z0-9@.-]{1,64}$")
 private val MIGRATE_KEY_BLOB_RE = Regex("^[A-Za-z0-9+/=]{1,8192}$")
 private val MIGRATE_MANIFEST_RE = Regex("^[A-Za-z0-9._-]{1,100}$")
@@ -449,6 +451,61 @@ class LauncherApi(
         return call("migrate-signout-old " + items.distinct().joinToString(" "), timeoutMs = 120_000)
     }
     suspend fun migrateReboot(sudoPassword: String): JsonObject = call("migrate-reboot", stdin = sudoPassword)
+
+    // Copy between servers (docs/copy-design.md). Never add these to COALESCED. No secret value passes through here:
+    // only names, paths and the one-time public key.
+    private fun copyArgs(kind: CopyKind, project: String?): String {
+        if (kind == CopyKind.PROJECT) requireName(project.orEmpty())
+        return kind.wire + if (kind == CopyKind.PROJECT) " $project" else ""
+    }
+
+    /**
+     * [stdin] is only for the bundle kind on the target: the source's `name sha` lines. A bundle list always gets stdin
+     * (possibly empty) so it isn't left waiting up to 5 s for lines that never come.
+     */
+    suspend fun copyList(kind: CopyKind, project: String?, stdin: List<String> = emptyList()): CopyList =
+        call("copy-list " + copyArgs(kind, project), stdin = if (kind == CopyKind.BUNDLE) stdin.joinToString("\n") else null, timeoutMs = 180_000)
+    suspend fun copyKeygen(): CopyKey = call("copy-keygen")
+    /** On the target: [fromAddress] (the source's tailnet IP, or "" on the public route) and minutes to live. */
+    suspend fun copyAuthorize(publicKey: String, fromAddress: String, minutes: Int = 120): JsonObject {
+        val key = publicKey.trim()
+        if (!key.startsWith("ssh-") || key.any { it == '\n' || it == '\r' }) throw ApiException(Codes.INVALID_NAME, "Bad copy key")
+        if (fromAddress.isNotEmpty()) requireMigrate(MIGRATE_HOST_RE, fromAddress, "Bad server address")
+        return call("copy-authorize", stdin = listOf(key, fromAddress, minutes.coerceIn(1, 720).toString()).joinToString("\n"))
+    }
+    private fun pinnedLines(host: String, port: Int, hostKeyType: String, hostKeyBlob: String): List<String> {
+        requireMigrate(MIGRATE_HOST_RE, host, "Bad server address")
+        if (port !in 1..65535) throw ApiException(Codes.INVALID_NAME, "Bad port")
+        requireMigrate(MIGRATE_KEY_TYPE_RE, hostKeyType, "Bad host key type")
+        requireMigrate(MIGRATE_KEY_BLOB_RE, hostKeyBlob, "Bad host key")
+        return listOf(host, port.toString(), hostKeyType, hostKeyBlob)
+    }
+    /** On the source: can it reach [host] and does it show the pinned key? */
+    suspend fun copyProbe(host: String, port: Int, hostKeyType: String, hostKeyBlob: String): CopyProbe =
+        call("copy-probe", stdin = pinnedLines(host, port, hostKeyType, hostKeyBlob).joinToString("\n"), timeoutMs = 60_000)
+    /**
+     * On the source: starts the send; returns at once. Stdin = host, port, user, host-key type, host-key base64 (as
+     * migrate-send), then the chosen paths one per line (secrets: env/NAME, secret-files/x; bundle: branch names; project:
+     * relative paths, or the single line "." for the whole folder). The server would send everything for no path lines; the app
+     * always names what was ticked.
+     */
+    suspend fun copySend(
+        kind: CopyKind, project: String?, host: String, port: Int, user: String, hostKeyType: String, hostKeyBlob: String,
+        paths: List<String>,
+    ): JsonObject {
+        requireMigrate(COPY_SSH_USER_RE, user, "Bad user name")
+        if (paths.isEmpty() || paths.any { !copyPathOk(it) }) throw ApiException(Codes.INVALID_NAME, "Bad file list")
+        val head = pinnedLines(host, port, hostKeyType, hostKeyBlob)
+        return call("copy-send " + copyArgs(kind, project), stdin = (listOf(head[0], head[1], user, head[2], head[3]) + paths).joinToString("\n"))
+    }
+    suspend fun copyStatus(): CopyStatus = call("copy-status")
+    /** On the target: applies the received [file]; [lines] = policy, then the paths to overwrite (see copyApplyLines). */
+    suspend fun copyApply(file: String, lines: List<String>): JsonObject {
+        requireMigrate(COPY_FILE_RE, file, "Bad copy file name")
+        if (lines.isEmpty() || lines.any { !copyPathOk(it) }) throw ApiException(Codes.INVALID_NAME, "Bad file list")
+        return call("copy-apply $file", stdin = lines.joinToString("\n"))
+    }
+    suspend fun copyCancel(): JsonObject = call("copy-cancel")
 
     private fun requireMigrate(re: Regex, value: String, message: String) {
         if (!re.matches(value)) throw ApiException(Codes.INVALID_NAME, message)

@@ -327,6 +327,20 @@ fun SettingsScreen(vm: MainViewModel, s: AppSettings, firstRun: Boolean) {
                     OutlinedButton(onClick = { vm.migrateOpen() }) { Text("Open") }
                 }
             }
+
+            // Copy needs two servers in the app (and script API 58 on both: the screen checks that).
+            if (s.servers.count { it.isConfigured } >= 2) {
+                SectionLabel("Copy")
+                CardBox {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Copy between servers")
+                            Text("Send a project, keys or unpushed work from one server to another", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        OutlinedButton(onClick = { vm.copy.open() }) { Text("Open") }
+                    }
+                }
+            }
         }
 
         if (t == 2) {

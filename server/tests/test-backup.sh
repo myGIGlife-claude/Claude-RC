@@ -459,6 +459,29 @@ as "$RX" "$CB" receive extra </dev/null
 OUT="$(HOME="$WORK/rx-fresh" PATH="$WORK/bigdf:$PATH" "$CB" receive <"$WORK/stream.bin" 2>&1)"; RC=$?
 [[ "$RC" -eq 0 && "$(mode "$WORK/rx-fresh/backups")" == 700 ]]; check "receive creates ~/backups with mode 700" $?
 
+echo "receive --copy"
+CPDIR="$RX/.config/claude-launcher/copy"
+rxcopy() { # rxcopy <stdin file> [args]: stdout in RXOUT, exit code in RC
+  local in="$1"; shift
+  RXOUT="$(env HOME="$RX" PATH="$WORK/bigdf:$PATH" "SSH_ORIGINAL_COMMAND=touch $WORK/pwned2" "$CB" receive "$@" <"$in" 2>"$WORK/rx.err")"; RC=$?
+  OUT="stdout=[$RXOUT] stderr=[$(cat "$WORK/rx.err")]"
+}
+N0="$(rxcount)"
+rxcopy "$WORK/stream.bin" --copy
+[[ "$RC" -eq 0 && "$RXOUT" =~ ^copy-[0-9]{8}-[0-9]{6}(-[0-9]+)?\.tgz$ ]]; check "receive --copy prints copy-<time>.tgz" $?
+[[ -f "$CPDIR/$RXOUT" && "$(mode "$CPDIR/$RXOUT")" == 600 && "$(mode "$CPDIR")" == 700 ]] && cmp -s "$CPDIR/$RXOUT" "$WORK/stream.bin"; check "the stream is kept intact in the copy folder: file 600, folder 700" $?
+[[ "$(rxcount)" == "$N0" && ! -e "$WORK/pwned2" ]]; check "the home backups folder is not used, SSH_ORIGINAL_COMMAND ignored" $?
+rxcopy "$WORK/stream.bin" --copy
+[[ "$RC" -eq 0 && "$(find "$CPDIR" -type f | wc -l)" == 2 ]]; check "a second copy in the same second gets its own name" $?
+rxcopy "$WORK/stream2m.bin" --copy
+rm -f "$WORK/cap.out"; OUT="$(env HOME="$RX" PATH="$WORK/bigdf:$PATH" CLAUDE_BACKUP_RECEIVE_MAX_MB=1 "$CB" receive --copy <"$WORK/stream2m.bin" 2>&1)"; RC=$?
+[[ "$RC" -eq 1 && "$(find "$CPDIR" -type f | wc -l)" == 3 && -z "$(find "$CPDIR" -name '*.part')" ]]; check "receive --copy honours the size cap and leaves no .part" $?
+rxcopy "$WORK/stream.bin" --copy extra
+[[ "$RC" -eq 2 ]]; check "receive --copy takes nothing else" $?
+rxcopy "$WORK/stream.bin" --bogus
+[[ "$RC" -eq 2 ]]; check "receive still refuses other arguments" $?
+rm -rf "$CPDIR"
+
 echo "usage"
 as "$OLD" "$CB" --help
 [[ "$RC" -eq 0 ]] && grep -q 'export' <<<"$OUT" && grep -q 'import' <<<"$OUT"; check "--help" $?
