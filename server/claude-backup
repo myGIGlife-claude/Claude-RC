@@ -424,11 +424,12 @@ collect() { # collect <all 0|1> <max bytes>
   { grep -hoE '^(export +)?[A-Za-z_][A-Za-z0-9_]*=' "$HOME/.config/claude-launcher/env" 2>/dev/null |
     sed -E 's/^export +//; s/=$//' || true; } >"$TMP/envnames"
 
-  # Tools, cron lines and non-stock timers (names only), so migrate-verify can compare with the new server.
+  # Tools, cron jobs (schedule + program name only: arguments can hold secrets) and non-stock timers (names only), so migrate-verify can compare with the new server.
   { for w in docker uv bun node npm gh aws apktool jadx supabase tailscale python3 java go rustc; do
       ! command -v "$w" >/dev/null 2>&1 || echo "$w"
     done; } >"$TMP/tools"
-  { if command -v crontab >/dev/null 2>&1; then crontab -l 2>/dev/null | grep -vE '^[[:space:]]*(#|$)' | cut -c1-200 || true; fi; } >"$TMP/cron"
+  { if command -v crontab >/dev/null 2>&1; then crontab -l 2>/dev/null | grep -vE '^[[:space:]]*(#|$)|^[A-Za-z_][A-Za-z0-9_]*=' |
+    awk '{ c = ($1 ~ /^@/) ? $2 : $6; n = split(c, a, "/"); if (a[n] != "") print (($1 ~ /^@/) ? $1 : $1" "$2" "$3" "$4" "$5) " " a[n] }' || true; fi; } >"$TMP/cron"
   { { systemctl --user list-timers --all --no-legend 2>/dev/null || true; systemctl list-timers --all --no-legend 2>/dev/null || true; } |
       grep -oE '[A-Za-z0-9@:._-]+\.timer' | sed 's/\.timer$//' |
       grep -vE '^(apt-daily|apt-daily-upgrade|dpkg-db-backup|fstrim|logrotate|man-db|e2scrub_all|motd-news|fwupd-refresh|update-notifier-download|update-notifier-motd|launchpadlib-cache-clean|sysstat-collect|sysstat-summary|systemd-tmpfiles-clean|snapd\.snap-repair|ua-timer|esm-cache|apport-autoreport|cloud-init-hotplugd|plocate-updatedb|anacron)$' || true
