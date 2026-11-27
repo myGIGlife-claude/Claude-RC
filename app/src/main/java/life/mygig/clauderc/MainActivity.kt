@@ -65,8 +65,8 @@ class MainActivity : FragmentActivity(), AppLock {
         vm.setForeground(true)
         vm.chats.resumeChat()
         // Lock again after a while in the background. The short grace period
-        // covers the PIN screen (its own activity) and quick trips to the
-        // browser during a login.
+        // covers the system's lock prompt (its own activity) and quick trips to
+        // the browser during a login or to a file picker.
         val since = backgroundedAt
         if (since != null && SystemClock.elapsedRealtime() - since > RELOCK_AFTER_MS) vm.lockApp()
         backgroundedAt = null
@@ -75,10 +75,8 @@ class MainActivity : FragmentActivity(), AppLock {
     override fun onStop() {
         super.onStop()
         vm.setForeground(false)
-        if (!isChangingConfigurations) {
-            backgroundedAt = SystemClock.elapsedRealtime()
-            vm.chats.lockChat()   // chat needs the PIN again after any trip away from the app
-        }
+        vm.chats.pauseChat()   // no chat polling while the app isn't in front
+        if (!isChangingConfigurations) backgroundedAt = SystemClock.elapsedRealtime()
     }
 
     override fun canAuthenticate(): Boolean =

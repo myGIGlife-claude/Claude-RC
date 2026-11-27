@@ -22,7 +22,7 @@ claude-backup — encrypted backup and restore of a cLaudeRC server user's setup
 
   claude-backup export [--out FILE] [--slim] [--projects] [--docker] [--no-claude-login] [--pass-file F]
   claude-backup plan [--json] [--slim] [--projects] [--docker] [--no-claude-login]
-  claude-backup receive
+  claude-backup receive [--copy]
   claude-backup clone MANIFEST     clone the manifest's missing clean repos (needs GitHub access)
   claude-backup import FILE [--pass-file F] [--dry-run] [--clone] [--with-authorized-keys] [--from USER@HOST] [--manifest-out OUT]
   claude-backup list FILE [--pass-file F]
@@ -64,7 +64,8 @@ receive  Reads ONE stream on stdin into ~/backups/incoming-<time>.gpg (folder 70
          prints the file name. Refuses (exit 1, nothing left behind) more than
          CLAUDE_BACKUP_RECEIVE_MAX_MB (default 20480) or when the free disk space is smaller than
          the stream so far plus 1 GB. Meant as an SSH forced command: ignores $SSH_ORIGINAL_COMMAND,
-         takes no arguments, needs no passphrase.
+         takes no arguments, needs no passphrase. `receive --copy` keeps a plain tar.gz as
+         ~/.config/claude-launcher/copy/copy-<time>.tgz instead (Settings > Copy).
 
 import  Restores into $HOME on the new server. The passphrase comes from --pass-file, env
          CLAUDE_BACKUP_PASS_FILE or a prompt (no echo). The file is fully read once before
@@ -674,15 +675,17 @@ cmd_plan() {
 # One stream on stdin into ~/backups/incoming-<time>.gpg. Runs as an SSH forced command: never reads
 # anything from the client but the stream itself.
 cmd_receive() {
-  local dir="$HOME/backups" max_mb="${CLAUDE_BACKUP_RECEIVE_MAX_MB:-20480}" base name n=0 size=0 prev avail chunk=16
+  local dir="$HOME/backups" max_mb="${CLAUDE_BACKUP_RECEIVE_MAX_MB:-20480}" base name n=0 size=0 prev avail chunk=16 pre=incoming ext=gpg
   unset SSH_ORIGINAL_COMMAND
-  (($# == 0)) || bad_usage "receive takes no arguments"
+  # --copy (Settings > Copy): a plain tar.gz from another server of the same owner, kept in the copy folder
+  if (($# == 1)) && [[ "$1" == --copy ]]; then dir="${XDG_CONFIG_HOME:-$HOME/.config}/claude-launcher/copy" pre=copy ext=tgz; shift; fi
+  (($# == 0)) || bad_usage "receive takes no arguments (or only --copy)"
   [[ "$max_mb" =~ ^[0-9]+$ ]] || die "CLAUDE_BACKUP_RECEIVE_MAX_MB must be a number"
   mkdir -p "$dir"
   chmod 700 "$dir"
-  base="incoming-$(date +%Y%m%d-%H%M%S)"
-  name="$base.gpg"
-  while [[ -e "$dir/$name" || -e "$dir/$name.part" ]]; do n=$((n + 1)); name="$base-$n.gpg"; done
+  base="$pre-$(date +%Y%m%d-%H%M%S)"
+  name="$base.$ext"
+  while [[ -e "$dir/$name" || -e "$dir/$name.part" ]]; do n=$((n + 1)); name="$base-$n.$ext"; done
   PART="$dir/$name.part"
   : >"$PART"
   while :; do
