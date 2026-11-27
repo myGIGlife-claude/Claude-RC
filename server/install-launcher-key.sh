@@ -39,9 +39,10 @@ if command -v ssh-keygen >/dev/null; then
 fi
 
 # Same lock claude-setup.sh's with_state_lock holds, so a concurrent migrate/copy edit of authorized_keys isn't lost.
-if command -v flock >/dev/null; then
-  lockdir="${XDG_CONFIG_HOME:-$HOME/.config}/claude-launcher"
-  ( umask 077; mkdir -p "$lockdir" )
+# Best effort: this script is how a phone gets in, so a lock folder it can't create never stops it.
+lockdir="${XDG_CONFIG_HOME:-$HOME/.config}/claude-launcher"
+if command -v flock >/dev/null && ( umask 077; mkdir -p "$lockdir" ) 2>/dev/null &&
+  { : >>"$lockdir/.state.lock"; } 2>/dev/null; then
   exec 6>>"$lockdir/.state.lock"
   flock -w 20 6 || { echo "Another change is still being saved. Try again in a moment." >&2; exit 1; }
 fi
