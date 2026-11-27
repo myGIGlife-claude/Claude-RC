@@ -21,7 +21,9 @@ import life.mygig.clauderc.api.MigrateSession
 import life.mygig.clauderc.api.MigrateStatus
 import life.mygig.clauderc.api.VerifyResult
 import life.mygig.clauderc.data.Server
+import life.mygig.clauderc.api.Worker
 import life.mygig.clauderc.data.SettingsStore
+import life.mygig.clauderc.ui.vm.choosesSignIn
 import life.mygig.clauderc.ssh.Ed25519Identity
 import life.mygig.clauderc.ssh.SshKeyManager
 import java.security.SecureRandom
@@ -30,10 +32,11 @@ import java.security.SecureRandom
 enum class MigrateStep { CHOOSE, CHECK, STOP_SESSIONS, CREATE_USER, TRANSFER, RESTORE, SIGN_IN, SIGN_OUT, REBOOT, VERIFY, DONE }
 
 /** One Claude account to sign in again on the new server: the main one, or a worker. */
-data class MigrateSignIn(val name: String, val main: Boolean, val done: Boolean = false)
+data class MigrateSignIn(val name: String, val main: Boolean, val done: Boolean = false, val kind: String = "claude")
 
 /** The sign-in page (and code, if any) the user is working through for [name]. */
-data class MigrateSignInPrompt(val name: String, val main: Boolean, val login: LoginUrl)
+/** [login] is null for Grok and Gemini workers: those take an API key here (their account sign-in is in the Cluster screen). */
+data class MigrateSignInPrompt(val name: String, val main: Boolean, val login: LoginUrl?, val kind: String = "claude")
 
 /** What to remove from the old server once the new one works. */
 data class MigrateSignOut(
@@ -275,7 +278,7 @@ class MigrateFlow(
     }
 
     private suspend fun fetchSessions(api: LauncherApi): List<MigrateSession> =
-        api.sessions().sessions.map { MigrateSession(it.name, it.busy, it.waiting) }
+        api.sessions().sessions.map { MigrateSession(it.name, busy = it.busy, waiting = it.waiting) }
 
     /** Stops idle sessions (if asked), then goes on only when nothing is left running on the old server. */
     private suspend fun checkSessions(stopIdle: Boolean) {
@@ -529,32 +532,48 @@ class MigrateFlow(
         val api = apiFor(t)
         val logins = _ui.value.plan?.logins
         val mainDone = try { api.status().claude.loggedIn } catch (e: ApiException) { false }
-        val workersDone = try {
-            api.workers().workers.filter { it.signedIn }.map { it.name }.toSet()
+        // The new server's own worker list: only the ones still signed out, each with its kind (codex, grok, gemini too).
+        val workers = try {
+            api.workers().workers.filter { !it.signedIn }
         } catch (e: ApiException) {
-            emptySet()
+            logins?.workers.orEmpty().map { Worker(it) }
         }
         val targets = buildList {
             if (logins?.claude == true) add(MigrateSignIn("Claude", true, mainDone))
-            logins?.workers?.forEach { add(MigrateSignIn(it, false, it in workersDone)) }
+            workers.forEach { add(MigrateSignIn(it.name, false, false, it.kind)) }
         }
         _ui.update { it.copy(step = MigrateStep.SIGN_IN, signInTargets = targets, signInPrompt = null) }
         log(if (targets.isEmpty()) "No Claude sign-ins to move." else "Sign in to Claude again on ${t.host} (${targets.size} account(s)).")
     }
 
-    fun signInStart(name: String, main: Boolean) = work { startSignIn(name, main) }
+    fun signInStart(name: String, main: Boolean, kind: String = "claude") = work { startSignIn(name, main, kind) }
 
-    private suspend fun startSignIn(name: String, main: Boolean) {
+    private suspend fun startSignIn(name: String, main: Boolean, kind: String = "claude") {
         needStep(MigrateStep.SIGN_IN)
         val (_, t) = servers()
         val api = apiFor(t)
-        val login = if (main) api.loginClaudeStart() else api.workerLoginStart(name)
-        _ui.update { it.copy(signInPrompt = MigrateSignInPrompt(name, main, login)) }
+        val login = when {
+            main -> api.loginClaudeStart()
+            choosesSignIn(kind) -> null   // Grok and Gemini: the prompt asks for an API key
+            else -> api.workerLoginStart(name)
+        }
+        _ui.update { it.copy(signInPrompt = MigrateSignInPrompt(name, main, login, kind)) }
+    }
+
+    /** Grok or Gemini worker: saves [key] on the new server (never in the log or the state). */
+    fun signInKey(name: String, key: String) = work {
+        needStep(MigrateStep.SIGN_IN)
+        val (_, t) = servers()
+        apiFor(t).workerSetKey(name, key)
+        _ui.update { s ->
+            s.copy(signInTargets = s.signInTargets.map { x -> if (x.name == name && !x.main) x.copy(done = true) else x }, signInPrompt = null)
+        }
+        log("Saved the key for $name on ${t.host}.")
     }
 
     fun signInCode(name: String, main: Boolean, code: String) = work {
         needStep(MigrateStep.SIGN_IN)
-        retryBlock = { startSignIn(name, main) }   // a retry gets a fresh sign-in page
+        retryBlock = { startSignIn(name, main, _ui.value.signInPrompt?.kind ?: "claude") }   // a retry gets a fresh sign-in page
         val (_, t) = servers()
         val api = apiFor(t)
         if (main) api.loginClaudeCode(code) else api.workerLoginCode(name, code)
@@ -663,6 +682,29 @@ class MigrateFlow(
         apiFor(t).loginGithub(token)
         log("Signed in to GitHub on ${t.host}.")
         verify()
+    }
+
+    /** Starts, on the new server, the sessions that were running on the old one (names come from the plan taken before they were stopped). */
+    fun startSessions() = work {
+        needStep(MigrateStep.VERIFY, MigrateStep.DONE)
+        val (_, t) = servers()
+        val api = apiFor(t)
+        val wanted = _ui.value.plan?.sessions.orEmpty().filter { !it.general }
+        if (wanted.isEmpty()) {
+            log("No sessions were running on the old server.")
+            return@work
+        }
+        var started = 0
+        for (s in wanted) {
+            val project = s.project.ifBlank { s.name }
+            try {
+                api.start(project)
+                started++
+            } catch (e: ApiException) {
+                log("Couldn't start $project: ${e.message}")
+            }
+        }
+        log("Started $started of ${wanted.size} session(s) on ${t.host}.")
     }
 
     /** Clones the repos the restore couldn't, then checks again. */

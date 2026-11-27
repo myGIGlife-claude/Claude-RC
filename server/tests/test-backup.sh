@@ -71,6 +71,15 @@ printf '#!/usr/bin/env bash\ncat >/dev/null\nexit 2\n' >"$WORK/failbin/gpg"
 # df stubs for `receive`: 100 GB free / 1 MB free
 printf '#!/usr/bin/env bash\necho "Filesystem 1024-blocks Used Available Capacity Mounted on"\necho "stub 200000000 100000000 100000000 50%% /"\n' >"$WORK/bigdf/df"
 printf '#!/usr/bin/env bash\necho "Filesystem 1024-blocks Used Available Capacity Mounted on"\necho "stub 200000000 199999000 1000 99%% /"\n' >"$WORK/smalldf/df"
+cat >"$WORK/stubs/crontab" <<'EOF'
+#!/usr/bin/env bash
+printf '# a comment\n\n0 2 * * * /home/x/bin/nightly\n'
+EOF
+cat >"$WORK/stubs/systemctl" <<'EOF'
+#!/usr/bin/env bash
+[[ "$*" == *list-timers* ]] && printf 'Mon n/a - - apt-daily.timer apt-daily.service\nMon n/a - - my-sync.timer my-sync.service\n'
+exit 0
+EOF
 chmod +x "$WORK/stubs/"* "$WORK/failbin/gpg" "$WORK/bigdf/df" "$WORK/smalldf/df"
 export OLD_HOME="$OLD" PATH="$WORK/stubs:$PATH"
 
@@ -406,6 +415,7 @@ pst() { jq -r --arg d "$1" '.repos[] | select(.dir == $d) | .state + ":" + (.res
 jq -e '.repos | all(.skipped_reason | type == "string")' <<<"$PJ" >/dev/null; check "plan: skipped_reason is always a string" $?
 jq -e '.other_dirs == ["demo-plain"] and .logins == {claude: true, workers: ["demo-worker"]} and .env_var_names == ["DEMO_API_KEY"]' <<<"$PJ" >/dev/null; check "plan: other_dirs, logins, env var names" $?
 jq -e '.docker_volumes == ["demo-data"] and .docker_containers == ["demo-db:postgres:16"] and has("systemd_units") and has("listening")' <<<"$PJ" >/dev/null; check "plan: docker and server facts" $?
+jq -e '(.tools | index("docker")) != null and (.tools | index("nonexistent-tool")) == null and .cron == ["0 2 * * * /home/x/bin/nightly"] and .timers == ["my-sync"]' <<<"$PJ" >/dev/null; check "plan: tools, cron lines (no comments), non-stock timers" $?
 jq -e '(.estimate_mb | type) == "number" and .estimate_mb >= 1 and .estimate_mb == (.estimate_mb | floor)' <<<"$PJ" >/dev/null; check "plan: estimate_mb is a whole number >= 1" $?
 EST="$(jq -r .estimate_mb <<<"$PJ")"
 TARMB=$(($(dump "$B" "$PW" | wc -c) / 1048576 + 1))

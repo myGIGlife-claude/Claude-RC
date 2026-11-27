@@ -5647,7 +5647,7 @@ do_migrate_plan() {
   local plan sessions svc
   plan="$(t 120 "$(migrate_backup_bin)" plan --json 2>/dev/null </dev/null)" || api_err internal "claude-backup couldn't check this server."
   jq -e 'type == "object"' >/dev/null 2>&1 <<<"$plan" || api_err internal "claude-backup gave no usable plan."
-  sessions="$(sessions_list_json | jq -c 'map({name, busy, waiting})')"
+  sessions="$(sessions_list_json | jq -c 'map({name, project, general, busy, waiting})')"
   svc="$(services_json | jq -c 'to_entries | map(select(.value.logged_in == true) | .key)')"
   api_ok "$(jq -c --argjson s "${sessions:-[]}" --argjson v "${svc:-[]}" '{
     sessions:$s, repos:(.repos // []), logins:(.logins // {claude:false, workers:[]}), services:$v,
@@ -6303,6 +6303,24 @@ do_migrate_verify() {
     done < <(jq -r '(.claude_logins.workers // [])[]? | strings' "$mf")
     if ((${#rest[@]} == 0)); then migrate_vitem pending_logins true "nothing to sign in"
     else migrate_vitem pending_logins true "still to sign in: $(migrate_names "${rest[@]}")"; fi
+
+    # tools and timers the old server had and this one lacks (information only); cron lines can't be compared
+    local ot=() ct=() nt tl
+    nt="$({ systemctl --user list-timers --all --no-legend 2>/dev/null || true; systemctl list-timers --all --no-legend 2>/dev/null || true; } |
+      grep -oE '[A-Za-z0-9@:._-]+\.timer' | sed 's/\.timer$//' || true)"
+    while IFS= read -r tl; do
+      [[ "$tl" =~ ^[A-Za-z0-9._+-]{1,40}$ ]] && ! command -v "$tl" >/dev/null 2>&1 && ot+=("$tl")
+    done < <(jq -r '(.tools // [])[]? | strings' "$mf")
+    while IFS= read -r tl; do
+      grep -qxF -- "$tl" <<<"$nt" || ct+=("timer $tl")
+    done < <(jq -r '(.timers // [])[]? | strings' "$mf")
+    rest=("${ot[@]}" "${ct[@]}")
+    out=""
+    ((${#rest[@]} == 0)) || out="missing here: $(migrate_names "${rest[@]}")"
+    if [[ "$(jq -r '(.cron // []) | length' "$mf")" -gt 0 ]]; then
+      out+="${out:+; }the old server had cron lines, re-create if still needed: $(jq -r '[(.cron // [])[]? | strings | .[0:60]] | .[:3] | join(" | ")' "$mf")"
+    fi
+    migrate_vitem tools_match true "${out:-same tools and timers}"
   fi
 
   # the transfer key must not stay authorized
