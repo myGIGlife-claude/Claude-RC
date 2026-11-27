@@ -6,6 +6,9 @@ cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage
 ## Current task
 Done today: README (#229) and PLAN (#230) merged; master ~/.claude/CLAUDE.md rewritten (backup kept) and default model set to Opus; T4 in PR #231; worker role drop-down in PR #232. Next: merge #231/#232 on green CI, then T14-T15 (starred-chat queue), then T2, T3, T5-T10.
 
+## New server (2026-11-27)
+A second server is set up for cLaudeRC, the CI runner and the emulator farm; read `docs/new-server-plan.md` for what is done, what is left and what waits on Jonathan.
+
 ## Model rule (Jonathan, 2026-11-16, master rule in ~/.claude/CLAUDE.md)
 Orchestrator splits work into small tasks and picks the cheapest model that does each reliably: Haiku = simple, repetitive; Sonnet = standard build, refactor, tests, moderate debugging; Opus = architecture, hard debugging, ambiguous or system-wide, security design/review (Opus takes every top-tier task by default, Agent `model: opus` or `planner`); Fable 5.2 only when Opus failed or is clearly not enough (one-line reason). Same bug survives 2 fixes: go up one level. Orchestrator keeps review, integration and final verification (real build on CI, never "it compiles").
 
