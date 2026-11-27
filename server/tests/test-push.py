@@ -102,6 +102,13 @@ assert not sent, "finished is off by default"
 open(os.path.join(cfg, "push-done", "demo"), "w").close()
 run(ev={"hook_event_name": "Stop"})
 assert sent and sent[0]["data"]["channel"] == "finished" and sent[0]["data"]["session"] == "demo", sent
+run("--alert", "qchat", "question")
+assert len(sent) == 1 and sent[0]["data"]["channel"] == "alerts" and sent[0]["data"]["session"] == "qchat" and sent[0]["data"]["kind"] == "question" and "qchat" in sent[0]["data"]["title"], sent
+for k in ("needs_you", "error"):
+    run("--alert", "qchat", k)
+    assert len(sent) == 1 and sent[0]["data"]["kind"] == k, sent
+run("--alert", "qchat", "bogus"); assert not sent, "unknown kind: silent"
+run("--alert", "../x", "error"); assert not sent, "bad session name: silent"
 env.pop("TMUX_PANE")
 run(ev={"hook_event_name": "Notification"})
 assert not sent, "outside tmux: silent"
