@@ -4269,14 +4269,14 @@ do_mcp_auth_start() {
   for ((i = 0; i < 120; i++)); do
     sleep 0.5
     text="$(mcp_auth_screen)"
-    url="$(grep -A1 'copy this URL manually' <<<"$text" | grep -oE 'https://[^[:space:]]+' | head -n 1)"
+    url="$(grep -A3 -E 'copy this URL manually|Use the URL below' <<<"$text" | grep -oE 'https://[^[:space:]]+' | head -n 1)"
     [[ -n "$url" ]] && break
     sel="$(grep -m1 '❯' <<<"$text")"
     if grep -q 'Yes, I trust this folder' <<<"$text"; then
       [[ "$sel" == *"Yes, I trust"* ]] && mcp_auth_key Enter || mcp_auth_key Down
-    elif grep -qE '[0-9]\. (Re-?a|A)uthenticate' <<<"$text"; then
+    elif grep -qE '([0-9]\. |^ *(❯ *)?)(Re-?a|A)uthenticate *$' <<<"$text"; then
       [[ "$sel" == *uthenticate* ]] && mcp_auth_key Enter || mcp_auth_key Down
-    elif grep -q 'Manage MCP servers' <<<"$text"; then
+    elif grep -qE 'Manage MCP servers|^ *MCP servers *$' <<<"$text"; then   # Claude Code 2.1.33x dropped "Manage"
       ((moves++ < 40)) || break
       [[ " $sel " == *" $name "* ]] && mcp_auth_key Enter || mcp_auth_key Down
     fi
@@ -4448,7 +4448,8 @@ check_pin() {
   if until="$(chat_locked_until)"; then
     api_err chat_locked "Too many wrong PINs. Chat is locked until $(date -d "@$until" +%H:%M), or delete ~/.config/claude-launcher/chat-locked on the server."
   fi
-  if [[ "$1" == "$want" ]]; then rm -f "$CHAT_FAILS"; return 0; fi
+  # Right PIN: let go of the lock now, or every chat call queues behind this one's work (busy after 10 s).
+  if [[ "$1" == "$want" ]]; then rm -f "$CHAT_FAILS"; exec 8>&-; return 0; fi
   n=$(($(cat "$CHAT_FAILS" 2>/dev/null || echo 0) + 1))
   echo "$n" >"$CHAT_FAILS"
   if ((n >= 5)); then
