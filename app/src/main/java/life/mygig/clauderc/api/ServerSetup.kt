@@ -47,7 +47,7 @@ umask 077
 export PATH="$HOME/.local/bin:$PATH"
 say() { printf '@@clauderc %s\n' "$*"; }
 T=""; command -v timeout >/dev/null 2>&1 && T=timeout
-have_all() { missing=""; for c in curl git jq tmux flock; do command -v "$c" >/dev/null 2>&1 || missing="$missing $c"; done; }
+have_all() { missing=""; for c in curl git jq tmux flock crontab; do command -v "$c" >/dev/null 2>&1 || missing="$missing $c"; done; }
 as_root() {
   case "$sudo_ok" in
     root) "$@" ;;
@@ -92,7 +92,7 @@ main() {
   if [ -n "$missing" ]; then
     case "$sudo_ok" in root|nopasswd|ok) can=1 ;; *) can=0 ;; esac
     if [ "$can" = 1 ] && command -v apt-get >/dev/null 2>&1; then
-      pkgs=""; for c in $missing; do [ "$c" = flock ] && c=util-linux; pkgs="$pkgs $c"; done
+      pkgs=""; for c in $missing; do [ "$c" = flock ] && c=util-linux; [ "$c" = crontab ] && c=cron; pkgs="$pkgs $c"; done
       echo "Installing$pkgs (apt-get)..."
       as_root env DEBIAN_FRONTEND=noninteractive ${T:+timeout 180} apt-get update -qq </dev/null || echo "apt-get update failed."
       # $pkgs unquoted on purpose: one word per package.
