@@ -1,16 +1,14 @@
-Last updated: 2026-11-27 16:30 UTC
+Last updated: 2026-11-28 00:20 UTC
 
 ## Goal
 cLaudeRC: an Android app plus server scripts to run, watch, chat with and manage Claude Code sessions on your own server from a phone.
 
 ## Current task
-Connection improvements (Jonathan 2026-11-27): C1-C5 merged in #254 (SCRIPT_API 57 installed); C6 merged in #255 (SCRIPT_API 58 installed). Old AWS server (Lightsail ai_paradise) STOPPED, not deleted, until everything is verified.
-- [x] C1 Drop cached SSH on network change (ClaudeRcApp NetworkCallback -> SshRunner.retireAll). Check: CI green, phone switch Wi-Fi/mobile reconnects at once.
-- [x] C2 fail2ban never bans Tailscale ranges (host harden script + this server's /etc/fail2ban/jail.d/clauderc-tailnet.local). Check: test-api.sh green.
-- [x] C3 SSH compression zlib@openssh.com. Check: CI + release APK connects.
-- [x] C4 Tailscale address per server, tried first with fallback (worker task 56a3998b). Check: unit tests, Settings field.
-- [x] C5 chat-watch long-poll replacing chat-history polling (Opus design in progress, then build; SCRIPT_API bump).
-- [x] C6 Copy between servers merged in #255, SCRIPT_API 58 installed. Still to do: a real copy between two servers on the phone; `test-sshd.sh` copy checks passed on CI.
+Fix-all pass done 2026-11-28 (PRs #254-#263). Open:
+- Q3b real queue run: throwaway projects ~/projects/qtest-a and qtest-b are starred, queue ON. It paused itself on the weekly limit (7d 95%) until 18:02 UTC 2026-11-28. After that check: hello.txt committed and T1 ticked in both, queue-log shows turns. Then queue-off, unstar, stop both sessions, and ask Jonathan before deleting the two folders.
+- Install server scripts after #262/#263 merge on green main (self-update).
+- QUESTION: branch protection on main (T16) needs Jonathan's OK.
+- Jonathan: Update now and check the release opens/connects (Gradle bump #241); Gemini worker needs an API key (Google ended personal sign-in); re-enable Drive backup / knowledge schedules if used (cron was missing until 2026-11-28).
 
 ## Model rule (Jonathan, 2026-11-16, master rule in ~/.claude/CLAUDE.md)
 Orchestrator splits work into small tasks and picks the cheapest model that does each reliably: Haiku = simple, repetitive; Sonnet = standard build, refactor, tests, moderate debugging; Opus = architecture, hard debugging, ambiguous or system-wide, security design/review (Opus takes every top-tier task by default, Agent `model: opus` or `planner`); Fable 5.2 only when Opus failed or is clearly not enough (one-line reason). Same bug survives 2 fixes: go up one level. Orchestrator keeps review, integration and final verification (real build on CI, never "it compiles").
