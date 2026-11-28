@@ -26,11 +26,11 @@ GEMINI_APPROVAL = {"acceptEdits": "auto_edit", "plan": "plan", "bypassPermission
 # Grok has no read-only or limited-approval headless mode (ask mode would wait for ever), so it only ever runs inside our sandbox.
 GROK_SANDBOX_ERROR = "Grok workers run only inside the sandbox: turn Sandbox on/auto in Cluster settings and make sure bubblewrap works."
 GROK_PROMPT_MAX = 100_000   # bytes: the prompt becomes one -p argument and Linux caps one argument at 128 KB (the headers added to a task fit in the gap)
-GROK_AUTH_FILE = ".grok/auth.json"   # unverified: the name comes from xAI's installer notes; `grok login` keeps its login under $HOME/.grok
+GROK_AUTH_FILE = ".grok/auth.json"   # verified 2026-11-27: `grok login` writes it there (HOME = the worker's home)
 # Runs inside the sandbox, where HOME is the worker's home. A Grok account login wins (it uses the user's plan, a key uses xAI credits).
 # Otherwise the key goes from the worker's key file into grok's environment: bubblewrap's --setenv would put it in argv, where `ps`
 # shows it to the host. # unverified: whether `-p` could read stdin itself; the docs only show an argument.
-# unverified: whether the account login works headless in the sandbox (network is open, the home is writable for token refreshes).
+# Verified 2026-11-27: the account login works headless in the sandbox (network open, home writable for token refreshes).
 GROK_SH = f'if [ ! -s "$HOME/{GROK_AUTH_FILE}" ]; then XAI_API_KEY=$(cat -- "$1") || exit 1; export XAI_API_KEY; fi; shift; exec "$@" -p "$(cat)"'
 GEMINI_AUTH_FILE = ".gemini/oauth_creds.json"   # the CLI's cached Google login, under $GEMINI_CLI_HOME
 # A run with an API key: the key goes from the worker's key file into gemini's environment inside the sandbox (bubblewrap's --setenv would put it in argv).
@@ -42,6 +42,9 @@ GEMINI_503_RE = re.compile(r"Attempt \d+ failed with status 503")
 GEMINI_QUOTA_MSG = "Gemini's daily quota is used up on this key/account (free tier?). Use a Google account sign-in or a billed API key, or try again tomorrow."
 GEMINI_503_MSG = "Gemini is overloaded right now (Google capacity). Try again later or use another worker."
 GEMINI_LOGIN_MSG = "Gemini's Google sign-in expired or isn't valid on this server: sign in again from the Claude tab."
+# Seen 2026-11-27: Google ended Gemini CLI sign-in for personal accounts ("no longer supported for Gemini Code Assist for individuals").
+GEMINI_RETIRED_MSG = ("Google no longer lets the Gemini CLI use a personal Google account sign-in. "
+                      "Add a Gemini API key for this worker (Claude tab > the worker > key) to keep using it.")
 GROK_TEXT_KEYS = ("result", "response", "text", "output", "message", "content")   # unverified: the docs only name .sessionId in the final JSON object
 SLOTS = max(1, int(os.environ.get("CLAUDERC_WORKER_SLOTS") or 10))   # hard cap of runs of one worker at once (they share its login like several chats share one); the owner's per-chat limit is lower
 USAGE_URL = os.environ.get("CLAUDERC_USAGE_URL") or "https://api.anthropic.com/api/oauth/usage"
@@ -811,6 +814,8 @@ def gemini_stop_reason(text):
 
 def gemini_error(text):
     """The plain message for a failed Gemini run's output, else None (the output itself is then shown)."""
+    if "no longer supported for Gemini Code Assist" in text:
+        return GEMINI_RETIRED_MSG
     return GEMINI_LOGIN_MSG if "Manual authorization is required" in text else gemini_stop_reason(text)
 
 
