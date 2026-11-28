@@ -740,6 +740,7 @@ two = "Attempt 1 failed with status 503\nAttempt 2 failed with status 503\n"
 assert stop(two) is None and stop(two + "Attempt 3 failed with status 503\n") == OVER
 assert stop(two + "Attempt 3 failed with status 503\nTerminalQuotaError") == QUOTA, "the one that won't pass by itself comes first"
 assert gerr("Manual authorization is required but the current session is non-interactive") == LOGIN and gerr("TerminalQuotaError") == QUOTA and gerr("something else") is None
+assert gerr("An unexpected critical error occurred: This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite") == ns["GEMINI_RETIRED_MSG"] and "API key" in ns["GEMINI_RETIRED_MSG"]
 assert "Google account sign-in" in QUOTA and "another worker" in OVER and "Claude tab" in LOGIN
 vis = ns["gemini_visible_output"]
 assert vis('{"response":"about TerminalQuotaError"}') == "" and vis('{"error":{"message":"TerminalQuotaError"}}') != "" and vis("TerminalQuotaError raw") != ""

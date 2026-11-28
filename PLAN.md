@@ -17,20 +17,19 @@ Orchestrator splits work into small tasks and picks the cheapest model that does
 
 ## Tasks (open work only; each has its model and why)
 - [x] T1 README PR #229 (README brought up to date, CI green): merge, then watch main build. Owner OK needed (merging was blocked once). Model: orchestrator, mechanical.
-- [ ] T2 Housekeeping: close the superseded PLAN PRs #198, #204, #211 (this refresh replaces them); merge Dependabot #214 (Gradle libraries, 5 updates) and #228 (Actions, 4 updates) only after a CI build, and install the release APK on a phone before trusting the Gradle bump (R8 can break at run time). Model: Haiku for closing and merging; Sonnet to read the Gradle changelog for breaking changes.
-- [ ] T3 PR #195 (YouTube honest channel-lookup errors): rebase on main, review, merge. Model: Sonnet, small and isolated.
-- [ ] T4 General-chat race: two `general-open` calls on one stopped chat can kill each other's tmux session (`do_general_open` has no lock). Add a per-chat `flock` and a test in `server/tests/test-api.sh`. Model: Sonnet writes, orchestrator reviews (server script, could kill sessions: run all server tests).
+- [x] T2 old PRs merged on green (#228, #241 Gradle: test release on the phone, #242).
+- [x] T3 #195 merged.
+- [x] T4 general-open lock (already in #231).
 - [ ] T14 Star button + queue protocol (Jonathan 2026-11-16): a star icon in the chat top bar adds the chat to the auto-continue queue (server-side state, new action, bump SCRIPT_API and MIN_SCRIPT_API). Markers a session prints: `QUESTION:` (waiting for Jonathan) and `QUEUE: nothing to do`. Model: Opus writes the protocol (unattended, system-wide), Sonnet builds app + server.
 - [ ] T15 `claude-queue` scheduler on the server, running all the time for maximum usage: round-robin over starred chats; each turn the chat finishes one PLAN task completely; reads each account's 5-hour/weekly usage and keeps going while there is room, resumes right after a window resets; skips chats waiting on a QUESTION, empty plans, and two chats in one repo at once; kill switch in the app; log. A session may merge its own PR when CI is green, never on red. Hard stops stay: deleting data, production, DNS/mail, spending money, access changes. Model: Opus designs and reviews, Sonnet builds.
 - [ ] Q3 follow-ups (queue tick built on branch queue-tick, tests green): (a) TODO push alert on question/needs_you/error: `claude-push` has no "send an alert" mode (only the Claude hook events and `--test`), so add a small `--alert <session> <kind>` option to it, then call it from `qstate` in claude-setup.sh; (b) one manual run on the real server with two throwaway projects; (c) the usage-limit banner wording stays `unverified` (QUEUE_LIMIT_RE), none was found in a real transcript. `stop_reason == "end_turn"` was verified on 231 real replies. Model: Sonnet.
 - [ ] T16 Make the "ask first" rules real: `permissions.ask` for DNS/mail/public-post tools (done 2026-11-16 in settings.json); branch protection (required CI check) and `gh pr merge --auto` so a red build cannot merge (needs Jonathan's OK on repo rules); a done-check per queue turn (`/goal` or a Stop hook), `--max-turns`. Model: Opus.
-- [ ] T17 "Ask another session": a button in the chat to pick another live session and send it a question (tools exist: `ListAgents`, `SendMessage`; messages to a session in another permission mode wait for approval, test that first). Model: Sonnet.
-- [ ] T5 Verify the `unverified` guesses in `clauderc-team` against real Grok and Gemini runs (answer JSON keys, error shape, Gemini login file name and refused-code wording, headless reuse of the login), fix, drop the markers. Needs Jonathan's logged-in workers. Model: Sonnet.
-- [ ] T6 Real cluster test with a second account: `delegate(role=...)`, failover, `from_task` writer-to-auditor, 3 parallel tasks, hand-back at 95%, all four kinds (Claude, Codex, Grok, Gemini). Report what breaks. Model: Sonnet runs; Opus (`planner`) reads the results only if something fails.
-- [ ] T7 Cluster `wait` still returns about once a minute: make it return when a task finishes. Model: Sonnet (one subsystem); Opus only if the fix touches the detached-run design.
-- [ ] T8 More unit tests (Cluster/Team models, chat reducers, widget layout picks). Model: Sonnet.
-- [ ] T9 README: real mock-up screens for General chat, Permissions, widgets, natural voice, add-server (source in docs/mockups, never real data). Model: Sonnet builds HTML mock-ups; Grok worker only if a raster picture is needed.
-- [ ] T10 Migrate wizard follow-ups (verify first, may be partly done): re-sign-in step for Codex/Grok/Gemini workers, restart sessions and check docker/uv/tools the old server had. Model: Sonnet.
+- [x] T17 Ask another session (#258).
+- [x] T5/T6 2026-11-28: real runs: Claude (role routing), Codex and Grok (account login, sandbox) answer; per-chat limit of 3 enforced; Gemini personal sign-in retired by Google (API key only, plain message added). GROK_TEXT_KEYS and the error shapes stay unverified (no failing run seen).
+- [x] T7 cluster wait returns on finish (#261).
+- [x] T8 unit tests (#257).
+- [x] T9 README mock-ups (#257).
+- [x] T10 migrate follow-ups (#260).
 - [ ] T11 Collaboration relay hardening (Cloudflare Worker in ~/projects/clauderc-relay, not in this repo): one-time/expiring invites, per-person revoke, encryption at rest. Model: Opus designs and reviews (security), Sonnet implements.
 - [-] T12 iOS: PAUSED by Jonathan 2026-11-16 (Android only, no release planned). Leave `ios/` and the iOS workflow untouched; no iOS work in any task.
 - [ ] T13 Widgets, optional next: more actions, general-chat session names, refresh-button feedback. Model: Sonnet. Only after Jonathan has seen them on the phone.
